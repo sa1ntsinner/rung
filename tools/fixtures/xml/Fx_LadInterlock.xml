@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- rung fixture: LAD FC authored for the rung test suite (Out := Enable AND Guard). -->
+<Document>
+  <Engineering version="V20" />
+  <SW.Blocks.FC ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="Input">
+    <Member Name="Enable" Datatype="Bool" />
+    <Member Name="Guard" Datatype="Bool" />
+  </Section>
+  <Section Name="Output">
+    <Member Name="Out" Datatype="Bool" />
+  </Section>
+  <Section Name="InOut" />
+  <Section Name="Temp" />
+  <Section Name="Constant" />
+  <Section Name="Return">
+    <Member Name="Ret_Val" Datatype="Void" />
+  </Section>
+</Sections></Interface>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <Name>Fx_LadInterlock</Name>
+      <Number>10</Number>
+      <ProgrammingLanguage>LAD</ProgrammingLanguage>
+    </AttributeList>
+    <ObjectList>
+      <SW.Blocks.CompileUnit ID="1" CompositionName="CompileUnits">
+        <AttributeList>
+          <NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v4">
+  <Parts>
+    <Access Scope="LocalVariable" UId="21">
+      <Symbol><Component Name="Enable" /></Symbol>
+    </Access>
+    <Access Scope="LocalVariable" UId="22">
+      <Symbol><Component Name="Guard" /></Symbol>
+    </Access>
+    <Access Scope="LocalVariable" UId="23">
+      <Symbol><Component Name="Out" /></Symbol>
+    </Access>
+    <Part Name="Contact" UId="24" />
+    <Part Name="Contact" UId="25" />
+    <Part Name="Coil" UId="26" />
+  </Parts>
+  <Wires>
+    <Wire UId="27"><Powerrail /><NameCon UId="24" Name="in" /></Wire>
+    <Wire UId="28"><IdentCon UId="21" /><NameCon UId="24" Name="operand" /></Wire>
+    <Wire UId="29"><NameCon UId="24" Name="out" /><NameCon UId="25" Name="in" /></Wire>
+    <Wire UId="30"><IdentCon UId="22" /><NameCon UId="25" Name="operand" /></Wire>
+    <Wire UId="31"><NameCon UId="25" Name="out" /><NameCon UId="26" Name="in" /></Wire>
+    <Wire UId="32"><IdentCon UId="23" /><NameCon UId="26" Name="operand" /></Wire>
+  </Wires>
+</FlgNet></NetworkSource>
+          <ProgrammingLanguage>LAD</ProgrammingLanguage>
+        </AttributeList>
+      </SW.Blocks.CompileUnit>
+    </ObjectList>
+  </SW.Blocks.FC>
+</Document>

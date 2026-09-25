@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+bin/
+obj/
+.vs/
+.rung/
+*.log
+TestResults/

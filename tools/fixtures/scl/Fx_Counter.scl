@@ -1,0 +1,28 @@
+FUNCTION_BLOCK "Fx_Counter"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Pulse : Bool;
+      Reset : Bool;
+   END_VAR
+
+   VAR_OUTPUT
+      Count : DInt;
+      Elapsed : Time;
+   END_VAR
+
+   VAR
+      Debounce {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      LastPulse : Bool;
+   END_VAR
+
+
+BEGIN
+	#Debounce(IN := #Pulse, PT := T#20ms, ET => #Elapsed);
+	IF #Reset THEN
+	    #Count := 0;
+	ELSIF #Debounce.Q AND NOT #LastPulse THEN
+	    #Count := #Count + 1;
+	END_IF;
+	#LastPulse := #Debounce.Q;
+END_FUNCTION_BLOCK

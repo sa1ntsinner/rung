@@ -1,0 +1,13 @@
+{
+  "name": "@rung/core",
+  "version": "0.1.0-dev",
+  "license": "BUSL-1.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  
+  "files": ["dist", "LICENSE"],
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "smol-toml": "^1.4.2" }
+}

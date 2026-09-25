@@ -1,0 +1,23 @@
+FUNCTION "Fx_Valve" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Enable : Bool;
+      Mode : Int;
+   END_VAR
+
+   VAR_OUTPUT
+      Open : Bool;
+   END_VAR
+
+
+BEGIN
+	CASE #Mode OF
+	    0:
+	        #Open := FALSE;
+	    1:
+	        #Open := #Enable;
+	    ELSE
+	        #Open := FALSE;
+	END_CASE;
+END_FUNCTION

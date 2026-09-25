@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: BUSL-1.1 -->
+  <!-- Built only on a trusted Windows host with TIA Portal V20 + Openness installed. The Siemens DLL is never copied. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>rung-bridge-v20</AssemblyName>
+    <RootNamespace>Rung.Bridge.V20</RootNamespace>
+    <Version>0.1.0</Version>
+    <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20</RungOpennessDir>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Siemens.Engineering">
+      <HintPath>$(RungOpennessDir)\Siemens.Engineering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
+  </ItemGroup>
+</Project>

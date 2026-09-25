@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/bridge-client" },
+    { "path": "packages/sync" },
+    { "path": "packages/cli" }
+  ]
+}

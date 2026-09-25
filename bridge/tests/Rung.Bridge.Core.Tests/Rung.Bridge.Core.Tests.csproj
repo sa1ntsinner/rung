@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: BUSL-1.1 -->
+  <PropertyGroup>
+    <TargetFrameworks>net48;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(OS)' != 'Windows_NT'">net10.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" Condition="'$(TargetFramework)' == 'net48'" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\docs\format\address-vectors.json" Link="address-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\docs\format\protocol-golden.json" Link="protocol-golden.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

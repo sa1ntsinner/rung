@@ -1,0 +1,14 @@
+DATA_BLOCK "Fx_Global"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   VAR
+      Station : "Fx_Types";
+      Counter : DInt;
+      Ready : Bool;
+   END_VAR
+
+BEGIN
+   Counter := 0;
+
+END_DATA_BLOCK

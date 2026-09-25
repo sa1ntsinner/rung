@@ -1,0 +1,120 @@
+{
+  "segments": {
+    "valid": [
+      ["Fx_Motor", "Fx_Motor"],
+      ["Motor/Valve 1", "Motor%2FValve 1"],
+      ["A:B", "A%3AB"],
+      ["50%", "50%25"],
+      ["a~b", "a%7Eb"],
+      ["back\\slash", "back%5Cslash"],
+      ["q?*<>|\"", "q%3F%2A%3C%3E%7C%22"],
+      ["trail.", "trail%2E"],
+      ["trail ", "trail%20"],
+      ["dots..", "dots%2E%2E"],
+      ["mix. .", "mix%2E%20%2E"],
+      ["inner. space", "inner. space"],
+      ["CON", "%43ON"],
+      ["con", "%63on"],
+      ["CON.txt", "%43ON.txt"],
+      ["COM1", "%43OM1"],
+      ["COM¹", "%43OM¹"],
+      ["LPT9", "%4CPT9"],
+      ["CONSOLE", "CONSOLE"],
+      ["tab\tx", "tab%09x"],
+      ["del\u007f", "del%7F"],
+      ["Überwachung", "Überwachung"],
+      ["日本語", "日本語"],
+      ["emoji😀", "emoji😀"],
+      ["Default tag table", "Default tag table"]
+    ],
+    "invalidEscaped": ["", "%ZZ", "%2f", "%", "50%2", "%41BC", "trail.", "a~b", "a/b"],
+    "invalidRaw": ["", "\ud800lone"]
+  },
+  "addresses": [
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": ["10_Drives", "Motors"], "name": "Fx_Motor" },
+      "string": "plc:PLC_1/blocks/10_Drives/Motors/Fx_Motor",
+      "form": "scl",
+      "path": "plc/PLC_1/blocks/10_Drives/Motors/Fx_Motor.scl"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": [], "name": "Motor/Valve 1" },
+      "string": "plc:PLC_1/blocks/Motor%2FValve 1",
+      "form": "scl",
+      "path": "plc/PLC_1/blocks/Motor%2FValve 1.scl"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": ["10_Drives", "Motors"], "name": "Fx_Motor", "namespace": "Fx" },
+      "string": "plc:PLC_1/blocks/10_Drives/Motors/Fx~Fx_Motor",
+      "form": "scl",
+      "path": "plc/PLC_1/blocks/10_Drives/Motors/Fx~Fx_Motor.scl"
+    },
+    {
+      "address": { "device": "PLC_1", "unit": "Fx_Unit", "kind": "block", "groups": [], "name": "Fx_Fc" },
+      "string": "plc:PLC_1/units/Fx_Unit/blocks/Fx_Fc",
+      "form": "scl",
+      "path": "plc/PLC_1/units/Fx_Unit/blocks/Fx_Fc.scl"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "type", "groups": [], "name": "Fx_Types" },
+      "string": "plc:PLC_1/types/Fx_Types",
+      "form": "udt",
+      "path": "plc/PLC_1/types/Fx_Types.udt"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "tagtable", "groups": [], "name": "Default tag table" },
+      "string": "plc:PLC_1/tags/Default tag table",
+      "form": "tags.xml",
+      "path": "plc/PLC_1/tags/Default tag table.tags.xml"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": ["20_Valves"], "name": "Fx_LadInterlock" },
+      "string": "plc:PLC_1/blocks/20_Valves/Fx_LadInterlock",
+      "form": "s7dcl",
+      "path": "plc/PLC_1/blocks/20_Valves/Fx_LadInterlock.s7dcl"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": [], "name": "Secret" },
+      "string": "plc:PLC_1/blocks/Secret",
+      "form": "protected.yaml",
+      "path": "plc/PLC_1/blocks/Secret.protected.yaml"
+    },
+    {
+      "address": { "device": "My:PLC", "kind": "watchtable", "groups": ["A.", "B"], "name": "CON" },
+      "string": "plc:My%3APLC/watch/A%2E/B/%43ON",
+      "form": "xml",
+      "path": "plc/My%3APLC/watch/A%2E/B/%43ON.xml"
+    }
+  ],
+  "invalidAddressStrings": [
+    "hello",
+    "plc:",
+    "plc:PLC_1",
+    "plc:PLC_1/blocks",
+    "plc:PLC_1/widgets/X",
+    "plc:PLC_1/units//blocks/X",
+    "plc:PLC_1/units/U/blocks",
+    "plc:PLC_1/blocks/%ZZ",
+    "plc:PLC_1/blocks/a%2fb",
+    "plc:PLC_1/blocks/~X",
+    "plc:PLC_1/blocks/X~",
+    "plc:PLC_1/blocks/a~b~c",
+    "plc:PLC_1/blocks//X",
+    "PLC:PLC_1/blocks/X"
+  ],
+  "invalidPaths": [
+    "README.md",
+    "plc/PLC_1/blocks/x.scl.conflict",
+    "plc/PLC_1/blocks/x.s7res",
+    "plc/PLC_1/blocks/.scl",
+    "plc/PLC_1/blocks/../x.scl",
+    "plc/PLC_1/blocks/./x.scl",
+    "plc\\PLC_1\\blocks\\x.scl",
+    "/plc/PLC_1/blocks/x.scl",
+    "plc/PLC_1/types/X.scl",
+    "plc/PLC_1/tags/X.xml",
+    "plc/PLC_1/blocks/a%2fb.scl",
+    "plc/PLC_1/units/U/blocks.scl",
+    "plc/PLC_1/blocks/trail..scl"
+  ]
+}

@@ -1,0 +1,12 @@
+FUNCTION "Fx_Broken" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      A : Bool;
+   END_VAR
+
+
+BEGIN
+	// deliberate error: undeclared variable, generated with KeepOnError
+	#Missing := #A;
+END_FUNCTION

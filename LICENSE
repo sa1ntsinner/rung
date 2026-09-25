@@ -1,0 +1,18 @@
+rung is licensed per directory. Each package carries its own LICENSE file and
+every source file carries an SPDX-License-Identifier header.
+
+  MIT (open source)                         LICENSES/MIT.txt
+    packages/bridge-client, grammars/, editors/, agents/, docs/format/
+
+  Business Source License 1.1 (source-available, "fair source")
+                                            LICENSES/BUSL-1.1.txt
+    bridge/, packages/core, packages/sync, packages/cli
+    Free production use for individuals, education, non-commercial open
+    source and organizations with up to 3 users. Each version converts to
+    Apache-2.0 (LICENSES/Apache-2.0.txt) three years after its first public
+    release.
+
+  Commercial                                pro/ (not part of this repository's
+                                            public distribution)
+
+See docs/decisions/0001-licensing.md for the reasoning.

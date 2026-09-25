@@ -1,0 +1,20 @@
+FUNCTION "Fx_Stl" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      A : Bool;
+      B : Bool;
+   END_VAR
+
+   VAR_OUTPUT
+      Q : Bool;
+   END_VAR
+
+
+BEGIN
+NETWORK
+TITLE = AND of two inputs
+      A #A;
+      A #B;
+      = #Q;
+END_FUNCTION

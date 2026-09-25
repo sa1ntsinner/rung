@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <Authors>Elmir Mirzayev</Authors>
+    <Company>rung</Company>
+    <Copyright>(c) 2026 Elmir Mirzayev</Copyright>
+  </PropertyGroup>
+</Project>
