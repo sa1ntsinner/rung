@@ -1,38 +1,57 @@
-# rung
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo-dark.png">
+    <img alt="rung" src="site/assets/logo-light.png" width="236">
+  </picture>
+</p>
 
-**PLC-as-code for Siemens TIA Portal.** rung mirrors a TIA Portal project into a folder of plain text files (SCL, DB, UDT, SIMATIC SD, XML), keeps both sides in sync, and lets you work on it from any editor (VS Code, Zed, Neovim) and any AI agent (Claude Code, Codex, Cursor).
+TIA Portal projects as plain text.
 
-> Status: pre-alpha. Built and tested against fakes and TIA Portal V20 Openness; live verification on a fixture project is pending (see docs/STATUS.md). Not yet published.
+rung keeps a Siemens TIA Portal project and a folder of text files in sync, both ways. You write SCL in VS Code, Zed or Neovim, review changes in git like any other code, and coding agents work on the same files you do.
 
-## What you get
+It's pre-alpha. It runs against TIA Portal V20 and the full test suite passes on a real project, but there is no release yet.
 
-- **Two-way sync** (`rung watch`): edit files, TIA Portal follows; edit in TIA, files follow; concurrent edits merge (diff3) or become explicit conflicts. Imports are transactional and guarded by revisions.
-- **Language server** for SCL in VS Code, Zed and Neovim: completion, go to definition through DB/UDT/FB members, references, rename, TIA compile errors inline.
-- **AI agents**: a small MCP server (`rung mcp`) and a Claude Code plugin with safety and review skills; agents edit files directly.
-- **Unit tests** for SCL blocks on an offline simulator (`rung test`), JUnit output for CI.
-- **Read-only views** of hardware, HMI Unified and technology objects (`rung views`), live values over the S7-1500 Web API (`rung live`).
+## Quick start
 
-rung talks to TIA Portal only through the official Openness API. It never reads or writes `.ap*` project files and never downloads to a PLC. Failsafe, protected, system and GRAPH blocks are read-only.
-
+```sh
+rung init --project D:\TIA\Line3.ap20   # bind this folder to a project open in TIA Portal
+rung pull                               # export blocks, types and tag tables as text
+rung watch                              # keep both sides in sync until Ctrl+C
 ```
-TIA Portal ⇄ rung-bridge (C#, Openness) ⇄ rung (TypeScript) ⇄ folder of text files ⇄ editors / agents
-```
 
-Start with the [quickstart](docs/quickstart.md). See also [FAQ](docs/faq.md), [editors](docs/editors/README.md), [agents](docs/agents/README.md), [testing](docs/testing.md), [comparison](docs/comparison.md), [status](docs/STATUS.md).
+The [quickstart](docs/quickstart.md) walks through setup, including the Openness group your Windows user has to be in.
+
+## What's in it
+
+- Two-way sync. Save a file and rung imports it, compiles the block and writes TIA's version back. Changes made in TIA Portal come back to the files. If both sides changed, you get a line merge or a conflict to resolve.
+- A language server for SCL: completion, go to definition through DBs, UDTs and FB instances, references, rename, and TIA's compile errors on the right line. There are extensions for [VS Code and Zed](docs/editors/README.md) and a config for Neovim.
+- An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
+- `rung test`, which runs YAML unit tests for FBs and FCs on an offline simulator and prints JUnit. See [testing](docs/testing.md).
+- Read-only views of hardware, HMI and technology objects, and live values from the S7-1500 Web API.
+
+## What it won't do
+
+rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself and never downloads to a PLC. Failsafe, know-how protected, system and GRAPH blocks stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
 
 ## Requirements
 
-- Windows with TIA Portal V20 and the Openness option; your Windows user must be in the local group **Siemens TIA Openness**.
-- Node.js 22.13+ or 24.
+Windows with TIA Portal V20 and the Openness option, and Node.js 22 or newer.
 
-## Development
+<details>
+<summary>Working on rung</summary>
 
-```
+```sh
 pnpm install
-pnpm test                                   # TypeScript
-dotnet test bridge/tests/Rung.Bridge.Core.Tests   # bridge core (no TIA needed)
+pnpm test                                         # TypeScript packages
+dotnet test bridge/tests/Rung.Bridge.Core.Tests   # bridge core, no TIA Portal needed
 ```
+
+The live tests against TIA Portal run headless, without windows or prompts. The steps are in [docs/STATUS.md](docs/STATUS.md), and what we learned about Openness V20 along the way is in [docs/facts](docs/facts/openness-v20.md).
+
+</details>
 
 ## License
 
-Per directory — see [LICENSE](LICENSE). The core is source-available under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to 3 users; each version becomes Apache-2.0 three years after release. Client pieces (protocol client, grammar, editor extensions, workspace format) are MIT.
+The core is under the Business Source License 1.1. It's free for individuals, education, non-commercial open source and organizations with up to three users, and each version becomes Apache 2.0 three years after its release. The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE).
+
+rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG.
