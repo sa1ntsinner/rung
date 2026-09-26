@@ -71,3 +71,14 @@ describe("WebApiClient", () => {
     await expect(c.read(['"x"'])).rejects.toMatchObject({ code: "NETWORK" });
   });
 });
+
+describe("Web API names", () => {
+  it("quotes the first segment when a shell ate the quotes", async () => {
+    const { webApiName } = await import("../src/webapi.js");
+    expect(webApiName("Fx_Global.Counter")).toBe('"Fx_Global".Counter');
+    expect(webApiName('"Fx_Global".Counter')).toBe('"Fx_Global".Counter');
+    expect(webApiName("Tag_1")).toBe('"Tag_1"');
+    expect(webApiName("DB1.arr[2].x")).toBe('"DB1".arr[2].x');
+    expect(webApiName("%MW10")).toBe("%MW10");
+  });
+});

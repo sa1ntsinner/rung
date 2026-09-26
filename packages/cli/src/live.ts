@@ -12,7 +12,8 @@ export async function webApiFor(dir: string, env: Io["env"]): Promise<WebApiClie
   const password = env.RUNG_WEBAPI_PASSWORD;
   if (!password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user (it is never stored in rung.toml)");
   // the Web API login sends the password; over plain http anyone on the network can read it
-  if (/^http:\/\//i.test(w.url) && env.RUNG_WEBAPI_ALLOW_HTTP !== "1")
+  const loopback = /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:|\/|$)/i.test(w.url); // rung simulate: nothing leaves the PC
+  if (/^http:\/\//i.test(w.url) && !loopback && env.RUNG_WEBAPI_ALLOW_HTTP !== "1")
     throw new WorkspaceError("CONFIG_INVALID", `${w.url} is plain http: the password would travel unencrypted. Use https:// (set insecure = true for the PLC's self-signed certificate), or set RUNG_WEBAPI_ALLOW_HTTP=1 if you really mean it`);
   return new WebApiClient({ url: w.url, user: w.user, password, ...(w.insecure ? { insecure: true } : {}) });
 }

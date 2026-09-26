@@ -80,7 +80,10 @@ export class WebApiClient {
   }
 
   async login(): Promise<void> {
-    this.token = await this.call<string>("Api.Login", { user: this.opts.user, password: this.opts.password });
+    // S7-1500 answers { token: "..." } (Web API manual); older firmware and test doubles answer the bare token
+    const r = await this.call<string | { token?: string }>("Api.Login", { user: this.opts.user, password: this.opts.password });
+    this.token = typeof r === "string" ? r : r?.token;
+    if (!this.token) throw new WebApiError("BAD_RESPONSE", "Api.Login returned no token");
   }
 
   /** Reads several variables in one batch request; names use TIA syntax, e.g. "Fx_Global".Counter. */
@@ -88,7 +91,7 @@ export class WebApiClient {
     if (!this.token) await this.login();
     const base = this.nextId;
     this.nextId += names.length;
-    const batch = names.map((n, i) => ({ jsonrpc: "2.0", id: base + i, method: "PlcProgram.Read", params: { var: n } }));
+    const batch = names.map((n, i) => ({ jsonrpc: "2.0", id: base + i, method: "PlcProgram.Read", params: { var: webApiName(n) } }));
     const res = await this.post(batch);
     const list = Array.isArray(res) ? res : [res];
     return names.map((name, i) => {
@@ -116,4 +119,15 @@ export class WebApiClient {
       this.token = undefined;
     }
   }
+}
+
+/**
+ * The Web API wants the DB or tag name in quotes ("Fx_Global".Count). Shells often eat the quotes
+ * (PowerShell passing arguments to .cmd files does), so an unquoted first segment is quoted here.
+ */
+export function webApiName(name: string): string {
+  const n = name.trim();
+  if (n.startsWith('"') || n.startsWith("%")) return n; // already quoted, or an absolute address such as %MW10
+  const m = /^([^.[\s]+)(.*)$/.exec(n);
+  return m ? `"${m[1]}"${m[2]}` : n;
 }

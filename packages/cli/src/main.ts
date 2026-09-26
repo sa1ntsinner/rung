@@ -25,6 +25,7 @@ import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
+import { cmdSimulate } from "./simulate.js";
 
 export type { Io } from "./common.js";
 
@@ -58,6 +59,8 @@ PLC:
                                        download to the PLC; asks you to type the PLC name first, and
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
   rung open <file> [--dir <ws>]        open the block's editor in the TIA Portal window
+  rung simulate [dir] [--address 127.0.0.2] [--port 8080] [--cycle 10] [--block <FB/FC>]
+                                       a virtual S7-1500: runs the SCL program and answers the Web API (for rung live)
   rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
 
 Environment:
@@ -220,6 +223,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         scan: { type: "boolean" },
         grant: { type: "boolean" },
         pick: { type: "boolean" },
+        address: { type: "string" },
+        port: { type: "string" },
+        cycle: { type: "string" },
+        block: { type: "string" },
         json: { type: "boolean" },
         use: { type: "string" },
         mode: { type: "string" },
@@ -314,6 +321,8 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "simulate":
+        return await cmdSimulate(dir, v, io);
       case "setup":
         return await cmdSetup(target, v, io);
       case "compile":
