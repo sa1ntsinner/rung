@@ -22,6 +22,8 @@ namespace Rung.Bridge.Core
         IReadOnlyList<CompileMessage> Compile(string device, string[] addresses);
         /// <summary>Guarded delete; expectedTiaRevision must match the current revision.</summary>
         void Delete(string address, string expectedTiaRevision, string operationId);
+        /// <summary>Cross references reported by TIA Portal for one object.</summary>
+        IReadOnlyList<XRefEntry> XRef(string address);
     }
 
     public sealed class BridgeInfo

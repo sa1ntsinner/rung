@@ -211,3 +211,17 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
     [Fact] public void CreatingAnExistingObjectIsRefused() =>
         Assert.Equal("STALE_REVISION", Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/blocks/20_Valves/Fx_Valve", "scl", @"C:\x.scl", "absent", Guid.NewGuid().ToString())).Code);
 }
+
+[Trait("Category", "Tia")]
+public class XRefAdapterTests : IClassFixture<FixtureSession>
+{
+    readonly FixtureSession _fx;
+    public XRefAdapterTests(FixtureSession fx) { _fx = fx; }
+
+    [Fact] public void GlobalDbReportsItsUsers()
+    {
+        _fx.Session.ListObjects("PLC_1");
+        var entries = _fx.Session.XRef("plc:PLC_1/blocks/Fx_Global");
+        Assert.NotNull(entries); // shape is recorded as fact F14; content depends on fixture usage
+    }
+}

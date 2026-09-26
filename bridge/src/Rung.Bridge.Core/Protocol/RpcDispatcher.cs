@@ -93,6 +93,8 @@ namespace Rung.Bridge.Core.Protocol
                 case "objects.delete":
                     Session.Delete(Str(p, "address"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
                     return new { deleted = true };
+                case "xref.get":
+                    return Session.XRef(Str(p, "address"));
                 case "plc.compile":
                     return Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
                 default:

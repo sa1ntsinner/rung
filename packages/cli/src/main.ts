@@ -15,8 +15,10 @@ import {
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { doctor, pull, summarize } from "@rung/sync";
-import { HINTS, bridgeFor, defaultBridge, exists, openState, printWarnings, type Io } from "./common.js";
+import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
+import { serveStdio } from "@rung/mcp";
+import { writeAgentsFile } from "./agents.js";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 
 export type { Io } from "./common.js";
@@ -33,6 +35,8 @@ Usage:
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <address> [--dir <workspace>]
+  rung agents [dir]                    regenerate the project summary in AGENTS.md
+  rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
   rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
@@ -110,7 +114,8 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
       io.stdout(
         `exported   ${report.exported}\nunchanged  ${report.unchanged}\nremoved    ${report.removed}\nread-only  ${report.readOnly}\nwarnings   ${report.warnings.length}\n`,
       );
-      for (const w of report.warnings) io.stdout(`  ${w.code.padEnd(18)} ${w.address}${w.message ? ` — ${w.message}` : ""}\n`);
+      printWarnings(io, report.warnings);
+      await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
       return report.warnings.length ? 2 : 0;
     } finally {
       await state.close();
@@ -186,6 +191,21 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const dir = resolve(io.cwd, target ?? ".");
   try {
     switch (cmd) {
+      case "agents": {
+        const ws = await findWorkspace(dir);
+        const config = await loadConfig(ws);
+        await writeAgentsFile(ws, config.project.path, await agentsTemplate(config.project.path));
+        io.stdout(`updated ${join(ws, "AGENTS.md")}
+`);
+        return 0;
+      }
+      case "mcp": {
+        const ws = await findWorkspace(dir);
+        const config = await loadConfig(ws);
+        await serveStdio({ root: ws, bridgeFactory: () => bridgeFor(config, io, importFlags(config)) });
+        await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
+        return 0;
+      }
       case "init":
         return await cmdInit(dir, v, io);
       case "pull":

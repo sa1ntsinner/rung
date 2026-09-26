@@ -12,9 +12,6 @@
       "path": "../core"
     },
     {
-      "path": "../bridge-client"
-    },
-    {
       "path": "../sync"
     },
     {
@@ -24,7 +21,7 @@
       "path": "../graph"
     },
     {
-      "path": "../mcp"
+      "path": "../bridge-client"
     }
   ]
 }

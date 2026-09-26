@@ -1,0 +1,16 @@
+{
+  "name": "rung",
+  "owner": {
+    "name": "Elmir Mirzayev"
+  },
+  "plugins": [
+    {
+      "name": "rung",
+      "source": "./claude-plugin",
+      "description": "TIA Portal as code: MCP tools and skills"
+    }
+  ],
+  "metadata": {
+    "description": "rung: work on Siemens TIA Portal projects as code with AI agents"
+  }
+}

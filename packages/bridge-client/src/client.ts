@@ -6,6 +6,7 @@ import {
   PROTOCOL_VERSION,
   type BridgeEvent,
   type CompileMessage,
+  type XRefEntry,
   type ExportResult,
   type HelloResult,
   type ObjectEntry,
@@ -135,6 +136,10 @@ export class BridgeClient {
 
   deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
     return this.request("objects.delete", { address, expectedTiaRevision, operationId }) as Promise<{ deleted: boolean }>;
+  }
+
+  xref(address: string): Promise<XRefEntry[]> {
+    return this.request("xref.get", { address }) as Promise<XRefEntry[]>;
   }
 
   compile(device: string, addresses: string[] = []): Promise<CompileMessage[]> {

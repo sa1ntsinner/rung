@@ -29,6 +29,8 @@ export interface Ref {
   end: number;
   /** Member accesses after the name, each with its own range. */
   members: { name: string; start: number; end: number }[];
+  /** How the statement uses it: assigned (`x :=`, `=> x`), called (`x(...)`) or read. */
+  access: "read" | "write" | "call";
 }
 
 export interface Region {
@@ -203,9 +205,9 @@ export function parse(src: string): ParsedDocument {
     return vars;
   }
 
-  function collectRef(t: Token, block: BlockModel) {
+  function collectRef(t: Token, block: BlockModel, prev?: Token) {
     const kind: Ref["kind"] = t.kind === "local" ? "local" : t.kind === "global" ? "global" : "call";
-    const ref: Ref = { kind, name: unquote(t.text), start: t.start, end: t.end, members: [] };
+    const ref: Ref = { kind, name: unquote(t.text), start: t.start, end: t.end, members: [], access: "read" };
     for (;;) {
       if (peek().text === "[") {
         let depth = 0;
@@ -213,7 +215,7 @@ export function parse(src: string): ParsedDocument {
           const x = next();
           if (x.text === "[") depth++;
           else if (x.text === "]") depth--;
-          else if (x.kind === "local" || x.kind === "global") collectRef(x, block);
+          else if (x.kind === "local" || x.kind === "global") collectRef(x, block, x);
         } while (depth > 0 && peek().kind !== "eof");
         continue;
       }
@@ -225,6 +227,8 @@ export function parse(src: string): ParsedDocument {
       }
       break;
     }
+    if (peek().text === "(") ref.access = "call";
+    else if (peek().text === ":=" || prev?.text === "=>") ref.access = "write";
     block.refs.push(ref);
   }
 
@@ -234,7 +238,7 @@ export function parse(src: string): ParsedDocument {
     while (peek().kind !== "eof" && !isKw(peek(), endKw)) {
       const t = next();
       if (t.kind === "local" || t.kind === "global") {
-        collectRef(t, block);
+        collectRef(t, block, tokens[i - 2]);
         continue;
       }
       if (t.kind === "op") {
@@ -252,12 +256,12 @@ export function parse(src: string): ParsedDocument {
       }
       if (t.kind !== "ident") continue;
       if (peek().text === "(" && !NESTING[t.upper] && !CLOSERS.has(t.upper)) {
-        block.refs.push({ kind: "call", name: t.text, start: t.start, end: t.end, members: [] });
+        block.refs.push({ kind: "call", name: t.text, start: t.start, end: t.end, members: [], access: "call" });
         continue;
       }
       if (block.kind === "DB" && peek().text === ":=") {
         // DB start values: `Counter := 0;` refers to the DB's own variables
-        block.refs.push({ kind: "local", name: t.text, start: t.start, end: t.end, members: [] });
+        block.refs.push({ kind: "local", name: t.text, start: t.start, end: t.end, members: [], access: "write" });
         continue;
       }
       if (t.upper === "REGION") {

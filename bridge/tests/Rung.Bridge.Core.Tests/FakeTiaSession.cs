@@ -39,6 +39,9 @@ public sealed class FakeTiaSession : ITiaSession
     public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses) =>
         new[] { new CompileMessage { Address = addresses.Length > 0 ? addresses[0] : null, Severity = "error", Path = "PLC_1/Fx_Broken", Description = "Tag #Missing not defined" } };
 
+    public IReadOnlyList<XRefEntry> XRef(string address) =>
+        new[] { new XRefEntry { Source = address, SourceName = "Fx_Motor", TargetName = "Start_Button", TargetType = "Tag", TargetAddress = "%I0.0", Access = "Read", ReferenceType = "Uses", Location = "@Fx_Motor NW1" } };
+
     public void Delete(string address, string expectedTiaRevision, string operationId)
     {
         var e = Objects.Find(o => o.Address == address) ?? throw new RpcException(ErrorCodes.NotFound, address);

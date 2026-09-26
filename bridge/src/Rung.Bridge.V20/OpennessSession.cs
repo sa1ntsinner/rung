@@ -498,6 +498,47 @@ namespace Rung.Bridge.V20
             }
         }
 
+        // ---------------------------------------------------------------- cross references
+
+        public IReadOnlyList<XRefEntry> XRef(string address)
+        {
+            Alive();
+            var r = Resolve(address);
+            var svc = (r.Obj as IEngineeringServiceProvider)?.GetService<Siemens.Engineering.CrossReference.CrossReferenceService>();
+            if (svc == null) throw new RpcException(ErrorCodes.UnsupportedCapability, "No cross references for " + address);
+            var byObject = _index.Values.Where(v => v.Obj != null).ToList();
+            string AddressOf(IEngineeringObject o) => o == null ? null : byObject.FirstOrDefault(v => ReferenceEquals(v.Obj, o) || v.Obj.Equals(o))?.Entry.Address;
+            var list = new List<XRefEntry>();
+            void Walk(Siemens.Engineering.CrossReference.SourceObjectComposition sources)
+            {
+                foreach (Siemens.Engineering.CrossReference.SourceObject s in sources)
+                {
+                    foreach (Siemens.Engineering.CrossReference.ReferenceObject refObj in s.References)
+                    {
+                        foreach (Siemens.Engineering.CrossReference.Location loc in refObj.Locations)
+                        {
+                            list.Add(new XRefEntry
+                            {
+                                Source = AddressOf(s.UnderlyingObject) ?? address,
+                                SourceName = s.Name,
+                                Target = AddressOf(refObj.UnderlyingObject),
+                                TargetName = refObj.Name,
+                                TargetType = refObj.TypeName,
+                                TargetAddress = refObj.Address,
+                                Access = loc.Access.ToString(),
+                                ReferenceType = loc.ReferenceType.ToString(),
+                                Location = loc.ReferenceLocation,
+                            });
+                        }
+                    }
+                    Walk(s.Children);
+                }
+            }
+            try { Walk(svc.GetCrossReferences(Siemens.Engineering.CrossReference.CrossReferenceFilter.AllObjects).Sources); }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "cross references failed: " + e.Message); }
+            return list;
+        }
+
         // ---------------------------------------------------------------- delete
 
         public void Delete(string address, string expectedTiaRevision, string operationId)

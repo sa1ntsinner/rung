@@ -9,22 +9,7 @@
   ],
   "references": [
     {
-      "path": "../core"
-    },
-    {
-      "path": "../bridge-client"
-    },
-    {
-      "path": "../sync"
-    },
-    {
       "path": "../lsp"
-    },
-    {
-      "path": "../graph"
-    },
-    {
-      "path": "../mcp"
     }
   ]
 }

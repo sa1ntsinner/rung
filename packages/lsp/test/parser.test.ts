@@ -106,3 +106,11 @@ describe("parse structure", () => {
     for (let cut = 0; cut < src.length; cut += 7) expect(() => parse(src.slice(0, cut))).not.toThrow();
   });
 });
+
+describe("reference access", () => {
+  it("marks writes, reads and calls", () => {
+    const b = parse('FUNCTION_BLOCK "B"\nVAR\n  t : TON;\n  x : Bool;\nEND_VAR\nBEGIN\n  #x := "Tag_In";\n  #t(IN := #x, Q => "Tag_Out");\n  "Fx_Db".Counter := "Fx_Db".Counter + 1;\n  "Fx_Fc"(a := 1);\n  FOR #i := 0 TO 1 DO ; END_FOR;\nEND_FUNCTION_BLOCK\n').blocks[0]!;
+    const acc = b.refs.map((r) => `${r.name}${r.members.length ? "." + r.members.map((m) => m.name).join(".") : ""}:${r.access}`);
+    expect(acc).toEqual(["x:write", "Tag_In:read", "t:call", "x:read", "Tag_Out:write", "Fx_Db.Counter:write", "Fx_Db.Counter:read", "Fx_Fc:call", "i:write"]);
+  });
+});

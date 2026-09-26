@@ -94,6 +94,18 @@ export interface ExportResult {
   bundleHash: string;
 }
 
+export interface XRefEntry {
+  source: string;
+  sourceName: string;
+  target?: string;
+  targetName: string;
+  targetType: string;
+  targetAddress?: string;
+  access: string;
+  referenceType: string;
+  location?: string;
+}
+
 export interface CompileMessage {
   address?: string;
   severity: "error" | "warning" | "info";

@@ -1,5 +1,5 @@
 {
-  "name": "rung",
+  "name": "@rung/mcp",
   "version": "0.1.0-dev",
   "license": "BUSL-1.1",
   "type": "module",
@@ -11,9 +11,6 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "rung": "./dist/index.js"
-  },
   "files": [
     "dist",
     "LICENSE"
@@ -22,11 +19,13 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@rung/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.20.0",
     "@rung/bridge-client": "workspace:*",
-    "@rung/sync": "workspace:*",
-    "@rung/lsp": "workspace:*",
+    "@rung/core": "workspace:*",
     "@rung/graph": "workspace:*",
-    "@rung/mcp": "workspace:*"
+    "@rung/lsp": "workspace:*",
+    "@rung/sync": "workspace:*",
+    "node-diff3": "^3.1.2",
+    "zod": "^3.25.0"
   }
 }

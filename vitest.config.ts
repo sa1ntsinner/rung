@@ -11,6 +11,8 @@ export default defineConfig({
       "@rung/sync": src("sync"),
       "@rung/cli": src("cli"),
       "@rung/lsp": src("lsp"),
+      "@rung/graph": src("graph"),
+      "@rung/mcp": src("mcp"),
     },
   },
   test: {

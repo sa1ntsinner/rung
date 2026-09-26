@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "rung": { "command": "rung", "args": ["mcp"] }
+  }
+}

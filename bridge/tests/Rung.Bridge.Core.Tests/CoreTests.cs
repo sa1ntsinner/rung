@@ -333,3 +333,15 @@ public class DeleteRouteTests
         Assert.Single(s.Objects);
     }
 }
+
+public class XRefRouteTests
+{
+    [Fact] public void XRefReturnsEntries()
+    {
+        var d = new RpcDispatcher(() => new FakeTiaSession(), new BridgeInfo("V20", "t"));
+        var r = JsonDocument.Parse(d.Handle("{\"id\":1,\"method\":\"xref.get\",\"params\":{\"address\":\"plc:PLC_1/blocks/10_Drives/Motors/Fx_Motor\"}}")).RootElement.GetProperty("result")[0];
+        Assert.Equal("Start_Button", r.GetProperty("targetName").GetString());
+        Assert.Equal("%I0.0", r.GetProperty("targetAddress").GetString());
+        Assert.False(r.TryGetProperty("target", out _));
+    }
+}

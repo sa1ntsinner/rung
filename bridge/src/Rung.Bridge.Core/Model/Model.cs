@@ -58,6 +58,19 @@ namespace Rung.Bridge.Core.Model
         public int? Column;
     }
 
+    public sealed class XRefEntry
+    {
+        public string Source;        // our address of the referencing object
+        public string SourceName;
+        public string Target;        // our address of the referenced object, null for tags/system objects not in the inventory
+        public string TargetName;
+        public string TargetType;
+        public string TargetAddress; // e.g. %I0.0 for tags
+        public string Access;        // Read, Write, ReadWrite, Call, ...
+        public string ReferenceType; // Uses, UsedBy, TypeInstance, ...
+        public string Location;      // e.g. NW 2 or line information as TIA reports it
+    }
+
     public sealed class FormCapabilities
     {
         public bool SdLad;
