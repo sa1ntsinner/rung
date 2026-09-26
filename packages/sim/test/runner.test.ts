@@ -110,4 +110,13 @@ describe("rung test runner", () => {
     expect(xml).toContain('tests="3" failures="1"');
     expect(xml).toContain("step 3: Running expected false got true");
   });
+
+  it("--filter matches the block under test as well as the file path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-tests-"));
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(join(root, "tests", "motor.test.yaml"), MOTOR); // block: Fx_Motor
+    expect((await runTests(root, index(), "Fx_Motor")).map((r) => r.file)).toEqual(["tests/motor.test.yaml"]);
+    expect((await runTests(root, index(), "motor")).map((r) => r.file)).toEqual(["tests/motor.test.yaml"]);
+    expect(await runTests(root, index(), "Fx_Valve")).toEqual([]);
+  });
 });

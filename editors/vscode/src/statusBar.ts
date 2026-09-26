@@ -30,9 +30,22 @@ export class StatusBar implements vscode.Disposable {
     this.update();
   }
 
+  /** Current text and visibility (for tests). */
+  visible = false;
+
+  get text(): string {
+    return this.item.text;
+  }
+
+  get tooltipText(): string {
+    const t = this.item.tooltip;
+    return typeof t === "string" ? t : (t?.value ?? "");
+  }
+
   update(): void {
     if (!readSettings().statusBar || !this.ws.hasConfig) {
       this.item.hide();
+      this.visible = false;
       return;
     }
     const conflicts = this.ws.conflicts.length;
@@ -57,6 +70,7 @@ export class StatusBar implements vscode.Disposable {
     md.appendMarkdown("Click for rung actions (Alt+Q Q)");
     this.item.tooltip = md;
     this.item.show();
+    this.visible = true;
   }
 
   dispose(): void {

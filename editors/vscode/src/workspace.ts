@@ -157,7 +157,6 @@ export class RungWorkspace implements vscode.Disposable {
     const set = (k: string, v: unknown) => vscode.commands.executeCommand("setContext", k, v);
     await Promise.all([
       set("rung.workspace", this.hasConfig),
-      set("rung.watching", this.watching),
       set("rung.hasConflicts", this.conflicts.length > 0),
       set("rung.hasObjects", this.objects.length > 0),
     ]);

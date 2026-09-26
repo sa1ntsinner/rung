@@ -80,6 +80,7 @@
       { "command": "rung.goOffline", "title": "Go Offline", "category": "rung", "icon": "$(debug-disconnect)" },
       { "command": "rung.onlineState", "title": "Online State", "category": "rung", "icon": "$(pulse)" },
       { "command": "rung.refreshPlc", "title": "Refresh Online State", "category": "rung", "icon": "$(refresh)" },
+      { "command": "rung.connect", "title": "Connect… (Find the PLC, Choose the Connection)", "category": "rung", "icon": "$(link)" },
       { "command": "rung.interfaces", "title": "Interfaces and Reachable Devices…", "category": "rung", "icon": "$(radio-tower)" },
       { "command": "rung.download", "title": "Download to PLC…", "category": "rung", "icon": "$(desktop-download)", "enablement": "!rung.downloading" },
       { "command": "rung.openInTia", "title": "Open in TIA Portal", "category": "rung", "icon": "$(link-external)" },
@@ -112,6 +113,7 @@
         { "command": "rung.goOffline", "when": "rung.workspace" },
         { "command": "rung.onlineState", "when": "rung.workspace" },
         { "command": "rung.refreshPlc", "when": "false" },
+        { "command": "rung.connect", "when": "rung.workspace" },
         { "command": "rung.interfaces", "when": "rung.workspace" },
         { "command": "rung.download", "when": "rung.workspace" },
         { "command": "rung.openInTia", "when": "rung.workspace && editorLangId == scl" },
@@ -134,6 +136,7 @@
         { "command": "rung.openConfig", "when": "view == rung.project", "group": "2_workspace@1" },
         { "command": "rung.showOutput", "when": "view == rung.project", "group": "2_workspace@2" },
         { "command": "rung.refreshPlc", "when": "view == rung.plc && rung.workspace", "group": "navigation@1" },
+        { "command": "rung.connect", "when": "view == rung.plc && rung.workspace", "group": "1_plc@0" },
         { "command": "rung.interfaces", "when": "view == rung.plc && rung.workspace", "group": "1_plc@1" },
         { "command": "rung.openConfig", "when": "view == rung.plc && rung.workspace", "group": "2_workspace@1" },
         { "command": "rung.showOutput", "when": "view == rung.plc", "group": "2_workspace@2" }
@@ -157,7 +160,9 @@
         { "command": "rung.onlineState", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@3" },
         { "command": "rung.compilePlc", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "2_build@1" },
         { "command": "rung.compileHardware", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "2_build@2" },
+        { "command": "rung.connect", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@0" },
         { "command": "rung.interfaces", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@1" },
+        { "command": "rung.openConfig", "when": "view == rung.plc && viewItem == rung.connection", "group": "inline" },
         { "command": "rung.download", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@2" }
       ],
       "editor/title": [
@@ -186,6 +191,7 @@
       { "key": "alt+q shift+t", "command": "rung.testAll", "when": "rung.workspace" },
       { "key": "alt+q o", "command": "rung.goOnline", "when": "rung.workspace" },
       { "key": "alt+q f", "command": "rung.goOffline", "when": "rung.workspace" },
+      { "key": "alt+q c", "command": "rung.connect", "when": "rung.workspace" },
       { "key": "alt+q i", "command": "rung.interfaces", "when": "rung.workspace" },
       { "key": "alt+q d", "command": "rung.download", "when": "rung.workspace" },
       { "key": "alt+q e", "command": "rung.openInTia", "when": "rung.workspace && editorLangId == scl" },
@@ -333,17 +339,21 @@
   "scripts": {
     "typecheck": "tsc -p . --noEmit",
     "build": "tsc -p . --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=out/extension.js --sourcemap --log-level=warning",
-    "package": "npm run build -- --minify && vsce package --no-dependencies -o rung-scl.vsix"
+    "package": "npm run build -- --minify && vsce package --no-dependencies -o rung-scl.vsix",
+    "test:e2e": "tsc -p test-e2e && npm run build && node test-e2e/out/test-e2e/runTest.js"
   },
   "dependencies": {
     "smol-toml": "^1.9.0",
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.18.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.12",
+    "mocha": "^12.0.2",
     "typescript": "~5.9.2"
   }
 }

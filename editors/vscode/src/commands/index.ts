@@ -3,14 +3,17 @@
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { Args, parseOnlineState } from "../core/args";
+import { parseNoTarget } from "../core/connect";
 import type { Lsp } from "../lsp";
 import type { OnlineMonitor } from "../online";
 import type { Output } from "../output";
 import type { CompileProblems } from "../problems";
 import { RungCli } from "../runner/cli";
+import type { RunResult } from "../runner/terminal";
 import type { WatchController } from "../runner/watch";
 import type { ProjectView } from "../views/projectView";
 import { isFile, type RungWorkspace } from "../workspace";
+import { Connector } from "./connect";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
 import { deviceTarget, fileTarget } from "./targets";
@@ -38,6 +41,7 @@ function needsWorkspace(ws: RungWorkspace): boolean {
 
 export function registerCommands(context: vscode.ExtensionContext, s: Services): void {
   const { ws, cli, out, watch, online, problems } = s;
+  const connector = new Connector(ws, cli, out);
   const reg = (id: string, fn: (...args: unknown[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   const inWs =
     (fn: (...args: unknown[]) => unknown) =>
@@ -45,8 +49,40 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
       needsWorkspace(ws) ? fn(...args) : undefined;
 
   // --- sync
-  reg("rung.pull", inWs(() => cli.run(["pull"])));
-  reg("rung.sync", inWs(() => cli.run(["sync"])));
+  /** After pull / sync: point at new conflicts (the terminal has the details). */
+  const afterSync = (r: RunResult) => {
+    if (r.error || r.code === 0) return;
+    void ws.reload().then(async () => {
+      const n = ws.conflicts.length;
+      if (!n) return;
+      const pick = await vscode.window.showWarningMessage(
+        `${n} conflict${n > 1 ? "s" : ""}: ${ws.conflicts.slice(0, 3).join(", ")}${n > 3 ? ", …" : ""}. Changed here and in TIA Portal; keep your file or take TIA's version.`,
+        "Show in Project view",
+      );
+      if (pick) await vscode.commands.executeCommand("rung.project.focus");
+    });
+  };
+  reg(
+    "rung.pull",
+    inWs(async () => {
+      // pull needs the workspace state for itself; rung watch holds it (and keeps the files current anyway)
+      if (ws.watching) {
+        const stop = watch.owned ? "Stop watch and pull" : undefined;
+        const pick = await vscode.window.showInformationMessage(
+          "rung watch is running and already keeps the files and TIA Portal in sync, so a pull is not needed. To pull anyway, stop watch first.",
+          ...(stop ? [stop] : []),
+        );
+        if (pick !== stop || !stop) return;
+        await watch.stop();
+        if (ws.watching) return;
+      }
+      afterSync(await cli.run(["pull"]));
+    }),
+  );
+  reg(
+    "rung.sync",
+    inWs(async () => afterSync(await cli.run(["sync"]))),
+  );
   reg("rung.status", inWs(() => cli.run(["status"])));
   reg("rung.views", inWs(() => cli.run(["views"])));
   reg("rung.watch.start", inWs(() => watch.start()));
@@ -91,21 +127,51 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     const t = await fileTarget(ws, arg, name, "a block file");
     if (!t?.name) return;
     await saveIfDirty(t.uri);
-    await cli.run(Args.testBlock(t.name));
+    const r = await cli.run(Args.testBlock(t.name));
+    // rung test --filter matches test file paths: say where tests for this block are expected
+    if (!r.error && /^0\/0 passed/m.test(r.output))
+      void vscode.window.showInformationMessage(`No tests for ${t.name}. rung test runs tests/**/*.test.yaml files whose path contains "${t.name}", e.g. tests/${t.name}.test.yaml with block: ${t.name}.`);
   });
 
   // --- online
+  // rung online finds the PLC itself and saves [plc.X]; when it cannot decide (NO_TARGET) the Connector
+  // asks, saves the choice and the action runs again.
   const onlineAction = (mode: "online" | "offline") =>
     inWs(async (arg) => {
       const d = await deviceTarget(ws, arg, mode === "online" ? "Go online" : "Go offline");
       if (!d) return;
-      online.set(d, { ...online.get(d), checking: true });
-      const r = await cli.capture(mode === "online" ? Args.online(d) : Args.offline(d), { progress: mode === "online" ? `rung: going online with ${d}…` : `rung: going offline from ${d}…`, cancellable: true });
-      const st = parseOnlineState(r.output);
-      online.set(d, st ? { state: st.state, checking: false, at: Date.now() } : { ...online.get(d), checking: false, error: RungCli.summary(r.output) });
-      if (r.error) return;
-      if (r.code === 0) void vscode.window.setStatusBarMessage(`rung: ${d} ${st?.state ?? mode}`, 4000);
-      else void showFailure(out, mode === "online" ? `${d} is not online${st ? ` (${st.state})` : ""}` : `Going offline failed`, r.output);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        online.set(d, { ...online.get(d), checking: true });
+        const r = await cli.capture(mode === "online" ? Args.online(d) : Args.offline(d), {
+          progress: mode === "online" ? (ws.config?.plc[d] ? `rung: going online with ${d}…` : `rung: looking for ${d} on the network and going online…`) : `rung: going offline from ${d}…`,
+          cancellable: true,
+        });
+        const st = parseOnlineState(r.output);
+        const noTarget = parseNoTarget(r.output);
+        const error = noTarget?.kind === "notFound" ? "not found on the network" : noTarget ? "no connection chosen" : RungCli.summary(r.output);
+        // no state in the output: what was shown before is no longer known
+        online.set(d, st ? { state: st.state, checking: false, at: Date.now() } : { checking: false, error, at: Date.now() });
+        if (r.error || r.code === null) return;
+        if (r.code === 0) {
+          // rung may have just saved the connection it found: show it in the PLC view now
+          await ws.reload();
+          void vscode.window.setStatusBarMessage(`rung: ${d} ${st?.state ?? mode}`, 4000);
+          return;
+        }
+        if (mode === "online" && noTarget) {
+          if (!(await connector.choose(d, noTarget))) return;
+          continue;
+        }
+        if (mode === "online" && st) {
+          // rung reached TIA Portal, but the PLC did not come online (e.g. NotReachable): offer another connection
+          const pick = await vscode.window.showErrorMessage(`${d} is not online (${st.state}).`, "Choose connection…", "Show output");
+          if (pick === "Show output") out.show();
+          if (pick !== "Choose connection…" || !(await connector.choose(d))) return;
+          continue;
+        }
+        void showFailure(out, mode === "online" ? `${d} is not online` : `Going offline failed`, r.output);
+        return;
+      }
     });
   reg("rung.goOnline", onlineAction("online"));
   reg("rung.goOffline", onlineAction("offline"));
@@ -120,8 +186,15 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     }),
   );
   reg("rung.refreshPlc", inWs(() => online.refresh()));
-  reg("rung.interfaces", inWs((arg) => interfacesCommand(ws, cli, out, arg)));
-  reg("rung.download", inWs((arg) => downloadCommand(ws, cli, online, arg)));
+  reg(
+    "rung.connect",
+    inWs(async (arg) => {
+      const d = await deviceTarget(ws, arg, "Connect");
+      if (d) await connector.choose(d);
+    }),
+  );
+  reg("rung.interfaces", inWs((arg) => interfacesCommand(ws, cli, connector, arg)));
+  reg("rung.download", inWs((arg) => downloadCommand(ws, cli, online, connector, arg)));
 
   // --- TIA Portal / conflicts
   reg(
@@ -130,7 +203,12 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
       const t = await fileTarget(ws, arg, undefined, "a mirrored block file");
       if (!t) return;
       const r = await cli.capture(Args.open(t.rel), { progress: `rung: opening ${t.name ?? t.rel} in TIA Portal…` });
-      if (!r.error && r.code !== 0) void showFailure(out, "Could not open it in TIA Portal", r.output);
+      if (r.error || r.code === 0) return;
+      if (/without (a )?user interface/i.test(r.output))
+        void vscode.window.showWarningMessage(
+          `TIA Portal runs without a user interface on this PC, so it cannot show ${t.name ?? t.rel}. Open the project in a TIA Portal window to use Open in TIA Portal.`,
+        );
+      else void showFailure(out, "Could not open it in TIA Portal", r.output);
     }),
   );
   const resolve = (mode: "ours" | "theirs") =>
@@ -239,6 +317,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     a("plug", "Go online", "rung.goOnline", "O"),
     a("debug-disconnect", "Go offline", "rung.goOffline", "F"),
     a("pulse", "Online state", "rung.onlineState"),
+    a("link", "Connect…", "rung.connect", "C", "find the PLC on the network and choose the connection"),
     a("radio-tower", "Interfaces…", "rung.interfaces", "I"),
     a("desktop-download", "Download…", "rung.download", "D", "asks for confirmation first"),
     sep("workspace"),

@@ -199,6 +199,8 @@ export class ObjectDecorations implements vscode.FileDecorationProvider, vscode.
   private readonly subs: vscode.Disposable[] = [];
 
   constructor(private readonly ws: RungWorkspace) {
+    // the workspace is already loaded when this is created: take its objects now, not only on the next change
+    this.byPath = new Map(ws.objects.map((o) => [o.path, o]));
     this.subs.push(
       vscode.window.registerFileDecorationProvider(this),
       ws.onDidChange(() => {

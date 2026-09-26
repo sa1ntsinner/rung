@@ -6,3 +6,5 @@ package-lock.json
 .gitignore
 **/*.map
 **/*.vsix
+test-e2e/**
+.vscode-test/**

@@ -6,9 +6,10 @@ import * as vscode from "vscode";
 import { ALLOW_NAMES, describeDownload, downloadArgs, parseNeedsAllow, parseRefused, type DownloadOptions } from "../core/args";
 import { DOWNLOAD_DEFAULTS } from "../core/rungToml";
 import type { OnlineMonitor } from "../online";
-import type { RungCli } from "../runner/cli";
+import { RungCli } from "../runner/cli";
 import { readSettings } from "../settings";
 import type { RungWorkspace } from "../workspace";
+import type { Connector } from "./connect";
 import { deviceTarget } from "./targets";
 
 let inProgress = false;
@@ -46,7 +47,7 @@ async function pickOptions(o: DownloadOptions, tomlHardware: boolean): Promise<D
   return next;
 }
 
-export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: OnlineMonitor, arg: unknown): Promise<void> {
+export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: OnlineMonitor, connector: Connector, arg: unknown): Promise<void> {
   if (inProgress) {
     void vscode.window.showWarningMessage("A download is already running. Wait for it to finish.");
     return;
@@ -62,12 +63,10 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
   }
   const device = await deviceTarget(ws, arg, "Download");
   if (!device) return;
+  // rung download would look for the PLC itself; do it first so the confirmation names the connection
+  if (!(await connector.ensure(device))) return;
   const conn = ws.config?.plc[device];
-  if (!conn) {
-    const pick = await vscode.window.showWarningMessage(`No connection for ${device}. rung needs [plc.${device}] in rung.toml before it can download.`, "Interfaces…");
-    if (pick) await vscode.commands.executeCommand("rung.interfaces", device);
-    return;
-  }
+  if (!conn) return;
   const s = readSettings().download;
   let options: DownloadOptions = { device, hardware: s.hardware, software: true, allBlocks: s.allBlocks, startAfter: s.startAfter, allow: s.allow };
   if (s.pickOptions) {
@@ -103,7 +102,10 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
         return;
       }
       if (r.code !== 3) {
-        void vscode.window.showErrorMessage(r.code === 1 ? `Nothing was downloaded to ${device}. See the terminal.` : `Download to ${device} failed (exit code ${r.code}). See the terminal.`);
+        const why = RungCli.summary(r.output);
+        void vscode.window.showErrorMessage(
+          r.code === 1 ? `Nothing was downloaded to ${device}${why ? `: ${why}` : "."}` : /compile errors/.test(r.output) ? `Nothing was downloaded to ${device}: the program has compile errors (see Problems and the terminal).` : `Download to ${device} failed (exit code ${r.code}). See the terminal.`,
+        );
         return;
       }
       // TIA asked questions the policy answers with "no": offer to repeat with exactly those allowed.

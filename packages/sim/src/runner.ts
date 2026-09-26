@@ -244,8 +244,10 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
   const out: FileResult[] = [];
   for (const f of files.sort()) {
     const rel = relative(root, f).split(sep).join("/");
-    if (filter && !rel.includes(filter)) continue;
-    out.push(await runTestFile(index, rel, await readFile(f, "utf8")));
+    const text = await readFile(f, "utf8");
+    // --filter matches the file path or the block under test (rung test --filter Fx_Motor)
+    if (filter && !rel.includes(filter) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(text)) continue;
+    out.push(await runTestFile(index, rel, text));
   }
   return out;
 }

@@ -3,7 +3,7 @@
 // While rung watch runs, the language server also reports compile results of syncs.
 import { join } from "node:path";
 import * as vscode from "vscode";
-import { parseCompileOutput } from "./core/args";
+import { isCompileSummary, parseCompileOutput } from "./core/args";
 import type { RungWorkspace } from "./workspace";
 
 export class CompileProblems implements vscode.Disposable {
@@ -17,7 +17,8 @@ export class CompileProblems implements vscode.Disposable {
     if (!root) return;
     const byFile = new Map<string, vscode.Diagnostic[]>();
     for (const m of parseCompileOutput(output)) {
-      if (!m.file || m.severity === "info") continue;
+      // "Compiling finished (errors: 1; warnings: 0)" is TIA's summary, not a problem of its own
+      if (!m.file || m.severity === "info" || isCompileSummary(m.message)) continue;
       const line = Math.max(0, (m.line ?? 1) - 1);
       const d = new vscode.Diagnostic(new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER), m.message, m.severity === "error" ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
       d.source = "TIA Portal";

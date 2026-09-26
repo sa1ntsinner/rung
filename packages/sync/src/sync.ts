@@ -239,6 +239,7 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
 
       if (st?.status === "conflicted") {
         warn(address, "CONFLICT", "unresolved conflict; run rung resolve");
+        report.conflicts++;
         diag({ address, path: st.path, severity: "error", code: "CONFLICT", message: "Unresolved conflict; run rung resolve" });
         continue;
       }

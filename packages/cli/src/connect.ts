@@ -85,7 +85,10 @@ export async function saveTarget(ws: string, device: string, t: ConnectionTarget
     "",
   ].join("\n");
   const lines = text.split(/\r?\n/);
-  const start = lines.findIndex((l) => l.trim() === header);
+  // [plc.X], [ plc.X ] # comment, [plc."X"]: every spelling of the same table counts
+  const esc = device.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const isHeader = new RegExp(`^\\s*\\[\\s*plc\\s*\\.\\s*(?:${esc}|"${esc}"|'${esc}')\\s*\\]\\s*(#.*)?$`);
+  const start = lines.findIndex((l) => isHeader.test(l));
   let next: string;
   if (start < 0) next = text.replace(/\s*$/, "\n\n") + block;
   else {

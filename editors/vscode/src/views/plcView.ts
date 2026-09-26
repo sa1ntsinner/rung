@@ -16,6 +16,7 @@ const ACTIONS: readonly Omit<Extract<Node, { type: "action" }>, "type" | "device
   { label: "Go offline", command: "rung.goOffline", icon: "debug-disconnect", tooltip: "rung online --off" },
   { label: "Compile PLC", command: "rung.compilePlc", icon: "tools", tooltip: "rung compile: compile the software in TIA Portal" },
   { label: "Compile hardware", command: "rung.compileHardware", icon: "circuit-board", tooltip: "rung compile --hw" },
+  { label: "Connect…", command: "rung.connect", icon: "link", tooltip: "rung connect: find the PLC on the network (or choose among what answers) and save the connection in rung.toml" },
   { label: "Interfaces…", command: "rung.interfaces", icon: "radio-tower", tooltip: "rung interfaces --scan: PG/PC interfaces and reachable devices; can write [plc.X] into rung.toml" },
   { label: "Download…", command: "rung.download", icon: "desktop-download", tooltip: "rung download: asks for confirmation first" },
 ];
@@ -115,15 +116,15 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
 
   private connectionItem(device: string): PlcItem {
     const c = this.ws.config?.plc[device];
-    const it = new PlcItem({ type: "connection", device }, c ? c.pcInterface : "No connection configured", vscode.TreeItemCollapsibleState.None);
+    const it = new PlcItem({ type: "connection", device }, c ? c.pcInterface : "Connection: found when going online", vscode.TreeItemCollapsibleState.None);
     it.id = `conn:${device}`;
-    it.iconPath = new vscode.ThemeIcon(c ? "link" : "warning", c ? undefined : new vscode.ThemeColor("list.warningForeground"));
-    it.description = c ? [c.mode, c.targetInterface].filter(Boolean).join(" · ") : "run Interfaces…";
+    it.iconPath = new vscode.ThemeIcon(c ? "link" : "search");
+    it.description = c ? [c.mode, c.targetInterface].filter(Boolean).join(" · ") : "or click to choose";
     it.tooltip = c
-      ? `[plc.${device}] in rung.toml\nmode = ${c.mode}\npc_interface = ${c.pcInterface} (number ${c.pcInterfaceNumber})${c.targetInterface ? `\ntarget_interface = ${c.targetInterface}` : ""}`
-      : `Online and download need [plc.${device}] in rung.toml. Interfaces… lists the options and can write it for you.`;
-    it.command = c ? { command: "rung.openConfig", title: "Open rung.toml" } : { command: "rung.interfaces", title: "Interfaces…", arguments: [device] };
-    it.contextValue = "rung.connection";
+      ? `[plc.${device}] in rung.toml\nmode = ${c.mode}\npc_interface = ${c.pcInterface} (number ${c.pcInterfaceNumber})${c.targetInterface ? `\ntarget_interface = ${c.targetInterface}` : ""}\n\nClick to choose another connection.`
+      : `No [plc.${device}] in rung.toml yet. Go online (or download) finds ${device} on the network by its project address and saves the connection; click to look now and choose.`;
+    it.command = { command: "rung.connect", title: "Connect…", arguments: [device] };
+    it.contextValue = c ? "rung.connection" : "rung.connection.none";
     return it;
   }
 

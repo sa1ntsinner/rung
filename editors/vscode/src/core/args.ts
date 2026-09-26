@@ -146,6 +146,9 @@ export function parseCompileOutput(output: string): CompileMessage[] {
   return out;
 }
 
+/** TIA's closing "Compiling finished (errors: 1; warnings: 0)" line, which rung prints as a message of its own. */
+export const isCompileSummary = (message: string) => /^Compiling finished\b/i.test(message.trim());
+
 export interface InterfaceOption {
   mode: string;
   pcInterface: string;

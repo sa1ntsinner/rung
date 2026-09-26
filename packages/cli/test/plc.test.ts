@@ -154,6 +154,17 @@ describe("PLC commands", () => {
     expect(toml).toMatch(/pc_interface = "Ethernet"/);
   });
 
+  it("connect --use replaces a hand-written table with a comment instead of adding a second one", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, '\n[ plc.PLC_1 ]  # our test rig\nmode = "PN/IE"\npc_interface = "Old"\n');
+    expect(await t.run(["connect", "--use", "Ethernet", "--target", "1 X1"])).toBe(0);
+    const toml = readFileSync(t.toml, "utf8");
+    expect(toml.match(/plc\.PLC_1/g)).toHaveLength(1);
+    expect(toml).not.toContain('"Old"');
+    expect(await t.run(["status"])).toBe(0); // still a valid rung.toml
+  });
+
   it("online goes online and offline", async () => {
     const t = setup();
     await t.run(["init"]);

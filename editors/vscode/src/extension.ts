@@ -20,7 +20,21 @@ import { RungWorkspace } from "./workspace";
 
 let lsp: Lsp | undefined;
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+/** Returned by activate(): the pieces the integration tests (test-e2e) look at. Not a stable API. */
+export interface RungExtensionApi {
+  ws: RungWorkspace;
+  cli: RungCli;
+  watch: WatchController;
+  online: OnlineMonitor;
+  problems: CompileProblems;
+  project: ProjectView;
+  plc: PlcView;
+  statusBar: StatusBar;
+  decorations: ObjectDecorations;
+  lsp: Lsp;
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
   const out = new Output();
   const ws = new RungWorkspace(out);
   const terminals = new TerminalPool();
@@ -35,7 +49,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const project = new ProjectView(ws);
   const plc = new PlcView(ws, online, watch);
-  context.subscriptions.push(project, plc, new ObjectDecorations(ws), new StatusBar(ws, watch, online), new BlockCodeLens(ws));
+  const statusBar = new StatusBar(ws, watch, online);
+  const decorations = new ObjectDecorations(ws);
+  context.subscriptions.push(project, plc, decorations, statusBar, new BlockCodeLens(ws));
   registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp });
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
@@ -65,6 +81,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
+  return { ws, cli, watch, online, problems, project, plc, statusBar, decorations, lsp };
 }
 
 export async function deactivate(): Promise<void> {

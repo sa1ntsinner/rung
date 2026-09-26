@@ -99,7 +99,8 @@ export class RungCli implements vscode.Disposable {
   /** Last non-empty "rung: …" / "hint: …" lines, for notifications. */
   static summary(output: string): string {
     const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const err = lines.filter((l) => /^(rung( [a-z-]+)?:|hint:)/.test(l));
+    // progress lines ("rung: looking for PLC_1 on the network…") say nothing about the outcome
+    const err = lines.filter((l) => /^(rung( [a-z-]+)?:|hint:)/.test(l) && !/…$/.test(l));
     return (err.length ? err : lines.slice(-1)).join(" ").slice(0, 400);
   }
 
