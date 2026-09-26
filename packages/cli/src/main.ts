@@ -2,7 +2,6 @@
 import { parseArgs } from "node:util";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   CONFIG_FILE,
   StateStore,
@@ -20,6 +19,7 @@ import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
+import { agentsTemplatePath } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
@@ -54,7 +54,9 @@ Environment:
 
 async function agentsTemplate(project: string): Promise<string> {
   try {
-    const t = await readFile(fileURLToPath(new URL("../../../agents/AGENTS.template.md", import.meta.url)), "utf8");
+    const path = agentsTemplatePath();
+    if (!path) throw new Error("no template");
+    const t = await readFile(path, "utf8");
     return t.replace(/^<!--.*?-->\n/, "").replace("{{PROJECT}}", project);
   } catch {
     return `# rung workspace\n\nText mirror of ${project}. Edit files directly; never download to a PLC; .protected.yaml, F- and GRAPH blocks are read-only.\n`;

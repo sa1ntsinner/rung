@@ -15,10 +15,11 @@ export default defineConfig({
       "@rung/mcp": src("mcp"),
       "@rung/live": src("live"),
       "@rung/sim": src("sim"),
+      "@rung/pro": fileURLToPath(new URL("./pro/packages/pro/src/index.ts", import.meta.url)),
     },
   },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "pro/packages/*/test/**/*.test.ts", "tests/**/*.test.ts"],
     testTimeout: 20000,
   },
 });

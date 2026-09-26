@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { bridgeExecutable } from "./paths.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
 import { BridgeClient } from "@rung/bridge-client";
 
@@ -29,8 +29,7 @@ export const HINTS: Record<string, string> = {
 export function defaultBridge(env: Io["env"]): { command: string; args: string[] } {
   const args = env.RUNG_BRIDGE_ARGS ? (JSON.parse(env.RUNG_BRIDGE_ARGS) as string[]) : [];
   if (env.RUNG_BRIDGE) return { command: env.RUNG_BRIDGE, args };
-  const dev = fileURLToPath(new URL("../../../bridge/src/Rung.Bridge.V20/bin/Release/net48/rung-bridge-v20.exe", import.meta.url));
-  return { command: dev, args };
+  return { command: bridgeExecutable(env), args };
 }
 
 export async function exists(p: string) {

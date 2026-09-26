@@ -2,20 +2,23 @@
 
 **PLC-as-code for Siemens TIA Portal.** rung mirrors a TIA Portal project into a folder of plain text files (SCL, DB, UDT, SIMATIC SD, XML), keeps both sides in sync, and lets you work on it from any editor (VS Code, Zed, Neovim) and any AI agent (Claude Code, Codex, Cursor).
 
-> Status: pre-alpha, under active development. Not yet published.
+> Status: pre-alpha. Built and tested against fakes and TIA Portal V20 Openness; live verification on a fixture project is pending (see docs/STATUS.md). Not yet published.
 
-## How it works
+## What you get
+
+- **Two-way sync** (`rung watch`): edit files, TIA Portal follows; edit in TIA, files follow; concurrent edits merge (diff3) or become explicit conflicts. Imports are transactional and guarded by revisions.
+- **Language server** for SCL in VS Code, Zed and Neovim: completion, go to definition through DB/UDT/FB members, references, rename, TIA compile errors inline.
+- **AI agents**: a small MCP server (`rung mcp`) and a Claude Code plugin with safety and review skills; agents edit files directly.
+- **Unit tests** for SCL blocks on an offline simulator (`rung test`), JUnit output for CI.
+- **Read-only views** of hardware, HMI Unified and technology objects (`rung views`), live values over the S7-1500 Web API (`rung live`).
+
+rung talks to TIA Portal only through the official Openness API. It never reads or writes `.ap*` project files and never downloads to a PLC. Failsafe, protected, system and GRAPH blocks are read-only.
 
 ```
-TIA Portal ⇄ rung-bridge (C#, Openness API) ⇄ rung (TypeScript) ⇄ folder of text files ⇄ editors / agents
+TIA Portal ⇄ rung-bridge (C#, Openness) ⇄ rung (TypeScript) ⇄ folder of text files ⇄ editors / agents
 ```
 
-- `rung init` binds a workspace folder to an open TIA Portal project.
-- `rung pull` exports every supported object to `plc/<Device>/…` (incremental, lossless file names).
-- `rung doctor --fixture` checks that export → import → export is stable.
-- Coming next: `rung watch` (two-way sync), language server, MCP server for agents.
-
-rung talks to TIA Portal only through the official Openness API. It never reads or writes `.ap*` project files directly and never downloads to a real PLC.
+Start with the [quickstart](docs/quickstart.md). See also [FAQ](docs/faq.md), [editors](docs/editors/README.md), [agents](docs/agents/README.md), [testing](docs/testing.md), [comparison](docs/comparison.md), [status](docs/STATUS.md).
 
 ## Requirements
 
