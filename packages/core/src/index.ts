@@ -22,3 +22,4 @@ export { BlobStore, Journal, publishBundle, recoverJournal, bundleHash, pathKey,
 export { type RungConfig, CONFIG_FILE, defaultConfig, parseConfig, formatConfig, loadConfig, saveConfig } from "./config.js";
 export { preflight, isContained, sweepTempFiles, MAX_ABSOLUTE_PATH, type PlannedPath, type PreflightResult } from "./layout.js";
 export { toYaml } from "./yaml.js";
+export * from "./check.js";

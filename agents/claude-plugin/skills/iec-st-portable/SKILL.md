@@ -5,7 +5,7 @@ description: Use when working on IEC 61131-3 Structured Text for Beckhoff TwinCA
 
 # IEC 61131-3 ST on TwinCAT and CODESYS
 
-rung reads TwinCAT and plain ST files directly (no bridge): the language server, `rung test` and the simulator understand PROGRAM, FUNCTION_BLOCK, METHOD, GVLs and DUTs. TwinCAT XAE / CODESYS still build, download and go online.
+rung reads TwinCAT and plain ST files directly (no bridge): the language server, `rung test` and the simulator understand PROGRAM, FUNCTION_BLOCK, METHOD, GVLs and DUTs. TwinCAT XAE / CODESYS still build, download and go online. Check with `rung_check` whether they are installed; if not, say so and quote the install link it gives (both are free with a vendor account), then continue with what rung can do without them.
 
 ## Differences from Siemens SCL that bite
 

@@ -23,4 +23,4 @@ You prepare; a person downloads and tests on the machine. Your job is to make th
 
 ## Without hardware
 
-`rung simulate` gives a virtual S7-1500 (Web API only) that runs the SCL program; S7-PLCSIM (if installed) is what TIA Portal can go online and download to. Say which one a result came from.
+`rung simulate` gives a virtual S7-1500 (Web API only) that runs the SCL program; S7-PLCSIM (`rung_check` says whether it is installed; otherwise quote its install hint) is what TIA Portal can go online and download to. Say which one a result came from.

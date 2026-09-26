@@ -22,13 +22,14 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@rung/core": "workspace:*",
+    "@clack/prompts": "^1.8.1",
     "@rung/bridge-client": "workspace:*",
-    "@rung/sync": "workspace:*",
-    "@rung/lsp": "workspace:*",
+    "@rung/core": "workspace:*",
     "@rung/graph": "workspace:*",
-    "@rung/mcp": "workspace:*",
     "@rung/live": "workspace:*",
-    "@rung/sim": "workspace:*"
+    "@rung/lsp": "workspace:*",
+    "@rung/mcp": "workspace:*",
+    "@rung/sim": "workspace:*",
+    "@rung/sync": "workspace:*"
   }
 }

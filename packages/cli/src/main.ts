@@ -19,13 +19,15 @@ import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
-import { agentsTemplatePath } from "./paths.js";
+import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
+import { cmdCheck } from "./check.js";
+import { cmdSetupWizard } from "./wizard.js";
 
 export type { Io } from "./common.js";
 
@@ -34,6 +36,9 @@ export const VERSION = "0.1.0-dev";
 const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
 Usage:
+  rung setup [dir] [--dry-run] [-y] [--agents claude,codex,...] [--skills all|a,b] [--editors vscode,zed] [--scope project|global]
+                                       set up rung for your agents and editors (asks, shows the plan, then writes)
+  rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
@@ -215,13 +220,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "all-blocks": { type: "boolean" },
         "no-start": { type: "boolean" },
         allow: { type: "string", multiple: true },
-        yes: { type: "boolean" },
+        yes: { type: "boolean", short: "y" },
         plc: { type: "string" },
         file: { type: "string", multiple: true },
         off: { type: "boolean" },
         state: { type: "boolean" },
         scan: { type: "boolean" },
         grant: { type: "boolean" },
+        agents: { type: "string" },
+        skills: { type: "string" },
+        editors: { type: "string" },
+        platforms: { type: "string" },
+        scope: { type: "string" },
+        "dry-run": { type: "boolean" },
         pick: { type: "boolean" },
         address: { type: "string" },
         port: { type: "string" },
@@ -315,16 +326,25 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         return 0;
       }
       case "mcp": {
-        const ws = await findWorkspace(dir);
-        const config = await loadConfig(ws);
-        await serveStdio({ root: ws, bridgeFactory: () => bridgeFor(config, io, importFlags(config)) });
+        // agents configured for all projects start rung mcp anywhere: serve without a workspace too
+        // (rung_check works; workspace tools answer with how to set one up)
+        const ws = await findWorkspace(dir).catch(() => null);
+        const config = ws ? await loadConfig(ws) : null;
+        await serveStdio({
+          root: ws ?? dir,
+          ...(config ? { bridgeFactory: () => bridgeFor(config, io, importFlags(config)) } : {}),
+          bridgeWhitelisted: () => whitelistStatus(bridgeExecutable(io.env)),
+        });
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "check":
+        return await cmdCheck(v, io);
       case "simulate":
         return await cmdSimulate(dir, v, io);
       case "setup":
-        return await cmdSetup(target, v, io);
+        // rung setup openness: the whitelist; rung setup [dir]: the interactive setup
+        return target === "openness" ? await cmdSetup(target, v, io) : await cmdSetupWizard(dir, v, io);
       case "compile":
         return await cmdCompile(dir, v, io);
       case "online":

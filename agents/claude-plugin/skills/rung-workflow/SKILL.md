@@ -7,6 +7,10 @@ description: Use when working in a rung workspace (a folder with rung.toml mirro
 
 The folder is a live text mirror of a TIA Portal project. `plc/<Device>/blocks/**` holds program blocks, `types/` holds UDTs, `tags/` holds tag tables. Edits to these files are imported into TIA Portal by rung; TIA-side changes arrive in the files. If no TIA Portal has the project open, rung opens it in the background by itself; nobody has to start TIA for you.
 
+## What this PC has
+
+Call `rung_check` once at the start of a session (or when something fails for a missing tool). It lists TIA Portal and Openness, the Openness group and whitelist, S7-PLCSIM, TwinCAT XAE, CODESYS, editors and agents, each with what it enables. When a task needs something that is missing, do not work around it: tell the person exactly what to install, quoting the `fix` and `link` from `rung_check`, and what you can still do meanwhile (edit, test offline, simulate). `rung setup` wires rung into their agents and editors.
+
 ## Loop
 
 1. **Orient.** `rung_status` (conflicts? compile errors? watcher running?) and read `AGENTS.md`. For an object you have not seen, `rung_explain <name>` gives its file, interface and users.

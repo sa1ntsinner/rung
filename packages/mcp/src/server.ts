@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
-import { BlobStore, loadConfig, normalizeText, StateStore, type ObjectState } from "@rung/core";
+import { BlobStore, loadConfig, normalizeText, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
 import { OwnerClient, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type Diagnostic, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
@@ -20,6 +20,8 @@ export interface McpContext {
   env?: Record<string, string | undefined>;
   /** Starts a bridge for one-off operations when no `rung watch` owner is running. */
   bridgeFactory?: () => Promise<SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown> }>;
+  /** Whether the bridge is in the Openness whitelist (the CLI knows where the bridge is). */
+  bridgeWhitelisted?: () => Promise<"ok" | "missing" | "stale" | "unknown">;
 }
 
 type Text = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -284,6 +286,12 @@ export function createMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool("rung_rules", { description: "Safety rules agents must follow in a rung workspace." }, async () => text(SAFETY_RULES));
+
+  server.registerTool(
+    "rung_check",
+    { description: "What is installed on this PC (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS, editors, agents), what each enables, and what the person must install for a task. Call it before telling someone to use a tool they may not have.", inputSchema: {} },
+    async () => json(await runChecks(realProbes(ctx.env ?? process.env, ctx.bridgeWhitelisted ?? (async () => "unknown")))),
+  );
 
   server.registerTool(
     "rung_download_request",
