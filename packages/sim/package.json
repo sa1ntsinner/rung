@@ -1,5 +1,5 @@
 {
-  "name": "@rung/mcp",
+  "name": "@rung/sim",
   "version": "0.1.0-dev",
   "license": "BUSL-1.1",
   "type": "module",
@@ -19,15 +19,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.20.0",
-    "@rung/bridge-client": "workspace:*",
-    "@rung/core": "workspace:*",
-    "@rung/graph": "workspace:*",
     "@rung/lsp": "workspace:*",
-    "@rung/sync": "workspace:*",
-    "node-diff3": "^3.1.2",
-    "zod": "^3.25.0",
-    "@rung/live": "workspace:*",
-    "@rung/sim": "workspace:*"
+    "yaml": "^2.8.1"
   }
 }

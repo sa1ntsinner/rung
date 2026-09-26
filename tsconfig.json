@@ -23,6 +23,9 @@
       "path": "packages/live"
     },
     {
+      "path": "packages/sim"
+    },
+    {
       "path": "packages/cli"
     }
   ]

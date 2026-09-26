@@ -47,7 +47,7 @@ beforeAll(async () => {
 describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_resolve", "rung_rules", "rung_status", "rung_sync"]);
+    expect(tools).toEqual(["rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test"]);
     expect(client.getInstructions()).toMatch(/Never download to a PLC/);
   });
 

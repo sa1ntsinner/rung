@@ -20,6 +20,8 @@ import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
+import { runTests, toJUnit } from "@rung/sim";
+import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 
 export type { Io } from "./common.js";
@@ -36,6 +38,7 @@ Usage:
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <address> [--dir <workspace>]
+  rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline SCL simulator
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
@@ -174,6 +177,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         dir: { type: "string" },
         stdio: { type: "boolean" },
         offline: { type: "boolean" },
+        junit: { type: "string" },
+        filter: { type: "string" },
       },
     });
   } catch (e) {
@@ -197,6 +202,34 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "test": {
+        const ws = await findWorkspace(dir);
+        const index = new WorkspaceIndex();
+        await index.load(ws);
+        const results = await runTests(ws, index, v.filter as string | undefined);
+        let failed = 0;
+        for (const f of results) {
+          if (f.error) {
+            failed++;
+            io.stdout(`FAIL ${f.file}: ${f.error}
+`);
+            continue;
+          }
+          for (const c of f.cases) {
+            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.error}` : ""}
+`);
+            for (const x of c.failures) io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}
+`);
+            if (!c.passed) failed++;
+          }
+        }
+        if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
+        const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
+        io.stdout(`
+${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
+`);
+        return failed ? 2 : total ? 0 : 1;
+      }
       case "live":
         return await cmdLive(dir, target, positionals.slice(2), io);
       case "views": {

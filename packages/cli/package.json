@@ -28,6 +28,7 @@
     "@rung/lsp": "workspace:*",
     "@rung/graph": "workspace:*",
     "@rung/mcp": "workspace:*",
-    "@rung/live": "workspace:*"
+    "@rung/live": "workspace:*",
+    "@rung/sim": "workspace:*"
   }
 }

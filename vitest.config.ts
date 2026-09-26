@@ -14,6 +14,7 @@ export default defineConfig({
       "@rung/graph": src("graph"),
       "@rung/mcp": src("mcp"),
       "@rung/live": src("live"),
+      "@rung/sim": src("sim"),
     },
   },
   test: {

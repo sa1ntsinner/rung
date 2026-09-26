@@ -11,6 +11,7 @@ import { OwnerClient, confirmDelete, resolveConflict, syncOnce, type Diagnostic,
 import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
+import { runTests } from "@rung/sim";
 
 export interface McpContext {
   root: string;
@@ -263,6 +264,17 @@ export function createMcpServer(ctx: McpContext): McpServer {
       } finally {
         await client.logout().catch(() => undefined);
       }
+    },
+  );
+
+  server.registerTool(
+    "rung_test",
+    { description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs) on rung's offline SCL simulator. Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour.", inputSchema: { filter: z.string().optional() } },
+    async ({ filter }) => {
+      const { index } = await model();
+      const results = await runTests(ctx.root, index, filter);
+      if (!results.length) return text("No tests found. Add tests/<name>.test.yaml (see rung docs: block, cases, steps set/cycle/advance/expect).");
+      return json(results);
     },
   );
 
