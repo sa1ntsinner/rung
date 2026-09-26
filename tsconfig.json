@@ -20,6 +20,9 @@
       "path": "packages/mcp"
     },
     {
+      "path": "packages/live"
+    },
+    {
       "path": "packages/cli"
     }
   ]

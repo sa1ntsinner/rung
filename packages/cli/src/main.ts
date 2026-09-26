@@ -14,11 +14,12 @@ import {
   type RungConfig,
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
-import { doctor, pull, summarize } from "@rung/sync";
+import { doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
 import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
+import { cmdLive } from "./live.js";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 
 export type { Io } from "./common.js";
@@ -35,13 +36,17 @@ Usage:
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <address> [--dir <workspace>]
+  rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
+  rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
+  rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
   rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
 Environment:
-  RUNG_BRIDGE       path to rung-bridge-v20.exe (default: bundled/dev build)
+  RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
+  RUNG_WEBAPI_PASSWORD  password of the PLC web server user for rung live
 `;
 
 async function agentsTemplate(project: string): Promise<string> {
@@ -168,6 +173,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         merged: { type: "boolean" },
         dir: { type: "string" },
         stdio: { type: "boolean" },
+        offline: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -188,9 +194,31 @@ export async function main(argv: string[], io: Io): Promise<number> {
     startServer();
     await new Promise<void>(() => {}); // runs until the editor closes the connection
   }
-  const dir = resolve(io.cwd, target ?? ".");
+  const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "live":
+        return await cmdLive(dir, target, positionals.slice(2), io);
+      case "views": {
+        const ws = await findWorkspace(dir);
+        const tags = await writeTagViews(ws);
+        let model: string[] = [];
+        if (!v.offline) {
+          const config = await loadConfig(ws);
+          const client = await bridgeFor(config, io);
+          try {
+            const r = await writeModelViews(ws, client);
+            model = r.written;
+            for (const t of r.truncated) io.stderr(`rung views: ${t} view truncated (object limit)
+`);
+          } finally {
+            await client.close();
+          }
+        }
+        io.stdout(`wrote ${tags.length + model.length} views under ${join(ws, "views")}
+`);
+        return 0;
+      }
       case "agents": {
         const ws = await findWorkspace(dir);
         const config = await loadConfig(ws);

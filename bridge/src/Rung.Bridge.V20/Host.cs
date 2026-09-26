@@ -18,7 +18,7 @@ namespace Rung.Bridge.V20
             {
                 var dispatcher = new RpcDispatcher(
                     () => session = OpennessSession.Attach(args, io.Emit),
-                    new BridgeInfo("V20", version, caps)) { Diagnostics = Console.Error };
+                    new BridgeInfo(TiaVersion.Name, version, caps)) { Diagnostics = Console.Error };
                 try { io.Run(dispatcher, owner); }
                 finally { owner.Run(() => { session?.Dispose(); return 0; }).Wait(TimeSpan.FromSeconds(10)); }
             }

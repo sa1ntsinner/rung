@@ -161,7 +161,7 @@ namespace Rung.Bridge.V20
             {
                 Name = _project.Name,
                 Path = _project.Path.FullName,
-                TiaVersion = "V20",
+                TiaVersion = TiaVersion.Name,
                 Devices = plcs.Select(p => p.Name).ToArray(),
                 IsLocalSession = false,
                 Units = plcs.SelectMany(p => UnitNames(p).Select(u => p.Name + "/" + u)).ToArray(),
@@ -496,6 +496,134 @@ namespace Rung.Bridge.V20
                 default:
                     throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create " + parts.Kind);
             }
+        }
+
+        // ---------------------------------------------------------------- read-only model views (hardware, HMI, technology objects)
+
+        static readonly Dictionary<string, string[]> ViewCompositions = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["hardware"] = new[] { "DeviceItems", "Addresses", "Nodes", "Subnets", "IoSystems" },
+            ["hmi"] = new[] { "Screens", "ScreenItems", "Tags", "Connections", "AlarmClasses", "DiscreteAlarms", "AnalogAlarms", "HmiTextLists", "Scripts", "Dynamizations", "EventHandlers" },
+            ["techobjects"] = new[] { "TechnologicalObjects", "Groups" },
+        };
+
+        public DescribeNode Describe(string scope, int maxNodes)
+        {
+            Alive();
+            if (!ViewCompositions.TryGetValue(scope, out var allowed)) throw new RpcException(ErrorCodes.BadRequest, "Unknown scope " + scope + " (hardware, hmi, techobjects)");
+            var budget = Math.Max(10, Math.Min(maxNodes, 200000));
+            var count = 0;
+            var root = new DescribeNode { Type = "Project", Name = _project.Name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+            void Add(string key, DescribeNode child)
+            {
+                if (child == null) return;
+                if (!root.Children.TryGetValue(key, out var list)) root.Children[key] = list = new List<DescribeNode>();
+                list.Add(child);
+            }
+            switch (scope)
+            {
+                case "hardware":
+                    foreach (var d in AllDevices()) Add("Devices", Node(d, allowed, 0, ref count, budget));
+                    foreach (IEngineeringObject s in _project.Subnets) Add("Subnets", Node(s, allowed, 0, ref count, budget));
+                    break;
+                case "hmi":
+                    foreach (var d in AllDevices())
+                        foreach (var sw in SoftwareOf(d.DeviceItems))
+                            if (sw is Siemens.Engineering.HmiUnified.HmiSoftware hmi) Add("HmiUnified", Node(hmi, allowed, 0, ref count, budget));
+                    break;
+                case "techobjects":
+                    foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
+                    break;
+            }
+            root.Truncated = count >= budget;
+            return root;
+        }
+
+        List<Device> AllDevices()
+        {
+            var devices = new List<Device>(_project.Devices);
+            void Walk(DeviceUserGroupComposition groups) { foreach (DeviceUserGroup g in groups) { devices.AddRange(g.Devices); Walk(g.Groups); } }
+            Walk(_project.DeviceGroups);
+            devices.AddRange(_project.UngroupedDevicesGroup.Devices);
+            return devices;
+        }
+
+        static IEnumerable<object> SoftwareOf(DeviceItemComposition items)
+        {
+            foreach (DeviceItem item in items)
+            {
+                var sw = item.GetService<SoftwareContainer>()?.Software;
+                if (sw != null) yield return sw;
+                foreach (var nested in SoftwareOf(item.DeviceItems)) yield return nested;
+            }
+        }
+
+        static string Scalar(object v)
+        {
+            switch (v)
+            {
+                case null: return null;
+                case string s: return s;
+                case bool b: return b ? "true" : "false";
+                case Enum e: return e.ToString();
+                case DateTime dt: return dt.ToString("o");
+                case IFormattable f when v.GetType().IsPrimitive || v is decimal: return f.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
+                case IEngineeringObject o:
+                    try { return "→ " + (o.GetAttribute("Name") as string ?? o.GetType().Name); } catch (EngineeringException) { return "→ " + o.GetType().Name; }
+                default: return null; // compositions, lists and complex values are not attributes
+            }
+        }
+
+        static DescribeNode Node(IEngineeringObject obj, string[] allowed, int depth, ref int count, int budget, string nameOverride = null)
+        {
+            if (obj == null || count >= budget || depth > 12) return null;
+            count++;
+            var node = new DescribeNode { Type = obj.GetType().Name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+            try
+            {
+                foreach (var info in obj.GetAttributeInfos())
+                {
+                    if (info.AccessMode == EngineeringAttributeAccessMode.Write) continue;
+                    try
+                    {
+                        var s = Scalar(obj.GetAttribute(info.Name));
+                        if (s != null) node.Attributes[info.Name] = s;
+                    }
+                    catch (Exception) { /* some attributes throw depending on configuration */ }
+                }
+            }
+            catch (EngineeringException) { }
+            node.Name = nameOverride ?? (node.Attributes.TryGetValue("Name", out var n) ? n : null);
+            try
+            {
+                foreach (var ci in obj.GetCompositionInfos())
+                {
+                    if (Array.IndexOf(allowed, ci.Name) < 0) continue;
+                    var comp = obj.GetComposition(ci.Name);
+                    var list = new List<DescribeNode>();
+                    if (comp is System.Collections.IEnumerable items)
+                        foreach (var item in items)
+                            if (item is IEngineeringObject child) { var c = Node(child, allowed, depth + 1, ref count, budget); if (c != null) list.Add(c); }
+                    if (list.Count > 0) node.Children[ci.Name] = list;
+                }
+            }
+            catch (EngineeringException) { }
+            // network interfaces are services, not compositions: surface their nodes (IP addresses) explicitly
+            if (obj is DeviceItem di)
+            {
+                try
+                {
+                    var ni = di.GetService<NetworkInterface>();
+                    if (ni != null)
+                    {
+                        var nodes = new List<DescribeNode>();
+                        foreach (Siemens.Engineering.HW.Node nn in ni.Nodes) { var c = Node(nn, allowed, depth + 1, ref count, budget); if (c != null) nodes.Add(c); }
+                        if (nodes.Count > 0) node.Children["NetworkNodes"] = nodes;
+                    }
+                }
+                catch (EngineeringException) { }
+            }
+            return node;
         }
 
         // ---------------------------------------------------------------- cross references

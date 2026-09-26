@@ -71,6 +71,15 @@ namespace Rung.Bridge.Core.Model
         public string Location;      // e.g. NW 2 or line information as TIA reports it
     }
 
+    public sealed class DescribeNode
+    {
+        public string Type;
+        public string Name;
+        public System.Collections.Generic.SortedDictionary<string, string> Attributes;
+        public System.Collections.Generic.SortedDictionary<string, System.Collections.Generic.List<DescribeNode>> Children;
+        public bool? Truncated;
+    }
+
     public sealed class FormCapabilities
     {
         public bool SdLad;

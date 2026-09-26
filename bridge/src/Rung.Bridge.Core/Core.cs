@@ -24,6 +24,8 @@ namespace Rung.Bridge.Core
         void Delete(string address, string expectedTiaRevision, string operationId);
         /// <summary>Cross references reported by TIA Portal for one object.</summary>
         IReadOnlyList<XRefEntry> XRef(string address);
+        /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi or techobjects.</summary>
+        DescribeNode Describe(string scope, int maxNodes);
     }
 
     public sealed class BridgeInfo

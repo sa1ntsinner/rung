@@ -13,6 +13,7 @@ export default defineConfig({
       "@rung/lsp": src("lsp"),
       "@rung/graph": src("graph"),
       "@rung/mcp": src("mcp"),
+      "@rung/live": src("live"),
     },
   },
   test: {

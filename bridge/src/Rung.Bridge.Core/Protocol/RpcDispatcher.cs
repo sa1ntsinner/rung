@@ -93,6 +93,8 @@ namespace Rung.Bridge.Core.Protocol
                 case "objects.delete":
                     Session.Delete(Str(p, "address"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
                     return new { deleted = true };
+                case "model.describe":
+                    return Session.Describe(Str(p, "scope"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("maxNodes", out var mn) && mn.ValueKind == JsonValueKind.Number ? mn.GetInt32() : 20000);
                 case "xref.get":
                     return Session.XRef(Str(p, "address"));
                 case "plc.compile":

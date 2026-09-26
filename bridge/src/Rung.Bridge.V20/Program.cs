@@ -47,7 +47,11 @@ namespace Rung.Bridge.V20
 
             // Must be registered before any Siemens type is touched (Siemens-recommended pattern).
             var dir = Environment.GetEnvironmentVariable("RUNG_OPENNESS_DIR");
+#if TIA_V21
+            if (string.IsNullOrEmpty(dir)) dir = @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
+#else
             if (string.IsNullOrEmpty(dir)) dir = @"C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20";
+#endif
             AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
             {
                 var name = new AssemblyName(e.Name).Name;

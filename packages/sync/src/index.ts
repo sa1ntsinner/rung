@@ -5,3 +5,4 @@ export { mergeText, mergeBundle, SOURCE_FORMS, type MergeResult, type BundleMerg
 export { syncOnce, confirmDelete, resolveConflict, type SyncReport, type SyncOptions, type SyncBridge, type Diagnostic } from "./sync.js";
 export { OwnerServer, OwnerClient, OwnerError, OWNER_PROTOCOL, type OwnerInfo, type OwnerHandler } from "./owner.js";
 export { Watcher, type WatcherOptions, type ClosableBridge } from "./watch.js";
+export { writeModelViews, writeTagViews, toView, parseTagRows, VIEW_HEADER, type ViewsReport } from "./views.js";

@@ -1,5 +1,5 @@
 {
-  "name": "rung",
+  "name": "@rung/live",
   "version": "0.1.0-dev",
   "license": "BUSL-1.1",
   "type": "module",
@@ -11,9 +11,6 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "rung": "./dist/index.js"
-  },
   "files": [
     "dist",
     "LICENSE"
@@ -22,12 +19,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@rung/core": "workspace:*",
-    "@rung/bridge-client": "workspace:*",
-    "@rung/sync": "workspace:*",
-    "@rung/lsp": "workspace:*",
-    "@rung/graph": "workspace:*",
-    "@rung/mcp": "workspace:*",
-    "@rung/live": "workspace:*"
+    "@rung/core": "workspace:*"
   }
 }

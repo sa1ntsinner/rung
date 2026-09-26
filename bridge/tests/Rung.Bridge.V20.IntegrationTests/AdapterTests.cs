@@ -225,3 +225,19 @@ public class XRefAdapterTests : IClassFixture<FixtureSession>
         Assert.NotNull(entries); // shape is recorded as fact F14; content depends on fixture usage
     }
 }
+
+[Trait("Category", "Tia")]
+public class DescribeAdapterTests : IClassFixture<FixtureSession>
+{
+    readonly FixtureSession _fx;
+    public DescribeAdapterTests(FixtureSession fx) { _fx = fx; }
+
+    [Fact] public void HardwareViewContainsTheCpu()
+    {
+        var tree = _fx.Session.Describe("hardware", 5000);
+        Assert.Contains(tree.Children["Devices"], d => d.Name != null);
+    }
+
+    [Fact] public void UnknownScopeIsRejected() =>
+        Assert.Equal("BAD_REQUEST", Assert.Throws<RpcException>(() => _fx.Session.Describe("nope", 10)).Code);
+}

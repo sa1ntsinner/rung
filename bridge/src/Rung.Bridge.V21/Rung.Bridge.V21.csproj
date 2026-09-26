@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: BUSL-1.1 -->
+  <!--
+    TIA Portal V21 adapter: the V20 sources compiled against the modular V21 Openness assemblies
+    (PublicAPI\V21\net48). UNVERIFIED until built on a host with V21 installed (fact sheet F15/F16).
+    Not part of Rung.Bridge.sln so machines without V21 keep building.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>rung-bridge-v21</AssemblyName>
+    <RootNamespace>Rung.Bridge.V20</RootNamespace>
+    <DefineConstants>$(DefineConstants);TIA_V21</DefineConstants>
+    <Version>0.1.0</Version>
+    <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</RungOpennessDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Rung.Bridge.V20\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="$(RungOpennessDir)\Siemens.Engineering*.dll">
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
+  </ItemGroup>
+</Project>

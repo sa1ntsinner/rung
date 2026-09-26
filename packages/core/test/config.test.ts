@@ -54,3 +54,14 @@ describe("isContained", () => {
     expect(await isContained(root, join(root, "plc", "evil", "x.scl"))).toBe(false);
   });
 });
+
+describe("live config", () => {
+  it("accepts a Web API source and refuses stored passwords", () => {
+    const base = formatConfig(defaultConfig("C:\\p\\X.ap20", "V20", "b"));
+    const withLive = base + '\n[live.webapi]\nurl = "https://192.168.0.1"\nuser = "Administrator"\ninsecure = true\n';
+    expect(parseConfig(withLive).live).toEqual({ webapi: { url: "https://192.168.0.1", user: "Administrator", insecure: true } });
+    expect(parseConfig(formatConfig(parseConfig(withLive))).live).toEqual(parseConfig(withLive).live);
+    expect(() => parseConfig(withLive + 'password = "x"\n')).toThrow(/RUNG_WEBAPI_PASSWORD/);
+    expect(() => parseConfig(base + '\n[live.webapi]\nurl = "ftp://x"\nuser = "a"\n')).toThrow(/http/);
+  });
+});

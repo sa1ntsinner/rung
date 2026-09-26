@@ -10,9 +10,12 @@ import { BlobStore, loadConfig, normalizeText, StateStore, type ObjectState } fr
 import { OwnerClient, confirmDelete, resolveConflict, syncOnce, type Diagnostic, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
+import { WebApiClient } from "@rung/live";
 
 export interface McpContext {
   root: string;
+  /** Environment for secrets such as RUNG_WEBAPI_PASSWORD (defaults to process.env). */
+  env?: Record<string, string | undefined>;
   /** Starts a bridge for one-off operations when no `rung watch` owner is running. */
   bridgeFactory?: () => Promise<SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown> }>;
 }
@@ -243,6 +246,25 @@ export function createMcpServer(ctx: McpContext): McpServer {
     }
     return text(`deleted ${address}`);
   });
+
+  server.registerTool(
+    "rung_live_read",
+    { description: "Read current values from the running PLC (S7-1500 Web API, read-only). Needs [live.webapi] in rung.toml and RUNG_WEBAPI_PASSWORD. Use TIA names, e.g. \"Fx_Global\".Counter.", inputSchema: { names: z.array(z.string()).min(1).max(100) } },
+    async ({ names }) => {
+      const config = await loadConfig(ctx.root);
+      const w = config.live?.webapi;
+      const password = (ctx.env ?? process.env).RUNG_WEBAPI_PASSWORD;
+      if (!w || !password) return fail("Live reads are not configured: add [live.webapi] url/user to rung.toml and set RUNG_WEBAPI_PASSWORD.");
+      const client = new WebApiClient({ url: w.url, user: w.user, password, ...(w.insecure ? { insecure: true } : {}) });
+      try {
+        return json(await client.read(names));
+      } catch (e) {
+        return fail(`PLC read failed: ${(e as Error).message}`);
+      } finally {
+        await client.logout().catch(() => undefined);
+      }
+    },
+  );
 
   server.registerTool("rung_rules", { description: "Safety rules agents must follow in a rung workspace." }, async () => text(SAFETY_RULES));
 

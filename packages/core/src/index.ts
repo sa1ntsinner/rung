@@ -21,3 +21,4 @@ export { StateStore, type ObjectState, type ObjectStatus, type StateFile, type B
 export { BlobStore, Journal, publishBundle, recoverJournal, bundleHash, pathKey, writeRecoveryNote, type PublishIntent, type PublishTarget, type RecoveryReport } from "./bundle.js";
 export { type RungConfig, CONFIG_FILE, defaultConfig, parseConfig, formatConfig, loadConfig, saveConfig } from "./config.js";
 export { preflight, isContained, sweepTempFiles, MAX_ABSOLUTE_PATH, type PlannedPath, type PreflightResult } from "./layout.js";
+export { toYaml } from "./yaml.js";

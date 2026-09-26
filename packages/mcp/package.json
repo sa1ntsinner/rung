@@ -26,6 +26,7 @@
     "@rung/lsp": "workspace:*",
     "@rung/sync": "workspace:*",
     "node-diff3": "^3.1.2",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "@rung/live": "workspace:*"
   }
 }

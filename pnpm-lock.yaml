@@ -31,6 +31,9 @@ importers:
       '@rung/graph':
         specifier: workspace:*
         version: link:../graph
+      '@rung/live':
+        specifier: workspace:*
+        version: link:../live
       '@rung/lsp':
         specifier: workspace:*
         version: link:../lsp
@@ -52,6 +55,12 @@ importers:
       '@rung/lsp':
         specifier: workspace:*
         version: link:../lsp
+
+  packages/live:
+    dependencies:
+      '@rung/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/lsp:
     dependencies:
@@ -85,6 +94,9 @@ importers:
       '@rung/graph':
         specifier: workspace:*
         version: link:../graph
+      '@rung/live':
+        specifier: workspace:*
+        version: link:../live
       '@rung/lsp':
         specifier: workspace:*
         version: link:../lsp

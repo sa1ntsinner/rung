@@ -39,6 +39,16 @@ public sealed class FakeTiaSession : ITiaSession
     public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses) =>
         new[] { new CompileMessage { Address = addresses.Length > 0 ? addresses[0] : null, Severity = "error", Path = "PLC_1/Fx_Broken", Description = "Tag #Missing not defined" } };
 
+    public DescribeNode Describe(string scope, int maxNodes) => new DescribeNode
+    {
+        Type = "Project", Name = "RungFixture",
+        Attributes = new SortedDictionary<string, string>(),
+        Children = new SortedDictionary<string, List<DescribeNode>>
+        {
+            ["Devices"] = new List<DescribeNode> { new DescribeNode { Type = "Device", Name = "PLC_1", Attributes = new SortedDictionary<string, string> { ["TypeIdentifier"] = "OrderNumber:6ES7 516-3AN02-0AB0/V3.1" }, Children = new SortedDictionary<string, List<DescribeNode>>() } },
+        },
+    };
+
     public IReadOnlyList<XRefEntry> XRef(string address) =>
         new[] { new XRefEntry { Source = address, SourceName = "Fx_Motor", TargetName = "Start_Button", TargetType = "Tag", TargetAddress = "%I0.0", Access = "Read", ReferenceType = "Uses", Location = "@Fx_Motor NW1" } };
 

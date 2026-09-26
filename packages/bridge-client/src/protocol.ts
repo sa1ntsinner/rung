@@ -106,6 +106,14 @@ export interface XRefEntry {
   location?: string;
 }
 
+export interface DescribeNode {
+  type: string;
+  name?: string;
+  attributes: Record<string, string>;
+  children: Record<string, DescribeNode[]>;
+  truncated?: boolean;
+}
+
 export interface CompileMessage {
   address?: string;
   severity: "error" | "warning" | "info";

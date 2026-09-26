@@ -7,6 +7,7 @@ import {
   type BridgeEvent,
   type CompileMessage,
   type XRefEntry,
+  type DescribeNode,
   type ExportResult,
   type HelloResult,
   type ObjectEntry,
@@ -136,6 +137,10 @@ export class BridgeClient {
 
   deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
     return this.request("objects.delete", { address, expectedTiaRevision, operationId }) as Promise<{ deleted: boolean }>;
+  }
+
+  describe(scope: "hardware" | "hmi" | "techobjects", maxNodes = 20000): Promise<DescribeNode> {
+    return this.request("model.describe", { scope, maxNodes }) as Promise<DescribeNode>;
   }
 
   xref(address: string): Promise<XRefEntry[]> {

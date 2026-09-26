@@ -10,21 +10,6 @@
   "references": [
     {
       "path": "../core"
-    },
-    {
-      "path": "../sync"
-    },
-    {
-      "path": "../lsp"
-    },
-    {
-      "path": "../graph"
-    },
-    {
-      "path": "../bridge-client"
-    },
-    {
-      "path": "../live"
     }
   ]
 }
