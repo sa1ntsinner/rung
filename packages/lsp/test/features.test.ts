@@ -31,7 +31,7 @@ BEGIN
    #speed := #Motor.SpeedOut;
    #Timer(IN := #Motor.Running, PT := T#2s);
    IF #Timer.Q AND #Cfg.Enabled THEN
-      "Fx_Global".Counter := "Fx_Global".Counter + 1;
+      "Fx_Global".Count := "Fx_Global".Count + 1;
    END_IF;
    #nope := 1;
    #Cfg.Missing := TRUE;
@@ -96,7 +96,7 @@ describe("workspace features", () => {
   });
 
   it("finds references of a global across files", () => {
-    const refs = references(idx, user(), at(user(), '"Fx_Global".Counter'));
+    const refs = references(idx, user(), at(user(), '"Fx_Global".Count'));
     expect(refs.filter((r) => r.uri === user())).toHaveLength(3);
     expect(refs.some((r) => r.uri.endsWith("Fx_Global.db"))).toBe(true);
   });

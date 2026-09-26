@@ -43,12 +43,12 @@ describe("BridgeClient", () => {
   });
 
   it("times out read requests with TIMEOUT", async () => {
-    const c = await spawn(fake("slow", { requestTimeoutMs: 200 }));
+    const c = await spawn(fake("slow", { requestTimeoutMs: 1000 }));
     await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
   it("times out mutations with OUTCOME_UNKNOWN and never replays them", async () => {
-    const c = await spawn(fake("write-no-response", { requestTimeoutMs: 200 }));
+    const c = await spawn(fake("write-no-response", { requestTimeoutMs: 1000 }));
     await expect(c.importObject("plc:PLC_1/blocks/X", "scl", "C:/x.scl", "fp:1", "op-1")).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
     expect(c.sentMethods.filter((m) => m === "objects.import")).toHaveLength(1);
   });

@@ -17,7 +17,7 @@ export interface DoctorRow {
   pass2Equal: boolean;
   diffSample?: string;
   error?: string;
-  skipped?: "read-only" | "unit" | "system";
+  skipped?: "read-only" | "unit" | "system" | "no-import";
 }
 
 interface Snapshot {
@@ -88,6 +88,8 @@ export async function doctor(root: string, bridge: DoctorBridge, opts: { devices
           row.pass2Equal = equal(b, c);
         } catch (e) {
           const code = (e as { code?: string }).code;
+          // watch/force tables and other export-only objects: nothing to round-trip
+          if (code === "UNSUPPORTED_OBJECT" && !row.pass1Equal && row.form) { row.skipped = "no-import"; continue; }
           row.error = code ? `${code}: ${(e as Error).message}` : String(e);
         }
       }

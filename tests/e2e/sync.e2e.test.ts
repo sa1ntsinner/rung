@@ -25,13 +25,16 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
 
   it("a file edit is imported, compiled and written back canonically; then quiet", async () => {
     const before = readFileSync(valve, "utf8");
-    writeFileSync(valve, before.replace("#Open := #Enable;", "#Open := #Enable AND #Enable;"));
+    // toggles, so a fixture left edited by an earlier run still sees a real change
+    const [from, to] = before.includes("#Enable AND #Enable;") ? ["#Enable AND #Enable;", "#Enable;"] : ["#Open := #Enable;", "#Open := #Enable AND #Enable;"];
+    expect(before).toContain(from);
+    writeFileSync(valve, before.replace(from, to));
     out.length = 0;
     const t0 = Date.now();
     expect([0, 2]).toContain(await main(["sync"], io));
     console.log(`import+compile+export: ${Date.now() - t0} ms\n${out.join("")}`);
     expect(out.join("")).toMatch(/imported 1/);
-    expect(readFileSync(valve, "utf8")).toContain("#Enable AND #Enable");
+    expect(readFileSync(valve, "utf8")).toContain(to);
     out.length = 0;
     await main(["sync"], io);
     expect(out.join("")).toMatch(/imported 0 .*/);

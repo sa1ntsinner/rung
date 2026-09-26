@@ -21,6 +21,7 @@
 </Sections></Interface>
       <MemoryLayout>Optimized</MemoryLayout>
       <Name>Fx_LadInterlock</Name>
+      <Namespace />
       <Number>10</Number>
       <ProgrammingLanguage>LAD</ProgrammingLanguage>
     </AttributeList>

@@ -63,7 +63,7 @@ describe("rung test runner", () => {
   it("tests FCs and global DB members", async () => {
     const r = await runTestFile(index(), "v.yaml", `block: Fx_Valve\ncases:\n  - steps:\n      - set: { Enable: true, Mode: 1 }\n      - cycle: 1\n      - expect: { Open: true }\n      - set: { Mode: 2 }\n      - cycle: 1\n      - expect: { Open: false }\n`);
     expect(r.cases[0]!.passed).toBe(true);
-    const g = await runTestFile(index(), "g.yaml", `block: Fx_Motor\ncases:\n  - steps:\n      - set: { '"Fx_Global".Station.Mode': 3 }\n      - expect: { '"Fx_Global".Station.Mode': 3, '"Fx_Global".Counter': 0 }\n`);
+    const g = await runTestFile(index(), "g.yaml", `block: Fx_Motor\ncases:\n  - steps:\n      - set: { '"Fx_Global".Station.Mode': 3 }\n      - expect: { '"Fx_Global".Station.Mode': 3, '"Fx_Global".Count': 0 }\n`);
     expect(g.cases[0]!.passed).toBe(true);
   });
 

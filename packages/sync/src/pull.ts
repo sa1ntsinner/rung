@@ -107,7 +107,9 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
         adopted.add(adoptedFrom);
       }
       for (const w of staged.result.warnings ?? []) warn(entry.address, w);
-      report.exported++;
+      // re-verified objects without a fingerprint (force tables) whose bytes did not change are not "exported"
+      if (plan.targets.length || plan.removes.length || !prev) report.exported++;
+      else report.unchanged++;
       if (readOnly) report.readOnly++;
     } catch (e) {
       // A stuck or dead bridge would make every remaining object wait for its own timeout: stop the pull.

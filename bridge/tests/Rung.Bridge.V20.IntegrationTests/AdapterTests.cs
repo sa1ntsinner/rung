@@ -123,6 +123,17 @@ public class AdapterTests : IClassFixture<FixtureSession>
         Assert.True(new FileInfo(r.Files.Single(f => f.Role == "primary").Path).Length > 0);
     }
 
+    [Fact] public void EveryExportIsByteStableAcrossRepeats()
+    {
+        // force tables have no DocumentInfoOptions overload; a timestamp there made every sync re-export
+        foreach (var e in _fx.Session.ListObjects("PLC_1").Where(o => o.Kind != "folder" && o.Kind != "unit" && o.IsConsistent != false))
+        {
+            var a = _fx.Session.Export(e.Address, "auto", Tmp());
+            var b = _fx.Session.Export(e.Address, "auto", Tmp());
+            Assert.True(a.BundleHash == b.BundleHash, e.Address + " (" + a.Form + ") export is not stable");
+        }
+    }
+
     [Fact] public void LadExportsAsSdOrFallsBackToXml()
     {
         if (!_fx.ManifestAddresses.Contains("plc:PLC_1/blocks/20_Valves/Fx_LadInterlock")) return; // fixture could not import LAD
@@ -162,6 +173,7 @@ public class AdapterTests : IClassFixture<FixtureSession>
         Assert.Equal("scl", after.Form);
         var again = _fx.Session.Export(address, "auto", Tmp());
         Assert.Equal(after.BundleHash, again.BundleHash);
+        Assert.Equal(first.BundleHash, after.BundleHash); // import of an unchanged export is a no-op (no drift)
         Assert.Contains(_fx.Session.ListObjects("PLC_1"), o => o.Address == address); // still in its folder
     }
 

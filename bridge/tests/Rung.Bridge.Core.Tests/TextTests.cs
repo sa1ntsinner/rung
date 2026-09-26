@@ -20,6 +20,13 @@ public class TextNormalizerTests
         Assert.Equal(once, TextNormalizer.WithBom(once));
         Assert.Equal(0xEF, once[0]);
     }
+
+    static string S(string s) => Encoding.UTF8.GetString(TextNormalizer.ForSourceImport(Encoding.UTF8.GetBytes(s)));
+
+    // Fact (openness-v20.md): with LF endings GenerateBlocksFromSource adds a blank line at both ends of the body
+    [Fact] public void SourceImportUsesBomAndCrlf() => Assert.Equal("﻿BEGIN\r\n\t;\r\nEND_FUNCTION\r\n", S("BEGIN\n\t;\nEND_FUNCTION\n"));
+    [Fact] public void SourceImportKeepsExistingCrlfAndBom() => Assert.Equal("﻿a\r\nb\r\n", S("﻿a\r\nb\r\n"));
+    [Fact] public void SourceImportFixesMixedEndings() => Assert.Equal("﻿a\r\nb\r\nc\r\n", S("a\r\nb\nc"));
 }
 
 public class ProtectedYamlTests

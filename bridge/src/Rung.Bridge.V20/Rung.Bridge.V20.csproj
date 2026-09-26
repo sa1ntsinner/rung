@@ -21,4 +21,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
   </ItemGroup>
+  <PropertyGroup>
+    <RungOpennessWhitelistVersion>20.0</RungOpennessWhitelistVersion>
+  </PropertyGroup>
+  <Import Project="../../../tools/openness/Openness.Whitelist.targets" />
 </Project>

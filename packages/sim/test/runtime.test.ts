@@ -55,7 +55,7 @@ describe("Simulator", () => {
   });
 
   it("initializes UDT-typed DB members and start values", () => {
-    const s = sim({ Fx_Use: 'FUNCTION "Fx_Use" : DInt\nBEGIN\n  "Fx_Global".Counter := "Fx_Global".Counter + 5;\n  "Fx_Global".Station.Mode := 2;\n  #Fx_Use := "Fx_Global".Counter;\nEND_FUNCTION\n' });
+    const s = sim({ Fx_Use: 'FUNCTION "Fx_Use" : DInt\nBEGIN\n  "Fx_Global".Count := "Fx_Global".Count + 5;\n  "Fx_Global".Station.Mode := 2;\n  #Fx_Use := "Fx_Global".Count;\nEND_FUNCTION\n' });
     expect(s.callBlock("Fx_Use").returnValue).toBe(5);
     expect(s.callBlock("Fx_Use").returnValue).toBe(10);
     expect(((s.globals.FX_GLOBAL as { STATION: { MODE: number } }).STATION.MODE)).toBe(2);

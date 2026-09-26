@@ -40,13 +40,14 @@ namespace Rung.Bridge.V20
         readonly Project _project;
         readonly BridgeArgs _args;
         readonly Action<string, object> _emit;
+        readonly int _tiaPid;
         readonly Dictionary<string, ObjectRef> _index = new Dictionary<string, ObjectRef>(StringComparer.Ordinal);
         volatile bool _disposed;
         volatile bool _inImport;
 
-        OpennessSession(TiaPortal portal, Project project, BridgeArgs args, Action<string, object> emit)
+        OpennessSession(TiaPortal portal, Project project, BridgeArgs args, Action<string, object> emit, int tiaPid)
         {
-            _portal = portal; _project = project; _args = args; _emit = emit;
+            _portal = portal; _project = project; _args = args; _emit = emit; _tiaPid = tiaPid;
             portal.Disposed += (s, e) => { _disposed = true; emit("tia-disposed", new { }); };
             portal.Notification += (s, e) =>
             {
@@ -90,7 +91,7 @@ namespace Rung.Bridge.V20
                     throw new RpcException(ErrorCodes.NoProject, "The TIA Portal instance has no matching project open.");
                 }
                 SweepWorkDirs();
-                return new OpennessSession(portal, project, args, emit);
+                return new OpennessSession(portal, project, args, emit, proc.Id);
             }
             catch (EngineeringSecurityException e)
             {
@@ -192,7 +193,8 @@ namespace Rung.Bridge.V20
             if (consistent == false) return fallback();
             try
             {
-                var fps = obj.GetService<FingerprintProvider>()?.GetFingerprints();
+                // V20 returns null entries in the list for some objects (seen live): skip them
+                var fps = obj.GetService<FingerprintProvider>()?.GetFingerprints()?.Where(f => f != null).ToList();
                 if (fps != null && fps.Count > 0)
                     return "fp:" + string.Join("|", fps.OrderBy(f => f.Id.ToString(), StringComparer.Ordinal).Select(f => f.Id + "=" + f.Value));
             }
@@ -387,7 +389,11 @@ namespace Rung.Bridge.V20
                             case PlcType t: t.Export(primary, ExportOptions.None, DocumentInfoOptions.None); break;
                             case PlcTagTable tt: tt.Export(primary, ExportOptions.None, DocumentInfoOptions.None); break;
                             case PlcWatchTable w: w.Export(primary, ExportOptions.None, DocumentInfoOptions.None); break;
-                            case PlcForceTable f: f.Export(primary, ExportOptions.None); break;
+                            case PlcForceTable f:
+                                // no DocumentInfoOptions overload: strip the timestamped DocumentInfo so exports stay byte-stable (seen live)
+                                f.Export(primary, ExportOptions.None);
+                                File.WriteAllText(primary.FullName, System.Text.RegularExpressions.Regex.Replace(File.ReadAllText(primary.FullName), @"[ \t]*<DocumentInfo>[\s\S]*?</DocumentInfo>\r?\n?", ""), new UTF8Encoding(true));
+                                break;
                             default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot export " + r.Entry.Address + " as XML");
                         }
                         return form;
@@ -420,6 +426,7 @@ namespace Rung.Bridge.V20
             var name = r.Entry.Address;
             IList<string> imported;
             _inImport = true;
+            var guard = new PasswordPromptGuard(_tiaPid);
             try
             {
                 using (var access = _portal.ExclusiveAccess("rung: importing " + AddressFormat.Parse(address).Name))
@@ -442,17 +449,25 @@ namespace Rung.Bridge.V20
             finally
             {
                 _inImport = false;
+                guard.Dispose();
                 try { Directory.Delete(WorkDir(operationId, "src"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
 
             // Compile outside the transaction (Siemens forbids compile inside it), then return the fresh export.
             _index.Clear();
             var fresh = Resolve(address);
-            try { (fresh.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>()?.Compile(); }
-            catch (EngineeringException) { }
+            var cancelled = guard.Cancelled;
+            using (var compileGuard = new PasswordPromptGuard(_tiaPid))
+            {
+                try { (fresh.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>()?.Compile(); }
+                catch (EngineeringException) { }
+                cancelled += compileGuard.Cancelled;
+            }
             _index.Clear();
             var outDir = WorkDir(operationId, "out");
-            return Export(address, "auto", outDir);
+            var result = Export(address, "auto", outDir);
+            if (cancelled > 0) result.Warnings = result.Warnings.Concat(new[] { WarningCodes.PasswordPromptCancelled }).ToArray();
+            return result;
         }
 
         /// <summary>Target for an object that does not exist yet; its folder is created inside the import transaction.</summary>
@@ -800,7 +815,7 @@ namespace Rung.Bridge.V20
                 {
                     var tmp = Path.Combine(WorkDir(operationId, "src"), Stem + "." + form);
                     Directory.CreateDirectory(Path.GetDirectoryName(tmp));
-                    File.WriteAllBytes(tmp, TextNormalizer.WithBom(File.ReadAllBytes(path)));
+                    File.WriteAllBytes(tmp, TextNormalizer.ForSourceImport(File.ReadAllBytes(path)));
                     var source = r.Plc.ExternalSourceGroup.ExternalSources.CreateFromFile("rung_" + operationId.Replace("-", ""), tmp);
                     try
                     {

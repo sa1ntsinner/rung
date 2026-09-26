@@ -40,6 +40,8 @@ namespace Rung.Bridge.Core.Protocol
         public const string UnsupportedUnit = "UNSUPPORTED_UNIT";
         public const string Inconsistent = "INCONSISTENT";
         public const string SdFallback = "SD_FALLBACK";
+        /// <summary>TIA asked for a know-how password during the import; rung cancelled the prompt.</summary>
+        public const string PasswordPromptCancelled = "PASSWORD_PROMPT_CANCELLED";
     }
 
     public sealed class RpcException : Exception

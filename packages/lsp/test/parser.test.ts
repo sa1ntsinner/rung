@@ -44,7 +44,7 @@ describe("parse fixtures", () => {
     const b = parse(readFileSync(join(fixtures, "Fx_Global.db"), "utf8")).blocks[0]!;
     expect(b.kind).toBe("DB");
     expect(b.vars.find((v) => v.name === "Station")).toMatchObject({ typeRef: "Fx_Types" });
-    expect(b.refs.map((r) => r.name)).toContain("Counter");
+    expect(b.refs.map((r) => r.name)).toContain("Count");
   });
 
   it("Fx_Types: UDT struct members", () => {

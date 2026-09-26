@@ -29,7 +29,7 @@ describe.runIf(enabled)("e2e: pull against the fixture project", () => {
 
   const out: string[] = [];
   const io = { cwd: dir, stdout: (s: string) => out.push(s), stderr: (s: string) => out.push(s), env: process.env };
-  const manifest = (enabled ? JSON.parse(readFileSync(join(project, "..", "fixture-manifest.json"), "utf8")) : { addresses: [] }) as { addresses: string[] };
+  const manifest = (enabled ? JSON.parse(readFileSync(join(project, "..", "fixture-manifest.json"), "utf8").replace(/^﻿/, "")) /* written by Windows PowerShell 5.1 with a BOM */ : { addresses: [] }) as { addresses: string[] };
 
   it("init binds the fixture", async () => {
     expect(await main(["init", "--project", project], io)).toBe(0);

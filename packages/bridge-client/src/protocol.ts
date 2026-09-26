@@ -34,6 +34,8 @@ export const WarningCodes = {
   UNSUPPORTED_UNIT: "UNSUPPORTED_UNIT",
   INCONSISTENT: "INCONSISTENT",
   SD_FALLBACK: "SD_FALLBACK",
+  /** TIA asked for a know-how password during an import (project has protected blocks); rung cancelled it. */
+  PASSWORD_PROMPT_CANCELLED: "PASSWORD_PROMPT_CANCELLED",
 } as const;
 
 export class BridgeError extends Error {

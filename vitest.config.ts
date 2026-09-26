@@ -21,5 +21,7 @@ export default defineConfig({
   test: {
     include: ["packages/*/test/**/*.test.ts", "pro/packages/*/test/**/*.test.ts", "tests/**/*.test.ts"],
     testTimeout: 20000,
+    // live e2e suites share one TIA Portal instance: run their files one after another
+    fileParallelism: process.env.RUNG_E2E !== "1",
   },
 });

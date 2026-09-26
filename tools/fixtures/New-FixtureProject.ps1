@@ -65,6 +65,7 @@ New-Item -ItemType Directory -Force -Path $FixtureDir | Out-Null
 $mode = if ($WithUserInterface) { [Siemens.Engineering.TiaPortalMode]::WithUserInterface } else { [Siemens.Engineering.TiaPortalMode]::WithoutUserInterface }
 $sw = [Diagnostics.Stopwatch]::StartNew()
 $tia = New-Object Siemens.Engineering.TiaPortal($mode)
+$ok = $false
 $manifest = [ordered]@{ generatedAt = (Get-Date).ToString('o'); tia = 'V20'; addresses = @(); skipped = @() }
 try {
     $project = $tia.Projects.Create((New-Object IO.DirectoryInfo($FixtureDir)), 'RungFixture')
@@ -104,20 +105,28 @@ try {
     Import-Source $plc (Join-Path $here 'scl\Fx_Secret.scl') $null
     try {
         $secret = $plc.BlockGroup.Blocks.Find('Fx_Secret')
-        $pw = ConvertTo-SecureString 'rung-fixture-only' -AsPlainText -Force
+        # no ConvertTo-SecureString: its module fails to load when PowerShell 7 started this 5.1 process (PSModulePath)
+        $pw = New-Object Security.SecureString
+        foreach ($c in 'Rung-Fixture-0nly!'.ToCharArray()) { $pw.AppendChar($c) }
         (Get-Service2 $secret ([Siemens.Engineering.SW.Blocks.PlcBlockProtectionProvider])).Protect($pw)
         $manifest.addresses += 'plc:PLC_1/blocks/Fx_Secret'
         $manifest.protected = 'Fx_Secret'
     } catch { $manifest.skipped += "know-how protection: $($_.Exception.Message)" }
 
-    # --- a block whose name needs file-name escaping (first name TIA accepts wins)
+    # --- a block whose name needs file-name escaping (first name TIA accepts wins).
+    # V20 Openness cannot create SCL blocks directly (CreateFB is ProDiag-only), so go through a source.
     $escaped = $null
-    foreach ($n in @('Motor/Valve 1', 'Motor:Valve 1', 'Motor.Valve 1.')) {
+    $escapeErrors = @()
+    foreach ($n in @('Motor/Valve 1', 'Motor:Valve 1', 'Motor.Valve 1.', 'Motor*Valve 1')) {
+        $tmpSrc = Join-Path $env:TEMP 'Fx_Escaped.scl'
+        [IO.File]::WriteAllText($tmpSrc, "FUNCTION `"$n`" : Void`r`nVERSION : 0.1`r`nBEGIN`r`n   ;`r`nEND_FUNCTION`r`n")
         try {
-            $null = $plc.BlockGroup.Blocks.CreateFC($n, $true, 0, [Siemens.Engineering.SW.Blocks.ProgrammingLanguage]::SCL)
+            Import-Source $plc $tmpSrc $null
             $escaped = $n; break
-        } catch { }
+        } catch { $escapeErrors += "$n -> $($_.Exception.Message -replace '\s+', ' ')" }
+        finally { Remove-Item $tmpSrc -ErrorAction SilentlyContinue }
     }
+    if ($escapeErrors) { $manifest.escapeRejected = $escapeErrors }
     if ($escaped) { $manifest.escapedName = $escaped } else { $manifest.skipped += 'escaped-name block (no candidate accepted)' }
 
     # --- LAD FC from owned SimaticML
@@ -149,8 +158,10 @@ try {
     $manifest.seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1)
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $target 'fixture-manifest.json') -Encoding UTF8
     if (-not $KeepOpen) { $project.Close() }
-    Write-Output "FIXTURE OK $($project.Path.FullName) objects=$($manifest.addresses.Count) compileErrors=$($result.ErrorCount) skipped=$($manifest.skipped.Count) in $($manifest.seconds)s"
+    $ok = $true
+    Write-Output "FIXTURE OK $($manifest.projectPath) objects=$($manifest.addresses.Count) compileErrors=$($result.ErrorCount) skipped=$($manifest.skipped.Count) in $($manifest.seconds)s"
 }
 finally {
-    if (-not $KeepOpen) { $tia.Dispose() }
+    # a failed run never leaves a half-built project open in TIA Portal
+    if (-not $KeepOpen -or -not $ok) { $tia.Dispose() }
 }

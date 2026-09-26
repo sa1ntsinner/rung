@@ -257,6 +257,15 @@ describe("pull", () => {
     expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<w changed/>\n");
   });
 
+  it("does not count a re-verified object with identical bytes as exported", async () => {
+    const W = "plc:PLC_1/force/Fx_Force";
+    const t = setup((b) => b.add(W, { kind: "forcetable", form: "xml", fingerprint: "none", content: "<f/>\n" }));
+    expect((await t.run({ now: 1_000 })).exported).toBe(1);
+    const again = await t.run({ now: 2_000 });
+    expect(t.bridge.exportCalls).toContain(W);
+    expect([again.exported, again.unchanged]).toEqual([0, 1]);
+  });
+
   it("follows a case-only rename without losing the file or leaving a phantom entry", async () => {
     const t = setup((b) => b.add("plc:PLC_1/blocks/Motor", { content: "// m\n" }));
     await t.run();

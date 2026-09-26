@@ -1,0 +1,10 @@
+<Project>
+  <!-- SPDX-License-Identifier: MIT -->
+  <!-- Re-registers the freshly built Openness client in the TIA Portal whitelist so TIA Portal does not prompt
+       "Openness access" after every rebuild. Silently skipped when the whitelist is not writable
+       (see tools/openness/Register-OpennessWhitelist.ps1 -GrantUser) or when RUNG_NO_WHITELIST is set.
+       Release only: TIA keeps one entry per file name, and the CLI runs the Release bridge. -->
+  <Target Name="RungOpennessWhitelist" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' AND '$(RUNG_NO_WHITELIST)' == '' AND '$(CI)' == '' AND '$(Configuration)' == 'Release'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Register-OpennessWhitelist.ps1&quot; -Path &quot;$(TargetPath)&quot; -Version $(RungOpennessWhitelistVersion) -Quiet" ContinueOnError="true" StandardOutputImportance="low" />
+  </Target>
+</Project>

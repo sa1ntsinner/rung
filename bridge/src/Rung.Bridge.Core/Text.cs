@@ -29,6 +29,16 @@ namespace Rung.Bridge.Core
             return new byte[] { 0xEF, 0xBB, 0xBF }.Concat(data).ToArray();
         }
 
+        /// <summary>
+        /// Bytes handed to GenerateBlocksFromSource: BOM + CRLF, like TIA's own GenerateSource output.
+        /// Fact (openness-v20.md): with LF endings TIA adds a blank line at both ends of an SCL body on every import.
+        /// </summary>
+        public static byte[] ForSourceImport(byte[] data)
+        {
+            var lf = Normalize(data);
+            return WithBom(Utf8.GetBytes(Utf8.GetString(lf).Replace("\n", "\r\n")));
+        }
+
         /// <summary>Normalizes a staged file in place and returns its manifest record.</summary>
         public static ExportFile NormalizeFile(string path, string role)
         {

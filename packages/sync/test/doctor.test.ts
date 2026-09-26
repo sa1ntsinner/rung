@@ -11,11 +11,13 @@ import { FakeBridge } from "./fake-bridge.js";
 class ImportingFake extends FakeBridge {
   transform: (s: string, round: number) => string = (s) => s;
   failImport = new Set<string>();
+  noImport = new Set<string>();
   imports: { address: string; expected: string }[] = [];
   private rounds = new Map<string, number>();
   async importObject(address: string, _form: string, path: string, expected: string): Promise<ExportResult> {
     this.imports.push({ address, expected });
     if (this.failImport.has(address)) throw new BridgeError("IMPORT_FAILED", "compile error in source");
+    if (this.noImport.has(address)) throw new BridgeError("UNSUPPORTED_OBJECT", "Cannot import form xml");
     const o = this.objects.get(address)!;
     const round = (this.rounds.get(address) ?? 0) + 1;
     this.rounds.set(address, round);
@@ -33,6 +35,15 @@ describe("doctor", () => {
     b.add("plc:PLC_1/blocks/A", { content: "a := 1;\n" });
     const rows = await doctor(root(), b);
     expect(rows).toEqual([{ address: "plc:PLC_1/blocks/A", form: "scl", pass1Equal: true, pass2Equal: true }]);
+  });
+
+  it("skips export-only objects such as force tables", async () => {
+    const b = new ImportingFake();
+    b.add("plc:PLC_1/force/F", { kind: "forcetable", form: "xml", content: "<f/>\n" });
+    b.noImport.add("plc:PLC_1/force/F");
+    const [row] = await doctor(root(), b);
+    expect(row).toMatchObject({ form: "xml", skipped: "no-import" });
+    expect(row!.error).toBeUndefined();
   });
 
   it("detects normalization that converges on the second pass", async () => {
