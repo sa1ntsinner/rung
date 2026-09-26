@@ -40,6 +40,7 @@ import {
   type StagedExport,
 } from "./objects.js";
 import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
+import { placeCompileMessages } from "./compile-lines.js";
 
 export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile">;
 
@@ -460,7 +461,8 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
     }
     for (const [device, addrs] of byDevice) {
       try {
-        const msgs = await bridge.compile(device, cfg.sync.compile === "all" ? [] : addrs);
+        const raw = await bridge.compile(device, cfg.sync.compile === "all" ? [] : addrs);
+        const msgs = await placeCompileMessages(root, (a) => state.get(a)?.path, raw, (f) => readFile(f, "utf8"));
         for (const m of msgs) {
           const target = m.address ?? "";
           const path = (target && state.get(target)?.path) || "";

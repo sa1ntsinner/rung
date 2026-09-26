@@ -6,3 +6,4 @@ export { syncOnce, confirmDelete, resolveConflict, type SyncReport, type SyncOpt
 export { OwnerServer, OwnerClient, OwnerError, OWNER_PROTOCOL, type OwnerInfo, type OwnerHandler } from "./owner.js";
 export { Watcher, type WatcherOptions, type ClosableBridge } from "./watch.js";
 export { writeModelViews, writeTagViews, toView, parseTagRows, VIEW_HEADER, type ViewsReport } from "./views.js";
+export * from "./compile-lines.js";

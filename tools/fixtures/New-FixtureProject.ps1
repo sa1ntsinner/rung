@@ -47,7 +47,9 @@ function Import-Source($plc, [string]$path, $group, [string]$option = 'None') {
     $name = 'fx_' + [IO.Path]::GetFileNameWithoutExtension($path) -replace '[^A-Za-z0-9_]', '_'
     # Openness requires UTF-8 with BOM for sources with non-ASCII characters.
     $tmp = Join-Path $env:TEMP ("rung-fx-" + [guid]::NewGuid().ToString('N') + [IO.Path]::GetExtension($path))
-    [IO.File]::WriteAllText($tmp, [IO.File]::ReadAllText($path), (New-Object Text.UTF8Encoding($true)))
+    # CRLF: with LF endings TIA adds a blank line at both ends of every SCL body (docs/facts/openness-v20.md, F20)
+    $text = [IO.File]::ReadAllText($path) -replace "`r`n", "`n" -replace "`n", "`r`n"
+    [IO.File]::WriteAllText($tmp, $text, (New-Object Text.UTF8Encoding($true)))
     $src = $plc.ExternalSourceGroup.ExternalSources.CreateFromFile($name, $tmp)
     try {
         $opt = [Siemens.Engineering.SW.ExternalSources.GenerateBlockOption]::$option

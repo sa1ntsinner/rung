@@ -123,6 +123,10 @@ export interface CompileMessage {
   description: string;
   line?: number;
   column?: number;
+  /** line counted from the line after BEGIN, as TIA reports it (fact F7) */
+  bodyLine?: number;
+  /** "body" or "interface" */
+  section?: string;
 }
 
 export interface BridgeEvent {

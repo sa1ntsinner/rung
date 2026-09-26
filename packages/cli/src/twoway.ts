@@ -2,7 +2,8 @@
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, loadConfig } from "@rung/core";
-import { OwnerClient, OwnerServer, Watcher, confirmDelete, resolveConflict, syncOnce, type SyncReport } from "@rung/sync";
+import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type SyncReport } from "@rung/sync";
+import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
 
 function printReport(io: Io, r: SyncReport) {
@@ -82,7 +83,8 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     compile: async (p) => {
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
-      return b.compile(String(p.device ?? config.devices[0] ?? "PLC_1"), (p.addresses as string[] | undefined) ?? []);
+      const msgs = await b.compile(String(p.device ?? config.devices[0] ?? "PLC_1"), (p.addresses as string[] | undefined) ?? []);
+      return placeCompileMessages(dir, (a) => state.get(a)?.path, msgs, (f) => readFile(f, "utf8"));
     },
   });
   io.stdout(`rung watch: ${dir} ⇄ ${config.project.path} (poll ${config.sync.pollMs} ms, import ${config.sync.import}). Ctrl+C to stop.\n`);

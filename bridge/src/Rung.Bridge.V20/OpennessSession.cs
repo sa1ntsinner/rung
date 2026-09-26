@@ -754,26 +754,23 @@ namespace Rung.Bridge.V20
         {
             foreach (CompilerResultMessage m in list)
             {
+                // a node naming a block ("Fx_Broken (FC3)") sets the address for everything below it
+                var here = address;
+                if (!string.IsNullOrEmpty(m.Path) && byName.TryGetValue(CompilePath.ObjectName(m.Path), out var hit) && hit != null) here = hit;
                 if (m.Messages.Count == 0 && !string.IsNullOrEmpty(m.Description) && m.State != CompilerResultState.Success)
                 {
-                    var target = address;
-                    if (target == null && !string.IsNullOrEmpty(m.Path))
-                    {
-                        // The path ends with the object name, sometimes followed by " (FB1)" (exact shape: fact F7).
-                        var last = m.Path.Split(new[] { '>', '/', '\\' }).Last().Trim();
-                        var paren = last.LastIndexOf(" (", StringComparison.Ordinal);
-                        if (paren > 0) last = last.Substring(0, paren);
-                        if (byName.TryGetValue(last.Trim('"'), out var hit)) target = hit;
-                    }
+                    var leaf = CompilePath.Leaf(m.Path);
                     into.Add(new CompileMessage
                     {
-                        Address = target,
+                        Address = here,
                         Severity = m.State == CompilerResultState.Error ? "error" : m.State == CompilerResultState.Warning ? "warning" : "info",
                         Path = m.Path,
                         Description = m.Description,
+                        BodyLine = leaf.BodyLine,
+                        Section = leaf.Section,
                     });
                 }
-                Flatten(m.Messages, address, byName, into);
+                Flatten(m.Messages, here, byName, into);
             }
         }
 

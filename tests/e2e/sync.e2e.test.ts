@@ -55,6 +55,9 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
     await main(["sync"], io);
     console.log(out.join(""));
     expect(out.join("")).toMatch(/error|IMPORT_FAILED|COMPILE/);
+    // the diagnostic points at the #Nope line of the canonical file TIA wrote back (fact F7)
+    const nopeLine = readFileSync(created, "utf8").split(/\r?\n/).findIndex((l) => l.includes("#Nope")) + 1;
+    expect(out.join("")).toContain(`Fx_E2E.scl:${nopeLine} `);
   }, 600_000);
 
   it("deleting the file asks for confirmation; confirm-delete removes the block", async () => {
