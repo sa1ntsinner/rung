@@ -2,11 +2,24 @@
 // rung compile / online / interfaces / download / open (docs/decisions/0002-plc-actions.md).
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { WorkspaceError, loadConfig, type RungConfig } from "@rung/core";
 import type { BridgeClient, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages } from "@rung/sync";
-import { bridgeFor, findWorkspace, openState, type Io } from "./common.js";
+import { bridgeFor, findWorkspace, type Io } from "./common.js";
+
+/**
+ * Read-only view of .rung/state.json. These commands only look up paths and addresses, so they must not take
+ * the state lock: rung watch holds it while it runs.
+ */
+async function snapshot(ws: string): Promise<{ address: string; path: string }[]> {
+  try {
+    const doc = JSON.parse(await readFile(join(ws, ".rung", "state.json"), "utf8")) as { objects?: Record<string, { address: string; path: string }> };
+    return Object.values(doc.objects ?? {});
+  } catch {
+    return [];
+  }
+}
 
 /** Calls the running rung watch when there is one (it owns the bridge), else starts a bridge for this call. */
 async function viaOwnerOrBridge<T>(dir: string, config: RungConfig, io: Io, method: string, params: Record<string, unknown>, direct: (b: BridgeClient) => Promise<T>): Promise<T> {
@@ -45,10 +58,9 @@ async function workspace(dir: string) {
   return { ws, config: await loadConfig(ws) };
 }
 
-async function printCompile(ws: string, config: RungConfig, io: Io, raw: CompileMessage[]): Promise<number> {
-  const state = await openState(ws, config).catch(() => undefined);
-  const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => state?.get(a)?.path, raw, (f) => readFile(f, "utf8"));
-  await state?.close();
+async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[]): Promise<number> {
+  const objects = await snapshot(ws);
+  const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => objects.find((o) => o.address === a)?.path, raw, (f) => readFile(f, "utf8"));
   let errors = 0;
   for (const m of msgs) {
     if (m.severity === "error") errors++;
@@ -69,16 +81,12 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
   const files = ((v.file as string[] | undefined) ?? []).map((f) => relative(ws, resolve(io.cwd, f)).split(sep).join("/"));
   let addresses: string[] = [];
   if (files.length) {
-    const state = await openState(ws, config);
-    try {
-      addresses = files.map((f) => {
-        const s = state.all().find((x) => x.path === f);
-        if (!s) throw new WorkspaceError("NOT_MIRRORED", `${f} is not a mirrored object (run rung sync first)`);
-        return s.address;
-      });
-    } finally {
-      await state.close();
-    }
+    const objects = await snapshot(ws);
+    addresses = files.map((f) => {
+      const s = objects.find((x) => x.path === f);
+      if (!s) throw new WorkspaceError("NOT_MIRRORED", `${f} is not a mirrored object (run rung sync first)`);
+      return s.address;
+    });
   }
   const msgs = await viaOwnerOrBridge<CompileMessage[]>(ws, config, io, "compile", { device, addresses }, (b) => b.compile(device, addresses));
   return printCompile(ws, config, io, msgs);
@@ -175,9 +183,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 export async function cmdOpen(dir: string, file: string, io: Io): Promise<number> {
   const { ws, config } = await workspace(dir);
   const rel = relative(ws, resolve(io.cwd, file)).split(sep).join("/");
-  const state = await openState(ws, config);
-  const s = state.all().find((x) => x.path === rel);
-  await state.close();
+  const s = (await snapshot(ws)).find((x) => x.path === rel);
   if (!s) throw new WorkspaceError("NOT_MIRRORED", `${rel} is not a mirrored object`);
   await viaOwnerOrBridge(ws, config, io, "show", { address: s.address }, (b) => b.show(s.address));
   io.stdout(`opened ${s.address} in TIA Portal\n`);

@@ -1,78 +1,72 @@
 // SPDX-License-Identifier: MIT
-// VS Code client for rung: starts `rung lsp --stdio` and exposes the rung CLI as commands.
+// VS Code extension for rung: language client, rung sidebar (Project, PLC), status bar, CodeLens and commands.
+// Every action runs the rung CLI (setting rung.command); workspace files are only read here.
 import * as vscode from "vscode";
-import { LanguageClient, TransportKind, type LanguageClientOptions, type ServerOptions } from "vscode-languageclient/node";
+import { BlockCodeLens } from "./codelens";
+import { registerCommands } from "./commands";
+import { Args } from "./core/args";
+import { Lsp } from "./lsp";
+import { OnlineMonitor } from "./online";
+import { Output } from "./output";
+import { CompileProblems } from "./problems";
+import { RungCli } from "./runner/cli";
+import { TerminalPool } from "./runner/terminal";
+import { WatchController } from "./runner/watch";
+import { readSettings } from "./settings";
+import { StatusBar } from "./statusBar";
+import { ObjectDecorations, ProjectView } from "./views/projectView";
+import { PlcView } from "./views/plcView";
+import { RungWorkspace } from "./workspace";
 
-let client: LanguageClient | undefined;
-let watchTerminal: vscode.Terminal | undefined;
+let lsp: Lsp | undefined;
 
-function rungCommand(): string[] {
-  const cmd = vscode.workspace.getConfiguration("rung").get<string[]>("command") ?? ["rung"];
-  return cmd.length ? cmd : ["rung"];
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  const out = new Output();
+  const ws = new RungWorkspace(out);
+  const terminals = new TerminalPool();
+  const cli = new RungCli(ws, out, terminals);
+  const watch = new WatchController(ws, cli, out);
+  const online = new OnlineMonitor(ws, cli);
+  const problems = new CompileProblems(ws);
+  lsp = new Lsp(ws, cli, out);
+  context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
+
+  await ws.start();
+
+  const project = new ProjectView(ws);
+  const plc = new PlcView(ws, online, watch);
+  context.subscriptions.push(project, plc, new ObjectDecorations(ws), new StatusBar(ws, watch, online), new BlockCodeLens(ws));
+  registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp });
+
+  // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
+  context.subscriptions.push(
+    cli.onDidFinish(({ args }) => {
+      ws.scheduleReload(100);
+      const [cmd] = args;
+      if (cmd === "init") void lsp?.restart();
+    }),
+  );
+
+  // Optional compile on save; with rung watch running, watch imports and compiles the change itself.
+  let compiling = false;
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (compiling || doc.languageId !== "scl" || !readSettings().compileOnSave || !ws.hasConfig || ws.watching) return;
+      const o = ws.objectAt(doc.uri.fsPath);
+      if (!o || o.readOnly) return;
+      compiling = true;
+      void cli
+        .run(Args.compileFile(o.path, o.device))
+        .then((r) => problems.set(r.output, o.path))
+        .finally(() => (compiling = false));
+    }),
+  );
+
+  void lsp.start();
+
+  if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
 }
 
-function workspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-}
-
-function quote(arg: string): string {
-  return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
-}
-
-/** Runs a rung CLI command in a terminal so the user sees progress and hints. */
-function runInTerminal(args: string[], name = "rung"): vscode.Terminal {
-  const t = vscode.window.createTerminal({ name, cwd: workspaceRoot() });
-  t.show(true);
-  t.sendText([...rungCommand(), ...args].map(quote).join(" "));
-  return t;
-}
-
-async function startClient(context: vscode.ExtensionContext) {
-  const [command, ...prefix] = rungCommand();
-  const serverOptions: ServerOptions = {
-    command: command!,
-    args: [...prefix, "lsp", "--stdio"],
-    transport: TransportKind.stdio,
-    options: { cwd: workspaceRoot() },
-  };
-  const clientOptions: LanguageClientOptions = {
-    // TwinCAT sources stay XML-highlighted; the server reads the ST inside their CDATA sections.
-    documentSelector: [{ scheme: "file", language: "scl" }, { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO}" }],
-    synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },
-    outputChannelName: "rung",
-  };
-  client = new LanguageClient("rung", "rung language server", serverOptions, clientOptions);
-  context.subscriptions.push(client);
-  await client.start();
-}
-
-export async function activate(context: vscode.ExtensionContext) {
-  const reg = (id: string, fn: () => unknown) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  reg("rung.pull", () => runInTerminal(["pull"]));
-  reg("rung.sync", () => runInTerminal(["sync"]));
-  reg("rung.status", () => runInTerminal(["status"]));
-  reg("rung.watch", () => {
-    if (watchTerminal && vscode.window.terminals.includes(watchTerminal)) watchTerminal.show();
-    else watchTerminal = runInTerminal(["watch"], "rung watch");
-  });
-  const resolve = (mode: "--ours" | "--theirs") => {
-    const file = vscode.window.activeTextEditor?.document.uri.fsPath;
-    if (!file) return vscode.window.showWarningMessage("Open the conflicted file first.");
-    return runInTerminal(["resolve", file.replace(/\.(conflict|tia)$/, ""), mode]);
-  };
-  reg("rung.resolveOurs", () => resolve("--ours"));
-  reg("rung.resolveTheirs", () => resolve("--theirs"));
-  reg("rung.restartServer", async () => {
-    await client?.stop();
-    await startClient(context);
-  });
-  try {
-    await startClient(context);
-  } catch (e) {
-    void vscode.window.showErrorMessage(`rung language server did not start (${String(e)}). Set "rung.command" to the rung executable.`);
-  }
-}
-
-export async function deactivate() {
-  await client?.stop();
+export async function deactivate(): Promise<void> {
+  await lsp?.stop();
 }

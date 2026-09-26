@@ -17,6 +17,9 @@ importers:
       postject:
         specifier: 1.0.0-alpha.6
         version: 1.0.0-alpha.6
+      smol-toml:
+        specifier: ^1.9.0
+        version: 1.9.0
       typescript:
         specifier: ~5.9.2
         version: 5.9.3

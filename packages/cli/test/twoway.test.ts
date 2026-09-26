@@ -112,6 +112,10 @@ describe("two-way CLI", () => {
     await until(() => t.db().objects[0]!.content.includes("#a := 42;"));
     t.out.length = 0;
     expect(await t.run(["sync"])).toBe(0); // via IPC
+    // read-only lookups of the state must not need its lock while watch runs
+    t.err.length = 0;
+    expect(await t.run(["compile", "--file", join(...motorFile)])).toBe(0);
+    expect(t.err.join("")).not.toMatch(/STATE_LOCKED/);
     stop();
     expect(await watching).toBe(0);
     expect(existsSync(t.file(".rung", "owner.json"))).toBe(false);

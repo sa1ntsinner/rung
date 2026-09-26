@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
 import { BlobStore, loadConfig, normalizeText, StateStore, type ObjectState } from "@rung/core";
-import { OwnerClient, confirmDelete, resolveConflict, syncOnce, type Diagnostic, type SyncBridge, type SyncReport } from "@rung/sync";
+import { OwnerClient, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type Diagnostic, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
@@ -31,7 +31,7 @@ export const SAFETY_RULES = `rung safety rules for agents
 2. Never edit read-only objects: *.protected.yaml (know-how protected), failsafe (F_*) blocks, system blocks, GRAPH blocks. rung refuses to import them.
 3. Never download to a PLC. rung has no download command; ask the human to download from TIA Portal after reviewing the change.
 4. Resolve conflicts only with rung_resolve (keep the file, take TIA's version, or save a merged file first).
-5. Run rung_impact before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected.
+5. Run rung_find_usages before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected.
 6. After a sync, read rung_diagnostics; compile errors come from TIA Portal itself.`;
 
 /** state.json read without taking the writer lock (safe while rung watch runs). */
@@ -139,9 +139,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
     const r = await withOwner((o) => o.request("compile", { addresses: addresses ?? [], device }));
     if (r !== undefined) return json(r);
     if (!ctx.bridgeFactory) return fail("No rung watch is running; start it to compile from the agent.");
+    const config = await loadConfig(ctx.root).catch(() => undefined);
+    const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
     const b = await ctx.bridgeFactory();
     try {
-      return json(await b.compile(device ?? "PLC_1", addresses ?? []));
+      const msgs = await b.compile(dev, addresses ?? []);
+      const states = await stateSnapshot(ctx.root);
+      return json(await placeCompileMessages(ctx.root, (a) => states.find((s) => s.address === a)?.path, msgs, (f) => readFile(f, "utf8")));
     } finally {
       await b.close();
     }

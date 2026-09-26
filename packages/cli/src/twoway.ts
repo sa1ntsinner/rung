@@ -93,7 +93,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     compile: async (p) => {
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
-      const msgs = await b.compile(String(p.device ?? config.devices[0] ?? "PLC_1"), (p.addresses as string[] | undefined) ?? []);
+      const msgs = await b.compile(String(p.device ?? config.devices[0] ?? Object.keys(config.plc)[0] ?? "PLC_1"), (p.addresses as string[] | undefined) ?? []);
       return placeCompileMessages(dir, (a) => state.get(a)?.path, msgs, (f) => readFile(f, "utf8"));
     },
   });

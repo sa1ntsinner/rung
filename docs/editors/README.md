@@ -4,10 +4,12 @@ All editors use the same language server: `rung lsp --stdio` (run from the works
 
 ## VS Code (and Cursor, Windsurf, VSCodium)
 
-Install `editors/vscode/rung-scl.vsix` (build it with `npm run package` in that folder):
+Build and install the extension from `editors/vscode`:
 
 ```
-code --install-extension editors/vscode/rung-scl.vsix
+npm install
+npm run package
+code --install-extension rung-scl.vsix
 ```
 
 If `rung` is not on PATH, set in settings:
@@ -16,7 +18,17 @@ If `rung` is not on PATH, set in settings:
 "rung.command": ["node", "C:/path/to/rung/packages/cli/dist/index.js"]
 ```
 
-Commands: *rung: Pull*, *Sync*, *Start watch*, *Status*, *Resolve conflict — keep my file / take TIA version*, *Restart language server*.
+The extension runs the rung CLI for everything; it only reads `rung.toml` and `.rung/state.json` itself.
+
+- **rung sidebar** (activity bar): *Project* lists the mirrored objects by PLC, kind and TIA folder (or by block type) with conflict, changed and read-only marks; right-click to compile, test, open in TIA Portal or resolve a conflict. *PLC* shows whether `rung watch` runs (start/stop), each PLC's online state and connection, and Go online, Go offline, Compile PLC, Compile hardware, Interfaces…, Download…. A folder without `rung.toml` gets *Initialize from a TIA Portal project* (`rung init --project`).
+- **Status bar**: watching / idle / conflicts / online PLCs; click for all actions.
+- **CodeLens** above every block header and editor title buttons: Compile, Test, Open in TIA Portal. Compile messages land in Problems.
+- **Interfaces…** runs `rung interfaces --scan`; after you pick an interface it offers to write `[plc.<name>]` into `rung.toml`.
+- **Download…** shows a warning dialog with the PLC and what is downloaded, asks you to type the PLC name, then runs `rung download --yes` in its own terminal so you see every TIA question and answer. If TIA cancels (for example it wants to stop the CPU), it offers a retry that allows exactly that, with the same confirmation. It never downloads from CodeLens or on save.
+- **Commands** (palette category *rung*): pull, sync, watch start/stop/toggle, status, compile file / PLC / hardware, test all / this block, go online / offline, online state, interfaces, download, open in TIA Portal, resolve (keep mine / take TIA's), open rung.toml, show output, restart language server.
+- **Settings** (`rung.*`): command, auto-start watch, terminal reuse, output verbosity, CodeLens, compile on save (skipped while watch runs), status bar, project view grouping and read-only objects, online-state refresh interval (0 = off, only while watch runs), download confirmation (`typeName` or `modal`, user settings only), download defaults (hardware, all blocks, start after) and `rung.download.allow` (empty; leave it that way).
+
+Keys: `alt+q` and then a letter, the same letters as in Zed below: `s` sync, `w` watch, `b` compile file, `shift+b` compile PLC, `h` hardware, `t` test block, `shift+t` test all, `o` online, `f` offline, `i` interfaces, `d` download, `e` open in TIA Portal, `p` pull, `q` list of actions. They are active only in a folder with `rung.toml`; `b`, `t` and `e` only in SCL editors.
 
 ## Zed
 

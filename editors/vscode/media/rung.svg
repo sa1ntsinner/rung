@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="24" height="24" fill="currentColor">
+  <!-- rung mark: two power rails with a normally open contact on the rung between them -->
+  <rect x="3" y="3" width="2.4" height="26" rx="1.2"/>
+  <rect x="26.6" y="3" width="2.4" height="26" rx="1.2"/>
+  <rect x="5.4" y="15.1" width="6.3" height="1.8"/>
+  <rect x="11.7" y="10" width="2.2" height="12" rx="1.1"/>
+  <rect x="18.1" y="10" width="2.2" height="12" rx="1.1"/>
+  <rect x="20.3" y="15.1" width="6.3" height="1.8"/>
+</svg>
