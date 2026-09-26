@@ -258,6 +258,11 @@ public class PortalSelectorTests
         Assert.Equal(8, PortalSelector.Choose(P((7, null), (8, @"C:\p\B.ap20")), null).Pid);
     [Fact] public void NoPathAndTwoProjectsIsAmbiguous() =>
         Assert.Equal("AMBIGUOUS_PORTAL", Assert.Throws<RpcException>(() => PortalSelector.Choose(P((7, @"C:\p\A.ap20"), (8, @"C:\p\B.ap20")), null)).Code);
+    [Fact] public void RelativeWantedPathIsExpanded()
+    {
+        var abs = System.IO.Path.GetFullPath("fx.ap20");
+        Assert.Equal(7, PortalSelector.Choose(P((7, abs)), "fx.ap20").Pid);
+    }
     [Fact] public void NoProjectAnywhere() =>
         Assert.Equal("NO_PROJECT", Assert.Throws<RpcException>(() => PortalSelector.Choose(P((7, null)), null)).Code);
 }
@@ -298,4 +303,33 @@ public class FormPolicyTests
     [InlineData(false, false, false, "GRAPH", true)]
     public void ReadOnlyRules(bool khp, bool fs, bool sys, string lang, bool expected) =>
         Assert.Equal(expected, FormPolicy.IsReadOnly(new ObjectEntry { Kind = "block", Language = lang, KnowHowProtected = khp, IsFailsafe = fs, IsSystem = sys }));
+}
+
+public class CompileRouteTests
+{
+    static JsonElement Call(string line) => JsonDocument.Parse(new RpcDispatcher(() => new FakeTiaSession(), new BridgeInfo("V20", "t")).Handle(line)).RootElement;
+    [Fact] public void CompileFlattensMessages()
+    {
+        var r = Call("{\"id\":1,\"method\":\"plc.compile\",\"params\":{\"device\":\"PLC_1\",\"addresses\":[\"plc:PLC_1/blocks/Fx_Broken\"]}}").GetProperty("result")[0];
+        Assert.Equal("error", r.GetProperty("severity").GetString());
+        Assert.Equal("plc:PLC_1/blocks/Fx_Broken", r.GetProperty("address").GetString());
+    }
+    [Fact] public void AddressesMustBeStrings() =>
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":1,\"method\":\"plc.compile\",\"params\":{\"device\":\"PLC_1\",\"addresses\":[1]}}").GetProperty("error").GetProperty("code").GetString());
+    [Fact] public void AddressesOptional() =>
+        Assert.True(Call("{\"id\":1,\"method\":\"plc.compile\",\"params\":{\"device\":\"PLC_1\"}}").TryGetProperty("result", out _));
+}
+
+public class DeleteRouteTests
+{
+    [Fact] public void DeleteChecksRevision()
+    {
+        var s = new FakeTiaSession();
+        var d = new RpcDispatcher(() => s, new BridgeInfo("V20", "t"));
+        var stale = JsonDocument.Parse(d.Handle("{\"id\":1,\"method\":\"objects.delete\",\"params\":{\"address\":\"plc:PLC_1/types/Fx_Types\",\"expectedTiaRevision\":\"dt:0\",\"operationId\":\"x\"}}")).RootElement;
+        Assert.Equal("STALE_REVISION", stale.GetProperty("error").GetProperty("code").GetString());
+        var ok = JsonDocument.Parse(d.Handle("{\"id\":2,\"method\":\"objects.delete\",\"params\":{\"address\":\"plc:PLC_1/types/Fx_Types\",\"expectedTiaRevision\":\"dt:1:2\",\"operationId\":\"x\"}}")).RootElement;
+        Assert.True(ok.GetProperty("result").GetProperty("deleted").GetBoolean());
+        Assert.Single(s.Objects);
+    }
 }

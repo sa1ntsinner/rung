@@ -109,6 +109,52 @@ describe("recoverJournal", () => {
     expect(await new Journal(root).pending()).toEqual([]);
   });
 
+  it("recovers a crash after the old file was moved aside but before the new one landed", async () => {
+    const root = ws();
+    const blobs = new BlobStore(root);
+    mkdirSync(join(root, "plc/P/blocks"), { recursive: true });
+    const oldHash = sha256("old\n");
+    const newHash = await blobs.put("new\n");
+    const intent = {
+      opId: "gap",
+      address: "plc:P/blocks/A",
+      targets: [{ path: "plc/P/blocks/A.scl", hash: newHash, prevHash: oldHash }],
+      removes: [],
+      nextState: next("plc:P/blocks/A", "plc/P/blocks/A.scl", newHash),
+    };
+    await new Journal(root).write(intent);
+    // simulate: replaceGuarded moved the old file into recovery, then the process died
+    mkdirSync(join(root, ".rung", "recovery", "gap"), { recursive: true });
+    writeFileSync(join(root, ".rung", "recovery", "gap", "1-x-A.scl"), "old\n");
+    const r = await recoverJournal(root);
+    expect(r).toEqual({ completed: [intent.nextState], recoveryRequired: [] });
+    expect(readFileSync(join(root, "plc/P/blocks/A.scl"), "utf8")).toBe("new\n");
+  });
+
+  it("keeps the journal entry when asked, so state can be flushed first", async () => {
+    const root = ws();
+    const h = await new BlobStore(root).put("x\n");
+    await publishBundle(root, { opId: "keep", address: "plc:P/blocks/K", targets: [{ path: "plc/P/blocks/K.scl", hash: h, prevHash: "absent" }], removes: [], nextState: next("plc:P/blocks/K", "plc/P/blocks/K.scl", h) }, { keepJournal: true });
+    expect((await new Journal(root).pending()).map((i) => i.opId)).toEqual(["keep"]);
+    const r = await recoverJournal(root);
+    expect(r.completed).toHaveLength(1);
+  });
+
+  it("does not trash the new file on a case-only rename", async () => {
+    const root = ws();
+    mkdirSync(join(root, "plc/P/blocks"), { recursive: true });
+    writeFileSync(join(root, "plc/P/blocks/Motor.scl"), "m\n");
+    const h = await new BlobStore(root).put("m\n");
+    await publishBundle(root, {
+      opId: "case",
+      address: "plc:P/blocks/MOTOR",
+      targets: [{ path: "plc/P/blocks/MOTOR.scl", hash: h, prevHash: process.platform === "linux" ? "absent" : sha256("m\n") }],
+      removes: [{ path: "plc/P/blocks/Motor.scl", prevHash: sha256("m\n") }],
+      nextState: next("plc:P/blocks/MOTOR", "plc/P/blocks/MOTOR.scl", h),
+    });
+    expect(readFileSync(join(root, "plc/P/blocks/MOTOR.scl"), "utf8")).toBe("m\n");
+  });
+
   it("flags recovery when a target has foreign content, keeping the journal", async () => {
     const root = ws();
     await crashedIntent(root, false);

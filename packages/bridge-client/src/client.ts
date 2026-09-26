@@ -5,6 +5,7 @@ import {
   ErrorCodes,
   PROTOCOL_VERSION,
   type BridgeEvent,
+  type CompileMessage,
   type ExportResult,
   type HelloResult,
   type ObjectEntry,
@@ -30,7 +31,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -130,6 +131,14 @@ export class BridgeClient {
   }
   importObject(address: string, form: string, path: string, expectedTiaRevision: string, operationId: string): Promise<ExportResult> {
     return this.request("objects.import", { address, form, path, expectedTiaRevision, operationId }) as Promise<ExportResult>;
+  }
+
+  deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
+    return this.request("objects.delete", { address, expectedTiaRevision, operationId }) as Promise<{ deleted: boolean }>;
+  }
+
+  compile(device: string, addresses: string[] = []): Promise<CompileMessage[]> {
+    return this.request("plc.compile", { device, addresses }) as Promise<CompileMessage[]>;
   }
 
   async close(): Promise<void> {

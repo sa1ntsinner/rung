@@ -18,6 +18,6 @@ export {
 export { WorkspaceError, type WorkspaceErrorCode } from "./errors.js";
 export { sha256, normalizeText, writeFileAtomic, replaceGuarded, type GuardOptions, type GuardResult } from "./atomic.js";
 export { StateStore, type ObjectState, type ObjectStatus, type StateFile, type Binding } from "./state.js";
-export { BlobStore, Journal, publishBundle, recoverJournal, bundleHash, writeRecoveryNote, type PublishIntent, type PublishTarget, type RecoveryReport } from "./bundle.js";
+export { BlobStore, Journal, publishBundle, recoverJournal, bundleHash, pathKey, writeRecoveryNote, type PublishIntent, type PublishTarget, type RecoveryReport } from "./bundle.js";
 export { type RungConfig, CONFIG_FILE, defaultConfig, parseConfig, formatConfig, loadConfig, saveConfig } from "./config.js";
-export { preflight, isContained, MAX_ABSOLUTE_PATH, type PlannedPath, type PreflightResult } from "./layout.js";
+export { preflight, isContained, sweepTempFiles, MAX_ABSOLUTE_PATH, type PlannedPath, type PreflightResult } from "./layout.js";

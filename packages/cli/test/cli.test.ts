@@ -31,7 +31,7 @@ function setup(env: Record<string, string> = {}) {
       stderr: (s) => err.push(s),
       env: { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: objects, ...env },
     });
-  return { dir, run, out, err };
+  return { dir, run, out, err, objects };
 }
 
 describe("rung CLI", () => {
@@ -74,6 +74,24 @@ describe("rung CLI", () => {
     t.out.length = 0;
     expect(await t.run("pull")).toBe(0);
     expect(t.out.join("")).toMatch(/unchanged\s+2/);
+  });
+
+  it("keeps working after a PLC is added to the project (devices = all)", async () => {
+    const t = setup();
+    await t.run("init");
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    db.project.devices.push("PLC_2");
+    writeFileSync(t.objects, JSON.stringify(db));
+    expect(await t.run("pull")).toBe(0);
+  });
+
+  it("init --rebind keeps the user's sync settings", async () => {
+    const t = setup();
+    await t.run("init");
+    const cfg = join(t.dir, "rung.toml");
+    writeFileSync(cfg, readFileSync(cfg, "utf8").replace("pollMs = 2000", "pollMs = 5000"));
+    expect(await t.run("init", "--rebind")).toBe(0);
+    expect(readFileSync(cfg, "utf8")).toContain("pollMs = 5000");
   });
 
   it("pull exits 2 when there are warnings", async () => {

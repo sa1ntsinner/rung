@@ -12,7 +12,7 @@ namespace Rung.Bridge.V20
         {
             var io = StdioHost.FromConsole();
             var version = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-            var caps = args.AllowFixtureImport ? new[] { "export", "fixture-import" } : new[] { "export" };
+            var caps = args.AllowImport ? new[] { "export", "import", "compile" } : args.AllowFixtureImport ? new[] { "export", "fixture-import", "compile" } : new[] { "export", "compile" };
             OpennessSession session = null;
             using (var owner = new OwnerThread())
             {

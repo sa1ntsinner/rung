@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { link, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.js";
 import { WorkspaceError } from "./errors.js";
@@ -43,6 +43,8 @@ export interface ObjectState {
   status: ObjectStatus;
   /** Epoch ms of the last verification by export + hash (weak revisions). */
   verifiedAt?: number;
+  /** Set while status is "conflicted": the TIA revision and files the conflict was computed against. */
+  conflict?: { tiaFingerprint: string; tiaFiles: StateFile[] };
 }
 
 export interface Binding {
@@ -146,32 +148,48 @@ export class StateStore {
     const lock = join(dir, "lock");
     const mine: LockInfo = { host: hostname(), pid: process.pid, nonce: randomBytes(8).toString("hex"), startedAt: Date.now() };
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Write the complete lock record first, then publish it with an exclusive link: a lock file is never empty.
+      const tmp = `${lock}.new-${mine.nonce}`;
+      await writeFile(tmp, JSON.stringify(mine));
       try {
-        const fh = await open(lock, "wx");
-        await fh.writeFile(JSON.stringify(mine));
-        await fh.close();
+        await link(tmp, lock);
         return mine.nonce;
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      } finally {
+        await unlink(tmp).catch(() => {});
       }
       let owner: LockInfo | undefined;
+      let ageMs = 0;
       try {
+        ageMs = Date.now() - (await stat(lock)).mtimeMs;
         owner = JSON.parse(await readFile(lock, "utf8")) as LockInfo;
       } catch {
         owner = undefined;
       }
-      const stale = owner && owner.host === hostname() && owner.pid !== process.pid && !alive(owner.pid);
+      // Unreadable lock (left by an older rung that crashed mid-write) counts as stale once it is clearly old.
+      const stale = owner ? owner.host === hostname() && owner.pid !== process.pid && !alive(owner.pid) : ageMs > 30_000;
       if (!stale) throw new WorkspaceError("STATE_LOCKED", `workspace is in use by ${owner ? `${owner.host} pid ${owner.pid}` : "another process"}`);
-      // Only one recoverer wins the rename; verify it moved the lock we inspected.
+      // Only one recoverer wins the rename; verify it moved the lock we inspected before discarding it.
       const moved = `${lock}.stale-${mine.nonce}`;
       try {
         await rename(lock, moved);
-        const check = JSON.parse(await readFile(moved, "utf8")) as LockInfo;
-        await unlink(moved);
-        if (check.nonce !== owner!.nonce) throw new WorkspaceError("STATE_LOCKED", "lock changed during recovery");
-      } catch (e) {
-        if (e instanceof WorkspaceError) throw e;
+      } catch {
+        continue; // someone else recovered it first
       }
+      let check: LockInfo | undefined;
+      try {
+        check = JSON.parse(await readFile(moved, "utf8")) as LockInfo;
+      } catch {
+        check = undefined;
+      }
+      if ((check?.nonce ?? undefined) !== (owner?.nonce ?? undefined)) {
+        // We grabbed a fresh lock taken by another recoverer: give it back untouched.
+        await link(moved, lock).catch(() => {});
+        await unlink(moved).catch(() => {});
+        throw new WorkspaceError("STATE_LOCKED", "workspace lock changed during recovery");
+      }
+      await unlink(moved).catch(() => {});
     }
     throw new WorkspaceError("STATE_LOCKED", "could not acquire workspace lock");
   }

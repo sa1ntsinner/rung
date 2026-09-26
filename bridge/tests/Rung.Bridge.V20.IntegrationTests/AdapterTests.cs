@@ -183,3 +183,31 @@ public class NoPortalTests
     [Fact] public void AttachReturnsTypedError() =>
         Assert.Equal("TIA_NOT_RUNNING", Assert.Throws<RpcException>(() => OpennessSession.Attach(new BridgeArgs { ProjectPath = @"C:\nope\Nope.ap20" }, (n, p) => { })).Code);
 }
+
+[Trait("Category", "Tia")]
+public class TwoWayAdapterTests : IClassFixture<FixtureSession>
+{
+    readonly FixtureSession _fx;
+    public TwoWayAdapterTests(FixtureSession fx) { _fx = fx; }
+
+    [Fact] public void CreatesANewBlockInANewFolderAndCompilesIt()
+    {
+        var name = "Fx_New_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        var address = "plc:PLC_1/blocks/30_New/" + name;
+        var src = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
+        File.WriteAllText(src, "FUNCTION \"" + name + "\" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION\n");
+        var r = _fx.Session.Import(address, "scl", src, "absent", Guid.NewGuid().ToString());
+        Assert.Equal("scl", r.Form);
+        Assert.Contains(_fx.Session.ListObjects("PLC_1"), o => o.Address == address);
+        Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
+    }
+
+    [Fact] public void CompileOfBrokenBlockReportsErrorsWithAddress()
+    {
+        var msgs = _fx.Session.Compile("PLC_1", new[] { "plc:PLC_1/blocks/Fx_Broken" });
+        Assert.Contains(msgs, m => m.Severity == "error" && m.Address == "plc:PLC_1/blocks/Fx_Broken");
+    }
+
+    [Fact] public void CreatingAnExistingObjectIsRefused() =>
+        Assert.Equal("STALE_REVISION", Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/blocks/20_Valves/Fx_Valve", "scl", @"C:\x.scl", "absent", Guid.NewGuid().ToString())).Code);
+}

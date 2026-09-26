@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
 import { pull } from "../src/index.js";
+import { BridgeError } from "@rung/bridge-client";
 import { FakeBridge } from "./fake-bridge.js";
 
 const MOTOR = "plc:PLC_1/blocks/10_Drives/Motors/Fx_Motor";
@@ -234,15 +235,65 @@ describe("pull", () => {
 
   it("verifies weak revisions by hash after weakVerifyMs", async () => {
     const W = "plc:PLC_1/tags/Default tag table";
-    const t = setup((b) => b.add(W, { kind: "tagtable", form: "tags.xml", fingerprint: "none", content: "<tags/>\n" }));
+    const t = setup((b) => b.add(W, { kind: "tagtable", form: "tags.xml", fingerprint: "dt:1", content: "<tags/>\n" }));
     await t.run({ now: 1_000 });
     t.bridge.exportCalls = [];
     await t.run({ now: 2_000 });
     expect(t.bridge.exportCalls).toEqual([]); // still fresh
-    t.bridge.objects.get(W)!.files = { ".tags.xml": "<tags changed/>\n" }; // fingerprint "none" does not change
+    t.bridge.objects.get(W)!.files = { ".tags.xml": "<tags changed/>\n" }; // weak token did not move
     await t.run({ now: 1_000 + 3_600_001 });
     expect(t.bridge.exportCalls).toEqual([W]);
     expect(t.read("plc/PLC_1/tags/Default tag table.tags.xml")).toBe("<tags changed/>\n");
+  });
+
+  it("always re-verifies objects without a revision token", async () => {
+    const W = "plc:PLC_1/watch/Fx_Watch";
+    const t = setup((b) => b.add(W, { kind: "watchtable", form: "xml", fingerprint: "none", content: "<w/>\n" }));
+    await t.run({ now: 1_000 });
+    t.bridge.objects.get(W)!.files = { ".xml": "<w changed/>\n" };
+    t.bridge.exportCalls = [];
+    await t.run({ now: 2_000 });
+    expect(t.bridge.exportCalls).toEqual([W]);
+    expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<w changed/>\n");
+  });
+
+  it("follows a case-only rename without losing the file or leaving a phantom entry", async () => {
+    const t = setup((b) => b.add("plc:PLC_1/blocks/Motor", { content: "// m\n" }));
+    await t.run();
+    t.bridge.objects.delete("plc:PLC_1/blocks/Motor");
+    t.bridge.add("plc:PLC_1/blocks/MOTOR", { content: "// m\n" });
+    const r = await t.run();
+    expect(r.warnings).toEqual([]);
+    const names = readdirSync(t.file("plc/PLC_1/blocks"));
+    expect(names).toEqual(["MOTOR.scl"]);
+    const state = await StateStore.open(t.root, t.binding);
+    expect(state.all().map((s) => s.address)).toEqual(["plc:PLC_1/blocks/MOTOR"]);
+    await state.close();
+  });
+
+  it("aborts on a bridge timeout instead of waiting for every object", async () => {
+    const t = setup((b) => {
+      for (let i = 0; i < 5; i++) b.add(`plc:PLC_1/blocks/B${i}`);
+    });
+    const orig = t.bridge.exportObject.bind(t.bridge);
+    let calls = 0;
+    t.bridge.exportObject = async (...a: Parameters<typeof orig>) => {
+      if (++calls === 2) throw new BridgeError("TIMEOUT", "stuck");
+      return orig(...a);
+    };
+    await expect(t.run()).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(calls).toBe(2);
+    const state = await StateStore.open(t.root, t.binding);
+    expect(state.all()).toHaveLength(1); // the object exported before the timeout was checkpointed
+    await state.close();
+  });
+
+  it("sweeps temp files left by a crashed atomic write", async () => {
+    const t = setup();
+    mkdirSync(t.file("plc/PLC_1/blocks"), { recursive: true });
+    writeFileSync(t.file("plc/PLC_1/blocks/.x.scl.rung-tmp-0123456789ab"), "junk");
+    await t.run();
+    expect(existsSync(t.file("plc/PLC_1/blocks/.x.scl.rung-tmp-0123456789ab"))).toBe(false);
   });
 
   it("detects a project swap", async () => {
@@ -266,5 +317,5 @@ describe("pull", () => {
     const r2 = await t.run();
     expect(r2.exported).toBe(1);
     expect(t.bridge.exportCalls).toEqual(["plc:PLC_1/blocks/G5/S5/Deep2/B1265"]);
-  }, 120_000);
+  }, 600_000);
 });

@@ -20,6 +20,7 @@
       ["COM¹", "%43OM¹"],
       ["LPT9", "%4CPT9"],
       ["CONSOLE", "CONSOLE"],
+      ["CON\n", "CON%0A"],
       ["tab\tx", "tab%09x"],
       ["del\u007f", "del%7F"],
       ["Überwachung", "Überwachung"],
@@ -78,6 +79,12 @@
       "string": "plc:PLC_1/blocks/Secret",
       "form": "protected.yaml",
       "path": "plc/PLC_1/blocks/Secret.protected.yaml"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "block", "groups": [], "name": "Valve.tags" },
+      "string": "plc:PLC_1/blocks/Valve.tags",
+      "form": "xml",
+      "path": "plc/PLC_1/blocks/Valve.tags.xml"
     },
     {
       "address": { "device": "My:PLC", "kind": "watchtable", "groups": ["A.", "B"], "name": "CON" },

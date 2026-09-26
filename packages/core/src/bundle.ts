@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Content-addressed base blobs and a journal that makes multi-file publication recoverable.
 import { mkdir, readdir, readFile, stat, unlink, writeFile, rename } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { replaceGuarded, sha256, writeFileAtomic } from "./atomic.js";
 import { WorkspaceError } from "./errors.js";
 import type { ObjectState } from "./state.js";
@@ -88,15 +88,33 @@ async function currentHash(abs: string): Promise<string | "absent"> {
 
 const abs = (root: string, rel: string) => join(root, ...rel.split("/"));
 
+/** True if the directory lists exactly this spelling (case-insensitive filesystems also answer for other casings). */
+async function exactName(p: string): Promise<boolean> {
+  try {
+    return (await readdir(dirname(p))).includes(basename(p));
+  } catch {
+    return false;
+  }
+}
+/**
+ * Key under which the filesystem sees the same file: case-insensitive and normalizing on
+ * Windows and macOS (default volumes), exact on Linux.
+ */
+export const pathKey = (p: string) => (process.platform === "linux" ? p : p.normalize("NFC").toLowerCase());
+const fold = pathKey;
+
 async function apply(root: string, intent: PublishIntent, force: boolean): Promise<void> {
   const blobs = new BlobStore(root);
   const recoveryDir = join(root, ".rung", "recovery", intent.opId);
   for (const t of intent.targets) {
     const now = await currentHash(abs(root, t.path));
-    if (now === t.hash) continue;
+    if (now === t.hash && (await exactName(abs(root, t.path)))) continue;
     await replaceGuarded(abs(root, t.path), await blobs.get(t.hash), { expectedHash: t.prevHash, recoveryDir, force });
   }
+  const targetKeys = new Set(intent.targets.map((t) => fold(t.path)));
   for (const r of intent.removes) {
+    // A case-only rename (Motor.scl → MOTOR.scl) is the same file on Windows/macOS: never trash the new one.
+    if (targetKeys.has(fold(r.path))) continue;
     const p = abs(root, r.path);
     const now = await currentHash(p);
     if (now === "absent") continue;
@@ -112,13 +130,15 @@ async function apply(root: string, intent: PublishIntent, force: boolean): Promi
  * previous hash before anything is written; the intent is journaled so a crash in
  * the middle is rolled forward by recoverJournal().
  */
-export async function publishBundle(root: string, intent: PublishIntent, opts: { force?: boolean } = {}): Promise<PublishIntent> {
+export async function publishBundle(root: string, intent: PublishIntent, opts: { force?: boolean; keepJournal?: boolean } = {}): Promise<PublishIntent> {
   if (!opts.force) {
     for (const t of intent.targets) {
       const now = await currentHash(abs(root, t.path));
       if (now !== t.prevHash && now !== t.hash) throw new WorkspaceError("LOCAL_CHANGES", `${t.path} changed locally; not overwritten`);
     }
+    const targetKeys = new Set(intent.targets.map((t) => fold(t.path)));
     for (const r of intent.removes) {
+      if (targetKeys.has(fold(r.path))) continue;
       const now = await currentHash(abs(root, r.path));
       if (now !== "absent" && now !== r.prevHash) throw new WorkspaceError("LOCAL_CHANGES", `${r.path} changed locally; not removed`);
     }
@@ -126,8 +146,22 @@ export async function publishBundle(root: string, intent: PublishIntent, opts: {
   const journal = new Journal(root);
   await journal.write(intent);
   await apply(root, intent, !!opts.force);
-  await journal.done(intent.opId);
+  // Callers that record nextState in a state file flushed later keep the journal entry until that flush.
+  if (!opts.keepJournal) await journal.done(intent.opId);
   return intent;
+}
+
+/** A retained preimage of `prevHash` for this operation proves an "absent" target is mid-publication, not foreign. */
+async function hasPreimage(root: string, opId: string, prevHash: string): Promise<boolean> {
+  const dir = join(root, ".rung", "recovery", opId);
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return false;
+  }
+  for (const n of names) if ((await currentHash(join(dir, n))) === prevHash) return true;
+  return false;
 }
 
 export interface RecoveryReport {
@@ -144,7 +178,9 @@ export async function recoverJournal(root: string): Promise<RecoveryReport> {
     let consistent = true;
     for (const t of intent.targets) {
       const now = await currentHash(abs(root, t.path));
-      if (now !== t.hash && now !== t.prevHash) consistent = false;
+      if (now === t.hash || now === t.prevHash) continue;
+      if (now === "absent" && (await hasPreimage(root, intent.opId, t.prevHash))) continue;
+      consistent = false;
     }
     if (!consistent) {
       report.recoveryRequired.push(intent.address);

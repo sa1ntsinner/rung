@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { parseArgs } from "node:util";
-import { readFile, writeFile, appendFile, access } from "node:fs/promises";
+import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,62 +15,28 @@ import {
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { doctor, pull, summarize } from "@rung/sync";
+import { HINTS, bridgeFor, defaultBridge, exists, openState, printWarnings, type Io } from "./common.js";
+import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
+
+export type { Io } from "./common.js";
 
 export const VERSION = "0.1.0-dev";
-
-export interface Io {
-  cwd: string;
-  stdout: (s: string) => void;
-  stderr: (s: string) => void;
-  env: Record<string, string | undefined>;
-}
 
 const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
 Usage:
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
-  rung pull [dir] [--force]
+  rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
+  rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
+  rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
   rung status [dir]
-  rung doctor [dir] --fixture       round-trip probe; imports over objects (fixture projects only)
+  rung resolve <file> --ours|--theirs|--merged
+  rung confirm-delete <address> [--dir <workspace>]
+  rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
 Environment:
   RUNG_BRIDGE       path to rung-bridge-v20.exe (default: bundled/dev build)
 `;
-
-const HINTS: Record<string, string> = {
-  ACCESS_DENIED:
-    'Your Windows user must be in the local group "Siemens TIA Openness" (run as admin: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in) and you must accept the Openness access dialog in TIA Portal.',
-  TIA_NOT_RUNNING: "Start TIA Portal and open the project first.",
-  NO_PROJECT: "Open the bound project in TIA Portal (rung never opens or modifies projects on its own).",
-  AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
-  NOT_A_WORKSPACE: "Run rung init in this folder first.",
-  BINDING_MISMATCH: "This folder mirrors a different project. Use another folder or rung init --rebind.",
-  STATE_LOCKED: "Another rung process is using this workspace.",
-};
-
-function defaultBridge(env: Io["env"]): { command: string; args: string[] } {
-  const args = env.RUNG_BRIDGE_ARGS ? (JSON.parse(env.RUNG_BRIDGE_ARGS) as string[]) : [];
-  if (env.RUNG_BRIDGE) return { command: env.RUNG_BRIDGE, args };
-  const dev = fileURLToPath(new URL("../../../bridge/src/Rung.Bridge.V20/bin/Release/net48/rung-bridge-v20.exe", import.meta.url));
-  return { command: dev, args };
-}
-
-async function exists(p: string) {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
-  // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
-  const env = defaultBridge(io.env);
-  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command;
-  const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...extra];
-  return BridgeClient.spawn({ command, args, env: Object.fromEntries(Object.entries(io.env).filter(([, v]) => v !== undefined)) as Record<string, string> });
-}
 
 async function agentsTemplate(project: string): Promise<string> {
   try {
@@ -96,15 +62,23 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     if (tia !== "V20" && tia !== "V21") throw new WorkspaceError("CONFIG_INVALID", `unsupported TIA version ${tia}`);
     const devices = (v.device as string[] | undefined) ?? [];
     for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("CONFIG_INVALID", `device ${d} not in project (${info.devices.join(", ")})`);
-    const config = defaultConfig(info.path, tia, bridge.command, devices);
-    config.bridge.args = bridge.args;
-    await saveConfig(dir, config);
+    // On --rebind keep the user's sync/bridge settings; only the binding changes.
+    const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir).catch(() => undefined) : undefined;
+    const config = previous
+      ? { ...previous, project: { path: info.path, tiaVersion: tia as "V20" | "V21" }, devices }
+      : { ...defaultConfig(info.path, tia, bridge.command, devices), bridge: { command: bridge.command, args: bridge.args } };
+    // Take the state lock before touching rung.toml so config and state never disagree about the binding.
+    // devices = [] means "all PLCs" and is stored as such, so adding a PLC later does not break the binding.
+    const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices }, { rebind: !!v.rebind });
+    try {
+      await saveConfig(dir, config);
+    } finally {
+      await state.close();
+    }
     const gi = join(dir, ".gitignore");
     const current = (await exists(gi)) ? await readFile(gi, "utf8") : "";
     if (!current.split(/\r?\n/).includes(".rung/")) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ".rung/\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
-    const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices: devices.length ? devices : info.devices }, { rebind: !!v.rebind });
-    await state.close();
     io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\nNext: rung pull\n`);
     return 0;
   } finally {
@@ -112,16 +86,11 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   }
 }
 
-async function openState(dir: string, config: RungConfig, devices: string[]) {
-  return StateStore.open(dir, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices.length ? config.devices : devices });
-}
-
 async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const config = await loadConfig(dir);
   const client = await bridgeFor(config, io);
   try {
-    const info = await client.projectInfo();
-    const state = await openState(dir, config, info.devices);
+    const state = await openState(dir, config);
     try {
       let last = 0;
       const report = await pull(dir, client, state, {
@@ -146,20 +115,6 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
     }
   } finally {
     await client.close();
-  }
-}
-
-async function cmdStatus(dir: string, io: Io): Promise<number> {
-  await loadConfig(dir);
-  const state = await StateStore.open(dir, null);
-  try {
-    const all = state.all();
-    const synced = all.filter((o) => o.status === "synced").length;
-    io.stdout(`${all.length} objects, ${synced} synced, ${all.filter((o) => o.readOnly).length} read-only\n`);
-    for (const o of all.filter((x) => x.status !== "synced")) io.stdout(`  ${o.status.padEnd(16)} ${o.path}\n`);
-    return 0;
-  } finally {
-    await state.close();
   }
 }
 
@@ -201,6 +156,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         rebind: { type: "boolean" },
         force: { type: "boolean" },
         fixture: { type: "boolean" },
+        ours: { type: "boolean" },
+        theirs: { type: "boolean" },
+        merged: { type: "boolean" },
+        dir: { type: "string" },
       },
     });
   } catch (e) {
@@ -228,6 +187,24 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdStatus(dir, io);
       case "doctor":
         return await cmdDoctor(dir, v, io);
+      case "sync":
+        return await cmdSync(dir, io);
+      case "watch":
+        return await cmdWatch(dir, io);
+      case "resolve": {
+        const mode = v.ours ? "ours" : v.theirs ? "theirs" : v.merged ? "merged" : null;
+        if (!target || !mode) {
+          io.stderr("rung: usage: rung resolve <file> --ours|--theirs|--merged\n");
+          return 1;
+        }
+        return await cmdResolve(target, mode, io);
+      }
+      case "confirm-delete":
+        if (!target) {
+          io.stderr("rung: usage: rung confirm-delete <address> [--dir <workspace>]\n");
+          return 1;
+        }
+        return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
       default:
         io.stderr(`rung: unknown command ${cmd}\n${HELP}`);
         return 1;

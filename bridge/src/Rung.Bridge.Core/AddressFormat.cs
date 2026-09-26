@@ -26,8 +26,8 @@ namespace Rung.Bridge.Core
     public static class AddressFormat
     {
         const string Illegal = "/\\:*?\"<>|%~";
-        static readonly Regex Reserved = new Regex(@"^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        static readonly Regex TrailingDotsSpaces = new Regex(@"[. ]+$", RegexOptions.CultureInvariant);
+        static readonly Regex Reserved = new Regex(@"^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|\z)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        static readonly Regex TrailingDotsSpaces = new Regex(@"[. ]+\z", RegexOptions.CultureInvariant);
         static readonly Regex BadPercent = new Regex(@"%(?![0-9A-F]{2})", RegexOptions.CultureInvariant);
         static readonly Regex Percent = new Regex(@"%([0-9A-F]{2})", RegexOptions.CultureInvariant);
 

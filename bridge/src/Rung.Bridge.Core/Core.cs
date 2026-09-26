@@ -18,6 +18,10 @@ namespace Rung.Bridge.Core
         ExportResult Export(string address, string form, string targetDir);
         /// <summary>Guarded import (fixture-only in M1). expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>
         ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId);
+        /// <summary>Compiles the given objects (or the whole PLC when addresses is empty) and flattens the messages.</summary>
+        IReadOnlyList<CompileMessage> Compile(string device, string[] addresses);
+        /// <summary>Guarded delete; expectedTiaRevision must match the current revision.</summary>
+        void Delete(string address, string expectedTiaRevision, string operationId);
     }
 
     public sealed class BridgeInfo
@@ -65,7 +69,7 @@ namespace Rung.Bridge.Core
             List<PortalCandidate> matches;
             if (!string.IsNullOrEmpty(wantedPath))
             {
-                var want = Normalize(wantedPath);
+                var want = Normalize(LooksAbsolute(wantedPath) ? wantedPath : System.IO.Path.GetFullPath(wantedPath));
                 matches = withProject.Where(p => string.Equals(Normalize(p.ProjectPath), want, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (matches.Count == 0) throw new RpcException(ErrorCodes.NoProject, "Project is not open in any TIA Portal instance: " + wantedPath);
             }
@@ -78,6 +82,9 @@ namespace Rung.Bridge.Core
                 throw new RpcException(ErrorCodes.AmbiguousPortal, "Several TIA Portal instances match: " + string.Join(", ", matches.Select(m => m.Pid + "=" + m.ProjectPath)));
             return matches[0];
         }
+
+        // Windows drive/UNC paths count as absolute on every OS (tests run on Linux too).
+        static bool LooksAbsolute(string p) => System.IO.Path.IsPathRooted(p) || System.Text.RegularExpressions.Regex.IsMatch(p, @"^([A-Za-z]:[/\\]|[/\\]{2})");
 
         static string Normalize(string p) => p.Replace('/', '\\').TrimEnd('\\');
     }

@@ -1,42 +1,76 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Process-level fake of rung-bridge for CLI tests. Objects come from FAKE_OBJECTS (JSON file path).
+// Process-level fake of rung-bridge for CLI tests. Objects live in FAKE_OBJECTS (JSON file, rewritten on import/delete).
 import { createInterface } from "node:readline";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const projectArg = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : null;
-const db = JSON.parse(readFileSync(process.env.FAKE_OBJECTS, "utf8"));
+const allowImport = argv.includes("--allow-import") || argv.includes("--allow-fixture-import");
+const load = () => JSON.parse(readFileSync(process.env.FAKE_OBJECTS, "utf8"));
+const save = (db) => writeFileSync(process.env.FAKE_OBJECTS, JSON.stringify(db));
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const sha = (s) => createHash("sha256").update(Buffer.from(s, "utf8")).digest("hex");
+const fp = (o) => "fp:" + sha(o.content).slice(0, 8);
+const entry = (o) => o.entry ?? { address: o.address, kind: o.address.includes("/types/") ? "type" : "block", language: "SCL", knowHowProtected: false, isFailsafe: false, isSystem: false, fingerprint: fp(o) };
+const form = (o) => o.form ?? (o.address.includes("/types/") ? "udt" : "scl");
+
+function exportTo(o, dir) {
+  const path = join(dir, "obj." + form(o));
+  writeFileSync(path, o.content);
+  return { address: o.address, form: form(o), files: [{ path, role: "primary", sha256: sha(o.content) }], warnings: [], fingerprint: fp(o), bundleHash: "x" };
+}
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const req = JSON.parse(line);
   const reply = (result) => out({ id: req.id, result });
   const fail = (code, message) => out({ id: req.id, error: { code, message } });
   const p = req.params ?? {};
+  const db = load();
   if (req.method !== "bridge.hello" && process.env.FAKE_ACCESS_DENIED) return fail("ACCESS_DENIED", "not in group Siemens TIA Openness");
   if (req.method !== "bridge.hello" && projectArg && projectArg.toLowerCase() !== db.project.path.toLowerCase())
     return fail("NO_PROJECT", "Project is not open in any TIA Portal instance: " + projectArg);
   switch (req.method) {
     case "bridge.hello":
-      return reply({ protocol: 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: argv.includes("--allow-fixture-import") ? ["import"] : [] });
+      return reply({ protocol: 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: allowImport ? ["import"] : [] });
     case "project.info":
       return reply(db.project);
     case "objects.list":
-      return reply(db.objects.filter((o) => o.address.startsWith(`plc:${p.device}/`)).map((o) => o.entry ?? { address: o.address, kind: "block", language: "SCL", knowHowProtected: false, isFailsafe: false, isSystem: false, fingerprint: "fp:" + sha(o.content).slice(0, 8) }));
+      return reply(db.objects.filter((o) => o.address.startsWith(`plc:${p.device}/`)).map(entry));
     case "objects.export": {
       const o = db.objects.find((x) => x.address === p.address);
       if (!o) return fail("NOT_FOUND", p.address);
-      const path = join(p.dir, "obj.scl");
-      writeFileSync(path, o.content);
-      const files = [{ path, role: "primary", sha256: sha(o.content) }];
-      return reply({ address: p.address, form: "scl", files, warnings: [], fingerprint: "fp:" + sha(o.content).slice(0, 8), bundleHash: "x" });
+      return reply(exportTo(o, p.dir));
     }
-    case "objects.import":
-      if (!argv.includes("--allow-fixture-import")) return fail("READ_ONLY", "imports need --allow-fixture-import on a fixture project");
-      return reply({ address: p.address, form: p.form, files: [], warnings: [], fingerprint: "fp:x", bundleHash: "x" });
+    case "objects.import": {
+      if (!allowImport) return fail("READ_ONLY", "imports need --allow-import");
+      const text = readFileSync(p.path, "utf8");
+      let o = db.objects.find((x) => x.address === p.address);
+      if (p.expectedTiaRevision === "absent") {
+        if (o) return fail("STALE_REVISION", "exists");
+        o = { address: p.address, content: text, form: p.form };
+        db.objects.push(o);
+      } else {
+        if (!o) return fail("NOT_FOUND", p.address);
+        if (fp(o) !== p.expectedTiaRevision) return fail("STALE_REVISION", "changed in TIA");
+        o.content = text.replace(/\bbegin\b/g, "BEGIN"); // TIA canonicalizes keyword casing
+      }
+      save(db);
+      return reply(exportTo(o, mkdtempSync(join(tmpdir(), "fake-bridge-"))));
+    }
+    case "objects.delete": {
+      if (!allowImport) return fail("READ_ONLY", "deletes need --allow-import");
+      const i = db.objects.findIndex((x) => x.address === p.address);
+      if (i < 0) return fail("NOT_FOUND", p.address);
+      if (fp(db.objects[i]) !== p.expectedTiaRevision) return fail("STALE_REVISION", "changed");
+      db.objects.splice(i, 1);
+      save(db);
+      return reply({ deleted: true });
+    }
+    case "plc.compile":
+      return reply((p.addresses ?? []).filter((a) => (db.objects.find((o) => o.address === a)?.content ?? "").includes("#undeclared")).map((a) => ({ address: a, severity: "error", description: "Tag #undeclared not defined" })));
     default:
       return fail("BAD_REQUEST", "unknown " + req.method);
   }

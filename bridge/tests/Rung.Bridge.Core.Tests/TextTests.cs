@@ -47,3 +47,9 @@ public class FixtureGuardTests
     [Fact] public void RefusesWrongMarker() => Assert.Throws<RpcException>(() => FixtureGuard.Check(true, Project(true, "something else")));
     [Fact] public void AllowsMarkedFixture() => FixtureGuard.Check(true, Project(true));
 }
+
+public class ImportGuardTests
+{
+    [Fact] public void AllowImportSkipsFixtureMarker() => FixtureGuard.CheckImport(true, false, @"C:\somewhere\Real.ap20");
+    [Fact] public void NoFlagsRefuse() => Assert.Equal("READ_ONLY", Assert.Throws<RpcException>(() => FixtureGuard.CheckImport(false, false, @"C:\somewhere\Real.ap20")).Code);
+}

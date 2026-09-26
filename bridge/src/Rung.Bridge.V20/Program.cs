@@ -10,6 +10,7 @@ namespace Rung.Bridge.V20
     {
         public string ProjectPath;
         public bool AllowFixtureImport;
+        public bool AllowImport;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -24,6 +25,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--allow-fixture-import":
                         a.AllowFixtureImport = true;
+                        break;
+                    case "--allow-import":
+                        a.AllowImport = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);

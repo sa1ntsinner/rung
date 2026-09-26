@@ -101,18 +101,21 @@ export async function replaceGuarded(path: string, data: string | Uint8Array, op
       }
     }
     try {
-      await retry(() => link(tmp, path)); // fails with EEXIST if an editor recreated the file
+      // link fails with EEXIST if an editor recreated the file; no retry on EPERM (no hard links on FAT/exFAT/shares)
+      await link(tmp, path);
       await unlink(tmp).catch(() => {});
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if (code === "EEXIST") throw new WorkspaceError("LOCAL_CHANGES", `${path} was recreated during publication; new content kept at ${tmp}`);
-      if (code === "EXDEV" || code === "ENOTSUP" || code === "EPERM") {
+      if (code === "EXDEV" || code === "ENOTSUP" || code === "EPERM" || code === "ENOSYS") {
         if (await exists(path)) throw new WorkspaceError("LOCAL_CHANGES", `${path} was recreated during publication`);
         await retry(() => rename(tmp, path)); // filesystems without hard links
       } else throw e;
     }
     return preimage ? { preimage } : {};
   } catch (e) {
+    // Never leave the destination empty: if the new file did not land, put the previous one back.
+    if (preimage && !(await exists(path))) await retry(() => rename(preimage!, path)).catch(() => {});
     if (!(e instanceof WorkspaceError && e.message.includes(tmp))) await unlink(tmp).catch(() => {});
     throw e;
   }

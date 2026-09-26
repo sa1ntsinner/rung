@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Preflight checks that run before any workspace file is written.
-import { realpath } from "node:fs/promises";
+import { readdir, realpath, unlink } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { findCaseCollisions } from "./address.js";
 
@@ -37,6 +37,29 @@ export function preflight(root: string, planned: readonly PlannedPath[]): Prefli
     ok.push(p);
   }
   return { ok, collisions, tooLong };
+}
+
+/** Removes temp files left in plc/ by a crash during an atomic write (".<name>.rung-tmp-<hex>"). Returns how many. */
+export async function sweepTempFiles(root: string): Promise<number> {
+  let removed = 0;
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (/^\..+\.rung-tmp-[0-9a-f]{12}$/.test(e.name)) {
+        await unlink(p).catch(() => {});
+        removed++;
+      }
+    }
+  };
+  await walk(join(root, "plc"));
+  return removed;
 }
 
 /** True if the nearest existing ancestor of `target` resolves (through junctions/symlinks) inside `root`. */

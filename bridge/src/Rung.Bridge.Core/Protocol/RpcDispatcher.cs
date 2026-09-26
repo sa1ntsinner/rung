@@ -90,6 +90,11 @@ namespace Rung.Bridge.Core.Protocol
                     return Session.Export(Str(p, "address"), Str(p, "form"), Str(p, "dir"));
                 case "objects.import":
                     return Session.Import(Str(p, "address"), Str(p, "form"), Str(p, "path"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
+                case "objects.delete":
+                    Session.Delete(Str(p, "address"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
+                    return new { deleted = true };
+                case "plc.compile":
+                    return Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
                 default:
                     throw new RpcException(ErrorCodes.BadRequest, "Unknown method: " + method);
             }
@@ -100,6 +105,19 @@ namespace Rung.Bridge.Core.Protocol
             if (p.ValueKind != JsonValueKind.Object || !p.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.String || v.GetString().Length == 0)
                 throw new RpcException(ErrorCodes.BadRequest, "Missing or invalid string parameter: " + name);
             return v.GetString();
+        }
+
+        static string[] StrArray(JsonElement p, string name)
+        {
+            if (p.ValueKind != JsonValueKind.Object || !p.TryGetProperty(name, out var v) || v.ValueKind == JsonValueKind.Null) return new string[0];
+            if (v.ValueKind != JsonValueKind.Array) throw new RpcException(ErrorCodes.BadRequest, "Parameter must be an array of strings: " + name);
+            var list = new System.Collections.Generic.List<string>();
+            foreach (var e in v.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.String) throw new RpcException(ErrorCodes.BadRequest, "Parameter must be an array of strings: " + name);
+                list.Add(e.GetString());
+            }
+            return list.ToArray();
         }
 
         static string Error(bool hasId, JsonElement id, string code, string message) =>

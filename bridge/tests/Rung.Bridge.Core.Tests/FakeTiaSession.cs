@@ -36,6 +36,16 @@ public sealed class FakeTiaSession : ITiaSession
         return new ExportResult { Address = address, Form = form, Files = files, Warnings = new string[0], Fingerprint = entry.Fingerprint, BundleHash = Bundle.Hash(files) };
     }
 
+    public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses) =>
+        new[] { new CompileMessage { Address = addresses.Length > 0 ? addresses[0] : null, Severity = "error", Path = "PLC_1/Fx_Broken", Description = "Tag #Missing not defined" } };
+
+    public void Delete(string address, string expectedTiaRevision, string operationId)
+    {
+        var e = Objects.Find(o => o.Address == address) ?? throw new RpcException(ErrorCodes.NotFound, address);
+        if (e.Fingerprint != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address);
+        Objects.Remove(e);
+    }
+
     public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId) =>
         throw new RpcException(ErrorCodes.UnsupportedCapability, "fake session does not import");
 }

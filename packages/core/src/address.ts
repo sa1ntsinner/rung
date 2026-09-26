@@ -91,18 +91,21 @@ export function addressToStem(a: Address): string {
 }
 
 export function pathToAddress(p: string): { address: Address; form: TextForm } | null {
-  try {
-    if (p.includes("\\") || !p.startsWith("plc/")) return null;
-    const parts = p.slice(4).split("/");
-    const file = parts[parts.length - 1]!;
-    const form = FORMS.find((f) => file.endsWith("." + f));
-    if (!form) return null;
-    parts[parts.length - 1] = file.slice(0, -(form.length + 1));
-    const { address } = decode(parts);
-    return addressToPath(address, form) === p ? { address, form } : null;
-  } catch {
-    return null;
+  if (p.includes("\\") || !p.startsWith("plc/")) return null;
+  const parts = p.slice(4).split("/");
+  const file = parts[parts.length - 1]!;
+  // A leaf may itself end in something that looks like a form (block "Valve.tags" as xml): try every suffix.
+  for (const form of FORMS) {
+    if (!file.endsWith("." + form)) continue;
+    try {
+      const candidate = [...parts.slice(0, -1), file.slice(0, -(form.length + 1))];
+      const { address } = decode(candidate);
+      if (addressToPath(address, form) === p) return { address, form };
+    } catch {
+      /* try the next form */
+    }
   }
+  return null;
 }
 
 /** Pairs of paths that would land on the same file on case-insensitive or normalizing filesystems. */

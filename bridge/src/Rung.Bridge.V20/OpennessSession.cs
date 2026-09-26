@@ -89,6 +89,7 @@ namespace Rung.Bridge.V20
                     if (portal.LocalSessions.Count > 0) throw new RpcException(ErrorCodes.MultiuserUnsupported, "Multiuser local sessions are not supported yet.");
                     throw new RpcException(ErrorCodes.NoProject, "The TIA Portal instance has no matching project open.");
                 }
+                SweepWorkDirs();
                 return new OpennessSession(portal, project, args, emit);
             }
             catch (EngineeringSecurityException e)
@@ -279,13 +280,46 @@ namespace Rung.Bridge.V20
                 WalkWatch(plc, device, g, new List<string>(path) { g.Name }, refs);
         }
 
+        /// <summary>
+        /// Cached references can go stale when objects are renamed, moved or deleted in TIA between
+        /// inventory and use; only return one that still sits at exactly this address.
+        /// </summary>
         ObjectRef Resolve(string address)
         {
-            if (_index.TryGetValue(address, out var r)) return r;
+            if (_index.TryGetValue(address, out var r) && CurrentAddress(r) == address) return r;
             var parts = AddressFormat.Parse(address);
             ListObjects(parts.Device);
-            if (_index.TryGetValue(address, out r)) return r;
+            if (_index.TryGetValue(address, out r) && CurrentAddress(r) == address) return r;
             throw new RpcException(ErrorCodes.NotFound, "No object at " + address);
+        }
+
+        static string CurrentAddress(ObjectRef r)
+        {
+            try
+            {
+                var groups = new List<string>();
+                object g = r.ParentGroup;
+                for (;;)
+                {
+                    if (g is PlcBlockUserGroup bu) { groups.Insert(0, bu.Name); g = bu.Parent; }
+                    else if (g is PlcTypeUserGroup tu) { groups.Insert(0, tu.Name); g = tu.Parent; }
+                    else if (g is PlcTagTableUserGroup gu) { groups.Insert(0, gu.Name); g = gu.Parent; }
+                    else if (g is PlcWatchAndForceTableUserGroup wu) { groups.Insert(0, wu.Name); g = wu.Parent; }
+                    else break;
+                }
+                var device = AddressFormat.Parse(r.Entry.Address).Device;
+                switch (r.Obj)
+                {
+                    case PlcBlock b: return Addr(device, "block", groups, b.Name, b.Namespace);
+                    case PlcType t: return Addr(device, "type", groups, t.Name, t.Namespace);
+                    case PlcTagTable tt: return Addr(device, "tagtable", groups, tt.Name, null);
+                    case PlcWatchTable w: return Addr(device, "watchtable", groups, w.Name, null);
+                    case PlcForceTable f: return Addr(device, "forcetable", groups, f.Name, null);
+                    default: return null;
+                }
+            }
+            catch (EngineeringException) { return null; } // deleted or otherwise unreachable
+            catch (AddressException) { return null; }
         }
 
         /// <summary>Re-reads the revision of one object without a full inventory.</summary>
@@ -375,10 +409,14 @@ namespace Rung.Bridge.V20
         public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId)
         {
             Alive();
-            FixtureGuard.Check(_args.AllowFixtureImport, _project.Path.FullName);
-            var r = Resolve(address);
-            if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
-            if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+            FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
+            if (!Guid.TryParseExact(operationId, "D", out var opGuid))
+                throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
+            operationId = opGuid.ToString("D");
+            var isNew = expectedTiaRevision == "absent";
+            var r = isNew ? NewObjectRef(address, form) : Resolve(address);
+            if (FormPolicy.IsReadOnly(r.Entry) || form == "protected.yaml") throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+            if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
             var name = r.Entry.Address;
             IList<string> imported;
             _inImport = true;
@@ -387,9 +425,11 @@ namespace Rung.Bridge.V20
                 using (var access = _portal.ExclusiveAccess("rung: importing " + AddressFormat.Parse(address).Name))
                 using (var tx = access.Transaction(_project, "rung import " + operationId))
                 {
-                    if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+                    if (isNew) r.ParentGroup = EnsureGroup(r);
+                    else if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
                     imported = ImportForm(r, form, path, operationId);
-                    var want = AddressFormat.Parse(address).Name;
+                    var parts = AddressFormat.Parse(address);
+                    var want = Identity(parts.Name, parts.Namespace);
                     if (imported.Count != 1 || imported[0] != want)
                         throw new RpcException(ErrorCodes.ImportFailed, "Import would change [" + string.Join(", ", imported) + "] instead of exactly " + want + "; rolled back");
                     tx.CommitOnDispose();
@@ -399,7 +439,11 @@ namespace Rung.Bridge.V20
             {
                 throw new RpcException(ErrorCodes.ImportFailed, e.Message);
             }
-            finally { _inImport = false; }
+            finally
+            {
+                _inImport = false;
+                try { Directory.Delete(WorkDir(operationId, "src"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
 
             // Compile outside the transaction (Siemens forbids compile inside it), then return the fresh export.
             _index.Clear();
@@ -407,8 +451,173 @@ namespace Rung.Bridge.V20
             try { (fresh.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>()?.Compile(); }
             catch (EngineeringException) { }
             _index.Clear();
-            var outDir = Path.Combine(Path.GetTempPath(), "rung-bridge", operationId);
+            var outDir = WorkDir(operationId, "out");
             return Export(address, "auto", outDir);
+        }
+
+        /// <summary>Target for an object that does not exist yet; its folder is created inside the import transaction.</summary>
+        ObjectRef NewObjectRef(string address, string form)
+        {
+            var parts = AddressFormat.Parse(address);
+            if (parts.Unit != null) throw new RpcException(ErrorCodes.UnsupportedObject, "Creating objects in software units is not supported yet");
+            ListObjects(parts.Device);
+            if (_index.ContainsKey(address)) throw new RpcException(ErrorCodes.StaleRevision, address + " already exists in TIA Portal");
+            var allowed = parts.Kind == "block" ? new[] { "scl", "awl", "db", "s7dcl", "xml" }
+                : parts.Kind == "type" ? new[] { "udt", "s7dcl", "xml" }
+                : parts.Kind == "tagtable" ? new[] { "tags.xml" } : new string[0];
+            if (Array.IndexOf(allowed, form) < 0) throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create a " + parts.Kind + " from form " + form);
+            return new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind, Fingerprint = "absent" }, Plc = Plc(parts.Device) };
+        }
+
+        /// <summary>Finds or creates the user-group chain named in the address (called inside the transaction).</summary>
+        static object EnsureGroup(ObjectRef r)
+        {
+            var parts = AddressFormat.Parse(r.Entry.Address);
+            switch (parts.Kind)
+            {
+                case "block":
+                {
+                    PlcBlockGroup g = r.Plc.BlockGroup;
+                    foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
+                    return g;
+                }
+                case "type":
+                {
+                    PlcTypeGroup g = r.Plc.TypeGroup;
+                    foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
+                    return g;
+                }
+                case "tagtable":
+                {
+                    PlcTagTableGroup g = r.Plc.TagTableGroup;
+                    foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
+                    return g;
+                }
+                default:
+                    throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create " + parts.Kind);
+            }
+        }
+
+        // ---------------------------------------------------------------- delete
+
+        public void Delete(string address, string expectedTiaRevision, string operationId)
+        {
+            Alive();
+            FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
+            if (!Guid.TryParseExact(operationId, "D", out _)) throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
+            var r = Resolve(address);
+            if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+            if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal; delete not confirmed");
+            _inImport = true;
+            try
+            {
+                using (var access = _portal.ExclusiveAccess("rung: deleting " + AddressFormat.Parse(address).Name))
+                using (var tx = access.Transaction(_project, "rung delete " + operationId))
+                {
+                    if (CurrentAddress(r) != address || Revision(r) != expectedTiaRevision)
+                        throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal; delete not confirmed");
+                    switch (r.Obj)
+                    {
+                        case PlcBlock b: b.Delete(); break;
+                        case PlcType t: t.Delete(); break;
+                        case PlcTagTable tt: tt.Delete(); break;
+                        case PlcWatchTable w: w.Delete(); break;
+                        default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot delete " + address);
+                    }
+                    tx.CommitOnDispose();
+                }
+            }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.ImportFailed, e.Message); }
+            finally { _inImport = false; }
+            _index.Remove(address);
+        }
+
+        // ---------------------------------------------------------------- compile
+
+        public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses)
+        {
+            Alive();
+            var plc = Plc(device);
+            if (!_index.Values.Any(v => v.Plc == plc)) ListObjects(device);
+            var byName = _index.Values.Where(v => v.Plc == plc)
+                .GroupBy(v => AddressFormat.Parse(v.Entry.Address).Name, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
+            var messages = new List<CompileMessage>();
+            try
+            {
+                if (addresses.Length == 0)
+                {
+                    var compiler = plc.GetService<ICompilable>();
+                    if (compiler == null) throw new RpcException(ErrorCodes.UnsupportedCapability, "PLC software cannot be compiled");
+                    Flatten(compiler.Compile().Messages, null, byName, messages);
+                }
+                else
+                {
+                    foreach (var a in addresses)
+                    {
+                        var r = Resolve(a);
+                        var c = (r.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>();
+                        if (c == null) continue; // types and tables are compiled together with their users
+                        Flatten(c.Compile().Messages, a, byName, messages);
+                    }
+                }
+            }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+            return messages;
+        }
+
+        static void Flatten(CompilerResultMessageComposition list, string address, Dictionary<string, string> byName, List<CompileMessage> into)
+        {
+            foreach (CompilerResultMessage m in list)
+            {
+                if (m.Messages.Count == 0 && !string.IsNullOrEmpty(m.Description) && m.State != CompilerResultState.Success)
+                {
+                    var target = address;
+                    if (target == null && !string.IsNullOrEmpty(m.Path))
+                    {
+                        // The path ends with the object name, sometimes followed by " (FB1)" (exact shape: fact F7).
+                        var last = m.Path.Split(new[] { '>', '/', '\\' }).Last().Trim();
+                        var paren = last.LastIndexOf(" (", StringComparison.Ordinal);
+                        if (paren > 0) last = last.Substring(0, paren);
+                        if (byName.TryGetValue(last.Trim('"'), out var hit)) target = hit;
+                    }
+                    into.Add(new CompileMessage
+                    {
+                        Address = target,
+                        Severity = m.State == CompilerResultState.Error ? "error" : m.State == CompilerResultState.Warning ? "warning" : "info",
+                        Path = m.Path,
+                        Description = m.Description,
+                    });
+                }
+                Flatten(m.Messages, address, byName, into);
+            }
+        }
+
+        static string Identity(string name, string ns) => string.IsNullOrEmpty(ns) ? name : ns + "~" + name;
+
+        static string TryNamespace(IEngineeringObject o)
+        {
+            try { return o.GetAttribute("Namespace") as string; } catch (EngineeringException) { return null; }
+        }
+
+        /// <summary>Per-operation scratch space in %TEMP%/rung-bridge/{uuid}/{part} (operationId is validated as a UUID).</summary>
+        static string WorkDir(string operationId, string part)
+        {
+            var d = Path.Combine(Path.GetTempPath(), "rung-bridge", operationId, part);
+            Directory.CreateDirectory(d);
+            return d;
+        }
+
+        /// <summary>Removes scratch folders of earlier bridge runs.</summary>
+        static void SweepWorkDirs()
+        {
+            try
+            {
+                foreach (var d in Directory.GetDirectories(Path.Combine(Path.GetTempPath(), "rung-bridge")))
+                    if (Directory.GetLastWriteTimeUtc(d) < DateTime.UtcNow.AddDays(-1)) Directory.Delete(d, true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
 
         IList<string> ImportForm(ObjectRef r, string form, string path, string operationId)
@@ -420,7 +629,7 @@ namespace Rung.Bridge.V20
                 case "db":
                 case "udt":
                 {
-                    var tmp = Path.Combine(Path.GetTempPath(), "rung-bridge", operationId, Stem + "." + form);
+                    var tmp = Path.Combine(WorkDir(operationId, "src"), Stem + "." + form);
                     Directory.CreateDirectory(Path.GetDirectoryName(tmp));
                     File.WriteAllBytes(tmp, TextNormalizer.WithBom(File.ReadAllBytes(path)));
                     var source = r.Plc.ExternalSourceGroup.ExternalSources.CreateFromFile("rung_" + operationId.Replace("-", ""), tmp);
@@ -430,7 +639,7 @@ namespace Rung.Bridge.V20
                         if (r.ParentGroup is PlcBlockUserGroup bg) created = source.GenerateBlocksFromSource(bg, GenerateBlockOption.None);
                         else if (r.ParentGroup is PlcTypeUserGroup tg) created = source.GenerateBlocksFromSource(tg, GenerateBlockOption.None);
                         else created = source.GenerateBlocksFromSource(GenerateBlockOption.None);
-                        return created.Select(o => o.GetAttribute("Name") as string).ToList();
+                        return created.Select(o => Identity(o.GetAttribute("Name") as string, TryNamespace(o))).ToList();
                     }
                     finally { source.Delete(); }
                 }
@@ -439,14 +648,14 @@ namespace Rung.Bridge.V20
                     var dir = new DirectoryInfo(Path.GetDirectoryName(path));
                     var stem = Path.GetFileNameWithoutExtension(path);
                     if (r.ParentGroup is PlcBlockGroup bg)
-                        return bg.Blocks.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcBlocks.Select(b => b.Name).ToList();
+                        return bg.Blocks.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcBlocks.Select(b => Identity(b.Name, b.Namespace)).ToList();
                     if (r.ParentGroup is PlcTypeGroup tg)
-                        return tg.Types.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcTypes.Select(t => t.Name).ToList();
+                        return tg.Types.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcTypes.Select(t => Identity(t.Name, t.Namespace)).ToList();
                     break;
                 }
                 case "xml":
-                    if (r.ParentGroup is PlcBlockGroup xb) return xb.Blocks.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(b => b.Name).ToList();
-                    if (r.ParentGroup is PlcTypeGroup xt) return xt.Types.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(t => t.Name).ToList();
+                    if (r.ParentGroup is PlcBlockGroup xb) return xb.Blocks.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(b => Identity(b.Name, b.Namespace)).ToList();
+                    if (r.ParentGroup is PlcTypeGroup xt) return xt.Types.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(t => Identity(t.Name, t.Namespace)).ToList();
                     break;
                 case "tags.xml":
                     if (r.ParentGroup is PlcTagTableGroup tt) return tt.TagTables.Import(new FileInfo(path), ImportOptions.Override).Select(t => t.Name).ToList();
