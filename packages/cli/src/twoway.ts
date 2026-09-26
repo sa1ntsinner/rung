@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
-import { relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, loadConfig } from "@rung/core";
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type SyncReport } from "@rung/sync";
 import { readFile } from "node:fs/promises";
@@ -143,7 +143,15 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
   io.stdout(`${s.objects} objects, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
   for (const [label, list] of [["conflicted", s.conflicted], ["file dirty", s.fileDirty], ["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
-  return s.conflicted.length || s.recoveryRequired.length ? 2 : 0;
+  // compile errors TIA reported and that still apply (QA-4)
+  let compileErrors: { path?: string; line?: number; message: string; severity: string; code: string }[] = [];
+  try {
+    compileErrors = ((JSON.parse(await readFile(join(dir, ".rung", "diagnostics.json"), "utf8")) as { items?: typeof compileErrors }).items ?? []).filter((d) => d.code === "COMPILE" && d.severity === "error" && !/^Compiling finished/.test(d.message));
+  } catch {
+    /* no pass yet */
+  }
+  for (const d of compileErrors) io.stdout(`  ${"compile error".padEnd(16)} ${d.path ?? ""}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  return s.conflicted.length || s.recoveryRequired.length || compileErrors.length ? 2 : 0;
 }
 
 export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged", io: Io): Promise<number> {

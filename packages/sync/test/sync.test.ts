@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
@@ -164,6 +164,34 @@ describe("syncOnce", () => {
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#y := 23;");
   });
 
+  it("resolve --merged takes a hand-merged .conflict file and keeps a recovery copy of the rest (QA-3)", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 21;"));
+    t.bridge.edit(A, { ".scl": srcA.replace("#y := 2;", "#y := 22;") });
+    await t.sync();
+    // the user merges inside the .conflict file and removes the markers
+    t.write(pA + ".conflict", srcA.replace("#y := 2;", "#y := 21 + 22;"));
+    await t.withState((s) => resolveConflict(t.root, s, pA, "merged"));
+    expect(t.read(pA)).toContain("#y := 21 + 22;");
+    expect(existsSync(t.f(pA + ".conflict"))).toBe(false);
+    const recovered = readdirSync(t.f(".rung/recovery"), { recursive: true }).map(String);
+    expect(recovered.some((f) => f.endsWith(".scl"))).toBe(true); // the replaced primary is kept
+    const r = await t.sync();
+    expect(r.imported).toBe(1);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#y := 21 + 22;");
+  });
+
+  it("resolve --merged refuses while both the file and the .conflict file still have markers", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 21;"));
+    t.bridge.edit(A, { ".scl": srcA.replace("#y := 2;", "#y := 22;") });
+    await t.sync();
+    t.write(pA, t.read(pA + ".conflict"));
+    await expect(t.withState((s) => resolveConflict(t.root, s, pA, "merged"))).rejects.toThrow(/conflict markers/);
+  });
+
   it("resolve --theirs takes the TIA version", async () => {
     const t = setup();
     await t.sync();
@@ -230,6 +258,30 @@ describe("syncOnce", () => {
     expect(t.bridge.imports).toEqual([]);
   });
 
+  it("refuses to import a file that is not UTF-8 instead of dropping its characters (QA-7)", async () => {
+    const t = setup();
+    await t.sync();
+    // "Grüße" in Windows-1252: ü = 0xFC, ß = 0xDF
+    writeFileSync(t.f(pA), Buffer.concat([Buffer.from(srcA.replace("BEGIN", "BEGIN\n  // Gr"), "utf8"), Buffer.from([0xfc, 0xdf]), Buffer.from("e\n", "utf8")]));
+    const r = await t.sync();
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: "INVALID_ENCODING", address: A }));
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("skips an unreadable file for one pass instead of aborting the whole sync (QA-8)", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 9;"));
+    chmodSync(t.f(pA), 0o000);
+    try {
+      const r = await t.sync();
+      expect(r.warnings.map((w) => w.code)).toContain("FILE_LOCKED");
+    } finally {
+      chmodSync(t.f(pA), 0o644);
+    }
+    expect((await t.sync()).imported).toBe(1);
+  });
+
   it("publishes compile diagnostics for imported objects", async () => {
     const t = setup();
     await t.sync();
@@ -241,6 +293,33 @@ describe("syncOnce", () => {
     const saved = JSON.parse(readFileSync(join(t.root, ".rung", "diagnostics.json"), "utf8"));
     expect(saved.items).toHaveLength(1);
     expect(saved.seq).toBeGreaterThan(0);
+  });
+
+  it("keeps compile errors of a still-broken block across quiet passes, and drops them once it compiles (QA-4)", async () => {
+    const t = setup();
+    await t.sync();
+    t.bridge.compileErrors.set(A, "Tag #q not defined");
+    t.write(pA, srcA.replace("#x := 1;", "#q := 1;"));
+    await t.sync();
+    const saved = () => JSON.parse(readFileSync(join(t.root, ".rung", "diagnostics.json"), "utf8")).items as { code: string; message: string }[];
+    const quiet = await t.sync(); // nothing changed: no import, no compile
+    expect(quiet.diagnostics).toEqual([]); // the report only carries what is new
+    expect(saved().map((d) => d.message)).toEqual(["Tag #q not defined"]);
+    t.bridge.compileErrors.delete(A);
+    t.write(pA, srcA);
+    await t.sync();
+    expect(saved()).toEqual([]);
+  });
+
+  it("drops a kept compile error when the block changes in TIA Portal", async () => {
+    const t = setup();
+    await t.sync();
+    t.bridge.compileErrors.set(A, "Tag #q not defined");
+    t.write(pA, srcA.replace("#x := 1;", "#q := 1;"));
+    await t.sync();
+    t.bridge.edit(A, { ".scl": srcA.replace("#x := 1;", "#x := 5;") }); // fixed in TIA
+    await t.sync();
+    expect(JSON.parse(readFileSync(join(t.root, ".rung", "diagnostics.json"), "utf8")).items).toEqual([]);
   });
 
   it("keeps the file dirty and stops on an unknown import outcome, never retrying automatically", async () => {
@@ -336,6 +415,35 @@ describe("syncOnce", () => {
     const r = await t.sync();
     expect(r.warnings.map((w) => w.code)).toContain("LOCAL_CHANGES");
     expect(t.read(pA)).toBe("my edit\n");
+  });
+
+  it("resolve --ours recreates an object that was deleted in TIA; the conflict does not come back (QA-5)", async () => {
+    const t = setup();
+    await t.sync();
+    const mine = srcA.replace("#x := 1;", "#x := 7;");
+    t.write(pA, mine);
+    t.bridge.objects.delete(A);
+    await t.sync();
+    await t.withState((s) => resolveConflict(t.root, s, pA, "ours"));
+    const r = await t.sync();
+    expect(r.created).toBe(1);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 7;");
+    const again = await t.sync();
+    expect(again.warnings.map((w) => w.code)).not.toContain("LOCAL_CHANGES");
+    expect(again.conflicts).toBe(0);
+  });
+
+  it("resolve --theirs accepts a TIA delete and keeps the edited file in recovery (QA-5)", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, "my edit\n");
+    t.bridge.objects.delete(A);
+    await t.sync();
+    await t.withState((s) => resolveConflict(t.root, s, pA, "theirs"));
+    expect(existsSync(t.f(pA))).toBe(false);
+    expect(readdirSync(t.f(".rung/recovery"), { recursive: true }).map(String).some((f) => f.endsWith("Fx_A.scl"))).toBe(true);
+    const r = await t.sync();
+    expect(r.created + r.imported + r.conflicts).toBe(0);
   });
 
   it("treats an object new on both sides with different content as a conflict", async () => {

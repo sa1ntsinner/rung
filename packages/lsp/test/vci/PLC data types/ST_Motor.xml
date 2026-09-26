@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <SW.Types.PlcStruct ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="None">
+    <Member Name="Current" Datatype="Real" />
+    <Member Name="State" Datatype="Struct">
+      <Member Name="Run" Datatype="Bool" />
+    </Member>
+  </Section>
+</Sections></Interface>
+      <Name>ST_Motor</Name>
+    </AttributeList>
+  </SW.Types.PlcStruct>
+</Document>

@@ -15,7 +15,8 @@ export const RULES = [
   { prefix: "tools/", license: "MIT" },
 ];
 const EXT = /\.(ts|mts|mjs|js|cs)$/;
-const SKIP = /(^|\/)(node_modules|dist|out|bin|obj|\.rung|TestResults)(\/|$)/;
+// editors/zed/grammars: Zed's own checkout of the grammar repository when the dev extension is built
+const SKIP = /(^|\/)(node_modules|dist|out|bin|obj|\.rung|\.rung-live|TestResults|target)(\/|$)|^editors\/zed\/grammars\//;
 
 export function expectedLicense(rel) {
   return RULES.find((r) => rel.startsWith(r.prefix))?.license;

@@ -1,0 +1,23 @@
+FUNCTION_BLOCK "FB_Pump"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Enable : Bool;
+   END_VAR
+   VAR
+      Lad : "FB_Lad";
+      Motor : "ST_Motor";
+      Sub : "UDT_Scl";
+      Scaled : Real;
+   END_VAR
+
+BEGIN
+   #Lad(Start := #Enable AND "Pump running");
+   #Motor.State.Run := #Lad.Done AND #Lad.Cfg.Limit > "C_MAX";
+   #Scaled := SCALE_X(MIN := 0.0, VALUE := NORM_X(MIN := 0, VALUE := 5, MAX := 10), MAX := 100.0);
+   "DB_Plant".Level := #Motor.Current + "DB_Xml".Speed + "DB_Inst".Cfg.Limit;
+   #Sub.Count := "Axis_1".StatusWord;
+   #Sub.Count := "Gateway_1~Module_2"; // hardware identifier (system constant), not exported by VCI
+   #Motor.Missing := TRUE;
+   "Nope".x := 1;
+END_FUNCTION_BLOCK

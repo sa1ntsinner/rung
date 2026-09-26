@@ -44,6 +44,23 @@ function localDecl(block: BlockModel, name: string): VarDecl | undefined {
   return block.vars.find((v) => v.name.toUpperCase() === u);
 }
 
+/**
+ * A variable visible without qualification in `block`: its own declarations, the FB's variables for an IEC
+ * METHOD, and for an instance/typed DB (`DATA_BLOCK "X" "Fb"`) the interface of that FB or UDT.
+ */
+function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string): Member | undefined {
+  const own = localDecl(block, name);
+  if (own) return { ...own, uri };
+  const u = name.toUpperCase();
+  if (block.owner) {
+    const g = index.global(block.owner);
+    const v = g?.block?.vars.find((x) => x.name.toUpperCase() === u);
+    if (v) return { ...v, uri: g!.uri };
+  }
+  if (block.kind === "DB" && block.dbOf) return index.membersOfType(block.dbOf).find((m) => m.name.toUpperCase() === u);
+  return undefined;
+}
+
 /** Reference (or member of one) under the cursor. */
 function refAt(index: WorkspaceIndex, uri: string, offset: number): { block: BlockModel; ref: Ref; member: number } | undefined {
   const block = index.blockAt(uri, offset);
@@ -56,9 +73,9 @@ function refAt(index: WorkspaceIndex, uri: string, offset: number): { block: Blo
   return undefined;
 }
 
-function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref): Member[] {
+function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref, uri: string): Member[] {
   if (ref.kind === "local") {
-    const d = localDecl(block, ref.name);
+    const d = scopeDecl(index, uri, block, ref.name);
     return d ? index.membersOf(d) : [];
   }
   if (ref.kind === "global") {
@@ -75,22 +92,25 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   for (const block of doc.parsed.blocks) {
     for (const ref of block.refs) {
       if (ref.kind === "local") {
-        const known = localDecl(block, ref.name) || ref.name.toUpperCase() === block.name.toUpperCase();
+        const known = scopeDecl(index, uri, block, ref.name) || ref.name.toUpperCase() === block.name.toUpperCase();
         if (!known) {
           out.push({ start: ref.start, end: ref.end, severity: "warning", message: `#${ref.name} is not declared in ${block.name}`, code: "UNDECLARED" });
           continue;
         }
       }
-      if (ref.kind === "global" && !index.global(ref.name)) {
+      // "Device~Module" names are hardware identifiers (system constants): exports never contain them
+      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~")) {
         out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored)`, code: "UNKNOWN_GLOBAL" });
         continue;
       }
       // Member names: only report when the type is known completely.
-      const root = rootMembers(index, block, ref);
+      const root = rootMembers(index, block, ref, uri);
       if (!root.length) continue;
       const chain = index.resolveChain(root, ref.members);
       for (let i = 0; i < chain.length; i++) {
         if (chain[i]) continue;
+        // the parent's type is not known (system type, unmirrored UDT, elementary bit access): no verdict
+        if (i > 0 && !index.membersOf(chain[i - 1]!).length) break;
         const m = ref.members[i]!;
         out.push({ start: m.start, end: m.end, severity: "warning", message: `${m.name} is not a member of ${i === 0 ? ref.name : ref.members[i - 1]!.name}`, code: "UNKNOWN_MEMBER" });
         break;
@@ -126,20 +146,52 @@ export function definition(index: WorkspaceIndex, uri: string, offset: number): 
   const { block, ref, member } = hit;
   if (member < 0) {
     if (ref.kind === "local") {
-      const d = localDecl(block, ref.name);
-      return d ? { uri, start: d.start, end: d.end } : undefined;
+      const d = scopeDecl(index, uri, block, ref.name);
+      return d?.uri !== undefined && d.start !== undefined ? { uri: d.uri, start: d.start, end: d.end! } : undefined;
     }
     const g = index.global(ref.name);
     return g ? { uri: g.uri, start: g.start, end: g.end } : undefined;
   }
-  const chain = index.resolveChain(rootMembers(index, block, ref), ref.members.slice(0, member + 1));
+  const chain = index.resolveChain(rootMembers(index, block, ref, uri), ref.members.slice(0, member + 1));
   const m = chain[member];
   return m?.uri !== undefined && m.start !== undefined ? { uri: m.uri, start: m.start, end: m.end! } : undefined;
+}
+
+/** Declaration (possibly nested in a STRUCT) whose name is under the cursor. */
+function declAt(vars: VarDecl[], offset: number): VarDecl | undefined {
+  for (const v of vars) {
+    if (offset >= v.start && offset <= v.end) return v;
+    const inner = v.members ? declAt(v.members, offset) : undefined;
+    if (inner) return inner;
+  }
+  return undefined;
+}
+
+/** Every place in the workspace whose resolved declaration is `target` (members of DBs, UDTs, FB interfaces). */
+function memberReferences(index: WorkspaceIndex, target: Location, includeDeclaration: boolean): Location[] {
+  const out: Location[] = includeDeclaration ? [target] : [];
+  const same = (m: Member | undefined) => m?.uri === target.uri && m.start === target.start;
+  for (const d of index.docs.values())
+    for (const b of d.parsed?.blocks ?? [])
+      for (const r of b.refs) {
+        if (!r.members.length && r.kind !== "local") continue;
+        const root = rootMembers(index, b, r, d.uri);
+        if (r.kind === "local" && same(scopeDecl(index, d.uri, b, r.name))) out.push({ uri: d.uri, start: r.start, end: r.end });
+        if (!r.members.length || !root.length) continue;
+        index.resolveChain(root, r.members).forEach((m, i) => {
+          if (same(m)) out.push({ uri: d.uri, start: r.members[i]!.start, end: r.members[i]!.end });
+        });
+      }
+  return out;
 }
 
 export function references(index: WorkspaceIndex, uri: string, offset: number, includeDeclaration = true): Location[] {
   const hit = refAt(index, uri, offset);
   const out: Location[] = [];
+  // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), or a declaration in a DB/UDT/FB
+  const onDecl = !hit ? declAt(index.blockAt(uri, offset)?.vars ?? [], offset) : undefined;
+  const memberTarget = hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset) : onDecl && index.blockAt(uri, offset)?.kind !== "FC" ? { uri, start: onDecl.start, end: onDecl.end } : undefined;
+  if (memberTarget) return memberReferences(index, memberTarget, includeDeclaration);
   if (hit && hit.member < 0 && hit.ref.kind === "local") {
     const u = hit.ref.name.toUpperCase();
     for (const r of hit.block.refs) if (r.kind === "local" && r.name.toUpperCase() === u) out.push({ uri, start: r.start, end: r.end });
@@ -173,12 +225,12 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
   if (!hit) return undefined;
   const { block, ref, member } = hit;
   if (member >= 0) {
-    const m = index.resolveChain(rootMembers(index, block, ref), ref.members.slice(0, member + 1))[member];
+    const m = index.resolveChain(rootMembers(index, block, ref, uri), ref.members.slice(0, member + 1))[member];
     const seg = ref.members[member]!;
     return m ? { markdown: describeMember(m), start: seg.start, end: seg.end } : undefined;
   }
   if (ref.kind === "local") {
-    const d = localDecl(block, ref.name);
+    const d = scopeDecl(index, uri, block, ref.name);
     if (!d) return undefined;
     return { markdown: describeMember(d) + (d.init ? `\n\nStart value: \`${d.init}\`` : ""), start: ref.start, end: ref.end };
   }
@@ -190,6 +242,7 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
   }
   const g = index.global(ref.name);
   if (!g) return undefined;
+  if (g.tag?.value !== undefined) return { markdown: `PLC constant **${g.name}** : \`${g.tag.dataType}\` = \`${g.tag.value}\` (table ${g.tag.table})`, start: ref.start, end: ref.end };
   if (g.tag) return { markdown: `PLC tag **${g.name}** : \`${g.tag.dataType}\`${g.tag.address ? ` at \`${g.tag.address}\`` : ""} (table ${g.tag.table})`, start: ref.start, end: ref.end };
   const b = g.block;
   if (!b) return { markdown: `**${g.name}** (graphical or protected object)`, start: ref.start, end: ref.end };

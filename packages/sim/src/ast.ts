@@ -11,7 +11,8 @@ export type Expr =
 
 export interface LRef {
   root: { kind: "local" | "global" | "ident"; name: string };
-  path: ({ member: string } | { index: Expr[] })[];
+  /** `.%X3`, `.%B0`, `.%W1`, `.%D0`: bit/byte/word/dword slice of a bit string or integer (always last). */
+  path: ({ member: string } | { index: Expr[] } | { slice: "X" | "B" | "W" | "D"; n: number })[];
   start: number;
 }
 
@@ -59,7 +60,16 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
   if (hash > 0) {
     const prefix = text.slice(0, hash).toUpperCase();
     const val = text.slice(hash + 1).replace(/_/g, "");
-    if (/^(T|TIME|LT|LTIME)$/.test(prefix)) return { k: "lit", value: parseTime(text), type: "time" };
+    if (/^(T|TIME|LT|LTIME|S5T|S5TIME)$/.test(prefix)) return { k: "lit", value: parseTime(text), type: "time" };
+    if (/^(TOD|TIME_OF_DAY|LTOD|LTIME_OF_DAY)$/.test(prefix)) {
+      const [h = 0, m = 0, sec = 0] = val.split(":").map(Number);
+      return { k: "lit", value: Math.round(((h * 60 + m) * 60 + sec) * 1000), type: "time" };
+    }
+    if (/^(D|DATE)$/.test(prefix)) return { k: "lit", value: Date.parse(`${val}T00:00:00Z`) / 86_400_000, type: "int" };
+    if (/^(DT|DATE_AND_TIME|LDT)$/.test(prefix)) {
+      const m = /^(\d+-\d+-\d+)-(.*)$/.exec(val);
+      return { k: "lit", value: m ? Date.parse(`${m[1]}T${m[2]}Z`) : NaN, type: "time" };
+    }
     if (/^(2|8|16)$/.test(prefix)) return { k: "lit", value: parseInt(val, Number(prefix)), type: "int" };
     if (/^(BOOL)$/.test(prefix)) return { k: "lit", value: /^(1|TRUE)$/i.test(val), type: "bool" };
     if (/REAL$/.test(prefix)) return { k: "lit", value: parseFloat(val), type: "real" };
@@ -83,8 +93,13 @@ const BINARY: [string[], number][] = [
 ];
 const PREC = new Map<string, number>(BINARY.flatMap(([ops, p]) => ops.map((o) => [o, p] as [string, number])));
 
-export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
-  const tokens = lex(src.slice(0, to)).tokens.filter((t) => t.kind !== "comment" && t.kind !== "pragma" && t.start >= from);
+export interface BodyOptions {
+  /** IEC 61131-3 source (TwinCAT/CODESYS): nested comments, `x S= c;` / `x R= c;`. */
+  iec?: boolean;
+}
+
+export function parseBody(src: string, from = 0, to = src.length, opts: BodyOptions = {}): Stmt[] {
+  const tokens = lex(src.slice(0, to), { nestedComments: !!opts.iec }).tokens.filter((t) => t.kind !== "comment" && t.kind !== "pragma" && t.start >= from);
   let i = 0;
   const peek = (k = 0) => tokens[Math.min(i + k, tokens.length - 1)]!;
   const next = () => tokens[Math.min(i++, tokens.length - 1)]!;
@@ -103,7 +118,12 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
     const name = first.text.replace(/^#/, "").replace(/^"|"$/g, "");
     const r: LRef = { root: { kind, name }, path: [], start: first.start };
     for (;;) {
-      if (peek().text === "." && ["ident", "global", "local"].includes(peek(1).kind)) {
+      const slice = peek().text === "." && peek(1).kind === "absolute" ? /^%([XBWD])(\d+)$/i.exec(peek(1).text) : null;
+      if (slice) {
+        next();
+        next();
+        r.path.push({ slice: slice[1]!.toUpperCase() as "X" | "B" | "W" | "D", n: Number(slice[2]) });
+      } else if (peek().text === "." && ["ident", "global", "local"].includes(peek(1).kind)) {
         next();
         r.path.push({ member: next().text.replace(/^#/, "").replace(/^"|"$/g, "") });
       } else if (peek().text === "[") {
@@ -139,7 +159,7 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
   function primary(): Expr {
     const t = next();
     if (t.kind === "number") return literal(t);
-    if (t.kind === "string") return { k: "lit", value: t.text.slice(1, -1).replace(/''/g, "'").replace(/\$(.)/g, (_, c: string) => (c === "N" || c === "L" ? "\n" : c === "T" ? "\t" : c)), type: "string" };
+    if (t.kind === "string") return { k: "lit", value: t.text.slice(t.text.indexOf("'") + 1, -1).replace(/''/g, "'").replace(/\$(.)/g, (_, c: string) => (c === "N" || c === "L" ? "\n" : c === "T" ? "\t" : c)), type: "string" };
     if (kw(t, "TRUE", "FALSE")) return { k: "lit", value: t.upper === "TRUE", type: "bool" };
     if (t.text === "(") {
       const e = expr();
@@ -301,7 +321,12 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
       next();
       while (peek().kind !== "eof" && peek().start < (eol < 0 ? src.length : eol)) next();
       const body = block("END_REGION");
+      const end = peek();
       expectKw("END_REGION");
+      // END_REGION may repeat the region name
+      const eol2 = src.indexOf("\n", end.end);
+      while (peek().kind !== "eof" && peek().start < (eol2 < 0 ? src.length : eol2) && peek().text !== ";") next();
+      semicolon();
       return { k: "if", branches: [{ cond: { k: "lit", value: true, type: "bool" }, body }], at };
     }
     if (t.kind === "local" || t.kind === "global" || t.kind === "ident") {
@@ -311,6 +336,22 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
         const call = { k: "call" as const, callee: target, args: args() };
         semicolon();
         return { k: "call", call, at };
+      }
+      // compound assignment: x += 1; x -= 1; x *= 2; x /= 2;
+      if (["+", "-", "*", "/"].includes(peek().text) && peek(1).text === "=" && peek(1).start === peek().end) {
+        const op = next().text;
+        next();
+        const value = expr();
+        semicolon();
+        return { k: "assign", target, value: { k: "bin", op, l: { k: "ref", ref: target }, r: value }, at };
+      }
+      // IEC set/reset assignment: x S= cond; x R= cond;
+      if (peek().kind === "ident" && (peek().upper === "S" || peek().upper === "R") && peek(1).text === "=" && peek(1).start === peek().end) {
+        const set = next().upper === "S";
+        next();
+        const cond = expr();
+        semicolon();
+        return { k: "if", branches: [{ cond, body: [{ k: "assign", target, value: { k: "lit", value: set, type: "bool" }, at }] }], at };
       }
       expectOp(":=");
       const value = expr();
@@ -325,7 +366,7 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
     let j = i;
     if (tokens[j]?.text === "-") j++;
     const first = tokens[j];
-    if (!first || !(first.kind === "number" || first.kind === "ident" || first.kind === "global")) return false;
+    if (!first || !(first.kind === "number" || first.kind === "ident" || first.kind === "global" || first.kind === "local")) return false;
     j++;
     while (tokens[j]?.text === "." && tokens[j + 1]?.kind === "ident") j += 2;
     if (tokens[j]?.text === "..") return true;

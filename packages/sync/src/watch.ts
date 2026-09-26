@@ -34,6 +34,9 @@ export class Watcher {
   private retryAt = 0;
   lastReport: SyncReport | null = null;
   lastPassAt = 0;
+  /** How long the last pass took; idle polling waits at least as long (QA-10). */
+  lastPassMs = 0;
+  private lastPassEnd = 0;
   lastError: string | null = null;
 
   constructor(
@@ -49,7 +52,18 @@ export class Watcher {
       if (file && /(^|[\\/])\./.test(String(file))) return; // our own temp files
       this.poke();
     });
-    this.timer = setInterval(() => void this.syncNow().catch(() => {}), this.opts.config.sync.pollMs);
+    this.timer = setInterval(() => this.tick(), this.opts.config.sync.pollMs);
+    void this.syncNow().catch(() => {});
+  }
+
+  /**
+   * Poll tick. Unlike file events it never queues behind a running pass, and it keeps the watcher idle at
+   * least as long as the last pass took, so a slow project costs at most half of TIA's time (QA-10).
+   */
+  tick(): void {
+    if (this.running || this.queued) return;
+    const now = (this.opts.now ?? Date.now)();
+    if (now - this.lastPassEnd < this.lastPassMs) return;
     void this.syncNow().catch(() => {});
   }
 
@@ -88,7 +102,11 @@ export class Watcher {
     if (now < this.retryAt) return null;
     try {
       this.bridge ??= await this.opts.bridgeFactory();
-      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config });
+      const t0 = Date.now();
+      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config }).finally(() => {
+        this.lastPassMs = Date.now() - t0;
+        this.lastPassEnd = (this.opts.now ?? Date.now)();
+      });
       this.failures = 0;
       this.lastReport = r;
       this.lastPassAt = now;

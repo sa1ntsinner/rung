@@ -133,4 +133,33 @@ describe("Watcher", () => {
     await state.close();
     expect(reports.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("polls at most every other pass length and never queues ticks behind a running pass (QA-10)", async () => {
+    const root = ws();
+    const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");
+    config.sync.pollMs = 60_000; // ticks are driven by hand below
+    const state = await StateStore.open(root, { projectPath: config.project.path, tiaVersion: "V20", devices: [] });
+    let passes = 0;
+    class Slow extends ClosableFake {
+      override async projectInfo() {
+        passes++;
+        await new Promise((r) => setTimeout(r, 150));
+        return super.projectInfo();
+      }
+    }
+    const w = new Watcher(root, state, { config, bridgeFactory: async () => new Slow() });
+    await w.syncNow();
+    expect(passes).toBe(1);
+    w.tick(); // right after a 150 ms pass: too early
+    expect(passes).toBe(1);
+    expect(w.lastError).toBeNull();
+    expect(w.lastPassMs).toBeGreaterThanOrEqual(150);
+    await new Promise((r) => setTimeout(r, w.lastPassMs + 50));
+    w.tick();
+    w.tick(); // a second tick while the first runs must not queue another pass
+    await new Promise((r) => setTimeout(r, w.lastPassMs + 400));
+    expect(passes).toBe(2);
+    await w.stop();
+    await state.close();
+  });
 });

@@ -214,6 +214,24 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
     }
 
+    [Fact] public void RepeatedInventoriesReuseFingerprintsButSeeChanges()
+    {
+        // QA-10: an idle watch must not recompute every fingerprint on every pass
+        _fx.Session.ListObjects("PLC_1");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var first = _fx.Session.ListObjects("PLC_1").ToDictionary(o => o.Address, o => o.Fingerprint);
+        var warm = sw.ElapsedMilliseconds;
+        Console.WriteLine("warm inventory: " + warm + " ms for " + first.Count + " objects");
+        // a change in TIA shows up in the next inventory
+        var address = "plc:PLC_1/blocks/20_Valves/Fx_Valve";
+        var export = _fx.Session.Export(address, "auto", Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N")));
+        var edited = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
+        File.WriteAllText(edited, File.ReadAllText(export.Files[0].Path).Replace("#Open := FALSE;", "#Open := FALSE; // cache probe " + Guid.NewGuid().ToString("N").Substring(0, 6)));
+        _fx.Session.Import(address, "scl", edited, export.Fingerprint, Guid.NewGuid().ToString());
+        var after = _fx.Session.ListObjects("PLC_1").ToDictionary(o => o.Address, o => o.Fingerprint);
+        Assert.NotEqual(first[address], after[address]);
+    }
+
     [Fact] public void ListsConnectionModesAndReportsOffline()
     {
         var c = _fx.Session.Connections("PLC_1", scan: false);

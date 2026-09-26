@@ -2,7 +2,7 @@
 // Offline SCL simulator: executes FB/FC bodies with virtual time for unit tests.
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
 // (no integer overflow wrap-around, no system instructions beyond the IEC standard set).
-import { STANDARD_BY_NAME, type BlockModel, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
+import { STANDARD_BY_NAME, SYSTEM_TYPES, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { parseBody, SclSyntaxError, type Expr, type LRef, type Stmt } from "./ast.js";
 
 export type Value = boolean | number | string | Struct | ArrayValue | Instance | undefined;
@@ -37,6 +37,11 @@ const TIME_TYPES = /^(TIME|LTIME|S5TIME)$/i;
 const STRING_TYPES = /^(STRING|WSTRING|CHAR|WCHAR)$/i;
 const isArray = (v: Value): v is ArrayValue => typeof v === "object" && v !== null && (v as ArrayValue).__array === true;
 const isInstance = (v: Value): v is Instance => typeof v === "object" && v !== null && typeof (v as Instance).__fb === "string";
+/** Nesting of FB/FC calls before the simulator reports endless recursion. */
+const MAX_CALL_DEPTH = 100;
+
+type Decl = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members" | "init">;
+type Kind = "real" | "int" | "unknown";
 
 interface Frame {
   block: BlockModel;
@@ -49,12 +54,79 @@ class Exit {}
 class Continue {}
 class Return {}
 
+/** Rounds to the nearest integer; exact halves go to the even neighbour (IEEE 754 round-to-nearest-even, as the S7 FPU and TIA's ROUND do). */
+export function roundHalfEven(x: number): number {
+  if (!Number.isFinite(x)) return x;
+  const f = Math.floor(x);
+  const d = x - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
+/** `Array[lo..hi, lo..hi] of <element>`: the dimension texts of the outermost array and the element type text. */
+export function splitArrayType(type: string): { dims: string[]; element: string } | undefined {
+  const m = /^\s*array\s*\[/i.exec(type);
+  if (!m) return undefined;
+  let depth = 0;
+  let j = m[0].length - 1;
+  for (; j < type.length; j++) {
+    if (type[j] === "[") depth++;
+    else if (type[j] === "]" && --depth === 0) break;
+  }
+  const inside = type.slice(m[0].length, j);
+  const dims: string[] = [];
+  let d = 0;
+  let from = 0;
+  for (let k = 0; k < inside.length; k++) {
+    const c = inside[k];
+    if (c === "[" || c === "(") d++;
+    else if (c === "]" || c === ")") d--;
+    else if (c === "," && d === 0) {
+      dims.push(inside.slice(from, k));
+      from = k + 1;
+    }
+  }
+  dims.push(inside.slice(from));
+  return { dims, element: type.slice(j + 1).replace(/^\s*of\b\s*/i, "").trim() };
+}
+
+const SLICE_WIDTH = { X: 1, B: 8, W: 16, D: 32 } as const;
+
+function sliceGet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }): Value {
+  const width = BigInt(SLICE_WIDTH[s.slice]);
+  const v = BigInt(typeof base === "boolean" ? (base ? 1 : 0) : Math.trunc(Number(base ?? 0)));
+  const bits = (v >> (BigInt(s.n) * width)) & ((1n << width) - 1n);
+  return s.slice === "X" ? bits === 1n : Number(bits);
+}
+
+function sliceSet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }, value: Value): number {
+  const width = BigInt(SLICE_WIDTH[s.slice]);
+  const shift = BigInt(s.n) * width;
+  const mask = ((1n << width) - 1n) << shift;
+  const v = BigInt(typeof base === "boolean" ? (base ? 1 : 0) : Math.trunc(Number(base ?? 0)));
+  const nv = (BigInt(s.slice === "X" ? (value ? 1 : 0) : Math.trunc(Number(value ?? 0))) << shift) & mask;
+  return Number((v & ~mask) | nv);
+}
+
+const combine = (a: Kind, b: Kind): Kind => (a === "real" || b === "real" ? "real" : a === "int" && b === "int" ? "int" : "unknown");
+
+function kindOfType(d: Decl | undefined): Kind {
+  if (!d || d.isArray || d.members?.length) return "unknown";
+  const t = (d.typeRef ?? d.type).replace(/^"|"$/g, "");
+  if (REAL_TYPES.test(t)) return "real";
+  if (INT_TYPES.test(t) || TIME_TYPES.test(t)) return "int";
+  return "unknown";
+}
+
 export class Simulator {
   /** Virtual time in milliseconds. */
   time = 0;
   readonly globals: Struct = {};
   private readonly bodies = new Map<string, Stmt[]>();
+  private readonly consts = new Map<string, Struct>();
   private steps = 0;
+  private depth = 0;
 
   constructor(
     private readonly index: WorkspaceIndex,
@@ -63,21 +135,29 @@ export class Simulator {
 
   private block(name: string): BlockModel {
     const g = this.index.global(name);
+    if (g?.kind === "OBJECT") throw this.objectError(name);
     if (!g?.block) throw new SimError(`Block "${name}" is not in the workspace (only SCL sources can be simulated)`);
     return g.block;
   }
 
+  private objectError(name: string): SimError {
+    return new SimError(`"${name}" is a technology object or a graphical/protected block; it is not simulated`);
+  }
+
   private body(b: BlockModel): Stmt[] {
-    const key = b.name.toUpperCase();
+    const key = `${b.kind}:${b.name.toUpperCase()}`;
     let s = this.bodies.get(key);
     if (!s) {
+      if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
+      if (b.xml) throw new SimError(`"${b.name}" is a graphical (LAD/FBD/GRAPH) or XML block; it is not simulated (only SCL sources are)`, b.name);
       const g = this.index.global(b.name)!;
       const doc = this.index.docs.get(g.uri)!;
       const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out
+      const iec = doc.code !== undefined || /\.st$/i.test(doc.uri);
       try {
-        s = b.bodyStart === undefined ? [] : parseBody(src, b.bodyStart, b.end);
+        s = b.bodyStart === undefined ? [] : parseBody(src, b.bodyStart, b.end, { iec });
       } catch (e) {
-        if (e instanceof SclSyntaxError) throw new SimError(`Syntax error in ${b.name}: ${e.message}`, b.name, e.offset);
+        if (e instanceof SclSyntaxError) throw new SimError(`Syntax error in ${b.name} (line ${doc.lines.position(e.offset).line + 1}): ${e.message}`, b.name, e.offset);
         throw e;
       }
       this.bodies.set(key, s);
@@ -85,36 +165,92 @@ export class Simulator {
     return s;
   }
 
+  /** 1-based source line of an offset in a block's file (for error messages). */
+  lineOf(blockName: string, offset: number): number | undefined {
+    const g = this.index.global(blockName);
+    const doc = g ? this.index.docs.get(g.uri) : undefined;
+    return doc ? doc.lines.position(offset).line + 1 : undefined;
+  }
+
   // ------------------------------------------------------------------ values
 
-  defaultValue(decl: Pick<VarDecl, "type" | "typeRef" | "isArray" | "members" | "init">): Value {
+  /** Constants of a block (VAR CONSTANT), evaluated once; used for array bounds and initial values. */
+  private constants(scope: BlockModel | undefined): Struct {
+    if (!scope) return {};
+    const key = `${scope.kind}:${scope.name.toUpperCase()}`;
+    let c = this.consts.get(key);
+    if (!c) {
+      c = {};
+      this.consts.set(key, c);
+      for (const v of scope.vars) if (v.section === "Constant" && !v.isArray && !v.members?.length) c[v.name.toUpperCase()] = this.defaultValue(v, scope);
+    }
+    return c;
+  }
+
+  private constFrame(scope: BlockModel | undefined): Frame {
+    const block: BlockModel = scope ?? { kind: "FC", name: "", nameStart: 0, nameEnd: 0, start: 0, end: 0, vars: [], regions: [], refs: [] };
+    const temps = { ...this.constants(scope) };
+    // inside a GVL, its constants are also reachable qualified: ARRAY[0..GVL_Cfg.N_ITEMS - 1]
+    if (scope?.kind === "GVL") temps[scope.name.toUpperCase()] = this.constants(scope);
+    return { block, mem: {}, temps };
+  }
+
+  private constValue(text: string, scope: BlockModel | undefined): number {
+    const t = text.trim();
+    if (/^[-+]?\d+$/.test(t)) return Number(t);
+    let v: Value;
+    try {
+      const [s] = parseBody(`#__c := ${t};`);
+      v = s?.k === "assign" ? this.eval(s.value, this.constFrame(scope)) : undefined;
+    } catch {
+      v = undefined;
+    }
+    if (typeof v !== "number" || !Number.isInteger(v)) throw new SimError(`array bound ${t} is not a constant the simulator can evaluate (literals, block constants and GVL constants are supported)`, scope?.name);
+    return v;
+  }
+
+  private bounds(dim: string, scope: BlockModel | undefined): [number, number] {
+    const at = dim.indexOf("..");
+    if (at < 0) {
+      if (dim.trim() === "*") return [0, -1]; // Array[*] parameter: sized by the caller
+      throw new SimError(`array dimension ${dim.trim()} is not a range`, scope?.name);
+    }
+    return [this.constValue(dim.slice(0, at), scope), this.constValue(dim.slice(at + 2), scope)];
+  }
+
+  defaultValue(decl: Decl, scope?: BlockModel): Value {
     if (decl.isArray) {
-      const dims = [...decl.type.matchAll(/(-?\d+)\s*\.\.\s*(-?\d+)/g)].map((m) => [Number(m[1]), Number(m[2])] as const);
-      const inner = { ...decl, isArray: false, type: decl.type.replace(/^.*\bof\b\s*/i, "") };
-      const build = (d: number): Value => {
-        const dim = dims[d];
-        if (!dim) return this.defaultValue(inner);
-        return { __array: true, lo: dim[0], items: Array.from({ length: dim[1] - dim[0] + 1 }, () => build(d + 1)) };
+      const shape = splitArrayType(decl.type);
+      if (!shape) return { __array: true, lo: 0, items: [] };
+      const dims = shape.dims.map((d) => this.bounds(d, scope));
+      // the element keeps the struct members / named type; only the outer `Array[..] of` is removed
+      const element: Decl = { type: shape.element, typeRef: decl.typeRef, isArray: /^array\b/i.test(shape.element), members: decl.members };
+      const build = (k: number): Value => {
+        if (k === dims.length) return this.defaultValue(element, scope);
+        const [lo, hi] = dims[k]!;
+        return { __array: true, lo, items: Array.from({ length: Math.max(0, hi - lo + 1) }, () => build(k + 1)) };
       };
       return build(0);
     }
-    if (decl.members?.length) return this.structOf(decl.members);
+    if (decl.members?.length) return this.structOf(decl.members, scope);
     let v: Value;
-    const t = decl.typeRef ?? decl.type;
+    const t = (decl.typeRef ?? decl.type).replace(/^"|"$/g, "");
     if (/^BOOL$/i.test(t)) v = false;
     else if (INT_TYPES.test(t) || REAL_TYPES.test(t) || TIME_TYPES.test(t)) v = 0;
     else if (STRING_TYPES.test(t.replace(/\[.*$/, ""))) v = "";
     else {
       const g = this.index.global(t);
-      if (g?.block?.kind === "UDT") v = this.structOf(g.block.vars);
+      const sys = SYSTEM_TYPES.get(t.toUpperCase());
+      if (g?.block?.kind === "UDT") v = this.structOf(g.block.vars, g.block);
       else if (g?.block?.kind === "FB") v = this.newInstance(g.block.name);
       else if (STANDARD_BY_NAME.get(t.toUpperCase())?.kind === "functionBlock") v = this.newInstance(t);
-      else v = 0; // unknown elementary type (DTL, Variant, …): treated as a number
+      else if (sys) v = Object.fromEntries(sys.map((m) => [m.name.toUpperCase(), this.defaultValue({ type: m.type, typeRef: m.typeRef ?? m.type, isArray: !!m.isArray })]));
+      else v = 0; // unknown elementary type (Variant, system types, …): treated as a number
     }
     if (decl.init !== undefined && !isInstance(v) && typeof v !== "object") {
       try {
         const [s] = parseBody(`#__init := ${decl.init};`);
-        if (s?.k === "assign") v = this.eval(s.value, null);
+        if (s?.k === "assign") v = this.eval(s.value, this.constFrame(scope));
       } catch {
         /* complex initializers (array lists) keep the default */
       }
@@ -122,9 +258,9 @@ export class Simulator {
     return v;
   }
 
-  private structOf(vars: VarDecl[]): Struct {
+  private structOf(vars: VarDecl[], scope?: BlockModel): Struct {
     const s: Struct = {};
-    for (const m of vars) s[m.name.toUpperCase()] = this.defaultValue(m);
+    for (const m of vars) s[m.name.toUpperCase()] = this.defaultValue(m, scope);
     return s;
   }
 
@@ -137,7 +273,7 @@ export class Simulator {
     }
     const b = this.block(fbName);
     if (b.kind !== "FB" && b.kind !== "PRG") throw new SimError(`"${fbName}" is ${b.kind}, not a function block`);
-    return { __fb: b.name, mem: this.structOf(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant")) };
+    return { __fb: b.name, mem: this.structOf(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant"), b) };
   }
 
   /** IEC 61131-3 globals are referenced without quotes: GVL lists, their variables and PROGRAMs. */
@@ -152,12 +288,30 @@ export class Simulator {
     if (!(key in this.globals)) {
       const g = this.index.global(name);
       if (g?.kind === "GVAR") return { obj: this.global(g.gvar!.list).obj[g.gvar!.list.toUpperCase()] as Struct, key: g.name.toUpperCase() };
-      if (g?.block?.kind === "GVL" || g?.block?.kind === "PRG") this.globals[key] = g.block.kind === "GVL" ? this.structOf(g.block.vars) : this.newInstance(g.block.name);
-      else if (g?.block?.kind === "DB") this.globals[key] = g.block.dbOf ? this.newInstance(g.block.dbOf) : this.structOf(g.block.vars);
-      else if (g?.tag) this.globals[key] = /^Bool$/i.test(g.tag.dataType) ? false : STRING_TYPES.test(g.tag.dataType) ? "" : 0;
+      if (g?.block?.kind === "GVL" || g?.block?.kind === "PRG") this.globals[key] = g.block.kind === "GVL" ? this.structOf(g.block.vars, g.block) : this.newInstance(g.block.name);
+      else if (g?.block?.kind === "DB") {
+        const b = g.block;
+        const of = b.dbOf ? this.index.global(b.dbOf)?.block : undefined;
+        const value: Value = b.dbOf ? (of?.kind === "UDT" ? this.structOf(of.vars, of) : this.newInstance(b.dbOf)) : this.structOf(b.vars, b);
+        this.globals[key] = value;
+        this.applyStartValues(b, value);
+      } else if (g?.tag) {
+        // PLC tags start at their type's default; user constants from a tag table have a value
+        this.globals[key] = this.defaultValue({ type: g.tag.dataType, typeRef: g.tag.dataType, isArray: false, ...(g.tag.value !== undefined ? { init: g.tag.value } : {}) });
+      }
+      else if (g?.kind === "OBJECT") throw this.objectError(name);
       else throw new SimError(`"${name}" is not a data block or tag in the workspace`);
     }
     return { obj: this.globals, key };
+  }
+
+  /** DB start values from the BEGIN part (`cnt := 200;`, `T1.PT := T#2s;`) override declared defaults. */
+  private applyStartValues(b: BlockModel, value: Value) {
+    if (b.bodyStart === undefined) return;
+    const stmts = this.body(b);
+    if (!stmts.length) return;
+    const mem = isInstance(value) ? value.mem : (value as Struct);
+    this.exec(stmts, { block: b, mem, temps: {} });
   }
 
   // ------------------------------------------------------------------ references
@@ -171,7 +325,7 @@ export class Simulator {
       if (!frame) throw new SimError(`#${ref.root.name} used outside a block`);
       if (root in frame.temps) obj = frame.temps;
       else if (root in frame.mem) obj = frame.mem;
-      else if (root === frame.block.name.toUpperCase()) obj = frame.temps; // FC return value
+      else if (root === frame.block.name.toUpperCase() && frame.block.kind === "FC") obj = frame.temps; // FC return value
       else if (ref.root.kind === "ident" && frame.block.kind === "DB") obj = frame.mem;
       else if (ref.root.kind === "ident" && this.isIecGlobal(ref.root.name)) ({ obj, key } = this.global(ref.root.name));
       else throw new SimError(`#${ref.root.name} is not declared in ${frame.block.name}`, frame.block.name, ref.start);
@@ -185,7 +339,7 @@ export class Simulator {
         obj = cur as Struct;
         key = seg.member.toUpperCase();
         if (!(key in obj)) throw new SimError(`${seg.member} is not a member`, frame?.block.name, ref.start);
-      } else {
+      } else if ("index" in seg) {
         for (let d = 0; d < seg.index.length; d++) {
           const arr = d === 0 ? cur : (obj as Value[])[key as number];
           if (!isArray(arr as Value)) throw new SimError("indexing a value that is not an array", frame?.block.name, ref.start);
@@ -195,33 +349,91 @@ export class Simulator {
           obj = a.items;
           key = idx - a.lo;
         }
-      }
+      } else throw new SimError("slice access (.%X, .%B, .%W, .%D) must come last", frame?.block.name, ref.start);
     }
     return { obj, key };
   }
 
   read(ref: LRef, frame: Frame | null): Value {
+    const last = ref.path[ref.path.length - 1];
+    if (last && "slice" in last) return sliceGet(this.read({ ...ref, path: ref.path.slice(0, -1) }, frame), last);
     const { obj, key } = this.locate(ref, frame);
     return (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
   }
 
   write(ref: LRef, value: Value, frame: Frame | null) {
+    const last = ref.path[ref.path.length - 1];
+    if (last && "slice" in last) {
+      const base = { ...ref, path: ref.path.slice(0, -1) };
+      this.write(base, sliceSet(this.read(base, frame), last, value), frame);
+      return;
+    }
     const { obj, key } = this.locate(ref, frame);
     (obj as Record<string | number, Value>)[key] = value;
   }
 
-  // ------------------------------------------------------------------ expressions
+  // ------------------------------------------------------------------ static types (REAL vs integer division)
 
-  private isReal(e: Expr, frame: Frame | null): boolean {
-    if (e.k === "lit") return e.type === "real";
-    if (e.k === "un") return this.isReal(e.e, frame);
-    if (e.k === "bin") return this.isReal(e.l, frame) || this.isReal(e.r, frame);
-    if (e.k === "ref" && frame && e.ref.path.length === 0) {
-      const d = frame.block.vars.find((v) => v.name.toUpperCase() === e.ref.root.name.toUpperCase());
-      return !!d && REAL_TYPES.test(d.typeRef ?? "");
+  /** Declared type of a reference, when the workspace knows it. */
+  private declOf(ref: LRef, frame: Frame | null): Decl | undefined {
+    let d: Decl | undefined;
+    const name = ref.root.name.toUpperCase();
+    if (ref.root.kind !== "global" && frame) {
+      const b = frame.block;
+      d = b.vars.find((x) => x.name.toUpperCase() === name);
+      if (!d && name === b.name.toUpperCase() && b.returnType) d = { type: b.returnType, typeRef: b.returnType, isArray: false };
+      if (!d && b.kind === "DB" && b.dbOf) d = this.index.membersOfType(b.dbOf).find((m) => m.name.toUpperCase() === name);
     }
-    return false;
+    if (!d) {
+      const g = this.index.global(ref.root.name);
+      if (g?.gvar) d = g.gvar.decl;
+      else if (g?.tag) d = { type: g.tag.dataType, typeRef: g.tag.dataType, isArray: false };
+      else if (g?.block && (g.block.kind === "DB" || g.block.kind === "GVL" || g.block.kind === "PRG")) d = { type: g.name, typeRef: g.name, isArray: false };
+    }
+    for (const seg of ref.path) {
+      if (!d) return undefined;
+      if ("member" in seg) {
+        const u = seg.member.toUpperCase();
+        d = this.index.membersOf(d as Member).find((m) => m.name.toUpperCase() === u);
+      } else if ("index" in seg) {
+        const shape = d.isArray ? splitArrayType(d.type) : undefined;
+        if (!shape) return undefined;
+        d = { type: shape.element, typeRef: d.typeRef, isArray: /^array\b/i.test(shape.element), members: d.members };
+      } else d = { type: seg.slice === "X" ? "Bool" : "DWord", isArray: false };
+    }
+    return d;
   }
+
+  private kindOf(e: Expr, frame: Frame | null): Kind {
+    switch (e.k) {
+      case "lit":
+        return e.type === "real" ? "real" : e.type === "int" || e.type === "time" ? "int" : "unknown";
+      case "un":
+        return this.kindOf(e.e, frame);
+      case "bin":
+        if (e.op === "**") return "real";
+        if (!["+", "-", "*", "/", "MOD"].includes(e.op)) return "unknown";
+        return combine(this.kindOf(e.l, frame), this.kindOf(e.r, frame));
+      case "ref":
+        return kindOfType(this.declOf(e.ref, frame));
+      case "call": {
+        if (e.callee.path.length) return "unknown";
+        const upper = e.callee.root.name.toUpperCase();
+        if (/_TO_/.test(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
+        if (/^(SQRT|SQR|LN|LOG|EXP|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
+        if (/^(LEN|FIND)$/.test(upper)) return "int";
+        if (/^(ABS|MIN|MAX|LIMIT|SEL|MUX)$/.test(upper)) {
+          const values = e.args.filter((a, i) => !(upper === "SEL" && (a.name?.toUpperCase() === "G" || (!a.name && i === 0))) && !(upper === "MUX" && (a.name?.toUpperCase() === "K" || (!a.name && i === 0))));
+          return values.map((a) => this.kindOf(a.value, frame)).reduce(combine, values.length ? "int" : "unknown");
+        }
+        const g = this.index.global(e.callee.root.name);
+        if (g?.block?.kind === "FC" && g.block.returnType) return kindOfType({ type: g.block.returnType, typeRef: g.block.returnType, isArray: false });
+        return "unknown";
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ expressions
 
   eval(e: Expr, frame: Frame | null): Value {
     switch (e.k) {
@@ -268,12 +480,17 @@ export class Simulator {
           case "**":
             return Math.pow(l as number, r as number);
           case "MOD":
-            if (r === 0) throw new SimError("MOD by zero", frame?.block.name);
+            if (r === 0) throw new SimError("integer division by zero (MOD 0)", frame?.block.name);
             return (l as number) % (r as number);
           case "/": {
-            if (r === 0) throw new SimError("division by zero", frame?.block.name);
-            const q = (l as number) / (r as number);
-            return this.isReal(e.l, frame) || this.isReal(e.r, frame) ? q : Math.trunc(q);
+            const kl = this.kindOf(e.l, frame);
+            const kr = this.kindOf(e.r, frame);
+            // REAL when either side is declared REAL; integer when both are declared integers;
+            // otherwise (types unknown to the workspace) decide by the values
+            const real = kl === "real" || kr === "real" || (!(kl === "int" && kr === "int") && !(Number.isInteger(l) && Number.isInteger(r)));
+            if (real) return (l as number) / (r as number); // x / 0.0 gives ±Inf or NaN like the PLC
+            if (r === 0) throw new SimError("integer division by zero", frame?.block.name);
+            return Math.trunc((l as number) / (r as number));
           }
         }
         throw new SimError(`operator ${e.op} not supported`);
@@ -292,8 +509,26 @@ export class Simulator {
     if (c.callee.root.kind !== "ident" || c.callee.path.length || (frame && (upper in frame.mem || upper in frame.temps))) {
       const target = c.callee.root.kind === "global" && !c.callee.path.length ? this.index.global(name) : undefined;
       if (target?.block?.kind === "FC") return this.callFc(target.block, c, frame);
+      if (target?.kind === "OBJECT") throw this.objectError(name);
+      // instruction called on typed instance data: #t.TON(...) on an IEC_TIMER, #c.CTU(...) on an IEC_COUNTER
+      const last = c.callee.path[c.callee.path.length - 1];
+      if (last && "member" in last) {
+        const base = this.read({ ...c.callee, path: c.callee.path.slice(0, -1) }, frame);
+        const method = last.member.toUpperCase();
+        if (isInstance(base) && base.std && STANDARD_BY_NAME.get(base.__fb.toUpperCase())?.methods?.includes(method)) {
+          this.bindInputs(base.mem, null, c.args, frame);
+          this.stdStep(base, method);
+          this.bindOutputs(base.mem, null, c.args, frame);
+          return undefined;
+        }
+      }
       const inst = this.read(c.callee, frame);
-      if (!isInstance(inst)) throw new SimError(`${name} is not a function block instance`, frame?.block.name, c.callee.start);
+      if (!isInstance(inst)) {
+        const d = this.declOf(c.callee, frame);
+        const type = (d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
+        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: system and technology instructions are not part of the offline simulator`, frame?.block.name, c.callee.start);
+        throw new SimError(`${name} is not a function block instance`, frame?.block.name, c.callee.start);
+      }
       this.runInstance(inst, c.args, frame);
       return undefined;
     }
@@ -343,7 +578,7 @@ export class Simulator {
         case "TRUNC":
           return Math.trunc(n(args[0]));
         case "ROUND":
-          return Math.round(n(args[0]));
+          return roundHalfEven(n(args[0]));
         case "CEIL":
           return Math.ceil(n(args[0]));
         case "FLOOR":
@@ -373,7 +608,7 @@ export class Simulator {
       if (/^(BOOL)$/.test(to)) return !!args[0] && args[0] !== 0;
       if (REAL_TYPES.test(to)) return Number(args[0]);
       if (STRING_TYPES.test(to)) return String(args[0]);
-      if (INT_TYPES.test(to) || TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : Math.round(Number(args[0]));
+      if (INT_TYPES.test(to) || TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0]));
       throw new SimError(`function ${name} is not supported by the simulator`, frame?.block.name, c.callee.start);
     }
     const g = this.index.global(name);
@@ -381,17 +616,43 @@ export class Simulator {
     throw new SimError(`${name} is not a known function (system instructions are not simulated)`, frame?.block.name, c.callee.start);
   }
 
-  private callFc(b: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null): Value {
-    const mem: Struct = this.structOf(b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut"));
-    const temps: Struct = this.structOf(b.vars.filter((v) => v.section === "Temp"));
-    const consts = b.vars.filter((v) => v.section === "Constant");
-    for (const k of consts) temps[k.name.toUpperCase()] = this.defaultValue(k);
-    this.bindInputs(mem, b, c.args, caller);
-    const frame: Frame = { block: b, mem, temps };
-    temps[b.name.toUpperCase()] = b.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }) : undefined;
-    this.exec(this.body(b), frame);
-    this.bindOutputs(mem, b, c.args, caller);
-    return temps[b.name.toUpperCase()];
+  /** Guards against endless recursion; JS would otherwise die with a RangeError. */
+  private enter<T>(b: BlockModel, run: () => T): T {
+    if (++this.depth > MAX_CALL_DEPTH) {
+      this.depth--;
+      throw new SimError(`call depth limit (${MAX_CALL_DEPTH}) exceeded in ${b.name} (endless recursion?)`, b.name);
+    }
+    try {
+      return run();
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
+  private runBody(b: BlockModel, frame: Frame) {
+    try {
+      this.exec(this.body(b), frame);
+    } catch (e) {
+      if (e instanceof Return) return;
+      if (e instanceof Exit || e instanceof Continue) throw new SimError(`${e instanceof Exit ? "EXIT" : "CONTINUE"} outside of a loop in ${b.name}`, b.name);
+      throw e;
+    }
+  }
+
+  private callFc(b: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null, capture?: Struct): Value {
+    return this.enter(b, () => {
+      const mem: Struct = this.structOf(b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut"), b);
+      const temps: Struct = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
+      Object.assign(temps, this.constants(b));
+      this.bindInputs(mem, b, c.args, caller);
+      const frame: Frame = { block: b, mem, temps };
+      temps[b.name.toUpperCase()] = b.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }, b) : undefined;
+      this.runBody(b, frame);
+      this.bindOutputs(mem, b, c.args, caller);
+      if (capture) Object.assign(capture, mem);
+      return temps[b.name.toUpperCase()];
+    });
   }
 
   private bindInputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
@@ -406,35 +667,45 @@ export class Simulator {
   }
 
   private bindOutputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
-    for (const a of args) {
-      if (!a.name) continue;
-      const key = a.name.toUpperCase();
+    const params = b ? b.vars.filter((v) => v.section === "Input" || v.section === "InOut") : [];
+    args.forEach((a, i) => {
+      const key = (a.name ?? (a.out ? undefined : params[i]?.name))?.toUpperCase();
+      if (!key) return;
       const isInOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       if ((a.out || isInOut) && a.value.k === "ref") this.write(a.value.ref, mem[key], caller);
-    }
+    });
   }
 
   /** Runs one call of an FB instance (user FB or standard FB). */
   runInstance(inst: Instance, args: { name?: string; out?: boolean; value: Expr }[] = [], caller: Frame | null = null) {
     if (inst.std) {
-      this.bindInputs(inst.mem, null, args.map((a) => a), caller);
+      this.bindInputs(inst.mem, null, args, caller);
       this.stdStep(inst);
       this.bindOutputs(inst.mem, null, args, caller);
       return;
     }
     const b = this.block(inst.__fb);
-    this.bindInputs(inst.mem, b, args, caller);
-    const temps = this.structOf(b.vars.filter((v) => v.section === "Temp"));
-    for (const k of b.vars.filter((v) => v.section === "Constant")) temps[k.name.toUpperCase()] = this.defaultValue(k);
-    this.exec(this.body(b), { block: b, mem: inst.mem, temps });
-    this.bindOutputs(inst.mem, b, args, caller);
+    this.enter(b, () => {
+      this.bindInputs(inst.mem, b, args, caller);
+      const temps = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
+      Object.assign(temps, this.constants(b));
+      this.runBody(b, { block: b, mem: inst.mem, temps });
+      this.bindOutputs(inst.mem, b, args, caller);
+    });
   }
 
-  private stdStep(inst: Instance) {
+  /** One step of a standard FB; `method` is the instruction called on IEC_TIMER/IEC_COUNTER data. */
+  private stdStep(inst: Instance, method?: string) {
     const m = inst.mem;
     const s = inst.std!;
     const now = this.time;
-    switch (inst.__fb.toUpperCase().replace(/_(L?TIME)$/, "")) {
+    // CTU and CTD on IEC_COUNTER data report through QU / QD instead of Q
+    const setQ = (fallback: "QU" | "QD", v: boolean) => void ("Q" in m ? (m.Q = v) : (m[fallback] = v));
+    const kind = (method ?? inst.__fb)
+      .toUpperCase()
+      .replace(/_(L?TIME)$/, "")
+      .replace(/_(SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT)$/, "");
+    switch (kind) {
       case "TON": {
         if (m.IN && !s.prev) s.start = now;
         if (m.IN) {
@@ -480,14 +751,14 @@ export class Simulator {
       case "CTU":
         if (m.R) m.CV = 0;
         else if (m.CU && !s.prev) m.CV = (m.CV as number) + 1;
-        m.Q = (m.CV as number) >= (m.PV as number);
+        setQ("QU", (m.CV as number) >= (m.PV as number));
         s.prev = !!m.CU;
         break;
       case "CTD":
         if (m.LD) m.CV = m.PV;
-        else if (m.CD && !s.prev) m.CV = (m.CV as number) - 1;
-        m.Q = (m.CV as number) <= 0;
-        s.prev = !!m.CD;
+        else if (m.CD && !s.prevD) m.CV = (m.CV as number) - 1;
+        setQ("QD", (m.CV as number) <= 0);
+        s.prevD = !!m.CD;
         break;
       case "CTUD":
         if (m.R) m.CV = 0;
@@ -516,7 +787,7 @@ export class Simulator {
         m.Q1 = !m.R1 && (!!m.S || !!m.Q1);
         break;
       default:
-        throw new SimError(`${inst.__fb} is not simulated`);
+        throw new SimError(`${inst.__fb}${method ? `.${method}` : ""} is not simulated`);
     }
   }
 
@@ -526,8 +797,13 @@ export class Simulator {
     for (const s of stmts) this.stmt(s, f);
   }
 
+  /** Counts a statement or loop iteration against the per-call step budget. */
+  private tick(f: Frame, at: number) {
+    if (++this.steps > this.maxStepsPerCall) throw new SimError("step limit exceeded (endless loop?)", f.block.name, at);
+  }
+
   private stmt(s: Stmt, f: Frame) {
-    if (++this.steps > this.maxStepsPerCall) throw new SimError("step limit exceeded (endless loop?)", f.block.name, s.at);
+    this.tick(f, s.at);
     try {
       switch (s.k) {
         case "empty":
@@ -565,6 +841,7 @@ export class Simulator {
           const to = this.eval(s.to, f) as number;
           this.write(s.v, this.eval(s.from, f), f);
           while (by >= 0 ? (this.read(s.v, f) as number) <= to : (this.read(s.v, f) as number) >= to) {
+            this.tick(f, s.at);
             try {
               this.exec(s.body, f);
             } catch (e) {
@@ -577,24 +854,24 @@ export class Simulator {
         }
         case "while":
           while (this.eval(s.cond, f)) {
+            this.tick(f, s.at);
             try {
               this.exec(s.body, f);
             } catch (e) {
               if (e instanceof Exit) break;
               if (!(e instanceof Continue)) throw e;
             }
-            if (++this.steps > this.maxStepsPerCall) throw new SimError("step limit exceeded (endless loop?)", f.block.name, s.at);
           }
           return;
         case "repeat":
           do {
+            this.tick(f, s.at);
             try {
               this.exec(s.body, f);
             } catch (e) {
               if (e instanceof Exit) break;
               if (!(e instanceof Continue)) throw e;
             }
-            if (++this.steps > this.maxStepsPerCall) throw new SimError("step limit exceeded (endless loop?)", f.block.name, s.at);
           } while (!this.eval(s.until, f));
           return;
         case "exit":
@@ -605,7 +882,7 @@ export class Simulator {
           throw new Return();
       }
     } catch (e) {
-      if (e instanceof SimError && e.offset === undefined) throw new SimError(e.message, f.block.name, s.at);
+      if (e instanceof SimError && e.offset === undefined) throw new SimError(e.message, e.block ?? f.block.name, s.at);
       throw e;
     }
   }
@@ -613,6 +890,7 @@ export class Simulator {
   /** Top-level call of a block from a test: FB instance or FC with argument values. */
   callBlock(target: Instance | string, inputs: Record<string, Value> = {}): { returnValue?: Value; outputs: Struct } {
     this.steps = 0;
+    this.depth = 0;
     const lit = (v: Value): Expr => ({ k: "lit", value: v as never, type: typeof v === "boolean" ? "bool" : typeof v === "string" ? "string" : "real" });
     const args = Object.entries(inputs).map(([name, value]) => ({ name, value: lit(value) }));
     try {
@@ -620,29 +898,15 @@ export class Simulator {
         const b = this.block(target);
         const call = { k: "call" as const, callee: { root: { kind: "global" as const, name: b.name }, path: [], start: 0 }, args };
         const mem: Struct = {};
-        const r = this.callFcCapture(b, call, mem);
+        const r = this.callFc(b, call, null, mem);
         return { returnValue: r, outputs: mem };
       }
       this.runInstance(target, args);
       return { outputs: target.mem };
     } catch (e) {
-      if (e instanceof Return) return { outputs: typeof target === "string" ? {} : target.mem };
+      if (e instanceof RangeError) throw new SimError(`call depth exceeded (endless recursion?): ${e.message}`);
       throw e;
     }
-  }
-
-  private callFcCapture(b: BlockModel, c: Extract<Expr, { k: "call" }>, capture: Struct): Value {
-    const mem: Struct = this.structOf(b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut"));
-    const temps: Struct = this.structOf(b.vars.filter((v) => v.section === "Temp"));
-    this.bindInputs(mem, b, c.args, null);
-    temps[b.name.toUpperCase()] = b.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }) : undefined;
-    try {
-      this.exec(this.body(b), { block: b, mem, temps });
-    } catch (e) {
-      if (!(e instanceof Return)) throw e;
-    }
-    Object.assign(capture, mem);
-    return temps[b.name.toUpperCase()];
   }
 }
 

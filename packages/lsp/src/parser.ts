@@ -54,6 +54,12 @@ export interface BlockModel {
   refs: Ref[];
   bodyStart?: number;
   comment?: string;
+  /** IEC METHOD: the function block it belongs to (the method body sees the FB's variables). */
+  owner?: string;
+  /** STL (.awl) body: not analysed, only the interface is indexed. */
+  stl?: boolean;
+  /** Read from a SimaticML (XML) export: interface only, the body is LAD/FBD/GRAPH or not present. */
+  xml?: boolean;
 }
 
 export interface ParseDiagnostic {
@@ -106,7 +112,8 @@ const CLOSERS = new Set(Object.values(NESTING));
 export const unquote = (t: string) => (t.startsWith("#") ? t.slice(1) : t).replace(/^"|"$/g, "");
 
 export interface ParseOptions {
-  dialect?: "scl" | "iec";
+  /** `stl`: SCL-style header and interface with an STL body (.awl) that is skipped. */
+  dialect?: "scl" | "iec" | "stl";
   /** Name for a header-less global variable list (TwinCAT GVL). */
   unitName?: string;
 }
@@ -120,7 +127,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     const lineStart = src.lastIndexOf("\n", tok.start - 1) + 1;
     return /^\s*$/.test(src.slice(lineStart, tok.start));
   };
-  const { tokens: all, errors } = lex(src);
+  const { tokens: all, errors } = lex(src, { nestedComments: iec });
   const tokens = all.filter((t) => t.kind !== "comment");
   const comments = all.filter((t) => t.kind === "comment");
   const diagnostics: ParseDiagnostic[] = errors.map((e: LexError) => ({ ...e, severity: "error" as const }));
@@ -170,6 +177,13 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     if (t.kind === "global") {
       next();
       return { type: t.text, typeRef: unquote(t.text), isArray: false };
+    }
+    if (isKw(t, "REF_TO") || (isKw(t, "POINTER", "REFERENCE") && isKw(peek(1), "TO"))) {
+      // REF_TO Int, POINTER TO INT, REFERENCE TO ST_X
+      next();
+      if (isKw(peek(), "TO")) next();
+      const inner = parseType();
+      return { type: src.slice(t.start, tokens[i - 1]!.end), ...(inner.typeRef ? { typeRef: inner.typeRef } : {}), isArray: inner.isArray, ...(inner.members ? { members: inner.members } : {}) };
     }
     if (t.kind === "ident") {
       next();
@@ -255,9 +269,22 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       break;
     }
     if (peek().text === "(") ref.access = "call";
-    else if (peek().text === ":=" || prev?.text === "=>") ref.access = "write";
+    else if (peek().text === ":=" || peek().text === "?=" || prev?.text === "=>") ref.access = "write";
+    else if (["+", "-", "*", "/"].includes(peek().text) && peek(1).text === "=" && peek(1).start === peek().end) ref.access = "write"; // x += 1
     block.refs.push(ref);
   }
+
+  /** Text after REGION / END_REGION up to the end of the line is a free-form name, not code. */
+  const freeText: [number, number][] = [];
+  function skipLine(t: Token) {
+    const eol = src.indexOf("\n", t.end);
+    const stop = eol < 0 ? src.length : eol;
+    freeText.push([t.end, stop]);
+    while (peek().kind !== "eof" && peek().start < stop) next();
+  }
+
+  /** Variables of the FB that owns the METHOD being parsed. */
+  let ownerVars: VarDecl[] | undefined;
 
   function parseBody(block: BlockModel, endKw: string) {
     const stack: { kw: string; tok: Token }[] = [];
@@ -287,15 +314,19 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       if (iec && parens > 0 && (peek().text === ":=" || peek().text === "=>")) continue; // named call argument
+      if (iec && /^(S|R|REF)$/.test(t.upper) && src[t.end] === "=" && peek().text === "=") continue; // x S= cond; x R= cond; p REF= x;
       if (iec && !KEYWORDS_IEC.has(t.upper) && tokens[i - 2]?.text !== ".") {
-        // plain identifiers are locals when declared in the POU, otherwise globals (GVL variables, types, enums)
-        const declared = block.vars.some((v) => v.name.toUpperCase() === t.upper) || t.upper === block.name.toUpperCase();
+        // plain identifiers are locals when declared in the POU (or the FB owning a METHOD), otherwise globals
+        const declared = block.vars.some((v) => v.name.toUpperCase() === t.upper) || t.upper === block.name.toUpperCase() || !!ownerVars?.some((v) => v.name.toUpperCase() === t.upper);
         collectRef(t, block, tokens[i - 2], declared ? "local" : "global");
         continue;
       }
-      if (block.kind === "DB" && peek().text === ":=") {
-        // DB start values: `Counter := 0;` refers to the DB's own variables
-        block.refs.push({ kind: "local", name: t.text, start: t.start, end: t.end, members: [], access: "write" });
+      if (block.kind === "DB" && (tokens[i - 2]?.text === ";" || isKw(tokens[i - 2]!, "BEGIN"))) {
+        // DB start values: `Counter := 0;`, `Plug.Delay := S5T#1s;`, `T1.PT := T#2s;` refer to the DB's own
+        // variables (or the interface of the FB/UDT for instance and typed DBs)
+        collectRef(t, block, undefined, "local");
+        const r = block.refs[block.refs.length - 1]!;
+        if (peek().text === ":=") r.access = "write";
         continue;
       }
       if (t.upper === "REGION") {
@@ -303,7 +334,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         const name = src.slice(t.end, eol < 0 ? src.length : eol).trim();
         stack.push({ kw: "REGION", tok: t });
         block.regions.push({ name, start: t.start, end: t.end });
-        while (peek().kind !== "eof" && peek().start < (eol < 0 ? src.length : eol)) next();
+        skipLine(t);
         continue;
       }
       if (NESTING[t.upper]) {
@@ -320,6 +351,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
           const r = [...block.regions].reverse().find((x) => x.start === top.tok.start);
           if (r) r.end = t.end;
         }
+        if (t.upper === "END_REGION") skipLine(t); // END_REGION <name>
       }
     }
     for (const open of stack) err(`${open.kw} is not closed (missing ${NESTING[open.kw]})`, open.tok);
@@ -329,12 +361,15 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
   while (peek().kind !== "eof") {
     const t = next();
     if (iec && t.kind === "ident" && t.upper === "VAR_GLOBAL") {
-      // TwinCAT GVL: a header-less VAR_GLOBAL list named after its file
-      const gvl: BlockModel = { kind: "GVL", name: opts.unitName ?? "GVL", nameStart: t.start, nameEnd: t.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
-      while (peek().kind !== "eof" && isKw(peek(), "CONSTANT", "RETAIN", "PERSISTENT")) next();
-      gvl.vars.push(...parseDecls("Static"));
+      // TwinCAT GVL: a header-less VAR_GLOBAL list named after its file; several sections form one list
+      const name = opts.unitName ?? "GVL";
+      const existing = blocks.find((b) => b.kind === "GVL" && b.name === name);
+      const gvl: BlockModel = existing ?? { kind: "GVL", name, nameStart: t.start, nameEnd: t.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
+      let section: Section = "Static";
+      while (peek().kind !== "eof" && isKw(peek(), "CONSTANT", "RETAIN", "PERSISTENT")) if (next().upper === "CONSTANT") section = "Constant";
+      gvl.vars.push(...parseDecls(section));
       if (isKw(peek(), "END_VAR")) gvl.end = next().end;
-      blocks.push(gvl);
+      if (!existing) blocks.push(gvl);
       continue;
     }
     const h = t.kind === "ident" ? headers[t.upper] : undefined;
@@ -347,6 +382,14 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     const nameTok = next();
     if (nameTok.kind !== "global" && nameTok.kind !== "ident") err("Expected a block name", nameTok);
     const block: BlockModel = { kind: h.kind, name: unquote(nameTok.text), nameStart: nameTok.start, nameEnd: nameTok.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
+    ownerVars = undefined;
+    if (iec && t.upper === "METHOD") {
+      const owner = [...blocks].reverse().find((b) => b.kind === "FB" || b.kind === "PRG");
+      if (owner) {
+        block.owner = owner.name;
+        ownerVars = owner.vars;
+      }
+    }
     const c = lineComment(nameTok.end);
     if (c) block.comment = c;
     if (iec) while (peek().kind === "ident" && /^(ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)$/.test(peek().upper)) next();
@@ -386,7 +429,8 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         while (peek().kind !== "eof" && !isKw(peek(), h.end)) next();
         continue;
       }
-      if (isKw(x, "STRUCT") && h.kind === "UDT") {
+      if (isKw(x, "STRUCT") && (h.kind === "UDT" || h.kind === "DB")) {
+        // UDT, or a standard-access DB declared as STRUCT ... END_STRUCT
         const ty = parseType();
         block.vars.push(...(ty.members ?? []));
         if (peek().text === ";") next();
@@ -400,6 +444,12 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       if (isKw(x, "BEGIN")) {
         next();
         block.bodyStart = x.end;
+        if (opts.dialect === "stl" || isKw(peek(), "NETWORK")) {
+          // STL body: skip it (the interface above is what editors and other blocks need)
+          block.stl = true;
+          while (peek().kind !== "eof" && !isKw(peek(), h.end)) next();
+          continue;
+        }
         parseBody(block, h.end);
         continue;
       }
@@ -420,5 +470,8 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     }
     blocks.push(block);
   }
-  return { blocks, diagnostics, tokens: all };
+  // STL bodies are not SCL: drop lexer complaints about them
+  const stl = blocks.filter((b) => b.stl);
+  const kept = diagnostics.filter((d) => !stl.some((b) => d.start >= b.bodyStart! && d.start < b.end) && !freeText.some(([a, b]) => d.start >= a && d.start < b));
+  return { blocks, diagnostics: kept, tokens: all };
 }

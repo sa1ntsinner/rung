@@ -27,9 +27,10 @@ cases:
       - expect: { Debounce.Q: false, Elapsed: "T#0ms" }
 ```
 
-- `set` writes inputs, statics, instance members (`Timer.PT`) or globals (`"DB".member`, `"Tag"`).
+- `set` writes inputs, statics, instance members (`Timer.PT`) or globals (`"DB".member`, `"Tag"`). Array elements are addressed as `'pts[2].x'` or `'grid[1,2]'` (quote them inside `{ … }`). The value must match the variable's kind: `true`/`false` for BOOL, numbers for numeric types, strings for strings.
 - `expect` compares with a small tolerance for reals; `T#…` strings are durations.
-- For an FC, the return value is expected under the block's own name.
+- One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
+- For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
 
 ## What the simulator covers
 

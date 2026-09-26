@@ -1,0 +1,82 @@
+{
+  "Function block": {
+    "prefix": "fb",
+    "body": [
+      "FUNCTION_BLOCK \"${1:FB_Name}\"",
+      "{ S7_Optimized_Access := 'TRUE' }",
+      "VERSION : 0.1",
+      "   VAR_INPUT",
+      "      ${2:Enable} : Bool;",
+      "   END_VAR",
+      "   VAR_OUTPUT",
+      "      ${3:Done} : Bool;",
+      "   END_VAR",
+      "   VAR",
+      "      $4",
+      "   END_VAR",
+      "",
+      "BEGIN",
+      "\t$0",
+      "END_FUNCTION_BLOCK"
+    ],
+    "description": "FUNCTION_BLOCK with optimized access"
+  },
+  "Function": {
+    "prefix": "fc",
+    "body": [
+      "FUNCTION \"${1:FC_Name}\" : ${2:Void}",
+      "{ S7_Optimized_Access := 'TRUE' }",
+      "VERSION : 0.1",
+      "   VAR_INPUT",
+      "      $3",
+      "   END_VAR",
+      "",
+      "BEGIN",
+      "\t$0",
+      "END_FUNCTION"
+    ],
+    "description": "FUNCTION with optimized access"
+  },
+  "Global data block": {
+    "prefix": "db",
+    "body": ["DATA_BLOCK \"${1:DB_Name}\"", "{ S7_Optimized_Access := 'TRUE' }", "VERSION : 0.1", "NON_RETAIN", "   VAR", "      $2", "   END_VAR", "", "BEGIN", "", "END_DATA_BLOCK"],
+    "description": "Global DB"
+  },
+  "PLC data type": {
+    "prefix": "udt",
+    "body": ["TYPE \"${1:UDT_Name}\"", "VERSION : 0.1", "   STRUCT", "      $0", "   END_STRUCT;", "", "END_TYPE"],
+    "description": "PLC data type (UDT)"
+  },
+  "IF": { "prefix": "if", "body": ["IF ${1:#condition} THEN", "\t$0", "END_IF;"] },
+  "IF ELSE": { "prefix": "ife", "body": ["IF ${1:#condition} THEN", "\t$2", "ELSE", "\t$0", "END_IF;"] },
+  "CASE": { "prefix": "case", "body": ["CASE ${1:#state} OF", "\t${2:0}:", "\t\t$0", "\tELSE", "\t\t;", "END_CASE;"] },
+  "FOR": { "prefix": "for", "body": ["FOR ${1:#i} := ${2:0} TO ${3:10} DO", "\t$0", "END_FOR;"] },
+  "WHILE": { "prefix": "while", "body": ["WHILE ${1:#condition} DO", "\t$0", "END_WHILE;"] },
+  "REGION": { "prefix": "region", "body": ["REGION ${1:Name}", "\t$0", "END_REGION"] },
+  "TON call": {
+    "prefix": "ton",
+    "body": ["${1:#tonDelay}(IN := ${2:#start},", "\tPT := ${3:T#5s});", "$0"],
+    "description": "Call an IEC TON instance (declare it as TON_TIME in VAR)"
+  },
+  "Rising edge": {
+    "prefix": "rtrig",
+    "body": ["${1:#rTrig}(CLK := ${2:#signal});", "IF $1.Q THEN", "\t$0", "END_IF;"],
+    "description": "R_TRIG instance call and use"
+  },
+  "Step sequence": {
+    "prefix": "seq",
+    "body": [
+      "CASE #${1:step} OF",
+      "\t0: // idle",
+      "\t\tIF #${2:start} THEN",
+      "\t\t\t#$1 := 10;",
+      "\t\tEND_IF;",
+      "\t10: // ${3:first step}",
+      "\t\t$0",
+      "\tELSE",
+      "\t\t#$1 := 0;",
+      "END_CASE;"
+    ],
+    "description": "CASE-based step sequence"
+  }
+}

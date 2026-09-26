@@ -27,6 +27,8 @@ cpSync(join(out, "rung.exe"), join(stage, "rung.exe"));
 const bridgeBin = join(root, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48");
 for (const f of readdirSync(bridgeBin)) if (!f.endsWith(".pdb")) cpSync(join(bridgeBin, f), join(stage, "bridge", f));
 cpSync(join(root, "agents", "AGENTS.template.md"), join(stage, "AGENTS.template.md"));
+// rung setup openness uses it to register the bridge in the Openness whitelist
+cpSync(join(root, "tools", "openness", "Register-OpennessWhitelist.ps1"), join(stage, "tools", "Register-OpennessWhitelist.ps1"));
 cpSync(join(root, "agents", "claude-plugin"), join(stage, "agents", "claude-plugin"), { recursive: true });
 cpSync(join(root, "agents", ".claude-plugin"), join(stage, "agents", ".claude-plugin"), { recursive: true });
 const vsix = join(root, "editors", "vscode", "rung-scl.vsix");

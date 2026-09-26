@@ -188,6 +188,22 @@ namespace Rung.Bridge.V20
 
         static string Dates(params DateTime[] d) => "dt:" + string.Join(":", d.Select(x => x.Ticks));
 
+        // QA-10: fingerprints cost 25-60 ms per block (fact F1); an idle watch re-read all of them on every pass.
+        // Between full refreshes an object whose modification dates and consistency are unchanged keeps its
+        // fingerprint. Revision checks before imports and exports never use the cache (Revision()).
+        static readonly TimeSpan FingerprintRefresh = TimeSpan.FromMinutes(5);
+        readonly Dictionary<string, (string Key, string Fingerprint, DateTime At)> _fingerprints = new Dictionary<string, (string, string, DateTime)>(StringComparer.Ordinal);
+
+        string CachedFingerprint(string address, IEngineeringServiceProvider obj, bool? consistent, string dates)
+        {
+            var key = dates + "|" + consistent;
+            var now = DateTime.UtcNow;
+            if (_fingerprints.TryGetValue(address, out var c) && c.Key == key && now - c.At < FingerprintRefresh) return c.Fingerprint;
+            var fp = Fingerprint(obj, consistent, () => dates);
+            _fingerprints[address] = (key, fp, now);
+            return fp;
+        }
+
         static string Fingerprint(IEngineeringServiceProvider obj, bool? consistent, Func<string> fallback)
         {
             if (consistent == false) return fallback();
@@ -232,7 +248,7 @@ namespace Rung.Bridge.V20
                     IsFailsafe = IsFailsafeLanguage(lang),
                     IsConsistent = b.IsConsistent,
                 };
-                entry.Fingerprint = Fingerprint(b, entry.IsConsistent, () => Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate));
+                entry.Fingerprint = CachedFingerprint(entry.Address, b, entry.IsConsistent, Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate));
                 refs.Add(new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = plc });
             }
             foreach (PlcBlockUserGroup g in group.Groups)
@@ -253,7 +269,7 @@ namespace Rung.Bridge.V20
                     IsFailsafe = false, // F-UDT detection is fact F13; unverified in V20
                     IsConsistent = t.IsConsistent,
                 };
-                entry.Fingerprint = Fingerprint(t, entry.IsConsistent, () => Dates(t.ModifiedDate, t.InterfaceModifiedDate));
+                entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, Dates(t.ModifiedDate, t.InterfaceModifiedDate));
                 refs.Add(new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc });
             }
             foreach (PlcTypeUserGroup g in group.Groups)
@@ -346,12 +362,23 @@ namespace Rung.Bridge.V20
             Directory.CreateDirectory(targetDir);
             for (var attempt = 0; attempt < 3; attempt++)
             {
-                var before = Revision(r);
-                foreach (var f in Directory.GetFiles(targetDir, Stem + ".*")) File.Delete(f);
+                string before, actualForm;
                 var warnings = new List<string>();
-                if (r.Entry.IsConsistent == false) warnings.Add(WarningCodes.Inconsistent);
-                var actualForm = ExportInto(r, form, targetDir, warnings);
-                if (Revision(r) != before) continue; // changed while exporting; bytes may be torn
+                try
+                {
+                    before = Revision(r);
+                    foreach (var f in Directory.GetFiles(targetDir, Stem + ".*")) File.Delete(f);
+                    if (r.Entry.IsConsistent == false) warnings.Add(WarningCodes.Inconsistent);
+                    actualForm = ExportInto(r, form, targetDir, warnings);
+                    if (Revision(r) != before) continue; // changed while exporting; bytes may be torn
+                }
+                catch (EngineeringObjectDisposedException)
+                {
+                    // TIA replaced the object (seen right after an import and compile): look it up again
+                    _index.Clear();
+                    r = Resolve(address);
+                    continue;
+                }
                 var files = Directory.GetFiles(targetDir, Stem + ".*").OrderBy(f => f, StringComparer.Ordinal)
                     .Select(f => TextNormalizer.NormalizeFile(f, Path.GetFileName(f) == Stem + "." + actualForm ? "primary" : "companion" + Path.GetFileName(f).Substring(Stem.Length)))
                     .ToArray();
@@ -375,8 +402,16 @@ namespace Rung.Bridge.V20
                         return form;
                     case "s7dcl":
                     {
-                        var res = r.Obj is PlcType t ? t.ExportAsDocuments(new DirectoryInfo(dir), Stem) : ((PlcBlock)r.Obj).ExportAsDocuments(new DirectoryInfo(dir), Stem);
-                        if (res.State == DocumentResultState.Success) return form;
+                        // QA-6: blocks with networks in several languages (and other SD gaps) throw instead of
+                        // returning a failed result; both cases fall back to SimaticML XML
+                        var sdOk = false;
+                        try
+                        {
+                            var res = r.Obj is PlcType t ? t.ExportAsDocuments(new DirectoryInfo(dir), Stem) : ((PlcBlock)r.Obj).ExportAsDocuments(new DirectoryInfo(dir), Stem);
+                            sdOk = res.State == DocumentResultState.Success;
+                        }
+                        catch (EngineeringException) { sdOk = false; }
+                        if (sdOk) return form;
                         warnings.Add(WarningCodes.SdFallback);
                         foreach (var f in Directory.GetFiles(dir, Stem + ".*")) File.Delete(f);
                         return ExportInto(r, "xml", dir, warnings);

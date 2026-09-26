@@ -1,0 +1,20 @@
+[
+  { "label": "rung: sync", "command": "rung", "args": ["sync"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus" },
+  { "label": "rung: watch (keep in sync)", "command": "rung", "args": ["watch"], "cwd": "$ZED_WORKTREE_ROOT", "use_new_terminal": true, "reveal": "no_focus" },
+  { "label": "rung: compile this block", "command": "rung", "args": ["compile", "--file", "$ZED_FILE"], "cwd": "$ZED_WORKTREE_ROOT", "tags": ["rung-block"] },
+  { "label": "rung: compile PLC", "command": "rung", "args": ["compile"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: compile hardware", "command": "rung", "args": ["compile", "--hw"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: test all", "command": "rung", "args": ["test"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: test this block", "command": "rung", "args": ["test", "--filter", "$ZED_STEM"], "cwd": "$ZED_WORKTREE_ROOT", "tags": ["rung-block"] },
+  { "label": "rung: go online", "command": "rung", "args": ["online"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: go offline", "command": "rung", "args": ["online", "--off"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: online state", "command": "rung", "args": ["online", "--state"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus" },
+  { "label": "rung: interfaces and reachable devices", "command": "rung", "args": ["interfaces", "--scan"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: download to PLC (asks first)", "command": "rung", "args": ["download"], "cwd": "$ZED_WORKTREE_ROOT", "use_new_terminal": true, "reveal": "always", "allow_concurrent_runs": false },
+  { "label": "rung: open in TIA Portal", "command": "rung", "args": ["open", "$ZED_FILE"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus", "tags": ["rung-block"] },
+  { "label": "rung: status", "command": "rung", "args": ["status"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: pull from TIA Portal", "command": "rung", "args": ["pull"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: views (hardware, HMI, tags)", "command": "rung", "args": ["views"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: resolve conflict, keep my file", "command": "rung", "args": ["resolve", "$ZED_FILE", "--ours"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: resolve conflict, take TIA's version", "command": "rung", "args": ["resolve", "$ZED_FILE", "--theirs"], "cwd": "$ZED_WORKTREE_ROOT" }
+]

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // One two-way reconciliation pass between the workspace and TIA Portal (rung sync; rung watch repeats it).
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, rm, unlink } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import {
   BlobStore,
   Journal,
@@ -28,6 +29,7 @@ import {
   baseBundle,
   buildState,
   diskHash,
+  isLockError,
   isReadOnlyEntry,
   localStatus,
   mapStaged,
@@ -53,6 +55,8 @@ export interface Diagnostic {
   message: string;
   line?: number;
   column?: number;
+  /** TIA revision the object had when the message was produced (compile messages are kept while it holds). */
+  revision?: string;
 }
 
 export interface SyncReport {
@@ -152,15 +156,26 @@ function rankOf(form: string, texts: string[]): number {
   return 2;
 }
 
-async function writeDiagnostics(root: string, items: Diagnostic[]): Promise<number> {
+/**
+ * Writes this pass's diagnostics. Compile messages of earlier passes stay (QA-4) while their object was not
+ * compiled again and still has the TIA revision they were produced for: a broken block stays red.
+ */
+async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Diagnostic) => boolean = () => false): Promise<number> {
   const file = join(root, ".rung", "diagnostics.json");
   let seq = 0;
+  let previous: Diagnostic[] = [];
   try {
-    seq = (JSON.parse(await readFile(file, "utf8")) as { seq: number }).seq ?? 0;
+    const old = JSON.parse(await readFile(file, "utf8")) as { seq: number; items?: Diagnostic[] };
+    seq = old.seq ?? 0;
+    previous = old.items ?? [];
   } catch {
     /* first run */
   }
-  await writeFileAtomic(file, JSON.stringify({ seq: seq + 1, items }, null, 2) + "\n");
+  const kept = previous.filter((d) => d.code === "COMPILE" && keep(d));
+  const key = (d: Diagnostic) => `${d.address}\u0000${d.line ?? ""}\u0000${d.message}`;
+  const seen = new Set(items.map(key));
+  const all = [...kept.filter((d) => !seen.has(key(d))), ...items];
+  await writeFileAtomic(file, JSON.stringify({ seq: seq + 1, items: all }, null, 2) + "\n");
   return seq + 1;
 }
 
@@ -331,8 +346,8 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
       if (!item && st) {
         const status = await localStatus(root, st.files);
         if (status === "modified") {
-          warn(address, "LOCAL_CHANGES", "deleted in TIA but edited locally; file kept");
-          state.upsert({ ...st, status: "conflicted" });
+          warn(address, "LOCAL_CHANGES", "deleted in TIA but edited locally; file kept (rung resolve --ours recreates it in TIA, --theirs accepts the delete)");
+          state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: "absent", tiaFiles: st.files, deletedInTia: true } });
           continue;
         }
         const removes = [];
@@ -366,6 +381,7 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
         throw e;
       }
       if (e instanceof BridgeError || e instanceof WorkspaceError) warn(address, e.code, e.message);
+      else if (isLockError(e)) warn(address, "FILE_LOCKED", `${(e as NodeJS.ErrnoException).path ?? "a file"} is locked or not readable (${(e as NodeJS.ErrnoException).code}); retrying on the next pass`);
       else throw e;
     } finally {
       done++;
@@ -407,6 +423,16 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
       failed.add(job.address);
       diag({ address: job.address, path: primaryPath, severity: "error", code: "DEPENDENCY_BLOCKED", message: cyclic.has(job.address) ? "Cyclic dependency between changed objects; import them together with rung sync --batch (not automatic)" : `Waiting for ${blockedBy!.address}, which could not be imported` });
       continue;
+    }
+    // QA-7: a file saved in another encoding (e.g. Windows-1252) would lose its umlauts on the way to TIA
+    if (Object.values(job.bundle).some((t) => t.includes("�"))) {
+      const bad = [];
+      for (const c of job.captured) if (!isUtf8(await readFile(rel2abs(root, c.path)).catch(() => Buffer.alloc(0)))) bad.push(c.path);
+      if (bad.length) {
+        failed.add(job.address);
+        diag({ address: job.address, path: bad[0]!, severity: "error", code: "INVALID_ENCODING", message: `${bad.join(", ")} is not UTF-8 (probably Windows-1252); save it as UTF-8, rung imports nothing until then` });
+        continue;
+      }
     }
     const stage = await stageForImport(root, job.form, job.bundle);
     let result;
@@ -466,7 +492,8 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
         for (const m of msgs) {
           const target = m.address ?? "";
           const path = (target && state.get(target)?.path) || "";
-          diag({ address: target, path, severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}) });
+          const revision = target ? state.get(target)?.tiaFingerprint : undefined;
+          diag({ address: target, path, severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}) });
         }
       } catch (e) {
         if (!(e instanceof BridgeError)) throw e;
@@ -475,7 +502,13 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
     }
   }
 
-  await writeDiagnostics(root, report.diagnostics);
+  const compiledAll = imported.length > 0 && cfg.sync.compile === "all";
+  const compiled = new Set(imported);
+  await writeDiagnostics(root, report.diagnostics, (d) => {
+    if (compiledAll || !d.address || compiled.has(d.address)) return false;
+    const now = state.get(d.address);
+    return !!now && (!d.revision || now.tiaFingerprint === d.revision);
+  });
   await state.flush();
   return report;
 }
@@ -507,19 +540,62 @@ export async function resolveConflict(root: string, state: StateStore, path: str
   if (!st || st.status !== "conflicted") throw new WorkspaceError("CONFIG_INVALID", `${path} is not in conflict`);
   const tiaFiles = st.conflict?.tiaFiles ?? st.files;
   const tiaFingerprint = st.conflict?.tiaFingerprint ?? st.tiaFingerprint;
+  const recoveryDir = join(root, ".rung", "recovery", "resolve-" + randomUUID());
+  if (st.conflict?.deletedInTia) {
+    // QA-5: the object no longer exists in TIA Portal
+    if (mode === "theirs") {
+      // accept the delete: the edited files go to recovery, nothing is lost
+      for (const f of st.files) {
+        const from = rel2abs(root, f.path);
+        if (!existsSync(from)) continue;
+        await mkdir(join(recoveryDir, dirname(f.path)), { recursive: true });
+        await rename(from, join(recoveryDir, f.path));
+      }
+    }
+    // ours / merged: forget the old object; the next pass sees a new file and creates it in TIA
+    state.remove(st.address);
+    await state.flush();
+    return;
+  }
   if (mode === "theirs") {
     const blobs = new BlobStore(root);
     for (const f of tiaFiles)
-      await replaceGuarded(rel2abs(root, f.path), await blobs.get(f.hash), { expectedHash: await diskHash(root, f.path), recoveryDir: join(root, ".rung", "recovery", "resolve-" + randomUUID()), force: true });
+      await replaceGuarded(rel2abs(root, f.path), await blobs.get(f.hash), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
     state.upsert({ ...st, files: tiaFiles, fileHash: bundleHash(tiaFiles), path: tiaFiles.find((f) => f.role === "primary")?.path ?? st.path, tiaFingerprint, status: "synced", conflict: undefined });
   } else {
+    const markers = /^<<<<<<< file$/m;
     for (const f of tiaFiles) {
-      const text = await readFile(rel2abs(root, f.path), "utf8").catch(() => "");
-      if (/^<<<<<<< file$/m.test(text)) throw new WorkspaceError("CONFIG_INVALID", `${f.path} still contains conflict markers`);
+      const primary = await readFile(rel2abs(root, f.path), "utf8").catch(() => "");
+      const merged = await readFile(rel2abs(root, f.path + ".conflict"), "utf8").catch(() => null);
+      if (mode === "merged" && merged !== null && !markers.test(merged)) {
+        // QA-3: the user merged inside the .conflict file; it becomes the file (the old one is kept for recovery)
+        await replaceGuarded(rel2abs(root, f.path), Buffer.from(merged, "utf8"), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
+      } else if (markers.test(primary)) {
+        throw new WorkspaceError("CONFIG_INVALID", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);
+      } else if (mode === "merged" && merged !== null && markers.test(merged) && primary === "") {
+        throw new WorkspaceError("CONFIG_INVALID", `${f.path}.conflict still contains conflict markers`);
+      }
     }
     // Base = the TIA version the conflict saw: the next pass sees "file modified, TIA unchanged" and imports.
     state.upsert({ ...st, files: tiaFiles, fileHash: bundleHash(tiaFiles), tiaFingerprint, status: "fileDirty", conflict: undefined });
   }
-  for (const f of tiaFiles) for (const s of CONFLICT_SUFFIXES) await unlink(rel2abs(root, f.path + s)).catch(() => {});
+  // the helper files go to .rung/recovery instead of being deleted: nothing a person typed is lost
+  for (const f of tiaFiles)
+    for (const suffix of CONFLICT_SUFFIXES) {
+      const from = rel2abs(root, f.path + suffix);
+      if (!existsSync(from)) continue;
+      await mkdir(join(recoveryDir, dirname(f.path)), { recursive: true });
+      await rename(from, join(recoveryDir, f.path + suffix)).catch(() => unlink(from).catch(() => {}));
+    }
   await state.flush();
+}
+
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+function isUtf8(bytes: Uint8Array): boolean {
+  try {
+    utf8.decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <SW.TechnologicalObjects.TechnologicalInstanceDB ID="0">
+    <AttributeList>
+      <Name>Axis_1</Name>
+      <Number>2</Number>
+    </AttributeList>
+  </SW.TechnologicalObjects.TechnologicalInstanceDB>
+</Document>

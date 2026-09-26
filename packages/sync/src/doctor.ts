@@ -58,14 +58,19 @@ function diffSample(a: Snapshot, b: Snapshot): string {
   return "(file set differs)";
 }
 
-export async function doctor(root: string, bridge: DoctorBridge, opts: { devices?: string[]; addresses?: string[] } = {}): Promise<DoctorRow[]> {
+export async function doctor(
+  root: string,
+  bridge: DoctorBridge,
+  opts: { devices?: string[]; addresses?: string[]; onProgress?: (done: number, total: number, address: string) => void } = {},
+): Promise<DoctorRow[]> {
   const work = join(root, ".rung", "doctor", randomUUID());
   const devices = opts.devices ?? (await bridge.projectInfo()).devices;
   const rows: DoctorRow[] = [];
   try {
     for (const device of devices) {
-      for (const entry of await bridge.listObjects(device)) {
-        if (opts.addresses && !opts.addresses.includes(entry.address)) continue;
+      const entries = (await bridge.listObjects(device)).filter((e) => !opts.addresses || opts.addresses.includes(e.address));
+      for (const [i, entry] of entries.entries()) {
+        opts.onProgress?.(i + 1, entries.length, entry.address);
         const row: DoctorRow = { address: entry.address, form: "", pass1Equal: false, pass2Equal: false };
         rows.push(row);
         if (entry.unit) { row.skipped = "unit"; continue; }

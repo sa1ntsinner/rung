@@ -175,3 +175,9 @@ export async function stageForImport(root: string, form: string, bundle: Record<
   }
   return { dir, primary: join(dir, STAGED_STEM + "." + form) };
 }
+
+/** Another program holds the file (editor save in progress, antivirus, backup): skip it this pass. */
+export function isLockError(e: unknown): boolean {
+  const code = (e as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Journal, WorkspaceError, parseAddress, pathKey, publishBundle, type ObjectState, type RungConfig, type StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
 import { takeInventory, type Warning } from "./inventory.js";
-import { buildState, diskHash, isReadOnlyEntry, isStrong, localStatus, planPublication, stageExport, type BridgeLike } from "./objects.js";
+import { buildState, diskHash, isLockError, isReadOnlyEntry, isStrong, localStatus, planPublication, stageExport, type BridgeLike } from "./objects.js";
 
 export { STAGED_STEM, isReadOnlyEntry, type BridgeLike } from "./objects.js";
 
@@ -118,6 +118,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
         throw e;
       }
       if (e instanceof BridgeError || e instanceof WorkspaceError) warn(entry.address, e.code, e.message);
+      else if (isLockError(e)) warn(entry.address, "FILE_LOCKED", `${(e as NodeJS.ErrnoException).path ?? "a file"} is locked or not readable (${(e as NodeJS.ErrnoException).code}); retrying on the next pass`);
       else throw e;
     } finally {
       done++;

@@ -20,12 +20,46 @@ Commands: *rung: Pull*, *Sync*, *Start watch*, *Status*, *Resolve conflict — k
 
 ## Zed
 
-Zed → Extensions → *Install Dev Extension* → choose `editors/zed`. The grammar is built from `grammars/tree-sitter-scl`. Point Zed at rung if it is not on PATH:
+Zed → Extensions → *Install Dev Extension* → choose `editors/zed` (needs Rust via rustup on PATH). The extension gives you:
+
+- SCL highlighting, outline and the rung language server for `.scl`, `.db` and `.udt`.
+- A run button (▶) in the gutter next to every block header: compile this block, test it, or open it in TIA Portal.
+- Tasks for everything else (*task: spawn*, or `ctrl-shift-r` in many setups): sync, watch, compile PLC, compile hardware, test, go online/offline, interfaces, download (it asks you to type the PLC name first), open in TIA Portal, pull, views, resolve conflicts.
+- Snippets: `fb`, `fc`, `db`, `udt`, `if`, `ife`, `case`, `for`, `while`, `region`, `ton`, `rtrig`, `seq`.
+- rung's MCP tools in Zed's agent panel (context server `rung`).
+
+Zed extensions cannot add their own side panels or buttons, so there is no rung sidebar in Zed; VS Code has one.
+
+The tasks run `rung`, so it has to be on PATH (or point the language server at it, below). If `.scl` files open as another language, map them in settings: `"file_types": { "SCL": ["scl", "db", "udt"] }`.
 
 ```json
 {
   "lsp": {
-    "rung": { "binary": { "path": "node", "arguments": ["C:/path/to/rung/packages/cli/dist/index.js", "lsp", "--stdio"] } }
+    "rung": { "binary": { "path": "C:/Program Files/nodejs/node.exe", "arguments": ["C:/path/to/rung/packages/cli/dist/index.js", "lsp", "--stdio"] } }
+  }
+}
+```
+
+Suggested keys (`keymap.json`): `alt-q` and then a letter.
+
+```json
+{
+  "context": "Workspace",
+  "bindings": {
+    "alt-q s": ["task::Spawn", { "task_name": "rung: sync" }],
+    "alt-q w": ["task::Spawn", { "task_name": "rung: watch (keep in sync)" }],
+    "alt-q b": ["task::Spawn", { "task_name": "rung: compile this block" }],
+    "alt-q shift-b": ["task::Spawn", { "task_name": "rung: compile PLC" }],
+    "alt-q h": ["task::Spawn", { "task_name": "rung: compile hardware" }],
+    "alt-q t": ["task::Spawn", { "task_name": "rung: test this block" }],
+    "alt-q shift-t": ["task::Spawn", { "task_name": "rung: test all" }],
+    "alt-q o": ["task::Spawn", { "task_name": "rung: go online" }],
+    "alt-q f": ["task::Spawn", { "task_name": "rung: go offline" }],
+    "alt-q i": ["task::Spawn", { "task_name": "rung: interfaces and reachable devices" }],
+    "alt-q d": ["task::Spawn", { "task_name": "rung: download to PLC (asks first)" }],
+    "alt-q e": ["task::Spawn", { "task_name": "rung: open in TIA Portal" }],
+    "alt-q p": ["task::Spawn", { "task_name": "rung: pull from TIA Portal" }],
+    "alt-q q": ["task::Spawn", { "task_name": "rung: status" }]
   }
 }
 ```

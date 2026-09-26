@@ -74,6 +74,32 @@ describe("rung test runner", () => {
     expect(r.cases[0]!.error).toMatch(/unknown step "jump"/);
   });
 
+  it("runs every key of a multi-key step in the order set, cycle, advance, expect (QA-17)", async () => {
+    const r = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - expect: { Running: true }\n        cycle: 1\n        set: { Start: true }\n  - steps:\n      - cycle: 1\n        expect: { Running: true }\n");
+    expect(r.cases.map((c) => [c.passed, c.error])).toEqual([
+      [true, undefined],
+      [false, undefined],
+    ]);
+    expect(r.cases[1]!.failures).toEqual([{ step: 1, name: "Running", expected: true, actual: false }]);
+    const bad = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - cycle: 1\n        expct: { Running: true }\n");
+    expect(bad.cases[0]!.error).toMatch(/unknown step "expct"/);
+  });
+
+  it("addresses array elements in set/expect and keeps FC IN_OUT values between cycles", async () => {
+    const idx = index();
+    idx.set("file:///w/plc/P/blocks/Arr.scl", 'FUNCTION_BLOCK "Arr"\nVAR\n  pts : Array[1..3] of "Fx_Types";\n  grid : Array[0..1, 0..2] of Int;\n  sum : Int;\nEND_VAR\nBEGIN\n  #sum := #pts[2].Mode + #grid[1, 2];\nEND_FUNCTION_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Inc.scl", 'FUNCTION "Inc" : Void\nVAR_IN_OUT\n  acc : Int;\nEND_VAR\nBEGIN\n  #acc := #acc + 1;\nEND_FUNCTION\n', 0);
+    const a = await runTestFile(idx, "a.yaml", "block: Arr\ncases:\n  - steps:\n      - set: { 'pts[2].Mode': 3, 'grid[1,2]': 4 }\n      - cycle: 1\n      - expect: { sum: 7, 'pts[2].Mode': 3, pts.2.Mode: 3 }\n");
+    expect(a.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
+    const f = await runTestFile(idx, "f.yaml", "block: Inc\ncases:\n  - steps:\n      - set: { acc: 0 }\n      - cycle: 3\n      - expect: { acc: 3 }\n");
+    expect(f.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
+  });
+
+  it("rejects set values of the wrong kind", async () => {
+    const r = await runTestFile(index(), "t.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - set: { Start: 1 }\n");
+    expect(r.cases[0]!.error).toMatch(/Start expects a BOOL \(true\/false\), got 1/);
+  });
+
   it("discovers tests/**/*.test.yaml and renders JUnit XML", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-tests-"));
     mkdirSync(join(root, "tests", "drives"), { recursive: true });

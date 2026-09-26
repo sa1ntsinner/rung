@@ -22,6 +22,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex } from "./workspace.js";
+import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, hover, outline, references, rename, type CompletionKind, type OutlineSymbol } from "./features.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
@@ -120,12 +121,16 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
     if (!root) return;
     // Files rewritten by rung sync (or edited elsewhere) are re-read; open buffers win.
     try {
-      fsWatcher = watch(join(root, "plc"), { recursive: true }, (_e, file) => {
+      // rung workspaces mirror into plc/; VCI exports and IEC projects are watched from the root
+      const watched = index.layout === "rung" ? join(root, "plc") : root;
+      fsWatcher = watch(watched, { recursive: true }, (_e, file) => {
         if (!file || /(^|[\\/])\./.test(String(file))) return;
-        const uri = pathToFileURL(join(root!, "plc", String(file))).href;
+        if (index.layout !== "rung" && !/\.(scl|db|udt|awl|st|xml|TcPOU|TcDUT|TcGVL|TcIO)$/i.test(String(file))) return;
+        const uri = pathToFileURL(join(watched, String(file))).href;
         if (documents.get(uri)) return;
         void readFile(fileURLToPath(uri), "utf8").then(
           (t) => {
+            if (index.layout !== "rung" && /\.xml$/i.test(String(file)) && !isSimaticMl(t) && !/technology objects/i.test(String(file))) return;
             index.set(uri, t, 0);
             schedule(uri);
           },

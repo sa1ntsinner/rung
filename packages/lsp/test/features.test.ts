@@ -146,3 +146,76 @@ describe("workspace features", () => {
     expect(times[Math.floor(times.length * 0.95)]!).toBeLessThan(100);
   });
 });
+
+describe("QA regressions", () => {
+  const FB = `FUNCTION_BLOCK "Q_Fb"
+VAR
+   T1 {InstructionName := 'TON_TIME'} : TON_TIME;
+   n : Int;
+   st : "Q_Stat";
+   tmr : IEC_TIMER;
+   cnt : IEC_COUNTER;
+   r : REF_TO Int;
+END_VAR
+BEGIN
+   #T1(IN := TRUE, PT := T#1s);
+   IF #st.lastSync.YEAR = 2200 OR #st.lastSync.MONTH = 1 THEN
+      #st.localIP.ADDR[1] := 192;
+   END_IF;
+   #st.lastSync.NOPE := 1;
+   #tmr.TON(IN := TRUE, PT := T#1s);
+   #cnt.CTU(CU := #tmr.Q, PV := 3);
+   #n := "Q_Start".Mode + "Q_Struct".Limits.MaxCurrent;
+   "Q_Struct".Limits.Nope := 1;
+END_FUNCTION_BLOCK
+`;
+  const UDT = 'TYPE "Q_Stat"\nVERSION : 0.1\n   STRUCT\n      lastSync : DTL;\n      localIP : IP_V4;\n      other : "Not_Mirrored";\n   END_STRUCT;\nEND_TYPE\n';
+  const INST = 'DATA_BLOCK "Q_Inst"\n{ S7_Optimized_Access := \'TRUE\' }\nVERSION : 0.1\nNON_RETAIN\n"Q_Fb"\n\nBEGIN\n   T1.PT := T#2s;\n   n := 5;\n   T1.XX := 1;\nEND_DATA_BLOCK\n';
+  const START = 'DATA_BLOCK "Q_Start"\nVERSION : 0.1\n   VAR\n      Plug : Struct\n         Delay_time : S5Time;\n      END_STRUCT;\n      Mode : Byte;\n   END_VAR\nBEGIN\n   Mode := 16#2;\n   Plug.Delay_time := S5T#1s;\nEND_DATA_BLOCK\n';
+  const STRUCT_DB = 'DATA_BLOCK "Q_Struct"\n{ S7_Optimized_Access := \'FALSE\' }\nVERSION : 0.1\nNON_RETAIN\n   STRUCT\n      Limits : Struct\n         MaxCurrent : Int;\n      END_STRUCT;\n      Flag : Bool;\n   END_STRUCT;\nBEGIN\n   Flag := TRUE;\nEND_DATA_BLOCK\n';
+  const STL = 'FUNCTION "Q_Stl" : Void\nVERSION : 0.1\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = t\n      A(;\n      A "Q_Start".Mode;\n      );\n      L s5t#10ms;\n      = #a;\nEND_FUNCTION\n';
+  const u = (n: string) => `file:///q/plc/P/blocks/${n}`;
+  const q = new WorkspaceIndex();
+  q.set(u("Q_Fb.scl"), FB, 0);
+  q.set("file:///q/plc/P/types/Q_Stat.udt", UDT, 0);
+  q.set(u("Q_Inst.db"), INST, 0);
+  q.set(u("Q_Start.db"), START, 0);
+  q.set(u("Q_Struct.db"), STRUCT_DB, 0);
+  q.set(u("Q_Stl.awl"), STL, 0);
+  const diag = (n: string) => diagnostics(q, u(n)).map((d) => [d.code, q.docs.get(u(n))!.text.slice(d.start, d.end)]);
+
+  it("accepts DB start values of own members and of instance DBs (QA-21)", () => {
+    expect(diag("Q_Start.db")).toEqual([]);
+    expect(diag("Q_Inst.db")).toEqual([["UNKNOWN_MEMBER", "XX"]]);
+    const off = INST.indexOf("PT :=");
+    expect(hover(q, u("Q_Inst.db"), off)!.markdown).toMatch(/\*\*PT\*\* : `Time`/);
+  });
+
+  it("resolves system-type members on UDT members, IEC_TIMER calls and REF_TO (QA-22)", () => {
+    expect(diag("Q_Fb.scl")).toEqual([
+      ["UNKNOWN_MEMBER", "NOPE"],
+      ["UNKNOWN_MEMBER", "Nope"],
+    ]);
+    expect(hover(q, u("Q_Fb.scl"), FB.indexOf("YEAR") + 1)!.markdown).toMatch(/\*\*YEAR\*\* : `UInt`/);
+  });
+
+  it("indexes standard-access DB members and ignores STL bodies (QA-24)", () => {
+    expect(diag("Q_Struct.db")).toEqual([]);
+    expect(diag("Q_Stl.awl")).toEqual([]);
+    expect(q.global("Q_Stl")!.block!.vars.map((v) => v.name)).toEqual(["a"]);
+    const def = definition(q, u("Q_Fb.scl"), FB.indexOf("MaxCurrent") + 1)!;
+    expect(q.docs.get(def.uri)!.text.slice(def.start, def.end)).toBe("MaxCurrent");
+  });
+
+  it("finds references of DB and UDT members", () => {
+    const refs = references(q, u("Q_Fb.scl"), FB.indexOf("MaxCurrent") + 1);
+    expect(refs.map((r) => [r.uri.split("/").pop(), q.docs.get(r.uri)!.text.slice(r.start, r.end)])).toEqual([
+      ["Q_Struct.db", "MaxCurrent"],
+      ["Q_Fb.scl", "MaxCurrent"],
+    ]);
+    const plug = references(q, u("Q_Start.db"), START.indexOf("Mode :=") + 1, false);
+    expect(plug.map((r) => r.uri.split("/").pop())).toEqual(["Q_Fb.scl", "Q_Start.db"]);
+    const year = references(q, "file:///q/plc/P/types/Q_Stat.udt", UDT.indexOf("lastSync") + 1, false);
+    expect(year.map((r) => q.docs.get(r.uri)!.text.slice(r.start, r.end))).toEqual(["lastSync", "lastSync", "lastSync"]);
+  });
+});

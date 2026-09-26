@@ -1,0 +1,11 @@
+DATA_BLOCK "DB_Plant"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   VAR
+      Level : Real;
+   END_VAR
+
+BEGIN
+   Level := 1.5;
+END_DATA_BLOCK

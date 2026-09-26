@@ -40,6 +40,42 @@ describe("lex", () => {
     ]);
   });
 
+  it("recognizes typed bit-string, based, S5TIME, string and date/time literals (QA-14)", () => {
+    const lits = ["WORD#16#00FF", "W#16#FF", "BYTE#16#0F", "DWORD#16#DEAD_BEEF", "LWORD#16#1", "DW#16#0", "INT#2#1010", "DINT#-5", "S5T#1s", "S5TIME#10ms", "WSTRING#'x y'", "STRING#'it''s'", "CHAR#'a'", "WCHAR#'a'", "DATE#2024-01-31", "D#2024-01-31", "TOD#12:30:00.5", "LTOD#1:2:3", "DT#2024-01-31-12:30:00", "LDT#2024-01-31-12:30:00.000", "LTIME#1d2h3m", "REAL#1.5E-3", "BOOL#TRUE"];
+    for (const l of lits) expect(kinds(`${l};`), l).toEqual([[l.includes("'") ? "string" : "number", l], ["op", ";"]]);
+  });
+
+  it("ends hex and typed CASE labels before the colon (QA-14)", () => {
+    expect(kinds("16#8201: WORD#16#FF: 5:")).toEqual([
+      ["number", "16#8201"],
+      ["op", ":"],
+      ["number", "WORD#16#FF"],
+      ["op", ":"],
+      ["number", "5"],
+      ["op", ":"],
+    ]);
+    expect(kinds("TOD#12:30:00:=")[0]).toEqual(["number", "TOD#12:30:00"]);
+  });
+
+  it("lexes IEC wildcard addresses and nested comments in IEC mode (QA-23)", () => {
+    expect(kinds("x AT %I* : BOOL; %MW10*2")).toEqual([
+      ["ident", "x"],
+      ["ident", "AT"],
+      ["absolute", "%I*"],
+      ["op", ":"],
+      ["ident", "BOOL"],
+      ["op", ";"],
+      ["absolute", "%MW10"],
+      ["op", "*"],
+      ["number", "2"],
+    ]);
+    const nested = "(* a (* b *) c *) x";
+    expect(lex(nested, { nestedComments: true }).tokens.map((t) => [t.kind, t.text]).slice(0, 2)).toEqual([
+      ["comment", "(* a (* b *) c *)"],
+      ["ident", "x"],
+    ]);
+  });
+
   it("handles absolute addresses, pragmas, comments and strings with escapes", () => {
     expect(kinds("%I0.0 %DB1.DBX0.0 { S7_Optimized_Access := 'TRUE' } // c\n(* block *) /* c */ 'it''s $'ok$''")).toEqual([
       ["absolute", "%I0.0"],

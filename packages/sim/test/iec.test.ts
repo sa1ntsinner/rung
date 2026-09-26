@@ -89,6 +89,20 @@ cases:
     expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
   });
 
+  it("runs S=/R= assignments, nested comments, AT %I* variables and GVL-constant array bounds", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/GVL_C.st", "VAR_GLOBAL CONSTANT\n  MAX : INT := 3;\nEND_VAR\nVAR_GLOBAL\n  aItems : ARRAY[0..GVL_C.MAX - 1] OF INT;\nEND_VAR\n", 0);
+    idx.set("file:///w/FB_Set.st", "FUNCTION_BLOCK FB_Set\nVAR_INPUT\n  bSet : BOOL;\n  bReset : BOOL;\nEND_VAR\nVAR\n  bLatch : BOOL;\n  bIn AT %I* : BOOL;\n  a : ARRAY[1..GVL_C.MAX] OF INT;\n  n : INT;\nEND_VAR\n(* outer (* nested *) still comment *)\nbLatch S= bSet;\nbLatch R= bReset;\na[GVL_C.MAX] := 5;\nGVL_C.aItems[2] := 1;\nn := a[3] + GVL_C.aItems[2];\nEND_FUNCTION_BLOCK\n", 0);
+    const s = new Simulator(idx);
+    const i = s.newInstance("FB_Set");
+    s.callBlock(i, { bSet: true });
+    expect([i.mem.BLATCH, i.mem.N]).toEqual([true, 6]);
+    s.callBlock(i, { bSet: false });
+    expect(i.mem.BLATCH).toBe(true);
+    s.callBlock(i, { bReset: true });
+    expect(i.mem.BLATCH).toBe(false);
+  });
+
   it("calls functions from TwinCAT .TcPOU files", () => {
     const sim = new Simulator(index());
     expect(sim.callBlock("FC_Scale", { fIn: 4 }).returnValue).toBe(10);

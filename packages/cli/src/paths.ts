@@ -15,7 +15,7 @@ export function installRoot(env: Record<string, string | undefined> = process.en
   return undefined;
 }
 
-function devPath(rel: string): string | undefined {
+export function devPath(rel: string): string | undefined {
   try {
     return fileURLToPath(new URL(rel, import.meta.url));
   } catch {

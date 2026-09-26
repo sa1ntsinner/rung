@@ -20,6 +20,8 @@ export const HINTS: Record<string, string> = {
   ACCESS_DENIED:
     'Your Windows user must be in the local group "Siemens TIA Openness" (run as admin: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in) and you must accept the Openness access dialog in TIA Portal.',
   TIA_NOT_RUNNING: "Start TIA Portal and open the project first.",
+  TIMEOUT:
+    "TIA Portal did not answer. It may be waiting for an \"Openness access\" confirmation (look at the TIA Portal window; a TIA Portal without window cannot show it). Register the bridge once with: rung setup openness",
   NO_PROJECT: "Open the bound project in TIA Portal (rung never opens or modifies projects on its own).",
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "Run rung init in this folder first.",

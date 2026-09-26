@@ -24,6 +24,7 @@ import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { cmdCompile, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
+import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 
 export type { Io } from "./common.js";
 
@@ -56,6 +57,7 @@ PLC:
                                        download to the PLC; asks you to type the PLC name first, and
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
   rung open <file> [--dir <ws>]        open the block's editor in the TIA Portal window
+  rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
 
 Environment:
   RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
@@ -106,6 +108,9 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const current = (await exists(gi)) ? await readFile(gi, "utf8") : "";
     if (!current.split(/\r?\n/).includes(".rung/")) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ".rung/\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
+    const bridgeExe = io.env.RUNG_BRIDGE ?? config.bridge.command;
+    const wl = /rung-bridge-v2\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe) : "unknown";
+    if (wl === "missing" || wl === "stale") io.stderr(`rung: ${WHITELIST_HINT}\n`);
     io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\nNext: rung pull\n`);
     return 0;
   } finally {
@@ -152,9 +157,15 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
     return 1;
   }
   const config = await loadConfig(dir);
+  // QA-11: doctor imports over every object; running next to rung watch makes both fail. Take the state lock.
+  const state = await openState(dir, config);
   const client = await bridgeFor(config, io, ["--allow-fixture-import"]);
   try {
-    const rows = await doctor(dir, client, { devices: config.devices.length ? config.devices : undefined });
+    const rows = await doctor(dir, client, {
+      devices: config.devices.length ? config.devices : undefined,
+      onProgress: (done, total, address) => io.stderr(`\r  ${done}/${total} ${address.length > 60 ? "…" + address.slice(-59) : address.padEnd(60)}`),
+    });
+    io.stderr("\n");
     await writeFileAtomic(join(dir, ".rung", "doctor-report.json"), JSON.stringify(rows, null, 2) + "\n");
     for (const r of rows) {
       const verdict = r.skipped ? `skipped (${r.skipped})` : r.error ? `ERROR ${r.error}` : r.pass1Equal ? "fixed point" : r.pass2Equal ? "converges on pass 2" : "NEVER converges";
@@ -166,6 +177,7 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
     return rows.some((r) => !r.skipped && (r.error || !r.pass2Equal)) ? 2 : 0;
   } finally {
     await client.close();
+    await state.close();
   }
 }
 
@@ -204,6 +216,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         off: { type: "boolean" },
         state: { type: "boolean" },
         scan: { type: "boolean" },
+        grant: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -293,6 +306,8 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "setup":
+        return await cmdSetup(target, v, io);
       case "compile":
         return await cmdCompile(dir, v, io);
       case "online":

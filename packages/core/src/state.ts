@@ -44,7 +44,8 @@ export interface ObjectState {
   /** Epoch ms of the last verification by export + hash (weak revisions). */
   verifiedAt?: number;
   /** Set while status is "conflicted": the TIA revision and files the conflict was computed against. */
-  conflict?: { tiaFingerprint: string; tiaFiles: StateFile[] };
+  /** deletedInTia: the object is gone from TIA Portal while the file was edited (resolve --ours recreates it). */
+  conflict?: { tiaFingerprint: string; tiaFiles: StateFile[]; deletedInTia?: true };
 }
 
 export interface Binding {
