@@ -10,6 +10,8 @@ export interface Io {
   stdout: (s: string) => void;
   stderr: (s: string) => void;
   env: Record<string, string | undefined>;
+  /** Asks the user a question (tests inject answers; the CLI reads the terminal). */
+  prompt?: (question: string) => Promise<string>;
   /** Resolves when the user asks to stop (Ctrl+C); used by long-running commands. */
   stopSignal?: Promise<void>;
 }
@@ -54,7 +56,8 @@ export function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
 }
 
 /** Bridge launch flags for two-way work: imports are only enabled when the workspace asks for them. */
-export const importFlags = (config: RungConfig) => (config.sync.import === "auto" ? ["--allow-import"] : []);
+export const importFlags = (config: RungConfig) =>
+  config.sync.import === "auto" ? ["--allow-import", ...(config.sync.save === "never" ? [] : ["--save-after-import"])] : [];
 
 export async function openState(dir: string, config: RungConfig) {
   return StateStore.open(dir, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices });

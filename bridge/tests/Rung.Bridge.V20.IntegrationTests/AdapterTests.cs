@@ -214,6 +214,39 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
     }
 
+    [Fact] public void ListsConnectionModesAndReportsOffline()
+    {
+        var c = _fx.Session.Connections("PLC_1", scan: false);
+        Assert.NotEmpty(c.Modes);
+        Assert.Contains(c.Modes, m => m.PcInterfaces.Count > 0);
+        Assert.Equal("Offline", _fx.Session.Online("PLC_1", "state", null).State);
+    }
+
+    [Fact] public void DownloadWithoutATargetExplainsWhatToConfigure()
+    {
+        var ex = Assert.Throws<RpcException>(() => _fx.Session.Download(new DownloadRequest { Device = "PLC_1" }));
+        Assert.Equal("NO_TARGET", ex.Code);
+        Assert.Contains("rung interfaces", ex.Message);
+    }
+
+    [Fact] public void CompilesTheHardware() =>
+        Assert.NotEmpty(_fx.Session.CompileHardware("PLC_1"));
+
+    [Fact] public void ACopyInAnotherFolderNeverOverwritesTheOriginal()
+    {
+        // QA-1: GenerateBlocksFromSource replaces a same-named block wherever it lives
+        var original = "plc:PLC_1/blocks/20_Valves/Fx_Valve";
+        var before = _fx.Session.Export(original, "auto", Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N")));
+        var copy = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
+        File.WriteAllText(copy, File.ReadAllText(before.Files[0].Path).Replace("#Open := FALSE;", "#Open := TRUE;"));
+        var ex = Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/blocks/10_Drives/Fx_Valve", "scl", copy, "absent", Guid.NewGuid().ToString()));
+        Assert.Equal("NAME_TAKEN", ex.Code);
+        Assert.Contains(original, ex.Message);
+        var after = _fx.Session.Export(original, "auto", Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N")));
+        Assert.Equal(before.BundleHash, after.BundleHash);
+        Assert.DoesNotContain(_fx.Session.ListObjects("PLC_1"), o => o.Address == "plc:PLC_1/blocks/10_Drives/Fx_Valve");
+    }
+
     [Fact] public void CompileOfBrokenBlockReportsErrorsWithAddress()
     {
         var msgs = _fx.Session.Compile("PLC_1", new[] { "plc:PLC_1/blocks/Fx_Broken" });

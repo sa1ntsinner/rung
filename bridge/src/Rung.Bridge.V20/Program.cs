@@ -11,6 +11,8 @@ namespace Rung.Bridge.V20
         public string ProjectPath;
         public bool AllowFixtureImport;
         public bool AllowImport;
+        /// <summary>Save the project after every successful import, so a TIA crash cannot silently undo what rung wrote (QA-2).</summary>
+        public bool SaveAfterImport;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -28,6 +30,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--allow-import":
                         a.AllowImport = true;
+                        break;
+                    case "--save-after-import":
+                        a.SaveAfterImport = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);

@@ -32,6 +32,12 @@ namespace Rung.Bridge.Core.Protocol
         public const string UnsupportedCapability = "UNSUPPORTED_CAPABILITY";
         public const string UnsupportedObject = "UNSUPPORTED_OBJECT";
         public const string OutcomeUnknown = "OUTCOME_UNKNOWN";
+        /// <summary>Creating an object whose name another object of the PLC already has (TIA names are unique per PLC, not per folder).</summary>
+        public const string NameTaken = "NAME_TAKEN";
+        /// <summary>Going online or downloading failed (not reachable, wrong interface, protection, ...).</summary>
+        public const string OnlineFailed = "ONLINE_FAILED";
+        /// <summary>The PLC has no connection target configured in rung.toml or TIA Portal.</summary>
+        public const string NoTarget = "NO_TARGET";
     }
 
     /// <summary>Nonfatal warning codes attached to results.</summary>
@@ -42,6 +48,8 @@ namespace Rung.Bridge.Core.Protocol
         public const string SdFallback = "SD_FALLBACK";
         /// <summary>TIA asked for a know-how password during the import; rung cancelled the prompt.</summary>
         public const string PasswordPromptCancelled = "PASSWORD_PROMPT_CANCELLED";
+        /// <summary>The import is in TIA but saving the project failed; a TIA crash before the next save would lose it.</summary>
+        public const string SaveFailed = "SAVE_FAILED";
     }
 
     public sealed class RpcException : Exception

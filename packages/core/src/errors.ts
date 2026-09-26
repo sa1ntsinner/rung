@@ -3,6 +3,7 @@
 /** Workspace-side error codes (the bridge has its own set in @rung/bridge-client). */
 export type WorkspaceErrorCode =
   | "STATE_LOCKED"
+  | "NOT_MIRRORED"
   | "STATE_FORMAT"
   | "BINDING_MISMATCH"
   | "LOCAL_CHANGES"

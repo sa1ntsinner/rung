@@ -17,6 +17,12 @@ describe("config", () => {
     const c = formatConfig(defaultConfig("p", "V20", "b")).replace("failsafe = true", "failsafe = false");
     expect(() => parseConfig(c)).toThrow(/readOnly.failsafe/);
   });
+  it("rejects unknown sync modes instead of failing later", () => {
+    const c = formatConfig(defaultConfig("p", "V20", "b"));
+    expect(() => parseConfig(c.replace('import = "auto"', 'import = "yes"'))).toThrow(/sync.import must be auto or manual/);
+    expect(() => parseConfig(c.replace('save = "after-import"', 'save = "sometimes"'))).toThrow(/sync.save/);
+    expect(parseConfig(c.replace('save = "after-import"', 'save = "never"')).sync.save).toBe("never");
+  });
   it("reports a missing workspace", async () => {
     await expect(loadConfig(mkdtempSync(join(tmpdir(), "rung-cfg-")))).rejects.toMatchObject({ code: "NOT_A_WORKSPACE" });
   });

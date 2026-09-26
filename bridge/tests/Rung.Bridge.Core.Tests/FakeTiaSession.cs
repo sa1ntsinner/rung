@@ -9,6 +9,32 @@ using Rung.Bridge.Core.Protocol;
 
 public sealed class FakeTiaSession : ITiaSession
 {
+    public DownloadRequest LastDownload;
+    public string OnlineState = "Offline";
+    public IReadOnlyList<CompileMessage> CompileHardware(string device) => new[] { new CompileMessage { Severity = "info", Description = "hardware ok" } };
+    public OnlineStatus Online(string device, string action, ConnectionTarget target)
+    {
+        if (action == "online") OnlineState = "Online";
+        else if (action == "offline") OnlineState = "Offline";
+        else if (action != "state") throw new RpcException(ErrorCodes.BadRequest, "action");
+        return new OnlineStatus { Device = device, State = OnlineState };
+    }
+    public ConnectionOptions Connections(string device, bool scan) => new ConnectionOptions
+    {
+        Device = device,
+        Modes = { new ConnectionModeInfo { Name = "PN/IE", PcInterfaces = { new PcInterfaceInfo { Name = "PLCSIM", Number = 1, TargetInterfaces = new[] { "1 X1" }, Subnets = new string[0] } } } },
+    };
+    public DownloadOutcome Download(DownloadRequest request)
+    {
+        LastDownload = request;
+        var d = DownloadPolicy.Decide("StopModules", new[] { "NoAction", "StopAll" }, request.Allow, request.StartAfter);
+        var o = new DownloadOutcome { Device = request.Device, State = d.Blocks ? "Cancelled" : "Success" };
+        o.Decisions.Add(new DownloadDecision { Phase = "pre", Kind = "StopModules", Name = d.Name, Choice = d.Choice, Allowed = d.Allowed, Blocks = d.Blocks });
+        if (d.Blocks) o.NeedsAllow = new[] { d.Name };
+        return o;
+    }
+    public void Show(string address) => throw new RpcException(ErrorCodes.UnsupportedCapability, "no UI");
+
     public Exception ThrowOnInfo;
 
     public readonly List<ObjectEntry> Objects = new List<ObjectEntry>

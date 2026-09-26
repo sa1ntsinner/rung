@@ -6,6 +6,11 @@ import {
   PROTOCOL_VERSION,
   type BridgeEvent,
   type CompileMessage,
+  type ConnectionOptions,
+  type ConnectionTarget,
+  type DownloadOutcome,
+  type DownloadRequest,
+  type OnlineStatus,
   type XRefEntry,
   type DescribeNode,
   type ExportResult,
@@ -33,7 +38,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import", "objects.delete"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete", "plc.download"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -100,7 +105,7 @@ export class BridgeClient {
     this.listeners.push(cb);
   }
 
-  request(method: string, params: Record<string, unknown>): Promise<unknown> {
+  request(method: string, params: Record<string, unknown>, timeoutMs = this.opts.requestTimeoutMs): Promise<unknown> {
     if (this.exited) return Promise.reject(new BridgeError(ErrorCodes.BRIDGE_EXITED, "rung-bridge is not running"));
     const id = this.nextId++;
     const mutation = MUTATIONS.has(method);
@@ -110,9 +115,9 @@ export class BridgeClient {
         reject(
           mutation
             ? new BridgeError(ErrorCodes.OUTCOME_UNKNOWN, `${method} timed out; it may or may not have been applied in TIA Portal`)
-            : new BridgeError(ErrorCodes.TIMEOUT, `${method} timed out after ${this.opts.requestTimeoutMs} ms`),
+            : new BridgeError(ErrorCodes.TIMEOUT, `${method} timed out after ${timeoutMs} ms`),
         );
-      }, this.opts.requestTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { method, mutation, resolve, reject, timer });
       this.sentMethods.push(method);
       this.child.stdin.write(JSON.stringify({ id, method, params }) + "\n");
@@ -149,6 +154,27 @@ export class BridgeClient {
 
   compile(device: string, addresses: string[] = []): Promise<CompileMessage[]> {
     return this.request("plc.compile", { device, addresses }) as Promise<CompileMessage[]>;
+  }
+
+  compileHardware(device: string): Promise<CompileMessage[]> {
+    return this.request("plc.compile", { device, hardware: true }, 600_000) as Promise<CompileMessage[]>;
+  }
+
+  online(device: string, action: "state" | "online" | "offline", target?: ConnectionTarget): Promise<OnlineStatus> {
+    return this.request("plc.online", { device, action, ...(target ? { target } : {}) }, 120_000) as Promise<OnlineStatus>;
+  }
+
+  connections(device: string, scan = false): Promise<ConnectionOptions> {
+    return this.request("plc.connections", { device, scan }, scan ? 180_000 : 60_000) as Promise<ConnectionOptions>;
+  }
+
+  /** A download can take minutes (hardware, large programs); it is never retried. */
+  download(request: DownloadRequest): Promise<DownloadOutcome> {
+    return this.request("plc.download", { request }, 1_800_000) as Promise<DownloadOutcome>;
+  }
+
+  show(address: string): Promise<{ shown: boolean }> {
+    return this.request("objects.show", { address }) as Promise<{ shown: boolean }>;
   }
 
   async close(): Promise<void> {

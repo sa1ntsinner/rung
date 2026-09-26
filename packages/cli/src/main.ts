@@ -23,6 +23,7 @@ import { agentsTemplatePath } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
+import { cmdCompile, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 
 export type { Io } from "./common.js";
 
@@ -47,9 +48,19 @@ Usage:
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
   rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
+PLC:
+  rung compile [dir] [--file <f>]... [--hw] [--plc <name>]   compile in TIA Portal; errors point at file lines
+  rung online [dir] [--off|--state] [--plc <name>]          go online / offline, or show the online state
+  rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
+  rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
+                                       download to the PLC; asks you to type the PLC name first, and
+                                       cancels whenever TIA asks something not allowed (e.g. stop-cpu)
+  rung open <file> [--dir <ws>]        open the block's editor in the TIA Portal window
+
 Environment:
   RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
   RUNG_WEBAPI_PASSWORD  password of the PLC web server user for rung live
+  RUNG_PLC_PASSWORD     password of a protected CPU for rung download
 `;
 
 async function agentsTemplate(project: string): Promise<string> {
@@ -181,6 +192,18 @@ export async function main(argv: string[], io: Io): Promise<number> {
         offline: { type: "boolean" },
         junit: { type: "string" },
         filter: { type: "string" },
+        hw: { type: "boolean" },
+        "no-hw": { type: "boolean" },
+        "no-sw": { type: "boolean" },
+        "all-blocks": { type: "boolean" },
+        "no-start": { type: "boolean" },
+        allow: { type: "string", multiple: true },
+        yes: { type: "boolean" },
+        plc: { type: "string" },
+        file: { type: "string", multiple: true },
+        off: { type: "boolean" },
+        state: { type: "boolean" },
+        scan: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -270,6 +293,20 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "compile":
+        return await cmdCompile(dir, v, io);
+      case "online":
+        return await cmdOnline(dir, v, io);
+      case "interfaces":
+        return await cmdInterfaces(dir, v, io);
+      case "download":
+        return await cmdDownload(dir, v, io);
+      case "open":
+        if (!target) {
+          io.stderr("rung: usage: rung open <file> [--dir <workspace>]\n");
+          return 1;
+        }
+        return await cmdOpen(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
       case "init":
         return await cmdInit(dir, v, io);
       case "pull":

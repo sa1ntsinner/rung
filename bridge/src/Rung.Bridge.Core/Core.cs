@@ -26,6 +26,16 @@ namespace Rung.Bridge.Core
         IReadOnlyList<XRefEntry> XRef(string address);
         /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi or techobjects.</summary>
         DescribeNode Describe(string scope, int maxNodes);
+        /// <summary>Compiles the hardware configuration of the PLC device (and its software).</summary>
+        IReadOnlyList<CompileMessage> CompileHardware(string device);
+        /// <summary>action: state | online | offline. Uses the target when given, else the one TIA has configured.</summary>
+        OnlineStatus Online(string device, string action, ConnectionTarget target);
+        /// <summary>Modes, PG/PC interfaces and target interfaces TIA offers; scan also lists reachable devices.</summary>
+        ConnectionOptions Connections(string device, bool scan);
+        /// <summary>Downloads to the PLC, answering TIA's questions with DownloadPolicy (docs/decisions/0002).</summary>
+        DownloadOutcome Download(DownloadRequest request);
+        /// <summary>Opens the object's editor in the TIA Portal window (needs a TIA Portal with user interface).</summary>
+        void Show(string address);
     }
 
     public sealed class BridgeInfo

@@ -1,0 +1,236 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Online, download, connection listing and "show in TIA Portal" (docs/decisions/0002-plc-actions.md).
+// UNVERIFIED against a real PLC or S7-PLCSIM: written from the V20 Openness API surface (reflection) and
+// Siemens' documented flow; the answers to TIA's download questions come from DownloadPolicy.
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security;
+using Rung.Bridge.Core;
+using Rung.Bridge.Core.Model;
+using Rung.Bridge.Core.Protocol;
+using Siemens.Engineering;
+using Siemens.Engineering.Compiler;
+using Siemens.Engineering.Connection;
+using Siemens.Engineering.Download;
+using Siemens.Engineering.Download.Configurations;
+using Siemens.Engineering.HW;
+using Siemens.Engineering.HW.Features;
+using Siemens.Engineering.Online;
+
+namespace Rung.Bridge.V20
+{
+    public sealed partial class OpennessSession
+    {
+        /// <summary>The CPU device item that carries the PLC software (the online and download providers live there).</summary>
+        DeviceItem CpuItem(string device)
+        {
+            var plc = Plc(device);
+            var item = (plc.Parent as SoftwareContainer)?.Parent as DeviceItem;
+            if (item == null) throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot find the CPU of " + device);
+            return item;
+        }
+
+        public IReadOnlyList<CompileMessage> CompileHardware(string device)
+        {
+            Alive();
+            var item = CpuItem(device);
+            // the station (device) compiles hardware and software together
+            var target = (IEngineeringServiceProvider)(item.Parent as Device) ?? item;
+            var compiler = target.GetService<ICompilable>() ?? item.GetService<ICompilable>();
+            if (compiler == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " cannot be compiled as hardware");
+            var messages = new List<CompileMessage>();
+            try { Flatten(compiler.Compile().Messages, null, new Dictionary<string, string>(), messages); }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+            return messages;
+        }
+
+        public OnlineStatus Online(string device, string action, ConnectionTarget target)
+        {
+            Alive();
+            var provider = CpuItem(device).GetService<OnlineProvider>();
+            if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
+            try
+            {
+                switch (action)
+                {
+                    case "state":
+                        break;
+                    case "online":
+                        if (target != null && !string.IsNullOrEmpty(target.Mode))
+                            provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
+                        else if (!provider.Configuration.IsConfigured)
+                            throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
+                        provider.GoOnline();
+                        break;
+                    case "offline":
+                        provider.GoOffline();
+                        break;
+                    default:
+                        throw new RpcException(ErrorCodes.BadRequest, "action must be state, online or offline");
+                }
+            }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
+            return new OnlineStatus { Device = device, State = provider.State.ToString() };
+        }
+
+        public ConnectionOptions Connections(string device, bool scan)
+        {
+            Alive();
+            var item = CpuItem(device);
+            var cfg = (item.GetService<DownloadProvider>()?.Configuration) ?? item.GetService<OnlineProvider>()?.Configuration;
+            if (cfg == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no connection configuration");
+            var result = new ConnectionOptions { Device = device, Configured = cfg.IsConfigured };
+            foreach (ConfigurationMode mode in cfg.Modes)
+            {
+                var m = new ConnectionModeInfo { Name = mode.Name };
+                foreach (ConfigurationPcInterface pc in mode.PcInterfaces)
+                {
+                    var info = new PcInterfaceInfo
+                    {
+                        Name = pc.Name,
+                        Number = pc.Number,
+                        TargetInterfaces = pc.TargetInterfaces.Select(t => t.Name).ToArray(),
+                        Subnets = pc.Subnets.Select(s => s.Name).ToArray(),
+                    };
+                    if (scan)
+                    {
+                        info.Accessible = new List<AccessibleDeviceInfo>();
+                        try
+                        {
+                            foreach (var d in pc.GetAccessibleDevices())
+                                info.Accessible.Add(new AccessibleDeviceInfo { Name = d.Name, Address = d.Address, DeviceSeries = d.DeviceSeries, MacAddress = d.MACAddress });
+                        }
+                        catch (EngineeringException) { /* interface not usable right now (cable, driver): report it without devices */ }
+                    }
+                    m.PcInterfaces.Add(info);
+                }
+                result.Modes.Add(m);
+            }
+            return result;
+        }
+
+        public DownloadOutcome Download(DownloadRequest request)
+        {
+            Alive();
+            var item = CpuItem(request.Device);
+            var provider = item.GetService<DownloadProvider>();
+            if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, request.Device + " cannot be downloaded");
+            if (request.Target == null || string.IsNullOrEmpty(request.Target.Mode))
+                throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(request.Device));
+            var target = ResolveTarget(provider.Configuration, request.Target, request.Device);
+
+            var options = DownloadOptions.None;
+            if (request.Hardware) options |= DownloadOptions.Hardware;
+            if (request.Software) options |= request.OnlyChanges ? DownloadOptions.SoftwareOnlyChanges : DownloadOptions.Software;
+            if (options == DownloadOptions.None) throw new RpcException(ErrorCodes.BadRequest, "Nothing to download: choose hardware and/or software");
+
+            var outcome = new DownloadOutcome { Device = request.Device };
+            DownloadConfigurationDelegate pre = c => Answer(c, "pre", request, outcome);
+            DownloadConfigurationDelegate post = c => Answer(c, "post", request, outcome);
+            try
+            {
+                var result = provider.Download(target, pre, post, options);
+                outcome.Errors = result.ErrorCount;
+                outcome.Warnings = result.WarningCount;
+                Collect(result.Messages, outcome.Messages);
+                outcome.State = outcome.Decisions.Any(d => d.Blocks) ? "Cancelled" : result.State.ToString();
+            }
+            catch (EngineeringException e)
+            {
+                outcome.Messages.Add(e.Message);
+                outcome.State = outcome.Decisions.Any(d => d.Blocks) ? "Cancelled" : "Error";
+            }
+            outcome.NeedsAllow = outcome.Decisions.Where(d => d.Blocks).Select(d => d.Name).Distinct().ToArray();
+            return outcome;
+        }
+
+        public void Show(string address)
+        {
+            Alive();
+            var r = Resolve(address);
+            var m = r.Obj.GetType().GetMethod("ShowInEditor", Type.EmptyTypes);
+            if (m == null) throw new RpcException(ErrorCodes.UnsupportedObject, address + " has no editor");
+            try { m.Invoke(r.Obj, null); }
+            catch (System.Reflection.TargetInvocationException e) when (e.InnerException is EngineeringException)
+            {
+                throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA Portal cannot show it (a TIA Portal started without user interface has no editors): " + e.InnerException.Message);
+            }
+        }
+
+        // ------------------------------------------------------------------ helpers
+
+        static void Answer(DownloadConfiguration c, string phase, DownloadRequest request, DownloadOutcome outcome)
+        {
+            var kind = c.GetType().Name;
+            var d = new DownloadDecision { Phase = phase, Kind = kind, Message = c.Message };
+            if (c is DownloadPasswordConfiguration pw)
+            {
+                var secret = Environment.GetEnvironmentVariable("RUNG_PLC_PASSWORD");
+                d.Name = "password";
+                if (!string.IsNullOrEmpty(secret))
+                {
+                    var s = new SecureString();
+                    foreach (var ch in secret) s.AppendChar(ch);
+                    pw.SetPassword(s);
+                    d.Choice = "password";
+                    d.Allowed = true;
+                }
+                else
+                {
+                    d.Choice = "none";
+                    d.Blocks = true;
+                    d.Message = (d.Message ?? "") + " (set RUNG_PLC_PASSWORD)";
+                }
+            }
+            else if (c is DownloadCheckConfiguration check)
+            {
+                var dec = DownloadPolicy.DecideCheck(kind, request.Allow);
+                check.Checked = dec.Checked;
+                d.Name = dec.Name; d.Choice = dec.Choice; d.Allowed = dec.Allowed; d.Blocks = dec.Blocks;
+            }
+            else
+            {
+                var prop = c.GetType().GetProperty("CurrentSelection");
+                if (prop != null && prop.PropertyType.IsEnum && prop.CanWrite)
+                {
+                    var dec = DownloadPolicy.Decide(kind, Enum.GetNames(prop.PropertyType), request.Allow, request.StartAfter);
+                    prop.SetValue(c, Enum.Parse(prop.PropertyType, dec.Choice));
+                    d.Name = dec.Name; d.Choice = dec.Choice; d.Allowed = dec.Allowed; d.Blocks = dec.Blocks;
+                }
+                else
+                {
+                    // informational entries (no answer to give)
+                    d.Name = DownloadPolicy.Kebab(kind);
+                    d.Choice = "info";
+                    d.Allowed = true;
+                }
+            }
+            outcome.Decisions.Add(d);
+        }
+
+        static void Collect(DownloadResultMessageComposition list, List<string> into)
+        {
+            foreach (DownloadResultMessage m in list)
+            {
+                if (!string.IsNullOrEmpty(m.Message)) into.Add(m.State + ": " + m.Message);
+                Collect(m.Messages, into);
+            }
+        }
+
+        static ConfigurationTargetInterface ResolveTarget(ConnectionConfiguration cfg, ConnectionTarget t, string device)
+        {
+            var mode = cfg.Modes.Find(t.Mode) ?? throw new RpcException(ErrorCodes.NoTarget, "No connection mode \"" + t.Mode + "\" for " + device + "; run rung interfaces");
+            var pc = mode.PcInterfaces.Find(t.PcInterface, t.PcInterfaceNumber <= 0 ? 1 : t.PcInterfaceNumber)
+                ?? throw new RpcException(ErrorCodes.NoTarget, "No PG/PC interface \"" + t.PcInterface + "\" (" + t.PcInterfaceNumber + ") in mode " + t.Mode + "; run rung interfaces");
+            if (!string.IsNullOrEmpty(t.TargetInterface))
+                return pc.TargetInterfaces.Find(t.TargetInterface) ?? throw new RpcException(ErrorCodes.NoTarget, "No target interface \"" + t.TargetInterface + "\" on " + t.PcInterface + "; run rung interfaces");
+            var all = pc.TargetInterfaces.ToList();
+            if (all.Count == 1) return all[0];
+            throw new RpcException(ErrorCodes.NoTarget, (all.Count == 0 ? "No target interface" : "Several target interfaces (" + string.Join(", ", all.Select(a => a.Name)) + ")") + " on " + t.PcInterface + "; set target_interface in rung.toml");
+        }
+
+        static string NoTargetMessage(string device) =>
+            "No connection configured for " + device + ": run rung interfaces, then set mode, pc_interface and target_interface under [plc." + device + "] in rung.toml";
+    }
+}

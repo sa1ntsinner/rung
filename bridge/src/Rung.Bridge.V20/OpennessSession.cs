@@ -30,7 +30,7 @@ namespace Rung.Bridge.V20
         public PlcSoftware Plc;
     }
 
-    public sealed class OpennessSession : ITiaSession, IDisposable
+    public sealed partial class OpennessSession : ITiaSession, IDisposable
     {
         // V20 facts (docs/facts/openness-v20.md): SD documents for LAD, not FBD.
         static readonly FormCapabilities Caps = new FormCapabilities { SdLad = true, SdFbd = false, SourceStl = true };
@@ -467,6 +467,11 @@ namespace Rung.Bridge.V20
             var outDir = WorkDir(operationId, "out");
             var result = Export(address, "auto", outDir);
             if (cancelled > 0) result.Warnings = result.Warnings.Concat(new[] { WarningCodes.PasswordPromptCancelled }).ToArray();
+            if (_args.SaveAfterImport)
+            {
+                try { _project.Save(); }
+                catch (EngineeringException) { result.Warnings = result.Warnings.Concat(new[] { WarningCodes.SaveFailed }).ToArray(); }
+            }
             return result;
         }
 
@@ -477,6 +482,15 @@ namespace Rung.Bridge.V20
             if (parts.Unit != null) throw new RpcException(ErrorCodes.UnsupportedObject, "Creating objects in software units is not supported yet");
             ListObjects(parts.Device);
             if (_index.ContainsKey(address)) throw new RpcException(ErrorCodes.StaleRevision, address + " already exists in TIA Portal");
+            // GenerateBlocksFromSource replaces a same-named block wherever it lives, so a file copied or moved
+            // into another folder would overwrite the original (QA-1). Names are unique per PLC across blocks and types.
+            var want = Identity(parts.Name, parts.Namespace);
+            var clashKinds = parts.Kind == "block" || parts.Kind == "type" ? new[] { "block", "type" } : new[] { parts.Kind };
+            var clash = _index.Values.FirstOrDefault(v => Array.IndexOf(clashKinds, v.Entry.Kind) >= 0
+                && string.Equals(AddressFormat.Parse(v.Entry.Address).Device, parts.Device, StringComparison.Ordinal)
+                && string.Equals(Identity(AddressFormat.Parse(v.Entry.Address).Name, AddressFormat.Parse(v.Entry.Address).Namespace), want, StringComparison.OrdinalIgnoreCase));
+            if (clash != null)
+                throw new RpcException(ErrorCodes.NameTaken, "\"" + parts.Name + "\" already exists at " + clash.Entry.Address + "; TIA Portal names are unique per PLC. To move a block to another folder, move it in TIA Portal and rung follows.");
             var allowed = parts.Kind == "block" ? new[] { "scl", "awl", "db", "s7dcl", "xml" }
                 : parts.Kind == "type" ? new[] { "udt", "s7dcl", "xml" }
                 : parts.Kind == "tagtable" ? new[] { "tags.xml" } : new string[0];

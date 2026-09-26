@@ -24,6 +24,9 @@ export const ErrorCodes = {
   UNSUPPORTED_CAPABILITY: "UNSUPPORTED_CAPABILITY",
   UNSUPPORTED_OBJECT: "UNSUPPORTED_OBJECT",
   OUTCOME_UNKNOWN: "OUTCOME_UNKNOWN",
+  NAME_TAKEN: "NAME_TAKEN",
+  ONLINE_FAILED: "ONLINE_FAILED",
+  NO_TARGET: "NO_TARGET",
   // client-side only
   BRIDGE_EXITED: "BRIDGE_EXITED",
   TIMEOUT: "TIMEOUT",
@@ -36,6 +39,8 @@ export const WarningCodes = {
   SD_FALLBACK: "SD_FALLBACK",
   /** TIA asked for a know-how password during an import (project has protected blocks); rung cancelled it. */
   PASSWORD_PROMPT_CANCELLED: "PASSWORD_PROMPT_CANCELLED",
+  /** the import is in TIA, but saving the project failed */
+  SAVE_FAILED: "SAVE_FAILED",
 } as const;
 
 export class BridgeError extends Error {
@@ -127,6 +132,62 @@ export interface CompileMessage {
   bodyLine?: number;
   /** "body" or "interface" */
   section?: string;
+}
+
+/** Where to connect; names as TIA shows them in "Extended download" (docs/decisions/0002-plc-actions.md). */
+export interface ConnectionTarget {
+  mode: string;
+  pcInterface: string;
+  pcInterfaceNumber?: number;
+  targetInterface?: string;
+}
+
+export interface OnlineStatus {
+  device: string;
+  state: "Offline" | "Connecting" | "Online" | "Incompatible" | "NotReachable" | "Protected" | "Disconnecting" | string;
+}
+
+export interface AccessibleDevice {
+  name: string;
+  address: string;
+  deviceSeries: string;
+  macAddress: string;
+}
+
+export interface ConnectionOptions {
+  device: string;
+  configured: boolean;
+  modes: { name: string; pcInterfaces: { name: string; number: number; targetInterfaces: string[]; subnets: string[]; accessible?: AccessibleDevice[] }[] }[];
+}
+
+export interface DownloadRequest {
+  device: string;
+  hardware?: boolean;
+  software?: boolean;
+  onlyChanges?: boolean;
+  allow?: string[];
+  startAfter?: boolean;
+  target: ConnectionTarget;
+}
+
+export interface DownloadDecision {
+  phase: "pre" | "post";
+  kind: string;
+  name: string;
+  message?: string;
+  choice: string;
+  allowed: boolean;
+  blocks: boolean;
+}
+
+export interface DownloadOutcome {
+  device: string;
+  state: "Success" | "Information" | "Warning" | "Error" | "Cancelled" | string;
+  errors: number;
+  warnings: number;
+  messages: string[];
+  decisions: DownloadDecision[];
+  needsAllow: string[];
 }
 
 export interface BridgeEvent {

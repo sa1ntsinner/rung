@@ -69,7 +69,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       save(db);
       return reply({ deleted: true });
     }
+    case "plc.online": {
+      db.online = p.action === "online" ? "Online" : p.action === "offline" ? "Offline" : (db.online ?? "Offline");
+      save(db);
+      return reply({ device: p.device, state: db.online });
+    }
+    case "plc.connections":
+      return reply({ device: p.device, configured: false, modes: [{ name: "PN/IE", pcInterfaces: [{ name: "PLCSIM", number: 1, targetInterfaces: ["1 X1"], subnets: [], ...(p.scan ? { accessible: [{ name: "plc_1", address: "192.168.0.1", deviceSeries: "S7-1500", macAddress: "00-00" }] } : {}) }] }] });
+    case "plc.download": {
+      const r = p.request;
+      db.downloads = [...(db.downloads ?? []), r];
+      save(db);
+      const stop = (r.allow ?? []).includes("stop-cpu");
+      return reply({ device: r.device, state: stop ? "Success" : "Cancelled", errors: 0, warnings: 0, messages: [], decisions: [{ phase: "pre", kind: "StopModules", name: "stop-cpu", choice: stop ? "StopAll" : "NoAction", allowed: stop, blocks: !stop }], needsAllow: stop ? [] : ["stop-cpu"] });
+    }
+    case "objects.show":
+      return fail("UNSUPPORTED_CAPABILITY", "TIA Portal was started without user interface");
     case "plc.compile":
+      if (p.hardware) return reply([{ severity: "info", description: "Hardware compiled" }]);
       return reply((p.addresses ?? []).filter((a) => (db.objects.find((o) => o.address === a)?.content ?? "").includes("#undeclared")).map((a) => ({ address: a, severity: "error", description: "Tag #undeclared not defined" })));
     default:
       return fail("BAD_REQUEST", "unknown " + req.method);

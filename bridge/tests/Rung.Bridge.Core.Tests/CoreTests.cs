@@ -320,6 +320,46 @@ public class CompileRouteTests
         Assert.True(Call("{\"id\":1,\"method\":\"plc.compile\",\"params\":{\"device\":\"PLC_1\"}}").TryGetProperty("result", out _));
 }
 
+public class PlcActionRouteTests
+{
+    readonly FakeTiaSession _s = new FakeTiaSession();
+    JsonElement Call(string line) => JsonDocument.Parse(new RpcDispatcher(() => _s, new BridgeInfo("V20", "t")).Handle(line)).RootElement;
+
+    [Fact] public void OnlineStateAndActions()
+    {
+        Assert.Equal("Offline", Call("{\"id\":1,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"state\"}}").GetProperty("result").GetProperty("state").GetString());
+        Assert.Equal("Online", Call("{\"id\":2,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"PLCSIM\"}}}").GetProperty("result").GetProperty("state").GetString());
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":3,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"reboot\"}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact] public void DownloadRequestIsParsedAndDefaultsAreSafe()
+    {
+        var r = Call("{\"id\":1,\"method\":\"plc.download\",\"params\":{\"request\":{\"device\":\"PLC_1\",\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"PLCSIM\",\"pcInterfaceNumber\":1}}}}").GetProperty("result");
+        Assert.Equal("Cancelled", r.GetProperty("state").GetString());
+        Assert.Equal("stop-cpu", r.GetProperty("needsAllow")[0].GetString());
+        Assert.True(_s.LastDownload.Software);
+        Assert.True(_s.LastDownload.OnlyChanges);
+        Assert.False(_s.LastDownload.Hardware);
+        Assert.Equal("PLCSIM", _s.LastDownload.Target.PcInterface);
+
+        var ok = Call("{\"id\":2,\"method\":\"plc.download\",\"params\":{\"request\":{\"device\":\"PLC_1\",\"allow\":[\"stop-cpu\"],\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"PLCSIM\"}}}}").GetProperty("result");
+        Assert.Equal("Success", ok.GetProperty("state").GetString());
+    }
+
+    [Fact] public void DownloadNeedsADevice() =>
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":1,\"method\":\"plc.download\",\"params\":{\"request\":{}}}").GetProperty("error").GetProperty("code").GetString());
+
+    [Fact] public void ConnectionsAndShow()
+    {
+        var c = Call("{\"id\":1,\"method\":\"plc.connections\",\"params\":{\"device\":\"PLC_1\",\"scan\":true}}").GetProperty("result");
+        Assert.Equal("PN/IE", c.GetProperty("modes")[0].GetProperty("name").GetString());
+        Assert.Equal("UNSUPPORTED_CAPABILITY", Call("{\"id\":2,\"method\":\"objects.show\",\"params\":{\"address\":\"plc:PLC_1/blocks/X\"}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact] public void HardwareCompileRoute() =>
+        Assert.Equal("hardware ok", Call("{\"id\":1,\"method\":\"plc.compile\",\"params\":{\"device\":\"PLC_1\",\"hardware\":true}}").GetProperty("result")[0].GetProperty("description").GetString());
+}
+
 public class DeleteRouteTests
 {
     [Fact] public void DeleteChecksRevision()

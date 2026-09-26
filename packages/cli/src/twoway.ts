@@ -65,6 +65,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       server?.emit("error", { message: e.message, retryInMs: wait });
     },
   });
+  const tools = () => {
+    const b = watcher.bridgeForTools;
+    if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
+    return b as import("@rung/bridge-client").BridgeClient;
+  };
   server = await OwnerServer.start(dir, {
     status: async () => statusOf(state, watcher),
     syncNow: async () => watcher.syncNow(),
@@ -80,6 +85,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       await confirmDelete(dir, b as never, state, String(p.address));
       return { deleted: true };
     },
+    compileHardware: async (p) => tools().compileHardware(String(p.device)),
+    online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
+    connections: async (p) => tools().connections(String(p.device), !!p.scan),
+    download: async (p) => tools().download(p.request as never),
+    show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");

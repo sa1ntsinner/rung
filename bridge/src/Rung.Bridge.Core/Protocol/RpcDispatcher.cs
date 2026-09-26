@@ -98,7 +98,20 @@ namespace Rung.Bridge.Core.Protocol
                 case "xref.get":
                     return Session.XRef(Str(p, "address"));
                 case "plc.compile":
-                    return Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
+                    return Bool(p, "hardware") ? Session.CompileHardware(Str(p, "device")) : Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
+                case "plc.online":
+                    return Session.Online(Str(p, "device"), Str(p, "action"), Obj<ConnectionTarget>(p, "target"));
+                case "plc.connections":
+                    return Session.Connections(Str(p, "device"), Bool(p, "scan"));
+                case "plc.download":
+                {
+                    var req = Obj<DownloadRequest>(p, "request") ?? throw new RpcException(ErrorCodes.BadRequest, "Missing request");
+                    if (string.IsNullOrEmpty(req.Device)) throw new RpcException(ErrorCodes.BadRequest, "request.device is required");
+                    return Session.Download(req);
+                }
+                case "objects.show":
+                    Session.Show(Str(p, "address"));
+                    return new { shown = true };
                 default:
                     throw new RpcException(ErrorCodes.BadRequest, "Unknown method: " + method);
             }
@@ -109,6 +122,16 @@ namespace Rung.Bridge.Core.Protocol
             if (p.ValueKind != JsonValueKind.Object || !p.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.String || v.GetString().Length == 0)
                 throw new RpcException(ErrorCodes.BadRequest, "Missing or invalid string parameter: " + name);
             return v.GetString();
+        }
+
+        static bool Bool(JsonElement p, string name) =>
+            p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
+
+        static T Obj<T>(JsonElement p, string name) where T : class
+        {
+            if (p.ValueKind != JsonValueKind.Object || !p.TryGetProperty(name, out var v) || v.ValueKind == JsonValueKind.Null) return null;
+            if (v.ValueKind != JsonValueKind.Object) throw new RpcException(ErrorCodes.BadRequest, "Parameter must be an object: " + name);
+            return JsonSerializer.Deserialize<T>(v.GetRawText(), Json);
         }
 
         static string[] StrArray(JsonElement p, string name)
