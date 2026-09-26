@@ -8,15 +8,15 @@
   "repository": { "type": "git", "url": "https://github.com/sa1ntsinner/rung" },
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Programming Languages", "Linters"],
-  "keywords": ["scl", "siemens", "tia portal", "plc", "structured text", "iec 61131-3"],
+  "keywords": ["scl", "siemens", "tia portal", "plc", "structured text", "iec 61131-3", "twincat"],
   "main": "./out/extension.js",
-  "activationEvents": ["workspaceContains:rung.toml"],
+  "activationEvents": ["workspaceContains:rung.toml", "workspaceContains:**/*.TcPOU", "workspaceContains:**/*.st"],
   "contributes": {
     "languages": [
       {
         "id": "scl",
-        "aliases": ["SCL", "Siemens SCL"],
-        "extensions": [".scl", ".db", ".udt", ".awl"],
+        "aliases": ["SCL", "Siemens SCL", "IEC Structured Text"],
+        "extensions": [".scl", ".db", ".udt", ".awl", ".st"],
         "configuration": "./language-configuration.json"
       }
     ],

@@ -203,14 +203,17 @@ export function complete(index: WorkspaceIndex, uri: string, offset: number): Co
   if (!doc) return [];
   const line = doc.text.slice(doc.text.lastIndexOf("\n", offset - 1) + 1, offset);
   const block = index.blockAt(uri, offset);
-  const memberCtx = /(#"[^"]+"|#[\p{L}\p{N}_]+|"[^"]+")((?:\.[\p{L}\p{N}_"]+)*)\.([\p{L}\p{N}_]*)$/u.exec(line);
+  const memberCtx = /(#"[^"]+"|#[\p{L}\p{N}_]+|"[^"]+"|(?<![\p{L}\p{N}_#"])[\p{L}_][\p{L}\p{N}_]*)((?:\.[\p{L}\p{N}_"]+)*)\.([\p{L}\p{N}_]*)$/u.exec(line);
   if (memberCtx) {
     const head = memberCtx[1]!;
     const chain = memberCtx[2]!.split(".").filter(Boolean).map((n) => ({ name: n.replace(/"/g, "") }));
     let root: Member[] = [];
+    const bare = !head.startsWith("#") && !head.startsWith('"');
     if (head.startsWith("#") && block) {
       const d = localDecl(block, head.slice(1).replace(/"/g, ""));
       root = d ? index.membersOf(d) : [];
+    } else if (bare && block && localDecl(block, head)) {
+      root = index.membersOf(localDecl(block, head)!); // IEC: locals need no '#'
     } else root = index.membersOfType(head.replace(/"/g, ""));
     let scope = root;
     for (const seg of chain) {

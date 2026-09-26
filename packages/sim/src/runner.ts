@@ -81,14 +81,16 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     const t0 = Date.now();
     const sim = new Simulator(index);
     const failures: TestFailure[] = [];
-    const isFb = g.block.kind === "FB";
+    const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     let inst: Instance | undefined;
     let fcInputs: Record<string, Value> = {};
     let fcOutputs: Struct = {};
     let fcReturn: Value;
     const getMem = (): Struct => (isFb ? inst!.mem : fcOutputs);
     const resolve = (name: string): { get: () => Value; set: (v: Value) => void } => {
-      const { global, root, path } = splitName(name);
+      let { global, root, path } = splitName(name);
+      const gvar = !global && !(isFb && root.toUpperCase() in getMem()) ? index.global(root)?.gvar : undefined;
+      if (gvar) ({ root, path } = { root: gvar.list, path: [root, ...path] }); // bare GVL variable
       const walk = (base: Struct, key: string, rest: string[]) => {
         let obj: Struct = base;
         let k = key.toUpperCase();
@@ -102,7 +104,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         if (!(k in obj)) throw new SimError(`${name} does not exist`);
         return { get: () => obj[k], set: (v: Value) => void (obj[k] = v) };
       };
-      if (global) {
+      if (global || (!isFb || !(root.toUpperCase() in getMem())) && sim.isIecGlobal(root)) {
         sim.read({ root: { kind: "global", name: root }, path: [], start: 0 }, null); // materialize DB/tag
         return walk(sim.globals, root, path);
       }
@@ -120,8 +122,9 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       }
     };
     try {
-      if (isFb) inst = sim.newInstance(g.block.name);
-      else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs or FCs`);
+      if (g.block.kind === "PRG") inst = sim.read({ root: { kind: "global", name: g.block.name }, path: [], start: 0 }, null) as Instance; // one shared PROGRAM instance
+      else if (isFb) inst = sim.newInstance(g.block.name);
+      else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs or PROGRAMs`);
       for (const [si, step] of (c.steps ?? []).entries()) {
         const [op, arg] = Object.entries(step)[0] ?? [];
         switch (op) {

@@ -6,8 +6,9 @@ import { pathToFileURL } from "node:url";
 import { LineIndex } from "./lexer.js";
 import { parse, type BlockModel, type ParsedDocument, type VarDecl } from "./parser.js";
 import { STANDARD_BY_NAME } from "./catalog.js";
+import { TWINCAT_FILE, extractTwinCat } from "./twincat.js";
 
-export type SymbolKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "TAG" | "OBJECT";
+export type SymbolKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "PRG" | "GVL" | "GVAR" | "TAG" | "OBJECT";
 
 export interface GlobalSymbol {
   name: string;
@@ -17,6 +18,8 @@ export interface GlobalSymbol {
   end: number;
   block?: BlockModel;
   tag?: { dataType: string; address?: string; table: string };
+  /** For GVAR: the variable declaration and its list. */
+  gvar?: { decl: VarDecl; list: string };
 }
 
 export interface Doc {
@@ -24,6 +27,8 @@ export interface Doc {
   text: string;
   lines: LineIndex;
   parsed?: ParsedDocument;
+  /** Text the parser saw (blanked XML for TwinCAT files); offsets match `text`. */
+  code?: string;
   version: number;
 }
 
@@ -42,6 +47,8 @@ export interface Member {
 }
 
 const SOURCE = /\.(scl|db|udt|awl)$/i;
+const IEC_SOURCE = /\.st$/i;
+const SKIP_DIRS = new Set(["node_modules", ".git", ".rung", "_Boot", "_CompileInfo", "_Libraries", "bin", "obj", "dist", "views"]);
 const OTHER = /\.(s7dcl|xml|protected\.yaml)$/i;
 
 export function uriOf(path: string): string {
@@ -54,7 +61,15 @@ export class WorkspaceIndex {
   private dirty = true;
 
   /** Loads every mirrored object under <root>/plc (sources parsed, other forms indexed by name). */
+  /** Loads <root>/plc (rung workspace) or, when absent, IEC/TwinCAT sources anywhere under root. */
   async load(root: string): Promise<void> {
+    let plc = true;
+    try {
+      await readdir(join(root, "plc"));
+    } catch {
+      plc = false;
+    }
+    if (!plc) return this.loadIec(root);
     const walk = async (dir: string): Promise<void> => {
       let entries;
       try {
@@ -72,9 +87,33 @@ export class WorkspaceIndex {
     await walk(join(root, "plc"));
   }
 
+  private async loadIec(root: string): Promise<void> {
+    const walk = async (dir: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) await walk(p);
+        else if (TWINCAT_FILE.test(e.name) || IEC_SOURCE.test(e.name) || SOURCE.test(e.name)) this.set(uriOf(p), await readFile(p, "utf8"), 0);
+      }
+    };
+    await walk(root);
+  }
+
   set(uri: string, text: string, version: number): Doc {
     const doc: Doc = { uri, text, lines: new LineIndex(text), version };
     if (SOURCE.test(uri)) doc.parsed = parse(text);
+    else if (IEC_SOURCE.test(uri)) doc.parsed = parse(text, { dialect: "iec", unitName: decodeURIComponent(uri.split("/").pop()!).replace(/\.st$/i, "") });
+    else if (TWINCAT_FILE.test(uri)) {
+      const unit = extractTwinCat(text);
+      doc.code = unit.code;
+      doc.parsed = parse(unit.code, { dialect: "iec", ...(unit.name ? { unitName: unit.name } : {}) });
+    }
     this.docs.set(uri, doc);
     this.dirty = true;
     return doc;
@@ -93,7 +132,11 @@ export class WorkspaceIndex {
       g.set(k, [...(g.get(k) ?? []), s]);
     };
     for (const d of this.docs.values()) {
-      if (d.parsed) for (const b of d.parsed.blocks) add({ name: b.name, kind: b.kind, uri: d.uri, start: b.nameStart, end: b.nameEnd, block: b });
+      if (d.parsed)
+        for (const b of d.parsed.blocks) {
+          add({ name: b.name, kind: b.kind, uri: d.uri, start: b.nameStart, end: b.nameEnd, block: b });
+          if (b.kind === "GVL") for (const v of b.vars) add({ name: v.name, kind: "GVAR", uri: d.uri, start: v.start, end: v.end, gvar: { decl: v, list: b.name } });
+        }
       else if (d.uri.endsWith(".tags.xml")) for (const t of parseTags(d.text, d.uri)) add(t);
       else {
         // LAD/FBD/GRAPH/protected objects: known by name only
@@ -128,10 +171,11 @@ export class WorkspaceIndex {
     if (seen.has(key)) return [];
     seen.add(key);
     const g = this.global(typeRef);
+    if (g?.gvar) return this.membersOf({ ...g.gvar.decl, uri: g.uri });
     if (g?.block) {
       const b = g.block;
       if (b.kind === "DB" && b.dbOf) return this.membersOfType(b.dbOf, seen);
-      const visible = b.kind === "FB" ? b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant") : b.vars;
+      const visible = b.kind === "FB" || b.kind === "PRG" ? b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant") : b.vars;
       return visible.map((v) => ({ ...v, uri: g.uri }));
     }
     const std = STANDARD_BY_NAME.get(key);

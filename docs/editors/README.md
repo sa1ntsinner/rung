@@ -51,3 +51,7 @@ parsers.scl = {
 ```
 
 Copy `grammars/tree-sitter-scl/queries/*.scm` to `~/.config/nvim/queries/scl/`.
+
+## TwinCAT 3 and plain IEC 61131-3 ST
+
+Open a TwinCAT PLC project folder (or any folder of `.st` files) without `rung.toml`: the language server then indexes `.st`, `.TcPOU`, `.TcDUT` and `.TcGVL` files. It reads the Structured Text inside their CDATA sections, keeps positions exact, and understands PROGRAM, METHOD, GVL lists, identifiers written without `#`, and standard FBs. `rung test <folder>` runs YAML unit tests from `<folder>/tests/` against FBs, FCs and PROGRAMs. In VS Code the TwinCAT files keep XML highlighting and still get diagnostics, hover, go-to-definition and completion. Zed and Neovim (tree-sitter) do not support the IEC dialect yet. There is no TwinCAT or CODESYS bridge: rung edits the files, and TwinCAT XAE builds and activates them.

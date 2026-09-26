@@ -205,7 +205,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
   try {
     switch (cmd) {
       case "test": {
-        const ws = await findWorkspace(dir);
+        // TwinCAT / plain IEC ST folders have no rung.toml: the given folder is the workspace.
+        const ws = await findWorkspace(dir).catch(() => dir);
         const index = new WorkspaceIndex();
         await index.load(ws);
         const results = await runTests(ws, index, v.filter as string | undefined);

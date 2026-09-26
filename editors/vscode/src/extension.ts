@@ -36,8 +36,9 @@ async function startClient(context: vscode.ExtensionContext) {
     options: { cwd: workspaceRoot() },
   };
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "scl" }],
-    synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/plc/**/*.{scl,db,udt,awl,s7dcl,xml}") },
+    // TwinCAT sources stay XML-highlighted; the server reads the ST inside their CDATA sections.
+    documentSelector: [{ scheme: "file", language: "scl" }, { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO}" }],
+    synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },
     outputChannelName: "rung",
   };
   client = new LanguageClient("rung", "rung language server", serverOptions, clientOptions);

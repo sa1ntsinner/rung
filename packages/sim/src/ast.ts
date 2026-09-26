@@ -335,7 +335,7 @@ export function parseBody(src: string, from = 0, to = src.length): Stmt[] {
 
   const out: Stmt[] = [];
   while (peek().kind !== "eof") {
-    if (kw(peek(), "END_FUNCTION_BLOCK", "END_FUNCTION", "END_ORGANIZATION_BLOCK", "END_DATA_BLOCK")) break;
+    if (kw(peek(), "END_FUNCTION_BLOCK", "END_FUNCTION", "END_ORGANIZATION_BLOCK", "END_DATA_BLOCK", "END_PROGRAM", "END_METHOD")) break;
     out.push(stmt());
   }
   return out;

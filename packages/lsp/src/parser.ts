@@ -3,7 +3,7 @@
 // It builds what editor features need: blocks, interfaces, regions, references and structural diagnostics.
 import { lex, type LexError, type Token } from "./lexer.js";
 
-export type BlockKind = "FB" | "FC" | "OB" | "DB" | "UDT";
+export type BlockKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "PRG" | "GVL";
 export type Section = "Input" | "Output" | "InOut" | "Static" | "Temp" | "Constant" | "Return" | "Member";
 
 export interface VarDecl {
@@ -77,6 +77,17 @@ const HEADERS: Record<string, { kind: BlockKind; end: string }> = {
   TYPE: { kind: "UDT", end: "END_TYPE" },
 };
 
+/** IEC 61131-3 ST as used by TwinCAT/CODESYS: POUs without BEGIN, METHODs, programs, global variable lists. */
+const HEADERS_IEC: Record<string, { kind: BlockKind; end: string }> = {
+  FUNCTION_BLOCK: { kind: "FB", end: "END_FUNCTION_BLOCK" },
+  FUNCTION: { kind: "FC", end: "END_FUNCTION" },
+  PROGRAM: { kind: "PRG", end: "END_PROGRAM" },
+  METHOD: { kind: "FC", end: "END_METHOD" },
+  TYPE: { kind: "UDT", end: "END_TYPE" },
+};
+
+const KEYWORDS_IEC = new Set(["IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE", "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT", "EXIT", "CONTINUE", "RETURN", "AND", "OR", "XOR", "NOT", "MOD", "TRUE", "FALSE", "THIS", "SUPER", "AND_THEN", "OR_ELSE", "JMP"]);
+
 const SECTIONS: Record<string, Section> = {
   VAR_INPUT: "Input",
   VAR_OUTPUT: "Output",
@@ -84,6 +95,8 @@ const SECTIONS: Record<string, Section> = {
   VAR: "Static",
   VAR_STAT: "Static",
   VAR_TEMP: "Temp",
+  VAR_INST: "Static",
+  VAR_GLOBAL: "Static",
 };
 
 /** Opening keyword → closing keyword for statements checked in bodies. */
@@ -92,7 +105,21 @@ const CLOSERS = new Set(Object.values(NESTING));
 
 export const unquote = (t: string) => (t.startsWith("#") ? t.slice(1) : t).replace(/^"|"$/g, "");
 
-export function parse(src: string): ParsedDocument {
+export interface ParseOptions {
+  dialect?: "scl" | "iec";
+  /** Name for a header-less global variable list (TwinCAT GVL). */
+  unitName?: string;
+}
+
+export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
+  const iec = opts.dialect === "iec";
+  const headers = iec ? HEADERS_IEC : HEADERS;
+  /** IEC POU/METHOD headers start a line; used to end header-less blocks. */
+  const isHeaderAt = (tok: Token) => {
+    if (tok.kind !== "ident" || !headers[tok.upper]) return false;
+    const lineStart = src.lastIndexOf("\n", tok.start - 1) + 1;
+    return /^\s*$/.test(src.slice(lineStart, tok.start));
+  };
   const { tokens: all, errors } = lex(src);
   const tokens = all.filter((t) => t.kind !== "comment");
   const comments = all.filter((t) => t.kind === "comment");
@@ -205,8 +232,8 @@ export function parse(src: string): ParsedDocument {
     return vars;
   }
 
-  function collectRef(t: Token, block: BlockModel, prev?: Token) {
-    const kind: Ref["kind"] = t.kind === "local" ? "local" : t.kind === "global" ? "global" : "call";
+  function collectRef(t: Token, block: BlockModel, prev?: Token, as?: "local" | "global") {
+    const kind: Ref["kind"] = as ?? (t.kind === "local" ? "local" : t.kind === "global" ? "global" : "call");
     const ref: Ref = { kind, name: unquote(t.text), start: t.start, end: t.end, members: [], access: "read" };
     for (;;) {
       if (peek().text === "[") {
@@ -235,7 +262,7 @@ export function parse(src: string): ParsedDocument {
   function parseBody(block: BlockModel, endKw: string) {
     const stack: { kw: string; tok: Token }[] = [];
     let parens = 0;
-    while (peek().kind !== "eof" && !isKw(peek(), endKw)) {
+    while (peek().kind !== "eof" && !isKw(peek(), endKw) && !(iec && isHeaderAt(peek()))) {
       const t = next();
       if (t.kind === "local" || t.kind === "global") {
         collectRef(t, block, tokens[i - 2]);
@@ -257,6 +284,13 @@ export function parse(src: string): ParsedDocument {
       if (t.kind !== "ident") continue;
       if (peek().text === "(" && !NESTING[t.upper] && !CLOSERS.has(t.upper)) {
         block.refs.push({ kind: "call", name: t.text, start: t.start, end: t.end, members: [], access: "call" });
+        continue;
+      }
+      if (iec && parens > 0 && (peek().text === ":=" || peek().text === "=>")) continue; // named call argument
+      if (iec && !KEYWORDS_IEC.has(t.upper) && tokens[i - 2]?.text !== ".") {
+        // plain identifiers are locals when declared in the POU, otherwise globals (GVL variables, types, enums)
+        const declared = block.vars.some((v) => v.name.toUpperCase() === t.upper) || t.upper === block.name.toUpperCase();
+        collectRef(t, block, tokens[i - 2], declared ? "local" : "global");
         continue;
       }
       if (block.kind === "DB" && peek().text === ":=") {
@@ -294,11 +328,20 @@ export function parse(src: string): ParsedDocument {
 
   while (peek().kind !== "eof") {
     const t = next();
-    const h = t.kind === "ident" ? HEADERS[t.upper] : undefined;
+    if (iec && t.kind === "ident" && t.upper === "VAR_GLOBAL") {
+      // TwinCAT GVL: a header-less VAR_GLOBAL list named after its file
+      const gvl: BlockModel = { kind: "GVL", name: opts.unitName ?? "GVL", nameStart: t.start, nameEnd: t.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
+      while (peek().kind !== "eof" && isKw(peek(), "CONSTANT", "RETAIN", "PERSISTENT")) next();
+      gvl.vars.push(...parseDecls("Static"));
+      if (isKw(peek(), "END_VAR")) gvl.end = next().end;
+      blocks.push(gvl);
+      continue;
+    }
+    const h = t.kind === "ident" ? headers[t.upper] : undefined;
     if (!h) {
-      if (t.kind !== "pragma") err(`Expected FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE, found ${t.text}`, t);
+      if (t.kind !== "pragma") err(`Expected ${iec ? "FUNCTION_BLOCK, FUNCTION, PROGRAM, METHOD or TYPE" : "FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE"}, found ${t.text}`, t);
       // resynchronize at the next header
-      while (peek().kind !== "eof" && !(peek().kind === "ident" && HEADERS[peek().upper])) next();
+      while (peek().kind !== "eof" && !(peek().kind === "ident" && (headers[peek().upper] || (iec && peek().upper === "VAR_GLOBAL")))) next();
       continue;
     }
     const nameTok = next();
@@ -306,11 +349,16 @@ export function parse(src: string): ParsedDocument {
     const block: BlockModel = { kind: h.kind, name: unquote(nameTok.text), nameStart: nameTok.start, nameEnd: nameTok.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
     const c = lineComment(nameTok.end);
     if (c) block.comment = c;
+    if (iec) while (peek().kind === "ident" && /^(ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)$/.test(peek().upper)) next();
     if (h.kind === "FC" && peek().text === ":") {
       next();
       block.returnType = parseType().type;
     }
-    while (peek().kind !== "eof" && !isKw(peek(), h.end)) {
+    if (iec && h.kind === "UDT" && peek().text === ":") next(); // TYPE ST_X : STRUCT ...
+    if (iec && (isKw(peek(), "EXTENDS") || isKw(peek(), "IMPLEMENTS"))) {
+      while (peek().kind !== "eof" && !(peek().kind === "ident" && (SECTIONS[peek().upper] || headers[peek().upper])) && peek().kind !== "pragma" && !/^(VAR|END_)/.test(peek().upper)) next();
+    }
+    while (peek().kind !== "eof" && !isKw(peek(), h.end) && !(iec && isHeaderAt(peek()))) {
       const x = peek();
       if (x.kind === "pragma") {
         next();
@@ -333,6 +381,11 @@ export function parse(src: string): ParsedDocument {
         else err("Missing END_VAR", peek());
         continue;
       }
+      if (iec && h.kind === "UDT" && x.text === "(") {
+        // enumeration: TYPE E_X : (A, B := 2) END_TYPE
+        while (peek().kind !== "eof" && !isKw(peek(), h.end)) next();
+        continue;
+      }
       if (isKw(x, "STRUCT") && h.kind === "UDT") {
         const ty = parseType();
         block.vars.push(...(ty.members ?? []));
@@ -350,10 +403,17 @@ export function parse(src: string): ParsedDocument {
         parseBody(block, h.end);
         continue;
       }
+      if (iec && h.kind !== "UDT") {
+        // IEC POUs have no BEGIN: the body starts after the declarations
+        block.bodyStart = x.start;
+        parseBody(block, h.end);
+        continue;
+      }
       err(`Unexpected ${x.text}`, x);
       next();
     }
     if (isKw(peek(), h.end)) block.end = next().end;
+    else if (iec) block.end = peek().kind === "eof" ? src.length : peek().start;
     else {
       err(`Missing ${h.end}`, t);
       block.end = src.length;

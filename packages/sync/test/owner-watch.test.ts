@@ -11,7 +11,15 @@ import { FakeBridge } from "./fake-bridge.js";
 const ws = () => mkdtempSync(join(tmpdir(), "rung-owner-"));
 const until = async (cond: () => boolean, ms = 10_000) => {
   const t0 = Date.now();
-  while (!cond()) {
+  // replaceGuarded briefly moves the target aside, so a read can hit ENOENT: treat throws as "not yet"
+  const ok = () => {
+    try {
+      return cond();
+    } catch {
+      return false;
+    }
+  };
+  while (!ok()) {
     if (Date.now() - t0 > ms) throw new Error("timeout waiting for condition");
     await new Promise((r) => setTimeout(r, 25));
   }

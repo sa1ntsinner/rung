@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="FB_Pump" Id="{7a1c3a52-0000-4000-8000-000000000001}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Pump
+VAR_INPUT
+	bStart : BOOL;
+	fSetpoint : LREAL; // l/min
+END_VAR
+VAR_OUTPUT
+	bRunning : BOOL;
+	fFlow : LREAL;
+END_VAR
+VAR
+	tonDelay : TON;
+	stCfg : ST_PumpCfg;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[tonDelay(IN := bStart AND NOT GVL_Plant.bEStop, PT := T#200MS);
+bRunning := tonDelay.Q;
+IF bRunning THEN
+	fFlow := LIMIT(0, fSetpoint, stCfg.fMaxFlow);
+ELSE
+	fFlow := 0;
+END_IF
+nUnknown := 1;]]></ST>
+    </Implementation>
+    <Method Name="Reset" Id="{7a1c3a52-0000-4000-8000-000000000002}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+	bForce : BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Reset := bForce;]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Pump">
+      <LineId Id="3" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

@@ -72,7 +72,8 @@ export class Simulator {
     let s = this.bodies.get(key);
     if (!s) {
       const g = this.index.global(b.name)!;
-      const src = this.index.docs.get(g.uri)!.text;
+      const doc = this.index.docs.get(g.uri)!;
+      const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out
       try {
         s = b.bodyStart === undefined ? [] : parseBody(src, b.bodyStart, b.end);
       } catch (e) {
@@ -135,8 +136,14 @@ export class Simulator {
       return { __fb: std.name, mem, std: {} };
     }
     const b = this.block(fbName);
-    if (b.kind !== "FB") throw new SimError(`"${fbName}" is ${b.kind}, not a function block`);
+    if (b.kind !== "FB" && b.kind !== "PRG") throw new SimError(`"${fbName}" is ${b.kind}, not a function block`);
     return { __fb: b.name, mem: this.structOf(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant")) };
+  }
+
+  /** IEC 61131-3 globals are referenced without quotes: GVL lists, their variables and PROGRAMs. */
+  isIecGlobal(name: string): boolean {
+    const k = this.index.global(name);
+    return k?.kind === "GVAR" || k?.block?.kind === "GVL" || k?.block?.kind === "PRG";
   }
 
   /** Global DB memory or tag value, created on first use from the workspace. */
@@ -144,7 +151,9 @@ export class Simulator {
     const key = name.toUpperCase();
     if (!(key in this.globals)) {
       const g = this.index.global(name);
-      if (g?.block?.kind === "DB") this.globals[key] = g.block.dbOf ? this.newInstance(g.block.dbOf) : this.structOf(g.block.vars);
+      if (g?.kind === "GVAR") return { obj: this.global(g.gvar!.list).obj[g.gvar!.list.toUpperCase()] as Struct, key: g.name.toUpperCase() };
+      if (g?.block?.kind === "GVL" || g?.block?.kind === "PRG") this.globals[key] = g.block.kind === "GVL" ? this.structOf(g.block.vars) : this.newInstance(g.block.name);
+      else if (g?.block?.kind === "DB") this.globals[key] = g.block.dbOf ? this.newInstance(g.block.dbOf) : this.structOf(g.block.vars);
       else if (g?.tag) this.globals[key] = /^Bool$/i.test(g.tag.dataType) ? false : STRING_TYPES.test(g.tag.dataType) ? "" : 0;
       else throw new SimError(`"${name}" is not a data block or tag in the workspace`);
     }
@@ -164,6 +173,7 @@ export class Simulator {
       else if (root in frame.mem) obj = frame.mem;
       else if (root === frame.block.name.toUpperCase()) obj = frame.temps; // FC return value
       else if (ref.root.kind === "ident" && frame.block.kind === "DB") obj = frame.mem;
+      else if (ref.root.kind === "ident" && this.isIecGlobal(ref.root.name)) ({ obj, key } = this.global(ref.root.name));
       else throw new SimError(`#${ref.root.name} is not declared in ${frame.block.name}`, frame.block.name, ref.start);
       key = root;
     }
@@ -279,7 +289,7 @@ export class Simulator {
     const name = c.callee.root.name;
     const upper = name.toUpperCase();
     // FB instance call: #inst(...), "Inst_DB"(...), #inst.sub(...)
-    if (c.callee.root.kind !== "ident" || c.callee.path.length) {
+    if (c.callee.root.kind !== "ident" || c.callee.path.length || (frame && (upper in frame.mem || upper in frame.temps))) {
       const target = c.callee.root.kind === "global" && !c.callee.path.length ? this.index.global(name) : undefined;
       if (target?.block?.kind === "FC") return this.callFc(target.block, c, frame);
       const inst = this.read(c.callee, frame);
