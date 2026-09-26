@@ -16,6 +16,7 @@ import {
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { doctor, pull, summarize } from "@rung/sync";
 import { HINTS, bridgeFor, defaultBridge, exists, openState, printWarnings, type Io } from "./common.js";
+import { startServer } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 
 export type { Io } from "./common.js";
@@ -32,6 +33,7 @@ Usage:
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <address> [--dir <workspace>]
+  rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
   rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
 Environment:
@@ -160,6 +162,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         theirs: { type: "boolean" },
         merged: { type: "boolean" },
         dir: { type: "string" },
+        stdio: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -175,6 +178,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
   if (v.help || !cmd) {
     io.stdout(HELP);
     return cmd || v.help ? 0 : 1;
+  }
+  if (cmd === "lsp") {
+    startServer();
+    await new Promise<void>(() => {}); // runs until the editor closes the connection
   }
   const dir = resolve(io.cwd, target ?? ".");
   try {

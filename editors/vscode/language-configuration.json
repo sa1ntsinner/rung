@@ -1,0 +1,18 @@
+{
+  "comments": { "lineComment": "//", "blockComment": ["(*", "*)"] },
+  "brackets": [["(", ")"], ["[", "]"], ["{", "}"]],
+  "autoClosingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "[", "close": "]" },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
+    { "open": "(*", "close": " *)", "notIn": ["string"] }
+  ],
+  "surroundingPairs": [["(", ")"], ["[", "]"], ["'", "'"], ["\"", "\""]],
+  "folding": { "markers": { "start": "^\s*(?i:REGION)\b", "end": "^\s*(?i:END_REGION)\b" } },
+  "indentationRules": {
+    "increaseIndentPattern": "^\s*(?i:(IF|ELSIF|ELSE|CASE|FOR|WHILE|REPEAT|REGION|VAR\w*|STRUCT|BEGIN)\b)(?!.*(?i:END_))",
+    "decreaseIndentPattern": "^\s*(?i:(END_\w+|ELSIF|ELSE|UNTIL)\b)"
+  },
+  "wordPattern": "(#?\"[^\"]*\")|(#?[\p{L}_][\p{L}\p{N}_]*)|(-?\d+(\.\d+)?)"
+}

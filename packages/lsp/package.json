@@ -1,5 +1,5 @@
 {
-  "name": "rung",
+  "name": "@rung/lsp",
   "version": "0.1.0-dev",
   "license": "BUSL-1.1",
   "type": "module",
@@ -11,9 +11,6 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "rung": "./dist/index.js"
-  },
   "files": [
     "dist",
     "LICENSE"
@@ -23,8 +20,9 @@
   },
   "dependencies": {
     "@rung/core": "workspace:*",
-    "@rung/bridge-client": "workspace:*",
     "@rung/sync": "workspace:*",
-    "@rung/lsp": "workspace:*"
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
   }
 }

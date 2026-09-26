@@ -14,7 +14,7 @@ export const RULES = [
   { prefix: "tools/", license: "MIT" },
 ];
 const EXT = /\.(ts|mts|mjs|js|cs)$/;
-const SKIP = /(^|\/)(node_modules|dist|bin|obj|\.rung|TestResults)(\/|$)/;
+const SKIP = /(^|\/)(node_modules|dist|out|bin|obj|\.rung|TestResults)(\/|$)/;
 
 export function expectedLicense(rel) {
   return RULES.find((r) => rel.startsWith(r.prefix))?.license;

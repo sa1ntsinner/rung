@@ -1,0 +1,17 @@
+id = "rung-scl"
+name = "rung — Siemens SCL"
+version = "0.1.0"
+schema_version = 1
+authors = ["Elmir Mirzayev"]
+description = "Siemens SCL (TIA Portal) highlighting plus the rung language server: completion, go-to-definition, diagnostics and TIA Portal sync."
+repository = "https://github.com/sa1ntsinner/rung"
+
+[language_servers.rung]
+name = "rung"
+languages = ["SCL"]
+
+# Development: points at the local checkout. For publishing, switch to the public repository URL + commit.
+[grammars.scl]
+repository = "file:///C:/Users/smile/Sync%20Docs/Projects/rung"
+rev = "49bd4e84df9b7546dffa6cc9946a990c33ed5b84"
+path = "grammars/tree-sitter-scl"

@@ -1,0 +1,21 @@
+{
+  "grammars": [
+    {
+      "name": "scl",
+      "camelcase": "Scl",
+      "scope": "source.scl",
+      "path": ".",
+      "file-types": ["scl", "db", "udt"],
+      "highlights": "queries/highlights.scm",
+      "injection-regex": "^(scl|st)$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Siemens SCL grammar for tree-sitter",
+    "authors": [{ "name": "Elmir Mirzayev" }],
+    "links": { "repository": "https://github.com/sa1ntsinner/rung" }
+  },
+  "bindings": { "c": false, "go": false, "node": false, "python": false, "rust": false, "swift": false }
+}

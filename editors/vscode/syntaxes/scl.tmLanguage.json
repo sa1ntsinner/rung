@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SCL",
+  "scopeName": "source.scl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#pragma" },
+    { "include": "#strings" },
+    { "include": "#names" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.scl", "match": "//.*$" },
+        { "name": "comment.block.scl", "begin": "\\(\\*", "end": "\\*\\)" },
+        { "name": "comment.block.scl", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "pragma": { "name": "meta.attribute.scl", "begin": "\\{", "end": "\\}", "patterns": [{ "include": "#strings" }] },
+    "strings": { "name": "string.quoted.single.scl", "begin": "'", "end": "'", "patterns": [{ "name": "constant.character.escape.scl", "match": "\\$.|''" }] },
+    "names": {
+      "patterns": [
+        { "name": "variable.other.local.scl", "match": "#(\"[^\"\\n]*\"|[\\p{L}_][\\p{L}\\p{N}_]*)" },
+        { "name": "variable.other.global.scl", "match": "\"[^\"\\n]*\"" },
+        { "name": "constant.language.address.scl", "match": "%[A-Za-z][A-Za-z0-9_.]*" }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.typed.scl", "match": "\\b[A-Za-z_]+#[-+]?[A-Za-z0-9_.:\\-]+" },
+        { "name": "constant.numeric.based.scl", "match": "\\b(2|8|16)#[0-9A-Fa-f_]+\\b" },
+        { "name": "constant.numeric.scl", "match": "\\b[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9]+)?\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.other.block.scl", "match": "(?i)\\b(FUNCTION_BLOCK|END_FUNCTION_BLOCK|FUNCTION|END_FUNCTION|ORGANIZATION_BLOCK|END_ORGANIZATION_BLOCK|DATA_BLOCK|END_DATA_BLOCK|TYPE|END_TYPE|STRUCT|END_STRUCT|BEGIN|TITLE|VERSION|AUTHOR|FAMILY|NAME|NON_RETAIN|KNOW_HOW_PROTECT|READ_ONLY|UNLINKED)\\b" },
+        { "name": "storage.modifier.section.scl", "match": "(?i)\\b(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR_STAT|VAR|END_VAR|CONSTANT|RETAIN|DB_SPECIFIC|AT)\\b" },
+        { "name": "keyword.control.scl", "match": "(?i)\\b(IF|THEN|ELSIF|ELSE|END_IF|CASE|OF|END_CASE|FOR|TO|BY|DO|END_FOR|WHILE|END_WHILE|REPEAT|UNTIL|END_REPEAT|EXIT|CONTINUE|RETURN|GOTO|REGION|END_REGION)\\b" },
+        { "name": "keyword.operator.word.scl", "match": "(?i)\\b(AND|OR|XOR|NOT|MOD)\\b" },
+        { "name": "constant.language.boolean.scl", "match": "(?i)\\b(TRUE|FALSE)\\b" },
+        { "name": "storage.type.scl", "match": "(?i)\\b(BOOL|BYTE|WORD|DWORD|LWORD|SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|REAL|LREAL|TIME|LTIME|DATE|TIME_OF_DAY|TOD|LTOD|DATE_AND_TIME|DT|LDT|DTL|CHAR|WCHAR|STRING|WSTRING|VARIANT|VOID|ARRAY)\\b" },
+        { "name": "support.function.scl", "match": "(?i)\\b(TON|TOF|TP|TON_TIME|TOF_TIME|TP_TIME|TON_LTIME|TOF_LTIME|TP_LTIME|CTU|CTD|CTUD|R_TRIG|F_TRIG|SR|RS|ABS|SQR|SQRT|LN|LOG|EXP|SIN|COS|TAN|ASIN|ACOS|ATAN|MIN|MAX|LIMIT|SEL|MUX|TRUNC|ROUND|CEIL|FLOOR|NORM_X|SCALE_X|LEN|CONCAT|LEFT|RIGHT|MID|FIND|SHL|SHR|ROL|ROR|[A-Z]+_TO_[A-Z]+)\\b(?=\\s*\\()" }
+      ]
+    },
+    "operators": { "name": "keyword.operator.scl", "match": ":=|=>|<=|>=|<>|\\*\\*|[+\\-*/=<>&]" }
+  }
+}

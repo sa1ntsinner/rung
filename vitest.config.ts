@@ -10,6 +10,7 @@ export default defineConfig({
       "@rung/bridge-client": src("bridge-client"),
       "@rung/sync": src("sync"),
       "@rung/cli": src("cli"),
+      "@rung/lsp": src("lsp"),
     },
   },
   test: {

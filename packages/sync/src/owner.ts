@@ -2,7 +2,8 @@
 // Local IPC of the workspace owner (rung watch): one writer, many readers (CLI, LSP, MCP).
 import { createHash, randomBytes } from "node:crypto";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
-import { readFile, realpath, unlink } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, unlink } from "node:fs/promises";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { writeFileAtomic } from "@rung/core";
 
@@ -32,7 +33,8 @@ const ownerFile = (root: string) => join(root, ".rung", "owner.json");
 
 async function pipeName(root: string): Promise<string> {
   const id = createHash("sha256").update((await realpath(root)).toLowerCase()).digest("hex").slice(0, 16);
-  return process.platform === "win32" ? `\\\\.\\pipe\\rung-${id}` : join(root, ".rung", `owner-${id}.sock`);
+  // Unix socket paths are limited to ~108 bytes: keep them short, in the OS temp dir, user-only (0600).
+  return process.platform === "win32" ? `\\\\.\\pipe\\rung-${id}` : join(tmpdir(), `rung-${userInfo().uid}-${id}.sock`);
 }
 
 function alive(pid: number): boolean {
@@ -74,12 +76,14 @@ export class OwnerServer {
     const pipe = await pipeName(root);
     if (process.platform !== "win32") await unlink(pipe).catch(() => {});
     const info: OwnerInfo = { protocol: OWNER_PROTOCOL, pid: process.pid, pipe, token: randomBytes(24).toString("hex"), startedAt: Date.now() };
+    await mkdir(join(root, ".rung"), { recursive: true });
     const s = new OwnerServer(root, info, handlers);
     s.server = createServer((sock) => s.accept(sock));
     await new Promise<void>((resolve, reject) => {
       s.server.once("error", reject);
       s.server.listen(pipe, () => resolve());
     });
+    if (process.platform !== "win32") await chmod(pipe, 0o600);
     await writeFileAtomic(ownerFile(root), JSON.stringify(info));
     return s;
   }

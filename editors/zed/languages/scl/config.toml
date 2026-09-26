@@ -1,0 +1,14 @@
+name = "SCL"
+grammar = "scl"
+path_suffixes = ["scl", "db", "udt"]
+line_comments = ["// "]
+block_comment = ["(* ", " *)"]
+autoclose_before = ";:.,=)]"
+brackets = [
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "[", end = "]", close = true, newline = false },
+  { start = "\"", end = "\"", close = true, newline = false, not_in = ["string", "comment"] },
+  { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
+tab_size = 3
+word_characters = ["#", "_"]

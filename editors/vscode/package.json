@@ -1,0 +1,52 @@
+{
+  "name": "rung-scl",
+  "displayName": "rung — SCL & TIA Portal sync",
+  "description": "Siemens SCL language support (highlighting, completion, go-to-definition, diagnostics) and two-way TIA Portal sync via rung.",
+  "version": "0.1.0",
+  "publisher": "sa1ntsinner",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/sa1ntsinner/rung" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "keywords": ["scl", "siemens", "tia portal", "plc", "structured text", "iec 61131-3"],
+  "main": "./out/extension.js",
+  "activationEvents": ["workspaceContains:rung.toml"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "scl",
+        "aliases": ["SCL", "Siemens SCL"],
+        "extensions": [".scl", ".db", ".udt", ".awl"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [{ "language": "scl", "scopeName": "source.scl", "path": "./syntaxes/scl.tmLanguage.json" }],
+    "commands": [
+      { "command": "rung.pull", "title": "rung: Pull from TIA Portal" },
+      { "command": "rung.sync", "title": "rung: Sync with TIA Portal (two-way)" },
+      { "command": "rung.watch", "title": "rung: Start watch (keep syncing)" },
+      { "command": "rung.status", "title": "rung: Show status" },
+      { "command": "rung.resolveOurs", "title": "rung: Resolve conflict — keep my file" },
+      { "command": "rung.resolveTheirs", "title": "rung: Resolve conflict — take TIA version" },
+      { "command": "rung.restartServer", "title": "rung: Restart language server" }
+    ],
+    "configuration": {
+      "title": "rung",
+      "properties": {
+        "rung.command": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["rung"],
+          "description": "Command that runs rung, e.g. [\"rung\"] or [\"node\", \"C:/path/to/rung/packages/cli/dist/index.js\"]."
+        },
+        "rung.trace.server": { "type": "string", "enum": ["off", "messages", "verbose"], "default": "off" }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "package": "tsc -p . && vsce package --no-dependencies --allow-missing-repository -o rung-scl.vsix"
+  },
+  "dependencies": { "vscode-languageclient": "^9.0.1" },
+  "devDependencies": { "@types/vscode": "^1.90.0", "@types/node": "^22.18.0", "typescript": "~5.9.2", "@vscode/vsce": "^3.6.0" }
+}

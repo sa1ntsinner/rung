@@ -1,0 +1,503 @@
+========================================
+Fx_Counter.scl
+========================================
+
+FUNCTION_BLOCK "Fx_Counter"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Pulse : Bool;
+      Reset : Bool;
+   END_VAR
+
+   VAR_OUTPUT
+      Count : DInt;
+      Elapsed : Time;
+   END_VAR
+
+   VAR
+      Debounce {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      LastPulse : Bool;
+   END_VAR
+
+
+BEGIN
+	#Debounce(IN := #Pulse, PT := T#20ms, ET => #Elapsed);
+	IF #Reset THEN
+	    #Count := 0;
+	ELSIF #Debounce.Q AND NOT #LastPulse THEN
+	    #Count := #Count + 1;
+	END_IF;
+	#LastPulse := #Debounce.Q;
+END_FUNCTION_BLOCK
+
+----------------------------------------
+
+(source_file
+  (function_block
+    (global_name)
+    (pragma)
+    (version)
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (var_section
+      (var_declaration
+        (identifier)
+        (pragma)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (call_statement
+        (call_expression
+          (local_variable)
+          (argument
+            (identifier)
+            (local_variable))
+          (argument
+            (identifier)
+            (typed_literal))
+          (argument
+            (identifier)
+            (local_variable))))
+      (if_statement
+        (local_variable)
+        (assignment_statement
+          (local_variable)
+          (number))
+        (elsif_clause
+          (binary_expression
+            (member_expression
+              (local_variable)
+              (identifier))
+            (unary_expression
+              (local_variable)))
+          (assignment_statement
+            (local_variable)
+            (binary_expression
+              (local_variable)
+              (number)))))
+      (empty_statement)
+      (assignment_statement
+        (local_variable)
+        (member_expression
+          (local_variable)
+          (identifier))))))
+
+========================================
+Fx_Global.db
+========================================
+
+DATA_BLOCK "Fx_Global"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   VAR
+      Station : "Fx_Types";
+      Counter : DInt;
+      Ready : Bool;
+   END_VAR
+
+BEGIN
+   Counter := 0;
+
+END_DATA_BLOCK
+
+----------------------------------------
+
+(source_file
+  (data_block
+    (global_name)
+    (pragma)
+    (version)
+    (var_section
+      (var_declaration
+        (identifier)
+        (global_name))
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (db_body
+      (assignment_statement
+        (identifier)
+        (number)))))
+
+========================================
+Fx_Motor.scl
+========================================
+
+FUNCTION_BLOCK "Fx_Motor"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Start : Bool;
+      Stop : Bool;
+      SpeedSetpoint : Real;   // rpm
+   END_VAR
+
+   VAR_OUTPUT
+      Running : Bool;
+      SpeedOut : Real;
+   END_VAR
+
+   VAR
+      Latch : Bool;
+   END_VAR
+
+
+BEGIN
+	// Überwachung: simple start/stop latch
+	#Latch := (#Start OR #Latch) AND NOT #Stop;
+	#Running := #Latch;
+	IF #Running THEN
+	    #SpeedOut := LIMIT(MN := 0.0, IN := #SpeedSetpoint, MX := 3000.0);
+	ELSE
+	    #SpeedOut := 0.0;
+	END_IF;
+END_FUNCTION_BLOCK
+
+----------------------------------------
+
+(source_file
+  (function_block
+    (global_name)
+    (pragma)
+    (version)
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier))
+      (line_comment))
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (line_comment)
+      (assignment_statement
+        (local_variable)
+        (binary_expression
+          (parenthesized_expression
+            (binary_expression
+              (local_variable)
+              (local_variable)))
+          (unary_expression
+            (local_variable))))
+      (assignment_statement
+        (local_variable)
+        (local_variable))
+      (if_statement
+        (local_variable)
+        (assignment_statement
+          (local_variable)
+          (call_expression
+            (identifier)
+            (argument
+              (identifier)
+              (number))
+            (argument
+              (identifier)
+              (local_variable))
+            (argument
+              (identifier)
+              (number))))
+        (else_clause
+          (assignment_statement
+            (local_variable)
+            (number))))
+      (empty_statement))))
+
+========================================
+Fx_Types.udt
+========================================
+
+TYPE "Fx_Types"
+VERSION : 0.1
+   STRUCT
+      Enabled : Bool;
+      Mode : Int;
+      Setpoint : Real;   // generic setpoint
+      Label : String[20];
+   END_STRUCT;
+
+END_TYPE
+
+----------------------------------------
+
+(source_file
+  (type_definition
+    (global_name)
+    (version)
+    (struct_type
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier))
+      (line_comment)
+      (var_declaration
+        (identifier)
+        (string_type
+          (number))))))
+
+========================================
+Fx_Valve.scl
+========================================
+
+FUNCTION "Fx_Valve" : Void
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Enable : Bool;
+      Mode : Int;
+   END_VAR
+
+   VAR_OUTPUT
+      Open : Bool;
+   END_VAR
+
+
+BEGIN
+	CASE #Mode OF
+	    0:
+	        #Open := FALSE;
+	    1:
+	        #Open := #Enable;
+	    ELSE
+	        #Open := FALSE;
+	END_CASE;
+END_FUNCTION
+
+----------------------------------------
+
+(source_file
+  (function
+    (global_name)
+    (identifier)
+    (pragma)
+    (version)
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (case_statement
+        (local_variable)
+        (case_item
+          (case_label
+            (number))
+          (assignment_statement
+            (local_variable)
+            (boolean)))
+        (case_item
+          (case_label
+            (number))
+          (assignment_statement
+            (local_variable)
+            (local_variable)))
+        (else_clause
+          (assignment_statement
+            (local_variable)
+            (boolean))))
+      (empty_statement))))
+
+========================================
+case with ranges and else
+========================================
+
+FUNCTION "F" : Void
+BEGIN
+  CASE #m OF
+    0, 1: #a := 1;
+    2..5: #a := 2;
+    ELSE #a := 3;
+  END_CASE;
+END_FUNCTION
+
+----------------------------------------
+
+(source_file
+  (function
+    (global_name)
+    (identifier)
+    (body
+      (case_statement
+        (local_variable)
+        (case_item
+          (case_label
+            (number))
+          (case_label
+            (number))
+          (assignment_statement
+            (local_variable)
+            (number)))
+        (case_item
+          (case_label
+            (range
+              (number)
+              (number)))
+          (assignment_statement
+            (local_variable)
+            (number)))
+        (else_clause
+          (assignment_statement
+            (local_variable)
+            (number))))
+      (empty_statement))))
+
+========================================
+regions, loops and calls
+========================================
+
+FUNCTION_BLOCK "B"
+VAR
+  t : TON_TIME;
+  i : Int;
+END_VAR
+BEGIN
+  REGION Setup
+    FOR #i := 0 TO 9 BY 2 DO
+      IF #i MOD 2 = 0 THEN CONTINUE; END_IF;
+    END_FOR;
+    #t(IN := TRUE, PT := T#1s);
+    WHILE NOT #t.Q DO ; END_WHILE;
+  END_REGION
+  "Fx_Global".Counter := %MW10 + 16#FF;
+END_FUNCTION_BLOCK
+
+----------------------------------------
+
+(source_file
+  (function_block
+    (global_name)
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (region
+        (region_header)
+        (for_statement
+          (local_variable)
+          (number)
+          (number)
+          (number)
+          (if_statement
+            (binary_expression
+              (binary_expression
+                (local_variable)
+                (number))
+              (number))
+            (continue_statement))
+          (empty_statement))
+        (empty_statement)
+        (call_statement
+          (call_expression
+            (local_variable)
+            (argument
+              (identifier)
+              (boolean))
+            (argument
+              (identifier)
+              (typed_literal))))
+        (while_statement
+          (unary_expression
+            (member_expression
+              (local_variable)
+              (identifier)))
+          (empty_statement))
+        (empty_statement))
+      (assignment_statement
+        (member_expression
+          (global_name)
+          (identifier))
+        (binary_expression
+          (absolute_address)
+          (number))))))
+
+========================================
+nested struct and array udt
+========================================
+
+TYPE "U"
+VERSION : 0.1
+  STRUCT
+    a : Array[0..3, 1..2] of "V";
+    s : Struct
+      x : Bool;
+    END_STRUCT;
+    txt : String[10] := 'hi';
+  END_STRUCT;
+END_TYPE
+
+----------------------------------------
+
+(source_file
+  (type_definition
+    (global_name)
+    (version)
+    (struct_type
+      (var_declaration
+        (identifier)
+        (array_type
+          (range
+            (number)
+            (number))
+          (range
+            (number)
+            (number))
+          (global_name)))
+      (var_declaration
+        (identifier)
+        (struct_type
+          (var_declaration
+            (identifier)
+            (identifier))))
+      (var_declaration
+        (identifier)
+        (string_type
+          (number))
+        (string)))))
