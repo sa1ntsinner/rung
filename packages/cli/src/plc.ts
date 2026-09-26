@@ -3,6 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
 import { WorkspaceError, loadConfig, type RungConfig } from "@rung/core";
 import type { BridgeClient, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages } from "@rung/sync";
@@ -48,9 +49,59 @@ async function deviceOf(config: RungConfig, v: Record<string, unknown>): Promise
   throw new WorkspaceError("CONFIG_INVALID", `this workspace mirrors several PLCs (${config.devices.join(", ")}); choose one with --plc`);
 }
 
-function targetOf(config: RungConfig, device: string): ConnectionTarget | undefined {
-  const c = config.plc[device];
-  return c ? { mode: c.mode, pcInterface: c.pcInterface, pcInterfaceNumber: c.pcInterfaceNumber, ...(c.targetInterface ? { targetInterface: c.targetInterface } : {}) } : undefined;
+const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
+
+/**
+ * The connection to use: the one in rung.toml, else (for going online) the one TIA Portal remembers, else the
+ * PLC found on the network by its project address, which is then saved to rung.toml. Returns undefined when
+ * TIA Portal's own remembered connection applies.
+ */
+async function ensureTarget(ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "download", force = false): Promise<ConnectionTarget | undefined> {
+  const saved = targetOf(config, device);
+  if (saved && !force) return saved;
+  if (purpose === "online" && !force) {
+    const quick = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: false }, (b) => b.connections(device, false));
+    if (quick.configured) return undefined;
+  }
+  io.stderr(`rung: looking for ${device} on the network (up to half a minute)…\n`);
+  const options = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: true }, (b) => b.connections(device, true));
+  const all = candidates(options);
+  const matches = all.filter((c) => c.reason === "address-match");
+  const sims = all.filter((c) => c.reason === "simulation");
+  let pick: Candidate | undefined = !force && matches.length === 1 ? matches[0] : !force && matches.length === 0 && sims.length === 1 ? sims[0] : undefined;
+  if (!pick) {
+    const choices = [...matches, ...sims, ...(matches.length ? [] : reachable(options))];
+    if (!choices.length) throw new WorkspaceError("NO_TARGET", notFoundMessage(device, options));
+    if (!canPrompt(io)) throw new WorkspaceError("NO_TARGET", `${choices.length} ways to reach ${device}: ${choices.map(describe).join("; ")}. Choose one with rung connect --pick (or rung connect --json for editors).`);
+    io.stdout(`Where is ${device}?\n`);
+    choices.forEach((c, i) => io.stdout(`  ${i + 1}) ${describe(c)}\n`));
+    const answer = Number((await ask(io, `Number (1-${choices.length}): `)).trim());
+    pick = choices[answer - 1];
+    if (!pick) throw new WorkspaceError("NO_TARGET", "no connection chosen");
+  }
+  await saveTarget(ws, device, pick.target);
+  io.stdout(`${device}: ${describe(pick)}; saved as [plc.${device}] in rung.toml\n`);
+  return pick.target;
+}
+
+/** rung connect: find the PLC (or pick among what answers) and remember it; --json lists the choices for editors. */
+export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  const { ws, config } = await workspace(dir);
+  const device = await deviceOf(config, v);
+  if (v.use) {
+    const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1), ...(v.target ? { targetInterface: String(v.target) } : {}) };
+    await saveTarget(ws, device, t);
+    io.stdout(`${device}: ${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}; saved as [plc.${device}] in rung.toml\n`);
+    return 0;
+  }
+  if (v.json) {
+    const options = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: true }, (b) => b.connections(device, true));
+    const all = candidates(options);
+    io.stdout(JSON.stringify({ device, saved: targetOf(config, device) ?? null, configuredInTia: options.configured, plcAddresses: options.plcAddresses, candidates: all.map((c) => ({ ...c, label: describe(c) })), reachable: reachable(options).map((c) => ({ ...c, label: describe(c) })), notFound: all.length ? null : notFoundMessage(device, options) }, null, 2) + "\n");
+    return 0;
+  }
+  await ensureTarget(ws, config, io, device, "download", !!v.pick || !!targetOf(config, device));
+  return 0;
 }
 
 async function workspace(dir: string) {
@@ -96,7 +147,7 @@ export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io)
   const { ws, config } = await workspace(dir);
   const device = await deviceOf(config, v);
   const action = v.off ? "offline" : v.state ? "state" : "online";
-  const target = targetOf(config, device);
+  const target = action === "online" ? await ensureTarget(ws, config, io, device, "online") : targetOf(config, device);
   const s = await viaOwnerOrBridge<OnlineStatus>(ws, config, io, "online", { device, action, ...(target ? { target } : {}) }, (b) => b.online(device, action, target));
   io.stdout(`${s.device}: ${s.state}\n`);
   return action === "online" && s.state !== "Online" ? 2 : 0;
@@ -137,8 +188,8 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   const { ws, config } = await workspace(dir);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
   const device = await deviceOf(config, v);
-  const target = targetOf(config, device);
-  if (!target) throw new WorkspaceError("CONFIG_INVALID", `no connection for ${device}: run rung interfaces, then add [plc.${device}] to rung.toml`);
+  const target = await ensureTarget(ws, config, io, device, "download");
+  if (!target) throw new WorkspaceError("NO_TARGET", `no connection for ${device}: run rung connect`);
   const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
   const software = !v["no-sw"];
   const onlyChanges = v["all-blocks"] ? false : config.download.onlyChanges;

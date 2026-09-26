@@ -157,6 +157,8 @@ export interface AccessibleDevice {
 export interface ConnectionOptions {
   device: string;
   configured: boolean;
+  /** addresses the project gives the CPU's interfaces, e.g. { interface: "PROFINET interface_1", address: "192.168.0.1" } */
+  plcAddresses: { interface: string; address: string; subnet?: string }[];
   modes: { name: string; pcInterfaces: { name: string; number: number; targetInterfaces: string[]; subnets: string[]; accessible?: AccessibleDevice[] }[] }[];
 }
 

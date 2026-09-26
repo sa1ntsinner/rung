@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Finding the PLC on the network, the way TIA Portal's "Go online" dialog does, but without the dialog:
+// the project knows the CPU's addresses, the bridge lists what every PG/PC interface can reach, and the one
+// match is remembered in rung.toml. Several matches or none: rung explains and lets the user choose.
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { WorkspaceError, writeFileAtomic, type RungConfig } from "@rung/core";
+import type { ConnectionOptions, ConnectionTarget } from "@rung/bridge-client";
+
+export interface Candidate {
+  target: ConnectionTarget;
+  /** what answered on that interface */
+  found?: { name: string; address: string; deviceSeries: string };
+  /** why it is a candidate */
+  reason: "address-match" | "simulation" | "reachable";
+}
+
+/** The target interface ("1 X1") that belongs to the project interface with this address. */
+function targetInterfaceFor(options: ConnectionOptions, address: string, available: string[]): string | undefined {
+  if (available.length === 1) return available[0];
+  const pn = options.plcAddresses.filter((a) => /\d+\.\d+\.\d+\.\d+/.test(a.address));
+  const i = pn.findIndex((a) => a.address === address);
+  if (i < 0) return undefined;
+  // TIA names the CPU's PROFINET interfaces X1, X2, ... in the order the project lists them
+  return available.find((t) => new RegExp(`X${i + 1}$`).test(t));
+}
+
+export function candidates(options: ConnectionOptions): Candidate[] {
+  const ours = new Set(options.plcAddresses.map((a) => a.address));
+  const out: Candidate[] = [];
+  for (const m of options.modes)
+    for (const p of m.pcInterfaces) {
+      for (const d of p.accessible ?? []) {
+        if (!ours.has(d.address)) continue;
+        const ti = targetInterfaceFor(options, d.address, p.targetInterfaces);
+        out.push({ target: { mode: m.name, pcInterface: p.name, pcInterfaceNumber: p.number, ...(ti ? { targetInterface: ti } : {}) }, found: d, reason: "address-match" });
+      }
+      if (/plcsim/i.test(p.name) && p.targetInterfaces.length)
+        out.push({ target: { mode: m.name, pcInterface: p.name, pcInterfaceNumber: p.number, targetInterface: p.targetInterfaces[0]! }, reason: "simulation" });
+    }
+  return out;
+}
+
+/** Every reachable Siemens device, for the case where the PLC answers under another address. */
+export function reachable(options: ConnectionOptions): Candidate[] {
+  const out: Candidate[] = [];
+  for (const m of options.modes)
+    for (const p of m.pcInterfaces)
+      for (const d of p.accessible ?? [])
+        out.push({ target: { mode: m.name, pcInterface: p.name, pcInterfaceNumber: p.number, ...(p.targetInterfaces.length === 1 ? { targetInterface: p.targetInterfaces[0]! } : {}) }, found: d, reason: "reachable" });
+  return out;
+}
+
+export function describe(c: Candidate): string {
+  const via = `${c.target.pcInterface}${c.target.targetInterface ? ` → ${c.target.targetInterface}` : ""}`;
+  if (c.reason === "simulation") return `S7-PLCSIM (${via})`;
+  return `${c.found!.name || "device"} at ${c.found!.address}${c.found!.deviceSeries ? ` (${c.found!.deviceSeries})` : ""} via ${via}`;
+}
+
+export function notFoundMessage(device: string, options: ConnectionOptions): string {
+  const addrs = options.plcAddresses.filter((a) => /\d+\.\d+\.\d+\.\d+/.test(a.address));
+  const adapters = options.modes.flatMap((m) => m.pcInterfaces.map((p) => p.name));
+  const seen = reachable(options);
+  return [
+    `${device} was not found on the network.`,
+    addrs.length ? `The project gives it ${addrs.map((a) => `${a.address} (${a.interface})`).join(", ")}.` : "The project gives it no IP address.",
+    adapters.length ? `rung looked on: ${adapters.join(", ")}.` : "TIA Portal offers no PG/PC interface on this PC.",
+    seen.length ? `Found there instead: ${seen.map(describe).join("; ")}. Choose one with: rung connect --pick` : "No Siemens device answered.",
+    "Check the cable and that this PC has an address in the PLC's subnet (for 192.168.0.1, e.g. 192.168.0.100/24). For a simulation, start S7-PLCSIM.",
+  ].join("\n");
+}
+
+/** Adds (or replaces) [plc.<device>] in rung.toml, keeping everything else of the file as the user wrote it. */
+export async function saveTarget(ws: string, device: string, t: ConnectionTarget): Promise<void> {
+  const file = join(ws, "rung.toml");
+  const text = await readFile(file, "utf8");
+  const header = `[plc.${/^[A-Za-z0-9_-]+$/.test(device) ? device : JSON.stringify(device)}]`;
+  const block = [
+    header,
+    `# found by rung connect; change it with rung connect --pick`,
+    `mode = ${JSON.stringify(t.mode)}`,
+    `pc_interface = ${JSON.stringify(t.pcInterface)}`,
+    `pc_interface_number = ${t.pcInterfaceNumber ?? 1}`,
+    ...(t.targetInterface ? [`target_interface = ${JSON.stringify(t.targetInterface)}`] : []),
+    "",
+  ].join("\n");
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === header);
+  let next: string;
+  if (start < 0) next = text.replace(/\s*$/, "\n\n") + block;
+  else {
+    let end = start + 1;
+    while (end < lines.length && !/^\s*\[/.test(lines[end]!)) end++;
+    next = [...lines.slice(0, start), ...block.trimEnd().split("\n"), "", ...lines.slice(end)].join("\n").replace(/\n{3,}/g, "\n\n");
+  }
+  await writeFileAtomic(file, next.endsWith("\n") ? next : next + "\n");
+}
+
+export function targetOf(config: RungConfig, device: string): ConnectionTarget | undefined {
+  const c = config.plc[device];
+  return c ? { mode: c.mode, pcInterface: c.pcInterface, pcInterfaceNumber: c.pcInterfaceNumber, ...(c.targetInterface ? { targetInterface: c.targetInterface } : {}) } : undefined;
+}
+
+export class NoTargetError extends WorkspaceError {
+  constructor(message: string) {
+    super("CONFIG_INVALID", message);
+  }
+}

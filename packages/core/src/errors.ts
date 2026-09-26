@@ -4,6 +4,7 @@
 export type WorkspaceErrorCode =
   | "STATE_LOCKED"
   | "NOT_MIRRORED"
+  | "NO_TARGET"
   | "STATE_FORMAT"
   | "BINDING_MISMATCH"
   | "LOCAL_CHANGES"

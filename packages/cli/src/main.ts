@@ -23,7 +23,7 @@ import { agentsTemplatePath } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
-import { cmdCompile, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
+import { cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 
 export type { Io } from "./common.js";
@@ -52,6 +52,7 @@ Usage:
 PLC:
   rung compile [dir] [--file <f>]... [--hw] [--plc <name>]   compile in TIA Portal; errors point at file lines
   rung online [dir] [--off|--state] [--plc <name>]          go online / offline, or show the online state
+  rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
                                        download to the PLC; asks you to type the PLC name first, and
@@ -83,7 +84,8 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     return 1;
   }
   const bridge = defaultBridge(io.env);
-  const args = [...bridge.args, ...(v.project ? ["--project", String(v.project)] : [])];
+  // with an explicit project the bridge may open it in the background when no TIA Portal has it open
+  const args = [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless"] : [])];
   const client = await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string> });
   try {
     const info = await client.projectInfo();
@@ -217,6 +219,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         state: { type: "boolean" },
         scan: { type: "boolean" },
         grant: { type: "boolean" },
+        pick: { type: "boolean" },
+        json: { type: "boolean" },
+        use: { type: "string" },
+        mode: { type: "string" },
+        number: { type: "string" },
+        target: { type: "string" },
       },
     });
   } catch (e) {
@@ -312,6 +320,8 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         return await cmdCompile(dir, v, io);
       case "online":
         return await cmdOnline(dir, v, io);
+      case "connect":
+        return await cmdConnect(dir, v, io);
       case "interfaces":
         return await cmdInterfaces(dir, v, io);
       case "download":

@@ -81,7 +81,12 @@ namespace Rung.Bridge.V20
             try
             {
                 var procs = TiaPortal.GetProcesses();
-                var chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath);
+                PortalCandidate chosen;
+                try { chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath); }
+                catch (RpcException e) when (args.OpenHeadless && args.ProjectPath != null && (e.Code == ErrorCodes.TiaNotRunning || e.Code == ErrorCodes.NoProject))
+                {
+                    return OpenHeadless(args, emit);
+                }
                 var proc = procs.First(p => p.Id == chosen.Pid);
                 var portal = proc.Attach();
                 var project = portal.Projects.FirstOrDefault(p => args.ProjectPath == null || string.Equals(p.Path.FullName, Path.GetFullPath(args.ProjectPath), StringComparison.OrdinalIgnoreCase));
@@ -894,10 +899,44 @@ namespace Rung.Bridge.V20
             throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot import form " + form + " for " + r.Entry.Address);
         }
 
+        /// <summary>This bridge opened the project itself (no TIA Portal had it): close it again on exit.</summary>
+        bool _ownsPortal;
+
+        /// <summary>
+        /// Opens the bound project in a TIA Portal without user interface that lives as long as this bridge, so an
+        /// engineer never has to start TIA Portal for rung. Nothing is shown on screen.
+        /// </summary>
+        static OpennessSession OpenHeadless(BridgeArgs args, Action<string, object> emit)
+        {
+            var file = new FileInfo(Path.GetFullPath(args.ProjectPath));
+            if (!file.Exists) throw new RpcException(ErrorCodes.NoProject, "Project file not found: " + file.FullName);
+            emit("tia-starting", new { project = file.FullName, headless = true });
+            var portal = new TiaPortal(TiaPortalMode.WithoutUserInterface);
+            try
+            {
+                var project = portal.Projects.Open(file);
+                var pid = TiaPortal.GetProcesses().FirstOrDefault(p => p.Mode == TiaPortalMode.WithoutUserInterface && p.ProjectPath != null && string.Equals(p.ProjectPath.FullName, file.FullName, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+                SweepWorkDirs();
+                emit("tia-started", new { project = file.FullName, pid });
+                return new OpennessSession(portal, project, args, emit, pid) { _ownsPortal = true };
+            }
+            catch (EngineeringException e)
+            {
+                try { portal.Dispose(); } catch (Exception) { }
+                // typical: the project is locked by a TIA Portal on another PC or was opened by a newer version
+                throw new RpcException(ErrorCodes.NoProject, "Could not open " + file.FullName + " in the background: " + e.Message);
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            if (_ownsPortal)
+            {
+                try { if (_args.SaveAfterImport) _project.Save(); } catch (Exception) { }
+                try { _project.Close(); } catch (Exception) { }
+            }
             try { _portal.Confirmation -= OnConfirmation; _portal.Dispose(); } catch (Exception) { }
         }
     }

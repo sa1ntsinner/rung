@@ -13,6 +13,8 @@ namespace Rung.Bridge.V20
         public bool AllowImport;
         /// <summary>Save the project after every successful import, so a TIA crash cannot silently undo what rung wrote (QA-2).</summary>
         public bool SaveAfterImport;
+        /// <summary>When no TIA Portal has the project open, open it in a TIA Portal without window, owned by this bridge.</summary>
+        public bool OpenHeadless;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -33,6 +35,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--save-after-import":
                         a.SaveAfterImport = true;
+                        break;
+                    case "--open-headless":
+                        a.OpenHeadless = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);

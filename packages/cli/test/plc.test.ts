@@ -23,9 +23,10 @@ function setup(answers: string[] = []) {
     return answers.shift() ?? "";
   };
   const run = (args: string[]) => main(args, { cwd: dir, stdout: (s) => out.push(s), stderr: (s) => err.push(s), env, prompt });
-  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean }[]; online?: string };
+  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean }[]; online?: string; onlineTarget?: Record<string, unknown> | null; scans?: number };
   const toml = join(dir, "rung.toml");
-  return { dir, run, out, err, db, questions, toml };
+  const patch = (o: Record<string, unknown>) => writeFileSync(objects, JSON.stringify({ ...JSON.parse(readFileSync(objects, "utf8")), ...o }));
+  return { dir, run, out, err, db, questions, toml, patch };
 }
 
 describe("PLC commands", () => {
@@ -73,21 +74,84 @@ describe("PLC commands", () => {
     expect(t.err.join("")).toMatch(/downloads are turned off/);
   });
 
-  it("download without a connection points at rung interfaces", async () => {
-    const t = setup();
-    await t.run(["init"]);
-    expect(await t.run(["download", "--yes"])).toBe(1);
-    expect(t.err.join("")).toMatch(/run rung interfaces/);
-  });
 
   it("interfaces prints the options and a ready rung.toml snippet", async () => {
     const t = setup();
     await t.run(["init"]);
     expect(await t.run(["interfaces", "--scan"])).toBe(0);
     const out = t.out.join("");
-    expect(out).toMatch(/pc_interface "PLCSIM" \(number 1\)/);
-    expect(out).toMatch(/reachable: plc_1 192\.168\.0\.1/);
-    expect(out).toContain('[plc.PLC_1]\nmode = "PN/IE"\npc_interface = "PLCSIM"');
+    expect(out).toContain('pc_interface "Ethernet" (number 1)');
+    expect(out).toContain("reachable: plc_1 192.168.0.1");
+  });
+
+  it("going online without any setup finds the PLC by its project address and remembers it", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    expect(await t.run(["online"])).toBe(0);
+    const out = t.out.join("");
+    expect(out).toContain("PLC_1: plc_1 at 192.168.0.1 (S7-1500) via Ethernet → 1 X1; saved");
+    expect(out).toMatch(/PLC_1: Online/);
+    expect(t.db().onlineTarget).toMatchObject({ mode: "PN/IE", pcInterface: "Ethernet", targetInterface: "1 X1" });
+    expect(readFileSync(t.toml, "utf8")).toMatch(/\[plc\.PLC_1\][\s\S]*pc_interface = "Ethernet"[\s\S]*target_interface = "1 X1"/);
+    // the second time nothing is scanned
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.db().scans).toBe(1);
+  });
+
+  it("uses the connection TIA Portal remembers when there is one", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.patch({ tiaConfigured: true });
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.db().scans ?? 0).toBe(0);
+    expect(t.db().onlineTarget).toBeNull();
+  });
+
+  it("maps the second PROFINET address to X2 and asks when several interfaces reach the PLC", async () => {
+    const t = setup(["2"]);
+    await t.run(["init"]);
+    t.patch({ reach: [{ pc: "Ethernet", address: "192.168.1.1" }, { pc: "USB-LAN", address: "192.168.0.1" }] });
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.questions[0]).toContain("Number (1-2)");
+    expect(t.out.join("")).toContain("1) plc_1 at 192.168.1.1 (S7-1500) via Ethernet → 1 X2");
+    expect(t.db().onlineTarget).toMatchObject({ pcInterface: "USB-LAN", targetInterface: "1 X1" });
+  });
+
+  it("explains what it looked for when the PLC is not on the network", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.patch({ reach: [] });
+    expect(await t.run(["online"])).toBe(1);
+    const err = t.err.join("");
+    expect(err).toMatch(/PLC_1 was not found on the network/);
+    expect(err).toContain("192.168.0.1 (PROFINET interface_1)");
+    expect(err).toMatch(/rung looked on: Ethernet, Wi-Fi/);
+    expect(err).toContain("192.168.0.100/24");
+  });
+
+  it("offers a device that answers under another address, and connect --json lists everything for editors", async () => {
+    const t = setup(["1"]);
+    await t.run(["init"]);
+    t.patch({ reach: [{ pc: "Wi-Fi", address: "10.0.0.7" }] });
+    t.out.length = 0;
+    expect(await t.run(["connect", "--json"])).toBe(0);
+    const j = JSON.parse(t.out.join(""));
+    expect(j.candidates).toEqual([]);
+    expect(j.reachable[0].label).toContain("10.0.0.7");
+    expect(j.notFound).toMatch(/Found there instead/);
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.db().onlineTarget).toMatchObject({ pcInterface: "Wi-Fi" });
+  });
+
+  it("connect --use saves a hand-picked connection", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    expect(await t.run(["connect", "--use", "PLCSIM", "--target", "1 X1"])).toBe(0);
+    expect(readFileSync(t.toml, "utf8")).toMatch(/pc_interface = "PLCSIM"/);
+    expect(await t.run(["connect", "--use", "Ethernet", "--target", "1 X2"])).toBe(0);
+    const toml = readFileSync(t.toml, "utf8");
+    expect(toml.match(/\[plc\.PLC_1\]/g)).toHaveLength(1); // replaced, not duplicated
+    expect(toml).toMatch(/pc_interface = "Ethernet"/);
   });
 
   it("online goes online and offline", async () => {

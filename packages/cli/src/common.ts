@@ -22,7 +22,7 @@ export const HINTS: Record<string, string> = {
   TIA_NOT_RUNNING: "Start TIA Portal and open the project first.",
   TIMEOUT:
     "TIA Portal did not answer. It may be waiting for an \"Openness access\" confirmation (look at the TIA Portal window; a TIA Portal without window cannot show it). Register the bridge once with: rung setup openness",
-  NO_PROJECT: "Open the bound project in TIA Portal (rung never opens or modifies projects on its own).",
+  NO_PROJECT: "Open the project in TIA Portal, or let rung open it in the background: [tia] start = \"headless\" in rung.toml (the default).",
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "Run rung init in this folder first.",
   BINDING_MISMATCH: "This folder mirrors a different project. Use another folder or rung init --rebind.",
@@ -53,7 +53,7 @@ export function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
   const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command;
-  const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...extra];
+  const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   return BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
 }
 

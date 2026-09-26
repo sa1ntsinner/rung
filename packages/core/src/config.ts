@@ -23,6 +23,8 @@ export interface RungConfig {
     weakVerifyMs: number;
   };
   readOnly: { failsafe: true; knowHow: true; system: true; graph: true };
+  /** How rung reaches TIA Portal: start = "headless" opens the project in a TIA Portal without window when none has it open. */
+  tia: { start: "headless" | "never" };
   /** Connection per PLC for online and download ([plc.<device>] in rung.toml; see rung interfaces). */
   plc: Record<string, PlcConnection>;
   /** How downloads behave (docs/decisions/0002-plc-actions.md). A person always starts a download. */
@@ -65,6 +67,7 @@ export function defaultConfig(projectPath: string, tiaVersion: "V20" | "V21", br
     devices,
     sync: { pollMs: 2000, detect: "fingerprint", compile: "affected", delete: "confirm", import: "auto", save: "after-import", weakVerifyMs: 3_600_000 },
     readOnly: { failsafe: true, knowHow: true, system: true, graph: true },
+    tia: { start: "headless" },
     plc: {},
     download: { enabled: true, allow: [], startAfter: true, onlyChanges: true, hardware: false, confirm: "type-name", compileFirst: true },
   };
@@ -117,6 +120,9 @@ export function parseConfig(text: string): RungConfig {
   for (const k of ["enabled", "startAfter", "onlyChanges", "hardware", "compileFirst"] as const) if (typeof download[k] !== "boolean") fail(`download.${k.replace(/[A-Z]/g, (c) => "_" + c.toLowerCase())} must be true or false`);
   if (!Array.isArray(download.allow) || !download.allow.every((a) => typeof a === "string")) fail("download.allow must be a list of names such as \"stop-cpu\"");
   if (!["type-name", "yes-no"].includes(download.confirm)) fail("download.confirm must be type-name or yes-no");
+  const rawTia = (raw.tia ?? {}) as Record<string, unknown>;
+  const tia = { start: (rawTia.start ?? base.tia.start) as RungConfig["tia"]["start"] };
+  if (!["headless", "never"].includes(tia.start)) fail('tia.start must be "headless" or "never"');
   const devices = raw.devices ?? [];
   if (!Array.isArray(devices) || !devices.every((d) => typeof d === "string" && d)) fail("devices must be a list of names");
   const ro = (raw.readOnly ?? {}) as Record<string, unknown>;
@@ -132,6 +138,7 @@ export function parseConfig(text: string): RungConfig {
     bridge: { command: bridge.command, args: Array.isArray(bridge.args) ? bridge.args.map(String) : [] },
     devices: devices as string[],
     sync,
+    tia,
     plc,
     download,
     ...(live?.webapi ? { live: { webapi: { url: live.webapi.url as string, user: live.webapi.user as string, ...(live.webapi.insecure === true ? { insecure: true } : {}) } } } : {}),
@@ -148,6 +155,7 @@ export function formatConfig(c: RungConfig): string {
       bridge: c.bridge,
       sync: c.sync,
       readOnly: c.readOnly,
+      tia: c.tia,
       download: {
         enabled: c.download.enabled,
         allow: c.download.allow,

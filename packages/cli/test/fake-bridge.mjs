@@ -71,11 +71,23 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     }
     case "plc.online": {
       db.online = p.action === "online" ? "Online" : p.action === "offline" ? "Offline" : (db.online ?? "Offline");
+      if (p.action === "online") db.onlineTarget = p.target ?? null;
       save(db);
       return reply({ device: p.device, state: db.online });
     }
-    case "plc.connections":
-      return reply({ device: p.device, configured: false, modes: [{ name: "PN/IE", pcInterfaces: [{ name: "PLCSIM", number: 1, targetInterfaces: ["1 X1"], subnets: [], ...(p.scan ? { accessible: [{ name: "plc_1", address: "192.168.0.1", deviceSeries: "S7-1500", macAddress: "00-00" }] } : {}) }] }] });
+    case "plc.connections": {
+      // db.reach: [{ pc, address }] = what each PG/PC interface can see; default: the PLC at its project address on "Ethernet"
+      const reach = db.reach ?? [{ pc: "Ethernet", address: "192.168.0.1" }];
+      const pcs = [...new Set(["Ethernet", "Wi-Fi", ...reach.map((r) => r.pc)])];
+      db.scans = (db.scans ?? 0) + (p.scan ? 1 : 0);
+      save(db);
+      return reply({
+        device: p.device,
+        configured: !!db.tiaConfigured,
+        plcAddresses: [{ interface: "PROFINET interface_1", address: "192.168.0.1" }, { interface: "PROFINET interface_2", address: "192.168.1.1" }],
+        modes: [{ name: "PN/IE", pcInterfaces: pcs.map((pc) => ({ name: pc, number: 1, targetInterfaces: ["1 X1", "1 X2"], subnets: [], ...(p.scan ? { accessible: reach.filter((r) => r.pc === pc).map((r) => ({ name: "plc_1", address: r.address, deviceSeries: "S7-1500", macAddress: "00-00" })) } : {}) })) }],
+      });
+    }
     case "plc.download": {
       const r = p.request;
       db.downloads = [...(db.downloads ?? []), r];

@@ -25,7 +25,16 @@ namespace Rung.Bridge.Core
     {
         public string Device;
         public bool Configured;
+        /// <summary>Addresses the project gives the PLC's interfaces (e.g. PROFINET X1 = 192.168.0.1): what rung looks for on the network.</summary>
+        public List<PlcAddressInfo> PlcAddresses = new List<PlcAddressInfo>();
         public List<ConnectionModeInfo> Modes = new List<ConnectionModeInfo>();
+    }
+
+    public sealed class PlcAddressInfo
+    {
+        public string Interface;
+        public string Address;
+        public string Subnet;
     }
 
     public sealed class ConnectionModeInfo

@@ -80,7 +80,7 @@ namespace Rung.Bridge.V20
             var item = CpuItem(device);
             var cfg = (item.GetService<DownloadProvider>()?.Configuration) ?? item.GetService<OnlineProvider>()?.Configuration;
             if (cfg == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no connection configuration");
-            var result = new ConnectionOptions { Device = device, Configured = cfg.IsConfigured };
+            var result = new ConnectionOptions { Device = device, Configured = cfg.IsConfigured, PlcAddresses = PlcAddresses(item) };
             foreach (ConfigurationMode mode in cfg.Modes)
             {
                 var m = new ConnectionModeInfo { Name = mode.Name };
@@ -228,6 +228,29 @@ namespace Rung.Bridge.V20
             var all = pc.TargetInterfaces.ToList();
             if (all.Count == 1) return all[0];
             throw new RpcException(ErrorCodes.NoTarget, (all.Count == 0 ? "No target interface" : "Several target interfaces (" + string.Join(", ", all.Select(a => a.Name)) + ")") + " on " + t.PcInterface + "; set target_interface in rung.toml");
+        }
+
+        /// <summary>IP addresses configured for the interfaces of the CPU's station.</summary>
+        static List<PlcAddressInfo> PlcAddresses(DeviceItem cpu)
+        {
+            var result = new List<PlcAddressInfo>();
+            void Walk(DeviceItemComposition items)
+            {
+                foreach (DeviceItem it in items)
+                {
+                    var ni = it.GetService<NetworkInterface>();
+                    if (ni != null)
+                        foreach (Node n in ni.Nodes)
+                        {
+                            string address = null;
+                            try { address = n.GetAttribute("Address") as string; } catch (EngineeringException) { }
+                            if (!string.IsNullOrEmpty(address)) result.Add(new PlcAddressInfo { Interface = it.Name, Address = address, Subnet = n.ConnectedSubnet?.Name });
+                        }
+                    Walk(it.DeviceItems);
+                }
+            }
+            try { Walk(cpu.DeviceItems); } catch (EngineeringException) { }
+            return result;
         }
 
         static string NoTargetMessage(string device) =>
