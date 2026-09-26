@@ -1,7 +1,7 @@
 {
   "name": "rung",
-  "version": "0.1.0",
-  "description": "Work on Siemens TIA Portal projects as code: rung MCP tools plus skills for the sync workflow, safety rules and impact-aware review.",
+  "version": "0.2.0",
+  "description": "Work on Siemens TIA Portal projects as code: rung MCP tools plus skills that make the agent work like a senior PLC engineer (workflow, safety, SCL craft, data design, testing, commissioning, review, IEC ST).",
   "author": { "name": "Elmir Mirzayev" },
   "homepage": "https://github.com/sa1ntsinner/rung",
   "repository": "https://github.com/sa1ntsinner/rung",

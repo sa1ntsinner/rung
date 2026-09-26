@@ -12,6 +12,7 @@ import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/ls
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
 import { runTests } from "@rung/sim";
+import { handover } from "./handover.js";
 
 export interface McpContext {
   root: string;
@@ -284,10 +285,34 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("rung_rules", { description: "Safety rules agents must follow in a rung workspace." }, async () => text(SAFETY_RULES));
 
-  server.registerTool("rung_download_request", { description: "Prepare a PLC download. rung never downloads; this returns what the human must do in TIA Portal.", inputSchema: { device: z.string().optional() } }, async ({ device }) =>
-    text(
-      `rung does not download to PLCs. Ask the human to:\n1. Open TIA Portal and review the changes (rung_status shows what was synced).\n2. Compile ${device ?? "the PLC"} (Software, rebuild all) and check for errors.\n3. Go online, compare offline/online and download with the usual safety checks for the machine.\nNever perform or script the download yourself.`,
-    ),
+  server.registerTool(
+    "rung_download_request",
+    {
+      description: "Prepare a download for a person: changed files, compile state, what TIA Portal will likely ask (stop CPU, reinitialise DBs), connection and a machine test plan. Written to .rung/download-request.md. Agents never download.",
+      inputSchema: {
+        device: z.string().optional(),
+        summary: z.string().optional().describe("what changed and why, for the person who downloads"),
+        testPlan: z.string().optional().describe("steps to test the change on the machine"),
+        interfaceChanges: z.array(z.string()).optional().describe("FBs whose interface changed"),
+      },
+    },
+    async ({ device, summary, testPlan, interfaceChanges }) => {
+      const config = await loadConfig(ctx.root).catch(() => undefined);
+      const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
+      const conn = config?.plc[dev];
+      const errors = (await syncDiagnostics(ctx.root)).filter((d) => d.severity === "error" && !/^Compiling finished/.test(d.message));
+      return text(
+        await handover({
+          root: ctx.root,
+          device: dev,
+          ...(summary ? { summary } : {}),
+          ...(testPlan ? { testPlan } : {}),
+          ...(interfaceChanges ? { interfaceChanges } : {}),
+          ...(conn ? { connection: { pcInterface: conn.pcInterface, ...(conn.targetInterface ? { targetInterface: conn.targetInterface } : {}) } } : {}),
+          compileErrors: errors.map((e) => ({ path: e.path, ...(e.line ? { line: e.line } : {}), message: e.message })),
+        }),
+      );
+    },
   );
 
   server.registerResource("status", "rung://status", { description: "Workspace sync status (JSON)", mimeType: "application/json" }, async (uri) => ({

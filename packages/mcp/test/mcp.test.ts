@@ -86,7 +86,10 @@ describe("rung mcp", () => {
   it("refuses to sync or compile without an owner or bridge, and never downloads", async () => {
     expect((await call("rung_sync")).isError).toBe(true);
     expect((await call("rung_compile")).isError).toBe(true);
-    expect((await call("rung_download_request", { device: "PLC_1" })).text).toMatch(/does not download/);
+    const req = (await call("rung_download_request", { device: "PLC_1", summary: "Faster valve close" })).text;
+    expect(req).toMatch(/never download/);
+    expect(req).toMatch(/Faster valve close/);
+    expect(req).toMatch(/rung download/);
   });
 
   it("serves the graph resource", async () => {
