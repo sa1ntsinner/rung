@@ -78,6 +78,15 @@ function sameBinding(a: Binding, b: Binding): boolean {
   );
 }
 
+/** What differs between the stored binding and rung.toml, in words. */
+function bindingDifference(stored: Binding, wanted: Binding): string {
+  if (stored.projectPath.replace(/\//g, "\\").toLowerCase() !== wanted.projectPath.replace(/\//g, "\\").toLowerCase())
+    return `the workspace state belongs to ${stored.projectPath}, rung.toml names ${wanted.projectPath}`;
+  if (stored.tiaVersion !== wanted.tiaVersion) return `the workspace state was made with TIA Portal ${stored.tiaVersion}, rung.toml says ${wanted.tiaVersion}`;
+  const list = (d: string[]) => (d.length ? d.join(", ") : "all PLCs");
+  return `the workspace state mirrors ${list(stored.devices)}, rung.toml lists ${list(wanted.devices)}`;
+}
+
 function sortedJson(value: unknown): string {
   return JSON.stringify(
     value,
@@ -129,12 +138,16 @@ export class StateStore {
       try {
         doc = JSON.parse(await readFile(join(dir, "state.json"), "utf8")) as StateDoc;
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new WorkspaceError("STATE_FORMAT", `unreadable state.json: ${String(e)}`);
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT")
+          throw new WorkspaceError(
+            "STATE_FORMAT",
+            `${join(dir, "state.json")} is unreadable (${e instanceof Error ? e.message : String(e)}). Rename it to state.json.bad and run rung pull: files that match TIA Portal are taken over, edited ones are kept and reported`,
+          );
       }
       if (doc && doc.format !== STATE_FORMAT) throw new WorkspaceError("STATE_FORMAT", `state format ${doc.format} is not supported`);
       if (!doc && !binding) throw new WorkspaceError("NOT_A_WORKSPACE", `${root} has no rung state; run rung init`);
       if (doc && binding && !opts.rebind && !sameBinding(doc.binding, binding))
-        throw new WorkspaceError("BINDING_MISMATCH", `workspace is bound to ${doc.binding.projectPath}; run rung init --rebind`);
+        throw new WorkspaceError("BINDING_MISMATCH", `${bindingDifference(doc.binding, binding)}; rung init --rebind binds the workspace anew`);
       const store = new StateStore(root, doc?.workspaceId ?? randomUUID(), binding ?? doc!.binding, nonce);
       for (const o of Object.values(doc?.objects ?? {})) store.put(o);
       store.dirty = !doc || !!opts.rebind;

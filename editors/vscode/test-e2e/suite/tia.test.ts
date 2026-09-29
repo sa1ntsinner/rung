@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-// Integration tests against a real, headless TIA Portal V20 (the probe workspace bound to the fixture
-// project). There is no PLC: going online has to end with rung's "not found" explanation. Nothing here
-// downloads, and rung.toml is left as it was.
+// Integration tests against a real, headless TIA Portal V20 (a workspace mirrored from the fixture project).
+// There is no PLC: the fixture's addresses (192.168.254.1, 192.168.253.1) are nobody's, so going online has to
+// end with rung's "not found" explanation. Nothing here downloads, and rung.toml is left as it was.
 import * as assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,6 +11,8 @@ import { CliLog, Dialogs, closeAll, file, findItem, openDoc, outline, positionOf
 
 const BROKEN = "plc/PLC_1/blocks/Fx_Broken.scl";
 const MOTOR = "plc/PLC_1/blocks/10_Drives/Motors/Fx_Motor.scl";
+// these need a quiet network: with a VPN to a plant rung rightly offers the devices that answer (fake suite)
+const itQuiet = process.env.RUNG_E2E_ANSWERING ? it.skip : it;
 
 describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
   this.timeout(300_000);
@@ -100,7 +102,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.deepEqual(d.texts, ["info: Online state: PLC_1: Offline"]);
   });
 
-  it("go online without a PLC: rung's explanation in a modal, no crash, state shown", async () => {
+  itQuiet("go online without a PLC: rung's explanation in a modal, no crash, state shown", async () => {
     d.answer(undefined);
     await vscode.commands.executeCommand("rung.goOnline");
     assert.deepEqual(cli.lines(), ["online --plc PLC_1"]);
@@ -108,14 +110,14 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.ok(modal, d.texts.join("\n"));
     assert.equal(modal.modal, true);
     assert.equal(modal.message, "PLC_1 was not found on the network.");
-    assert.match(modal.detail!, /The project gives it 192\.168\.0\.1 \(PROFINET interface_1\)/);
+    assert.match(modal.detail!, /The project gives it 192\.168\.254\.1 \(PROFINET interface_1\)/);
     assert.match(modal.detail!, /rung looked on: /);
     assert.match(modal.detail!, /For a simulation, start S7-PLCSIM/);
     assert.equal(api.online.get("PLC_1").error, "not found on the network");
     assert.match((await outline(api.plc)).join("\n"), /^PLC_1 \[state unknown\] \{rung\.plc\} <warning>/m);
   });
 
-  it("go online, Choose manually: every PG/PC interface of this PC is offered (cancelled)", async () => {
+  itQuiet("go online, Choose manually: every PG/PC interface of this PC is offered (cancelled)", async () => {
     d.answer("Choose manually");
     let offered: vscode.QuickPickItem[] = [];
     d.pick((items) => {
@@ -129,7 +131,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.equal(api.ws.config?.plc.PLC_1, undefined);
   });
 
-  it("Connect… scans with rung connect --json and explains that nothing answers", async () => {
+  itQuiet("Connect… scans with rung connect --json and explains that nothing answers", async () => {
     d.answer("Retry").answer(undefined);
     await vscode.commands.executeCommand("rung.connect");
     assert.deepEqual(cli.lines(), ["connect --json --plc PLC_1", "connect --json --plc PLC_1"]);
@@ -137,7 +139,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.equal(d.of("warning")[1]!.message, "PLC_1 was not found on the network.");
   });
 
-  it("Interfaces… lists the interfaces (Esc: only look)", async () => {
+  itQuiet("Interfaces… lists the interfaces (Esc: only look)", async () => {
     let title = "";
     d.pick((items, opts) => {
       title = opts?.title ?? "";
@@ -149,7 +151,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.match(title, /^Interfaces for PLC_1: no device answered$/);
   });
 
-  it("download without a PLC stops at the explanation, before any confirmation", async () => {
+  itQuiet("download without a PLC stops at the explanation, before any confirmation", async () => {
     d.answer(undefined);
     await vscode.commands.executeCommand("rung.download");
     assert.deepEqual(cli.lines(), ["connect --json --plc PLC_1"]);

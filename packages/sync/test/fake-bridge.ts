@@ -80,6 +80,6 @@ export class FakeBridge {
       return { path, role: suffix === "." + o.form ? "primary" : "companion" + suffix, sha256: sha(content) };
     });
     this.afterExport?.(address);
-    return { address, form: o.form, files, warnings: [], fingerprint: o.entry.fingerprint, bundleHash: "ignored" };
+    return { address, form: o.form, files, warnings: o.entry.isConsistent === false ? ["INCONSISTENT"] : [], fingerprint: o.entry.fingerprint, bundleHash: "ignored" };
   }
 }

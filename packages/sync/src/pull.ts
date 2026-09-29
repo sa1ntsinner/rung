@@ -27,6 +27,8 @@ export interface PullOptions {
   now?: () => number;
 }
 
+const INCONSISTENT_HINT = "not compiled in TIA Portal since its last change (rung compile)";
+
 /** Bridge failures after which every remaining call would fail or wait for its own timeout. */
 export const FATAL_BRIDGE_CODES = new Set(["TIA_NOT_RUNNING", "PORTAL_DISPOSED", "BRIDGE_EXITED", "ACCESS_DENIED", "TIMEOUT", "OUTCOME_UNKNOWN", "DIALOG_REQUIRED"]);
 
@@ -79,7 +81,9 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
         const fresh = isFresh(entry.fingerprint, prev, now(), opts.config.sync.weakVerifyMs);
         if (fresh && local === "clean") {
           report.unchanged++;
-          if (prev.readOnly) report.readOnly++;
+          if (prev.readOnly !== readOnly) state.upsert({ ...prev, readOnly });
+          if (readOnly) report.readOnly++;
+          if (entry.isConsistent === false) warn(entry.address, "INCONSISTENT", INCONSISTENT_HINT);
           continue;
         }
         if (fresh && local === "modified") {
@@ -106,7 +110,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
         state.remove(adoptedFrom);
         adopted.add(adoptedFrom);
       }
-      for (const w of staged.result.warnings ?? []) warn(entry.address, w);
+      for (const w of staged.result.warnings ?? []) warn(entry.address, w, w === "INCONSISTENT" ? INCONSISTENT_HINT : undefined);
       // re-verified objects without a fingerprint (force tables) whose bytes did not change are not "exported"
       if (plan.targets.length || plan.removes.length || !prev) report.exported++;
       else report.unchanged++;
@@ -131,6 +135,11 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
   // Objects gone from a complete inventory: trash their files if untouched.
   for (const s of state.all()) {
     if (live.has(s.address) || inv.skipped.has(s.address) || adopted.has(s.address)) continue;
+    if (s.status === "importing") {
+      // a create interrupted before TIA Portal had it: the file is the user's new file, never trash it
+      state.remove(s.address);
+      continue;
+    }
     if (!inv.devices.includes(parseAddress(s.address).device)) continue;
     const removes = [];
     let localEdit = false;

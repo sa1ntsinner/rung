@@ -120,5 +120,22 @@ describe("two-way CLI", () => {
     expect(await watching).toBe(0);
     expect(existsSync(t.file(".rung", "owner.json"))).toBe(false);
   }, 60_000);
+
+  it("watch prints what stays open once, not on every pass", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    const cfg = t.file("rung.toml");
+    writeFileSync(cfg, readFileSync(cfg, "utf8").replace("pollMs = 2000", "pollMs = 250"));
+    let stop!: () => void;
+    const stopSignal = new Promise<void>((r) => (stop = r));
+    const watching = t.run(["watch"], { stopSignal });
+    await until(() => existsSync(t.file(...motorFile)));
+    unlinkSync(t.file(...motorFile));
+    await until(() => t.out.join("").includes("DELETE_PENDING"));
+    await new Promise((r) => setTimeout(r, 2000)); // several passes
+    stop();
+    expect(await watching).toBe(0);
+    expect(t.out.join("").match(/DELETE_PENDING/g)).toHaveLength(1);
+  }, 60_000);
 });
 

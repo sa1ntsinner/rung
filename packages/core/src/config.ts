@@ -8,6 +8,7 @@ import { WorkspaceError } from "./errors.js";
 export interface RungConfig {
   format: 1;
   project: { path: string; tiaVersion: "V20" | "V21" };
+  /** command "" = the bridge that comes with rung, found at run time (an absolute path would pin one install) */
   bridge: { command: string; args: string[] };
   /** PLC aliases (TIA device names) mirrored into plc/<alias>/. Empty = all PLCs of the project. */
   devices: string[];
@@ -59,7 +60,7 @@ export interface DownloadSettings {
 
 export const CONFIG_FILE = "rung.toml";
 
-export function defaultConfig(projectPath: string, tiaVersion: "V20" | "V21", bridgeCommand: string, devices: string[] = []): RungConfig {
+export function defaultConfig(projectPath: string, tiaVersion: "V20" | "V21", bridgeCommand = "", devices: string[] = []): RungConfig {
   return {
     format: 1,
     project: { path: projectPath, tiaVersion },
@@ -89,8 +90,8 @@ export function parseConfig(text: string): RungConfig {
   if (!project || typeof project.path !== "string" || !project.path) fail("project.path is required");
   if (project.tiaVersion !== "V20" && project.tiaVersion !== "V21") fail("project.tiaVersion must be V20 or V21");
   const bridge = (raw.bridge ?? {}) as Record<string, unknown>;
-  if (typeof bridge.command !== "string" || !bridge.command) fail("bridge.command is required");
-  const base = defaultConfig(project.path, project.tiaVersion, bridge.command);
+  if (bridge.command !== undefined && typeof bridge.command !== "string") fail("bridge.command must be a path");
+  const base = defaultConfig(project.path, project.tiaVersion, (bridge.command as string | undefined) ?? "");
   const sync = { ...base.sync, ...((raw.sync as object) ?? {}) } as RungConfig["sync"];
   if (!(sync.pollMs >= 250)) fail("sync.pollMs must be >= 250");
   if (!["fingerprint", "vci"].includes(sync.detect)) fail("sync.detect must be fingerprint or vci");
@@ -135,7 +136,7 @@ export function parseConfig(text: string): RungConfig {
   }
   return {
     ...base,
-    bridge: { command: bridge.command, args: Array.isArray(bridge.args) ? bridge.args.map(String) : [] },
+    bridge: { command: (bridge.command as string | undefined) ?? "", args: Array.isArray(bridge.args) ? bridge.args.map(String) : [] },
     devices: devices as string[],
     sync,
     tia,
@@ -152,7 +153,7 @@ export function formatConfig(c: RungConfig): string {
       format: c.format,
       devices: c.devices,
       project: c.project,
-      bridge: c.bridge,
+      ...(c.bridge.command || c.bridge.args.length ? { bridge: c.bridge } : {}),
       sync: c.sync,
       readOnly: c.readOnly,
       tia: c.tia,

@@ -10,6 +10,7 @@ import {
   parseAddress,
   addressToPath,
   pathToAddress,
+  ignoredSourceReason,
   findCaseCollisions,
   AddressError,
   type Address,
@@ -55,6 +56,14 @@ describe("addresses", () => {
   });
   it.each(vectors.invalidPaths)("ignores path %j", (p) => {
     expect(pathToAddress(p)).toBeNull();
+  });
+  it("explains files that look like sources but are not read", () => {
+    expect(ignoredSourceReason("plc/P/blocks/Motor%2fValve.scl")).toBe("rung spells this file plc/P/blocks/Motor%2FValve.scl; rename it");
+    expect(ignoredSourceReason("plc/P/blocks/Trail.scl")).toBeUndefined(); // a source
+    expect(ignoredSourceReason("plc/P/blocks/Fx.s7res")).toBeUndefined(); // a companion
+    expect(ignoredSourceReason("plc/P/blocks/notes.txt")).toBeUndefined();
+    expect(ignoredSourceReason("plc/P/tags/T.scl")).toBe(".scl files are not read in tags/ (.tags.xml)");
+    expect(ignoredSourceReason("plc/P/stuff/X.scl")).toMatch(/^not in a folder rung mirrors \(plc\/<PLC>\/blocks\|types\|tags/);
   });
   it("rejects a form that does not fit the kind", () => {
     expect(() => addressToPath({ device: "P", kind: "tagtable", groups: [], name: "T" }, "scl")).toThrow(AddressError);

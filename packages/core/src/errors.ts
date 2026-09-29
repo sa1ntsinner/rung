@@ -13,6 +13,13 @@ export type WorkspaceErrorCode =
   | "PATH_ESCAPE"
   | "RECOVERY_REQUIRED"
   | "CONFIG_INVALID"
+  /** the command line asks for something that does not fit (a wrong name, a missing choice) */
+  | "BAD_ARGUMENT"
+  /** resolve / confirm-delete on an object that has nothing to resolve or delete */
+  | "NOTHING_PENDING"
+  | "CONFLICT_MARKERS"
+  /** rung watch is starting and has no bridge yet */
+  | "NOT_READY"
   | "NOT_A_WORKSPACE"
   | "READ_ONLY";
 

@@ -24,7 +24,17 @@ export const STAGED_STEM = "obj";
 export const SAFE_SUFFIX = /^\.[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9][A-Za-z0-9_-]*)*$/;
 
 export function isReadOnlyEntry(e: ObjectEntry): boolean {
-  return e.knowHowProtected || e.isFailsafe || e.isSystem || (e.language ?? "").includes("GRAPH");
+  return readOnlyReason(e) !== undefined;
+}
+
+/** Why rung never sends an edit of this object to TIA Portal, or undefined. */
+export function readOnlyReason(e: ObjectEntry): string | undefined {
+  if (e.libraryType) return `an instance of the library type ${e.libraryType}; change the type in TIA Portal's library (Edit type)`;
+  if (e.knowHowProtected) return "know-how protected";
+  if (e.isFailsafe) return "part of the safety program, which stays in TIA Portal";
+  if (e.isSystem) return "a system object";
+  if ((e.language ?? "").includes("GRAPH")) return "a GRAPH block, which stays in TIA Portal";
+  return undefined;
 }
 
 export const isStrong = (fp: string) => fp.startsWith("fp:");

@@ -27,6 +27,7 @@ namespace Rung.Bridge.Core.Model
         public bool IsFailsafe;
         public bool IsSystem;
         public bool? IsConsistent;
+        public string LibraryType;   // "LGF_FloatingAverage 3.0.2": an instance of a library type (read-only)
         public string Fingerprint;   // "fp:..." strong, "dt:..." weak, "none" = must hash
         public string[] Warnings;
     }

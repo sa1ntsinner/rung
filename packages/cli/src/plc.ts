@@ -67,7 +67,7 @@ async function deviceOf(config: RungConfig, v: Record<string, unknown>): Promise
   if (config.devices.length === 1) return config.devices[0]!;
   if (Object.keys(config.plc).length === 1) return Object.keys(config.plc)[0]!;
   if (config.devices.length === 0) return "PLC_1";
-  throw new WorkspaceError("CONFIG_INVALID", `this workspace mirrors several PLCs (${config.devices.join(", ")}); choose one with --plc`);
+  throw new WorkspaceError("BAD_ARGUMENT", `this workspace mirrors several PLCs (${config.devices.join(", ")}); choose one with --plc`);
 }
 
 const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
@@ -235,7 +235,7 @@ export async function cmdInterfaces(dir: string, v: Record<string, unknown>, io:
 
 async function ask(io: Io, question: string): Promise<string> {
   if (io.prompt) return io.prompt(question);
-  if (!process.stdin.isTTY) throw new WorkspaceError("CONFIG_INVALID", "rung download needs a terminal to confirm; pass --yes to confirm on the command line");
+  if (!process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "rung download needs a terminal to confirm; pass --yes to confirm on the command line");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await rl.question(question);

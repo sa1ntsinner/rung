@@ -34,7 +34,7 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
   if (st.status !== "synced" || (await localStatus(root, st.files)) !== "clean")
     throw new WorkspaceError("LOCAL_CHANGES", `${st.path} has changes that are not in TIA Portal yet; sync them first (rung sync)`);
   const oldName = parseAddress(address).name;
-  if (newName === oldName) throw new WorkspaceError("CONFIG_INVALID", `${oldName} already has that name`);
+  if (newName === oldName) throw new WorkspaceError("BAD_ARGUMENT", `${oldName} already has that name`);
 
   const { address: to } = await bridge.renameObject(address, newName, st.tiaFingerprint, randomUUID());
 

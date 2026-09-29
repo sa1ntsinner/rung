@@ -40,8 +40,10 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
   const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
 
   const info = await bridge.projectInfo();
-  if (!samePath(info.path, config.project.path) || info.tiaVersion !== config.project.tiaVersion)
-    throw new WorkspaceError("BINDING_MISMATCH", `bridge is attached to ${info.path} (${info.tiaVersion}); workspace is bound to ${config.project.path}`);
+  if (!samePath(info.path, config.project.path))
+    throw new WorkspaceError("BINDING_MISMATCH", `TIA Portal has ${info.path} open; this workspace is bound to ${config.project.path} (rung init --rebind binds it to another project)`);
+  if (info.tiaVersion !== config.project.tiaVersion)
+    throw new WorkspaceError("BINDING_MISMATCH", `${info.path} is open in TIA Portal ${info.tiaVersion}; rung.toml says tiaVersion = "${config.project.tiaVersion}"`);
   const devices = config.devices.length ? config.devices : info.devices;
   for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BINDING_MISMATCH", `device ${d} not found in project`);
   for (const u of info.units ?? []) {

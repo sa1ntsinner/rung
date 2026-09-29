@@ -132,9 +132,18 @@ namespace Rung.Bridge.Core
             }
         }
 
-        /// <summary>v1: protected, failsafe, system and GRAPH objects are never imported.</summary>
-        public static bool IsReadOnly(ObjectEntry e) =>
-            e.KnowHowProtected || e.IsFailsafe || e.IsSystem ||
-            (e.Language ?? "").IndexOf("GRAPH", StringComparison.Ordinal) >= 0;
+        /// <summary>v1: protected, failsafe, system, GRAPH objects and library type instances are never imported.</summary>
+        public static bool IsReadOnly(ObjectEntry e) => ReadOnlyReason(e) != null;
+
+        /// <summary>Why rung never writes this object, or null.</summary>
+        public static string ReadOnlyReason(ObjectEntry e)
+        {
+            if (e.LibraryType != null) return "an instance of the library type " + e.LibraryType + "; change the type in TIA Portal's library (Edit type)";
+            if (e.KnowHowProtected) return "know-how protected";
+            if (e.IsFailsafe) return "part of the safety program";
+            if (e.IsSystem) return "a system object";
+            if ((e.Language ?? "").IndexOf("GRAPH", StringComparison.Ordinal) >= 0) return "a GRAPH block";
+            return null;
+        }
     }
 }

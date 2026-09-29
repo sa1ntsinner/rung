@@ -25,9 +25,8 @@ export const HINTS: Record<string, string> = {
   NO_PROJECT: "Open the project in TIA Portal, or let rung open it in the background: [tia] start = \"headless\" in rung.toml (the default).",
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "Run rung init in this folder first.",
-  BINDING_MISMATCH: "This folder mirrors a different project. Use another folder or rung init --rebind.",
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
-  READ_ONLY: "Two-way sync needs sync.import = \"auto\" in rung.toml; protected, failsafe, system and GRAPH objects are never imported.",
+  READ_ONLY: "Two-way sync needs sync.import = \"auto\" in rung.toml; protected, failsafe, system and GRAPH objects and library type instances are never imported.",
 };
 
 export function defaultBridge(env: Io["env"]): { command: string; args: string[] } {
@@ -52,7 +51,7 @@ export function cleanEnv(env: Io["env"]): Record<string, string> {
 export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
-  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command;
+  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion);
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   const client = await BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
   client.onEvent((e) => showBridgeEvent(io, e));
@@ -91,7 +90,7 @@ export async function findWorkspace(start: string): Promise<string> {
 }
 
 /** Warnings that describe how an object is mirrored, not a problem: they are printed but do not make the exit code 2. */
-const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK"]);
+const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "INCONSISTENT"]);
 export const isNotice = (code: string) => NOTICES.has(code);
 
 export function printWarnings(io: Io, warnings: readonly { address: string; code: string; message?: string }[]) {

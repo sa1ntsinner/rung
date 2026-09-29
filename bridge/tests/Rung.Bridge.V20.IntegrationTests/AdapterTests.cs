@@ -13,6 +13,9 @@ using Rung.Bridge.Core.Protocol;
 using Rung.Bridge.V20;
 using Xunit;
 
+// every class attaches its own session to the one TIA: in parallel, one imports while another lists
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace System.Runtime.CompilerServices
 {
     [AttributeUsage(AttributeTargets.Method, Inherited = false)]
@@ -192,8 +195,13 @@ public class AdapterTests : IClassFixture<FixtureSession>
 [Trait("Category", "NoPortal")]
 public class NoPortalTests
 {
-    [Fact] public void AttachReturnsTypedError() =>
-        Assert.Equal("TIA_NOT_RUNNING", Assert.Throws<RpcException>(() => OpennessSession.Attach(new BridgeArgs { ProjectPath = @"C:\nope\Nope.ap20" }, (n, p) => { })).Code);
+    [Fact] public void AttachReturnsTypedError()
+    {
+        // with a TIA running (a fixture host) the project is what is missing
+        var tia = System.Diagnostics.Process.GetProcessesByName("Siemens.Automation.Portal").Length > 0;
+        var ex = Assert.Throws<RpcException>(() => OpennessSession.Attach(new BridgeArgs { ProjectPath = @"C:\nope\Nope.ap20" }, (n, p) => { }));
+        Assert.Equal(tia ? "NO_PROJECT" : "TIA_NOT_RUNNING", ex.Code);
+    }
 }
 
 [Trait("Category", "Tia")]

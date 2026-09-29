@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 // One two-way reconciliation pass between the workspace and TIA Portal (rung sync; rung watch repeats it).
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import {
   BlobStore,
   Journal,
+  MAX_ABSOLUTE_PATH,
   WorkspaceError,
   addressToStem,
   bundleHash,
   formatAddress,
+  ignoredSourceReason,
   parseAddress,
   pathToAddress,
+  preflight,
   publishBundle,
   replaceGuarded,
   sha256,
@@ -32,6 +35,7 @@ import {
   isLockError,
   isReadOnlyEntry,
   localStatus,
+  readOnlyReason,
   mapStaged,
   planPublication,
   readBundle,
@@ -97,9 +101,19 @@ const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.fo
 const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 
-/** Primary files in the workspace: address → path/form (conflict artefacts, dotfiles and unknown files ignored). */
-async function scanWorkspace(root: string): Promise<Map<string, { path: string; form: string; stem: string }>> {
-  const out = new Map<string, { path: string; form: string; stem: string }>();
+interface LocalFile {
+  path: string;
+  form: string;
+  stem: string;
+}
+
+/**
+ * Primary files in the workspace: address → the files that claim it (normally one). Conflict artefacts,
+ * dotfiles and companions are skipped; a file that looks like a source but is not one rung reads is reported.
+ */
+async function scanWorkspace(root: string): Promise<{ files: Map<string, LocalFile[]>; ignored: { path: string; reason: string }[] }> {
+  const out = new Map<string, LocalFile[]>();
+  const ignored: { path: string; reason: string }[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
     try {
@@ -117,12 +131,38 @@ async function scanWorkspace(root: string): Promise<Map<string, { path: string; 
       if (CONFLICT_SUFFIXES.some((s) => e.name.endsWith(s))) continue;
       const rel = relative(root, abs).split(sep).join("/");
       const hit = pathToAddress(rel);
-      if (!hit) continue;
-      out.set(formatAddress(hit.address), { path: rel, form: hit.form, stem: rel.slice(0, -(hit.form.length + 1)) });
+      if (!hit) {
+        const reason = ignoredSourceReason(rel);
+        if (reason) ignored.push({ path: rel, reason });
+        continue;
+      }
+      const address = formatAddress(hit.address);
+      out.set(address, [...(out.get(address) ?? []), { path: rel, form: hit.form, stem: rel.slice(0, -(hit.form.length + 1)) }]);
     }
   };
   await walk(join(root, "plc"));
-  return out;
+  return { files: out, ignored };
+}
+
+/** Staging folders older than this are left over from an interrupted pass (a live one exists for seconds). */
+const STAGING_MAX_AGE_MS = 30 * 60_000;
+
+async function sweepStaging(root: string, now: number): Promise<void> {
+  const dir = join(root, ".rung", "tmp");
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const n of names) {
+    const p = join(dir, n);
+    try {
+      if (now - (await stat(p)).mtimeMs > STAGING_MAX_AGE_MS) await rm(p, { recursive: true, force: true });
+    } catch {
+      /* gone or in use: the next pass tries again */
+    }
+  }
 }
 
 
@@ -229,8 +269,20 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   const diag = (d: Diagnostic) => report.diagnostics.push(d);
 
   const inv = await takeInventory(root, bridge, state, cfg, (w) => report.warnings.push(w));
+  await sweepStaging(root, Date.now()); // file times are real time, whatever clock the pass runs on
   const items = new Map(inv.items.map((i) => [i.entry.address, i]));
-  const local = await scanWorkspace(root);
+  const scan = await scanWorkspace(root);
+  for (const f of scan.ignored) warn(f.path, "IGNORED_FILE", f.reason);
+  // one file per object: the one rung mirrors; a second one (X.awl next to X.scl, X.scl next to
+  // X.protected.yaml) is never read, and two new files for one object create nothing
+  const local = new Map<string, LocalFile>();
+  for (const [address, list] of scan.files) {
+    const st = state.get(address);
+    const primary = st ? list.find((f) => f.path === st.path) : list.length === 1 ? list[0] : undefined;
+    for (const f of list)
+      if (f !== primary) warn(f.path, "IGNORED_FILE", st ? `a second file for ${parseAddress(address).name}; rung mirrors it as ${st.path}` : `${list.map((x) => x.path).join(" and ")} are the same object; keep one`);
+    if (primary) local.set(address, primary);
+  }
   const bound = (a: string) => {
     try {
       return inv.devices.includes(parseAddress(a).device);
@@ -275,9 +327,32 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     try {
       if (inv.blocked.has(address) || inv.skipped.has(address)) continue;
       const item = items.get(address);
-      const st = state.get(address);
+      let st = state.get(address);
       const loc = local.get(address);
       if (item && !item.stem) continue; // path collision, already warned
+
+      if (st?.status === "importing") {
+        // a create interrupted (Ctrl+C, a crash) before rung recorded how it ended
+        const untouched = (await localStatus(root, st.files)) === "clean";
+        const files = st.files;
+        state.remove(address);
+        st = undefined;
+        if (item && untouched) {
+          // TIA Portal has it: finish what the import would have done (TIA's form of the file)
+          await publish(address, files, await stageExport(root, bridge, address, item.stem!), isReadOnlyEntry(item.entry));
+          report.created++;
+          continue;
+        }
+        if (item && loc && cfg.sync.import === "auto") {
+          // TIA Portal has it and the file was edited since: the file is newer
+          const { bundle, captured } = await localBundle(root, loc.stem, loc.path);
+          const name = parseAddress(address).name;
+          const texts = Object.values(bundle);
+          queue.push({ address, name, form: loc.form, stem: item.stem!, bundle, expected: item.entry.fingerprint, captured, kind: "update", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
+          continue;
+        }
+        // not in TIA Portal: the file is simply new again
+      }
 
       if (st?.status === "conflicted") {
         warn(address, "CONFLICT", "unresolved conflict; run rung resolve");
@@ -301,14 +376,20 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           tiaChanged = bundleHash(staged.files) !== st.fileHash;
           if (!tiaChanged) state.upsert({ ...st, tiaFingerprint: staged.result.fingerprint, verifiedAt: now() });
         }
-        const cur = state.get(address)!;
+        let cur = state.get(address)!;
+        if (cur.readOnly !== readOnly) {
+          // e.g. tied to a library type in TIA Portal since the last pass
+          cur = { ...cur, readOnly };
+          state.upsert(cur);
+        }
 
         if (status === "clean") {
           if (tiaChanged) {
             await publish(address, cur.files, staged!, readOnly);
             report.exported++;
           } else {
-            if (cur.status === "pendingDelete") state.upsert({ ...cur, status: "synced" });
+            // a restored file ends a pending delete or a refused edit
+            if (cur.status === "pendingDelete" || cur.status === "fileDirty") state.upsert({ ...cur, status: "synced" });
             report.unchanged++;
           }
           continue;
@@ -329,7 +410,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         // modified locally
         if (readOnly) {
           state.upsert({ ...cur, status: "fileDirty" });
-          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: "This object is read-only in rung (protected, failsafe, system or GRAPH); the edit is not sent to TIA Portal" });
+          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; restore the file` });
           continue;
         }
         if (cfg.sync.import === "manual") {
@@ -413,10 +494,16 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           warn(address, "UNSUPPORTED_OBJECT", `cannot create objects from ${loc.form} files`);
           continue;
         }
+        // rung would create it in TIA Portal and then have no file to mirror it into
+        const stem = addressToStem(parseAddress(address));
+        if (preflight(root, [{ address, stem }]).tooLong.length) {
+          warn(loc.path, "PATH_TOO_LONG", `not created in TIA Portal: rung's files for it need more than ${MAX_ABSOLUTE_PATH} characters (with ${join(root, stem)}); use shorter folder or block names`);
+          continue;
+        }
         const { bundle, captured } = await localBundle(root, loc.stem, loc.path);
         const name = parseAddress(address).name;
         const texts = Object.values(bundle);
-        queue.push({ address, name, form: loc.form, stem: addressToStem(parseAddress(address)), bundle, expected: "absent", captured, kind: "create", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
+        queue.push({ address, name, form: loc.form, stem, bundle, expected: "absent", captured, kind: "create", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
       }
     } catch (e) {
       if (e instanceof BridgeError && FATAL_BRIDGE_CODES.has(e.code)) {
@@ -478,6 +565,11 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       }
     }
     const stage = await stageForImport(root, job.form, job.bundle);
+    if (job.kind === "create" && !st) {
+      // written down before TIA Portal creates it: an interrupted pass then knows the object came from this file
+      state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing" });
+      await state.flush();
+    }
     let result;
     try {
       result = await bridge.importObject(job.address, job.form, stage.primary, job.expected, randomUUID());
@@ -499,6 +591,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (e.code === "STALE_REVISION") warn(job.address, e.code, "TIA Portal changed meanwhile; merging on the next pass");
       else diag({ address: job.address, path: primaryPath, severity: "error", code: e.code, message: e.message });
       if (st) state.upsert({ ...st, status: "fileDirty" });
+      else state.remove(job.address); // refused: still just a new file
       continue;
     } finally {
       await rm(stage.dir, { recursive: true, force: true });
@@ -566,7 +659,7 @@ export async function confirmDelete(
   address: string,
 ): Promise<void> {
   const st = state.get(address);
-  if (!st || st.status !== "pendingDelete") throw new WorkspaceError("CONFIG_INVALID", `${address} has no pending delete`);
+  if (!st || st.status !== "pendingDelete") throw new WorkspaceError("NOTHING_PENDING", `${address} has no pending delete (rung status lists them)`);
   if ((await localStatus(root, st.files)) !== "missing" || (await Promise.all(st.files.map((f) => diskHash(root, f.path)))).some((h) => h !== "absent"))
     throw new WorkspaceError("LOCAL_CHANGES", `${address} has files again; delete not confirmed`);
   await bridge.deleteObject(address, st.tiaFingerprint, randomUUID());
@@ -582,7 +675,7 @@ export async function confirmDelete(
  */
 export async function resolveConflict(root: string, state: StateStore, path: string, mode: "ours" | "theirs" | "merged"): Promise<void> {
   const st = state.byPath(path);
-  if (!st || st.status !== "conflicted") throw new WorkspaceError("CONFIG_INVALID", `${path} is not in conflict`);
+  if (!st || st.status !== "conflicted") throw new WorkspaceError("NOTHING_PENDING", `${path} is not in conflict (rung status lists conflicts)`);
   const tiaFiles = st.conflict?.tiaFiles ?? st.files;
   const tiaFingerprint = st.conflict?.tiaFingerprint ?? st.tiaFingerprint;
   const recoveryDir = join(root, ".rung", "recovery", "resolve-" + randomUUID());
@@ -616,9 +709,9 @@ export async function resolveConflict(root: string, state: StateStore, path: str
         // the user merged inside the .conflict file; it becomes the file (the old one is kept for recovery)
         await replaceGuarded(rel2abs(root, f.path), Buffer.from(merged, "utf8"), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
       } else if (markers.test(primary)) {
-        throw new WorkspaceError("CONFIG_INVALID", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);
+        throw new WorkspaceError("CONFLICT_MARKERS", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);
       } else if (mode === "merged" && merged !== null && markers.test(merged) && primary === "") {
-        throw new WorkspaceError("CONFIG_INVALID", `${f.path}.conflict still contains conflict markers`);
+        throw new WorkspaceError("CONFLICT_MARKERS", `${f.path}.conflict still contains conflict markers`);
       }
     }
     // Base = the TIA version the conflict saw: the next pass sees "file modified, TIA unchanged" and imports.

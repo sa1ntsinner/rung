@@ -38,6 +38,13 @@ function defaultObjects(b: FakeBridge) {
 }
 
 describe("pull", () => {
+  it("reports an object TIA Portal has not compiled on every pull, not only the first", async () => {
+    const t = setup((b) => b.add(MOTOR, { isConsistent: false }));
+    const first = await t.run();
+    const second = await t.run({ now: 2_000 });
+    for (const r of [first, second]) expect(r.warnings).toContainEqual({ address: MOTOR, code: "INCONSISTENT", message: "not compiled in TIA Portal since its last change (rung compile)" });
+  });
+
   it("exports everything on first pull with normalized text", async () => {
     const t = setup();
     const r = await t.run();

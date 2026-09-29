@@ -100,14 +100,16 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   try {
     const info = await client.projectInfo();
     const tia = (v.tia as string | undefined) ?? info.tiaVersion;
-    if (tia !== "V20" && tia !== "V21") throw new WorkspaceError("CONFIG_INVALID", `unsupported TIA version ${tia}`);
+    if (tia !== "V20" && tia !== "V21") throw new WorkspaceError("BAD_ARGUMENT", `unsupported TIA version ${tia} (V20 or V21)`);
+    if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
     const devices = (v.device as string[] | undefined) ?? [];
-    for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("CONFIG_INVALID", `device ${d} not in project (${info.devices.join(", ")})`);
+    for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BAD_ARGUMENT", `device ${d} not in project (${info.devices.join(", ")})`);
     // On --rebind keep the user's sync/bridge settings; only the binding changes.
     const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir).catch(() => undefined) : undefined;
     const config = previous
       ? { ...previous, project: { path: info.path, tiaVersion: tia as "V20" | "V21" }, devices }
-      : { ...defaultConfig(info.path, tia, bridge.command, devices), bridge: { command: bridge.command, args: bridge.args } };
+      : // the bridge that comes with rung is found at run time; only an explicit RUNG_BRIDGE is written down
+        { ...defaultConfig(info.path, tia, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
     // Take the state lock before touching rung.toml so config and state never disagree about the binding.
     // devices = [] means "all PLCs" and is stored as such, so adding a PLC later does not break the binding.
     const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices }, { rebind: !!v.rebind });
@@ -120,7 +122,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const current = (await exists(gi)) ? await readFile(gi, "utf8") : "";
     if (!current.split(/\r?\n/).includes(".rung/")) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ".rung/\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
-    const bridgeExe = io.env.RUNG_BRIDGE ?? config.bridge.command;
+    const bridgeExe = io.env.RUNG_BRIDGE ?? (config.bridge.command || bridge.command);
     const wl = /rung-bridge-v2\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe) : "unknown";
     if (wl === "missing" || wl === "stale") io.stderr(`rung: ${WHITELIST_HINT}\n`);
     io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\nNext: rung pull\n`);
@@ -193,6 +195,49 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
   }
 }
 
+/** Options and positionals (after the command) each command takes: anything else is a typo worth stopping for. */
+const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
+  setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
+  check: { options: ["json"], positionals: 0 },
+  init: { options: ["project", "tia", "device", "rebind"], positionals: 1 },
+  pull: { options: ["force"], positionals: 1 },
+  sync: { options: [], positionals: 1 },
+  watch: { options: [], positionals: 1 },
+  status: { options: [], positionals: 1 },
+  resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
+  "confirm-delete": { options: ["dir"], positionals: 1 },
+  rename: { options: ["dir"], positionals: 2 },
+  test: { options: ["junit", "filter"], positionals: 1 },
+  live: { options: ["dir"], positionals: Infinity },
+  views: { options: ["offline"], positionals: 1 },
+  agents: { options: [], positionals: 1 },
+  mcp: { options: [], positionals: 1 },
+  lsp: { options: ["stdio"], positionals: 0 },
+  doctor: { options: ["fixture"], positionals: 1 },
+  compile: { options: ["file", "hw", "plc"], positionals: 1 },
+  online: { options: ["off", "state", "plc"], positionals: 1 },
+  compare: { options: ["json", "plc"], positionals: 1 },
+  connect: { options: ["pick", "json", "plc", "use", "mode", "number", "target"], positionals: 1 },
+  interfaces: { options: ["scan", "plc"], positionals: 1 },
+  download: { options: ["hw", "no-hw", "no-sw", "all-blocks", "allow", "no-start", "yes", "plc"], positionals: 1 },
+  open: { options: ["dir"], positionals: 1 },
+  simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
+};
+
+/** Why these arguments do not fit the command, or undefined. */
+function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]): string | undefined {
+  const spec = COMMANDS[cmd];
+  if (!spec) return undefined;
+  const stray = Object.keys(v).filter((k) => v[k] !== undefined && k !== "help" && !spec.options.includes(k));
+  if (stray.length) return `rung ${cmd} has no ${stray.map((s) => "--" + s).join(", ")}`;
+  const extra = positionals.slice(1 + spec.positionals);
+  if (extra.length) return `rung ${cmd} takes ${spec.positionals === 0 ? "no arguments" : spec.positionals === 1 ? "one argument" : `${spec.positionals} arguments`}; unexpected: ${extra.join(" ")}`;
+  const exclusive = [["ours", "theirs", "merged"], ["hw", "no-hw"], ["off", "state"]].map((g) => g.filter((k) => v[k]));
+  const both = exclusive.find((g) => g.length > 1);
+  if (both) return `${both.map((s) => "--" + s).join(" and ")} exclude each other`;
+  return undefined;
+}
+
 export async function main(argv: string[], io: Io): Promise<number> {
   let parsed;
   try {
@@ -261,6 +306,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
     io.stdout(HELP);
     return cmd || v.help ? 0 : 1;
   }
+  const wrong = misuse(cmd, v, positionals);
+  if (wrong) {
+    io.stderr(`rung: ${wrong} (rung --help)\n`);
+    return 1;
+  }
   if (cmd === "lsp") {
     startServer();
     await new Promise<void>(() => {}); // runs until the editor closes the connection
@@ -292,6 +342,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
+        if (!total) {
+          io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)\n`);
+          return 1;
+        }
         io.stdout(`
 ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
 `);

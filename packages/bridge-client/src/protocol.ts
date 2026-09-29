@@ -81,6 +81,8 @@ export interface ObjectEntry {
   isFailsafe: boolean;
   isSystem: boolean;
   isConsistent?: boolean;
+  /** "LGF_FloatingAverage 3.0.2" for an instance of a library type: read-only, TIA Portal's library owns it */
+  libraryType?: string;
   /** "fp:..." strong revision, "dt:..." weak, "none" = always verify by hash. */
   fingerprint: string;
   warnings?: string[];

@@ -13,6 +13,7 @@ export {
   addressToPath,
   addressToStem,
   pathToAddress,
+  ignoredSourceReason,
   findCaseCollisions,
 } from "./address.js";
 export { WorkspaceError, type WorkspaceErrorCode } from "./errors.js";

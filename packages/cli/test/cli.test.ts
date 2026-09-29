@@ -73,6 +73,29 @@ describe("rung CLI", () => {
     expect(await t.run("init", "--rebind")).toBe(0);
   });
 
+  it("stops at options and arguments a command does not take", async () => {
+    const t = setup();
+    expect(await t.run("pull", "--yes")).toBe(1);
+    expect(t.err.join("")).toMatch(/rung pull has no --yes/);
+    expect(await t.run("status", "a", "b")).toBe(1);
+    expect(t.err.join("")).toMatch(/rung status takes one argument; unexpected: b/);
+    expect(await t.run("resolve", "x.scl", "--ours", "--theirs")).toBe(1);
+    expect(t.err.join("")).toMatch(/--ours and --theirs exclude each other/);
+  });
+
+  it("test says so when there are no tests instead of 0/0 passed", async () => {
+    const t = setup();
+    expect(await t.run("test")).toBe(1);
+    expect(t.out.join("")).toMatch(/^no tests: rung test runs tests\/\*\*\/\*\.test\.yaml/);
+  });
+
+  it("init --tia must match the TIA Portal that has the project open", async () => {
+    const t = setup();
+    expect(await t.run("init", "--tia", "V21")).toBe(1);
+    expect(t.err.join("")).toMatch(/BAD_ARGUMENT: --tia V21 does not match: .*RungFixture\.ap20 is open in TIA Portal V20/);
+    expect(existsSync(join(t.dir, "rung.toml"))).toBe(false);
+  });
+
   it("init with --project fails clearly when that project is not open", async () => {
     const t = setup();
     expect(await t.run("init", "--project", "C:\\nope\\Nope.ap20")).toBe(1);

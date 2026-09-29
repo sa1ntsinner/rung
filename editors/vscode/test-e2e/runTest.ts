@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: MIT
 // `npm run test:e2e`: runs the integration tests in a real VS Code (Extension Development Host), once per
 // workspace: "fresh" (empty folder: initialize and pull, fake bridge), "fake" (a mirrored fake project) and
-// "tia" (the TIA Portal probe workspace, skipped when the fixture project is not open). Throwaway user data and extensions folders; other extensions are off.
+// "tia" (the fixture project mirrored from TIA Portal, skipped when it is not open or S7-PLCSIM runs). Throwaway user data and extensions folders; other extensions are off.
 //
 //   RUNG_E2E_SUITES=fresh,fake,tia      which suites (default all three)
 //   RUNG_E2E_GREP=<text>                only tests whose title contains the text
-//   RUNG_E2E_TIA_WS=<folder>            TIA workspace (default %TEMP%\rung-probe-ws)
+//   RUNG_E2E_TIA_WS=<folder>            TIA workspace to use as is (default: a fresh mirror of the fixture)
+//   RUNG_PROJECT=<.ap20>                the fixture (default %USERPROFILE%\rung-fixtures\RungFixture\RungFixture.ap20)
 //   VSCODE_EXE=<Code.exe>               VS Code to run (default: the installed one, else downloaded)
 //   RUNG_E2E_KEEP=1                     keep the temp folders
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runTests } from "@vscode/test-electron";
 import { createFakeWorkspace, createFreshFolder, FAKE_PROJECT, rungCli } from "./fixture";
@@ -73,11 +75,32 @@ async function runSuite(name: string, folder: string, base: string, env: Record<
   }
 }
 
-/** The TIA suite needs the fixture project open in TIA Portal; `rung online --state` answers only then. */
-function tiaReady(folder: string): string | undefined {
-  if (!existsSync(join(folder, "rung.toml"))) return `${folder} has no rung.toml`;
+const FIXTURE = process.env.RUNG_PROJECT ?? join(homedir(), "rung-fixtures", "RungFixture", "RungFixture.ap20");
+
+/**
+ * The TIA suite needs the fixture project open in TIA Portal and no PLC around: with S7-PLCSIM running TIA
+ * offers only PLCSIM. Without RUNG_E2E_TIA_WS it mirrors the fixture into a fresh folder (init and pull).
+ */
+function tiaWorkspace(base: string): { folder?: string; why?: string } {
+  const plcsim = spawnSync("tasklist", ["/FI", "IMAGENAME eq Siemens.Simatic.PlcSim*", "/NH"], { encoding: "utf8" }).stdout ?? "";
+  if (/Siemens\.Simatic\.PlcSim/i.test(plcsim)) return { why: "S7-PLCSIM runs (this suite needs no PLC around; node tools/fixtures/plcsim.mjs stop)" };
+  let folder = process.env.RUNG_E2E_TIA_WS;
+  if (!folder) {
+    folder = join(base, "tia");
+    mkdirSync(folder, { recursive: true });
+    const init = rungCli(repo, folder, {}, "init", "--project", FIXTURE);
+    if (init.code !== 0) return { why: `rung init on ${FIXTURE} failed: ${init.output.trim().split(/\r?\n/)[0]}` };
+    const pull = rungCli(repo, folder, {}, "pull");
+    if (pull.code !== 0 && pull.code !== 2) return { why: `rung pull failed: ${pull.output.trim().split(/\r?\n/).pop()}` };
+  } else if (!existsSync(join(folder, "rung.toml"))) return { why: `${folder} has no rung.toml` };
   const r = rungCli(repo, folder, {}, "online", "--state");
-  return r.code === 0 ? undefined : `TIA Portal does not answer for ${folder}: ${r.output.trim().split(/\r?\n/)[0]}`;
+  return r.code === 0 ? { folder } : { why: `TIA Portal does not answer for ${folder}: ${r.output.trim().split(/\r?\n/)[0]}` };
+}
+
+/** Devices that answer on this PC's networks (a VPN to a plant, a PLC on the desk); "" when none does. */
+function answeringDevices(folder: string): string {
+  const scan = rungCli(repo, folder, {}, "interfaces", "--scan", "--plc", "PLC_1");
+  return [...new Set([...scan.output.matchAll(/^ {6}reachable: (.*)$/gm)].map((m) => m[1]!.trim()))].join(", ");
 }
 
 async function main(): Promise<void> {
@@ -94,10 +117,13 @@ async function main(): Promise<void> {
       ok = (await runSuite("fake", fake.dir, base, { ...fake.env, RUNG_E2E_OBJECTS: fake.objects })) && ok;
     }
     if (suites.includes("tia")) {
-      const folder = process.env.RUNG_E2E_TIA_WS ?? join(tmpdir(), "rung-probe-ws");
-      const why = tiaReady(folder);
-      if (why) console.log(`\n=== suite "tia" skipped: ${why}`);
-      else ok = (await runSuite("tia", folder, base, {})) && ok;
+      const { folder, why } = tiaWorkspace(base);
+      if (!folder) console.log(`\n=== suite "tia" skipped: ${why}`);
+      else {
+        const answering = answeringDevices(folder);
+        if (answering) console.log(`devices answer on the network (${answering}): the "no PLC" tests are skipped`);
+        ok = (await runSuite("tia", folder, base, answering ? { RUNG_E2E_ANSWERING: answering } : {})) && ok;
+      }
     }
   } finally {
     if (process.env.RUNG_E2E_KEEP) console.log(`kept ${base}`);

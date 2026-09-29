@@ -11,6 +11,7 @@ using Siemens.Engineering;
 using Siemens.Engineering.Compiler;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
+using Siemens.Engineering.Library.Types;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.ExternalSources;
@@ -179,10 +180,24 @@ namespace Rung.Bridge.V20
             Alive();
             var plc = Plc(device);
             var refs = new List<ObjectRef>();
-            WalkBlocks(plc, device, plc.BlockGroup, new List<string>(), refs);
-            WalkTypes(plc, device, plc.TypeGroup, new List<string>(), refs);
-            WalkTags(plc, device, plc.TagTableGroup, new List<string>(), refs);
-            WalkWatch(plc, device, plc.WatchAndForceTableGroup, new List<string>(), refs);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    refs.Clear();
+                    WalkBlocks(plc, device, plc.BlockGroup, new List<string>(), refs);
+                    WalkTypes(plc, device, plc.TypeGroup, new List<string>(), refs);
+                    WalkTags(plc, device, plc.TagTableGroup, new List<string>(), refs);
+                    WalkWatch(plc, device, plc.WatchAndForceTableGroup, new List<string>(), refs);
+                    break;
+                }
+                catch (EngineeringObjectDisposedException) when (attempt < 3)
+                {
+                    // someone deleted or replaced an object while rung listed them (an edit in TIA, another
+                    // Openness client): list again
+                    plc = Plc(device);
+                }
+            }
             foreach (var key in _index.Keys.Where(k => k.StartsWith("plc:" + AddressFormat.EscapeSegment(device) + "/", StringComparison.Ordinal)).ToList()) _index.Remove(key);
             foreach (var r in refs) _index[r.Entry.Address] = r;
             return refs.Select(r => r.Entry).ToList();
@@ -207,6 +222,23 @@ namespace Rung.Bridge.V20
             var fp = Fingerprint(obj, consistent, () => dates);
             _fingerprints[address] = (key, fp, now);
             return fp;
+        }
+
+        // tying an object to a library type or updating the type changes its modification date
+        readonly Dictionary<string, (string Dates, string Type)> _libraryTypes = new Dictionary<string, (string, string)>(StringComparer.Ordinal);
+
+        string CachedLibraryType(string address, IEngineeringServiceProvider obj, string dates)
+        {
+            if (_libraryTypes.TryGetValue(address, out var c) && c.Dates == dates) return c.Type;
+            string type = null;
+            try
+            {
+                var v = obj.GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion;
+                if (v != null) type = v.TypeObject.Name + " " + v.VersionNumber;
+            }
+            catch (EngineeringException) { }
+            _libraryTypes[address] = (dates, type);
+            return type;
         }
 
         static string Fingerprint(IEngineeringServiceProvider obj, bool? consistent, Func<string> fallback)
@@ -253,7 +285,9 @@ namespace Rung.Bridge.V20
                     IsFailsafe = IsFailsafeLanguage(lang),
                     IsConsistent = b.IsConsistent,
                 };
-                entry.Fingerprint = CachedFingerprint(entry.Address, b, entry.IsConsistent, Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate));
+                var dates = Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate);
+                entry.Fingerprint = CachedFingerprint(entry.Address, b, entry.IsConsistent, dates);
+                entry.LibraryType = CachedLibraryType(entry.Address, b, dates);
                 refs.Add(new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = plc });
             }
             foreach (PlcBlockUserGroup g in group.Groups)
@@ -274,7 +308,9 @@ namespace Rung.Bridge.V20
                     IsFailsafe = false, // V20 offers no way to tell an F-UDT
                     IsConsistent = t.IsConsistent,
                 };
-                entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, Dates(t.ModifiedDate, t.InterfaceModifiedDate));
+                var dates = Dates(t.ModifiedDate, t.InterfaceModifiedDate);
+                entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, dates);
+                entry.LibraryType = CachedLibraryType(entry.Address, t, dates);
                 refs.Add(new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc });
             }
             foreach (PlcTypeUserGroup g in group.Groups)
@@ -500,7 +536,7 @@ namespace Rung.Bridge.V20
             operationId = opGuid.ToString("D");
             var isNew = expectedTiaRevision == "absent";
             var r = isNew ? NewObjectRef(address, form) : Resolve(address);
-            if (FormPolicy.IsReadOnly(r.Entry) || form == "protected.yaml") throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+            if (FormPolicy.IsReadOnly(r.Entry) || form == "protected.yaml") throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only: " + (FormPolicy.ReadOnlyReason(r.Entry) ?? "know-how protected"));
             if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
             var name = r.Entry.Address;
             IList<string> imported;
@@ -516,8 +552,10 @@ namespace Rung.Bridge.V20
                     imported = ImportForm(r, form, path, operationId);
                     var parts = AddressFormat.Parse(address);
                     var want = Identity(parts.Name, parts.Namespace);
+                    if (imported.Count == 0)
+                        throw new RpcException(ErrorCodes.ImportFailed, "The file declares no block or type (empty, or only comments); it must declare \"" + want + "\". Nothing was changed");
                     if (imported.Count != 1 || imported[0] != want)
-                        throw new RpcException(ErrorCodes.ImportFailed, "Import would change [" + string.Join(", ", imported) + "] instead of exactly " + want + "; rolled back");
+                        throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
                     tx.CommitOnDispose();
                 }
             }
@@ -794,7 +832,7 @@ namespace Rung.Bridge.V20
             using (OfflineFor(parts.Device))
             {
                 var r = Resolve(address);
-                if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+                if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only: " + FormPolicy.ReadOnlyReason(r.Entry));
                 if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
                 var clashKinds = parts.Kind == "block" || parts.Kind == "type" ? new[] { "block", "type" } : new[] { parts.Kind };
                 var want = Identity(newName, parts.Namespace);
@@ -836,7 +874,7 @@ namespace Rung.Bridge.V20
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             if (!Guid.TryParseExact(operationId, "D", out _)) throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
             var r = Resolve(address);
-            if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+            if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only: " + FormPolicy.ReadOnlyReason(r.Entry));
             if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal; delete not confirmed");
             _inImport = true;
             try

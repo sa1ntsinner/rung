@@ -108,6 +108,44 @@ export function pathToAddress(p: string): { address: Address; form: TextForm } |
   return null;
 }
 
+/**
+ * Why a file under plc/ that ends like a source is not one rung reads (a spelling rung never writes, such as
+ * %2f for %2F, or a folder rung does not mirror), or undefined for sources and for files that are no source at all.
+ */
+export function ignoredSourceReason(p: string): string | undefined {
+  if (!p.startsWith("plc/") || pathToAddress(p)) return undefined;
+  const parts = p.slice(4).split("/");
+  const file = parts[parts.length - 1]!;
+  const forms = FORMS.filter((f) => file.endsWith("." + f));
+  if (!forms.length) return undefined;
+  const stemOf = (form: TextForm) => [...parts.slice(0, -1), file.slice(0, -(form.length + 1))];
+  for (const form of forms) {
+    let canonical: string;
+    try {
+      canonical = "plc/" + stemOf(form).map(respell).join("/") + "." + form;
+    } catch {
+      continue;
+    }
+    if (canonical !== p && pathToAddress(canonical)) return `rung spells this file ${canonical}; rename it`;
+  }
+  for (const form of forms) {
+    try {
+      const { address } = decode(stemOf(form));
+      return `.${form} files are not read in ${KIND_DIR[address.kind]}/ (${FORMS_BY_KIND[address.kind].map((f) => "." + f).join(", ")})`;
+    } catch {
+      /* next */
+    }
+  }
+  return `not in a folder rung mirrors (plc/<PLC>/${Object.values(KIND_DIR).join("|")}/…)`;
+}
+
+/** The canonical spelling of a segment someone typed (%2f for %2F, a raw character rung escapes). */
+function respell(segment: string): string {
+  const loose = (s: string) => s.replace(/%([0-9A-Fa-f]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
+  const i = segment.indexOf("~");
+  return i > 0 ? `${escapeSegment(loose(segment.slice(0, i)))}~${escapeSegment(loose(segment.slice(i + 1)))}` : escapeSegment(loose(segment));
+}
+
 /** Pairs of paths that would land on the same file on case-insensitive or normalizing filesystems. */
 export function findCaseCollisions(paths: readonly string[]): [string, string][] {
   const seen = new Map<string, string>();

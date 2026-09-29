@@ -52,11 +52,18 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   const config = await loadConfig(dir);
   const state = await openState(dir, config); // single writer: fails with STATE_LOCKED if another owner runs
   let server: OwnerServer | undefined;
+  // an open conflict or pending delete is in every pass: print a pass when it did something or when what
+  // stands open changed, not every two seconds
+  const standing = (r: SyncReport) =>
+    JSON.stringify([r.conflicts, r.pendingDeletes, r.warnings.map((w) => [w.address, w.code, w.message]), r.diagnostics.map((d) => [d.path, d.code, d.line, d.message])]);
+  let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
     bridgeFactory: () => bridgeFor(config, io, importFlags(config)),
     onReport: (r) => {
-      if (r.exported + r.imported + r.created + r.merged + r.conflicts + r.removed + r.pendingDeletes + r.diagnostics.length) printReport(io, r);
+      const now = standing(r);
+      if (r.exported + r.imported + r.created + r.merged + r.removed || now !== shown) printReport(io, r);
+      shown = now;
       server?.emit("report", r);
       server?.emit("diagnostics", { items: r.diagnostics });
     },
@@ -67,7 +74,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   });
   const tools = () => {
     const b = watcher.bridgeForTools;
-    if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
+    if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
     return b as import("@rung/bridge-client").BridgeClient;
   };
   server = await OwnerServer.start(dir, {
@@ -81,13 +88,13 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     },
     confirmDelete: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
+      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
       await confirmDelete(dir, b as never, state, String(p.address));
       return { deleted: true };
     },
     rename: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
+      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
     },
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
@@ -98,8 +105,10 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
-      const msgs = await b.compile(String(p.device ?? config.devices[0] ?? Object.keys(config.plc)[0] ?? "PLC_1"), (p.addresses as string[] | undefined) ?? []);
+      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
+      const devices = config.devices.length ? config.devices : (await (b as import("@rung/bridge-client").BridgeClient).projectInfo()).devices;
+      if (!p.device && devices.length !== 1) throw new WorkspaceError("BAD_ARGUMENT", `the project has several PLCs (${devices.join(", ")}); name one`);
+      const msgs = await b.compile(String(p.device ?? devices[0]), (p.addresses as string[] | undefined) ?? []);
       return placeCompileMessages(dir, (a) => state.get(a)?.path, msgs, (f) => readFile(f, "utf8"));
     },
   });
@@ -224,7 +233,7 @@ async function addressOf(ws: string, what: string, cwd: string): Promise<string>
   if (byPath) return byPath.address;
   const named = objects.filter((o) => parseAddress(o.address).name.toLowerCase() === what.replace(/^"|"$/g, "").toLowerCase());
   if (named.length === 1) return named[0]!.address;
-  if (named.length > 1) throw new WorkspaceError("CONFIG_INVALID", `several objects are named ${what}: ${named.map((o) => o.path).join(", ")}; give the file instead`);
+  if (named.length > 1) throw new WorkspaceError("BAD_ARGUMENT", `several objects are named ${what}: ${named.map((o) => o.path).join(", ")}; give the file instead`);
   throw new WorkspaceError("NOT_MIRRORED", `no mirrored object or file ${what}; run rung pull`);
 }
 

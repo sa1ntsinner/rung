@@ -72,6 +72,12 @@ function unifiedDiff(a: string, b: string, labelA: string, labelB: string): stri
   return out.length > 2 ? out.join("\n") : "(no changes)";
 }
 
+/** The PLC a command means when none is named: the only one rung mirrors, or undefined when there are several. */
+async function onlyDevice(bridge: { projectInfo(): Promise<{ devices: string[] }> }, configured: string[]): Promise<string | undefined> {
+  const devices = configured.length ? configured : (await bridge.projectInfo()).devices;
+  return devices.length === 1 ? devices[0] : undefined;
+}
+
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: "rung", version: "0.1.0" }, { instructions: SAFETY_RULES });
   let cache: { at: number; index: WorkspaceIndex; graph: CodeGraph } | undefined;
@@ -146,9 +152,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
     if (r !== undefined) return json(r);
     if (!ctx.bridgeFactory) return fail("No rung watch is running; start it to compile from the agent.");
     const config = await loadConfig(ctx.root).catch(() => undefined);
-    const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
     const b = await ctx.bridgeFactory();
     try {
+      const dev = device ?? (await onlyDevice(b, config?.devices ?? []));
+      if (!dev) return fail(`The project has several PLCs (${(await b.projectInfo()).devices.join(", ")}); pass device.`);
       const msgs = await b.compile(dev, addresses ?? []);
       const states = await stateSnapshot(ctx.root);
       return json(await placeCompileMessages(ctx.root, (a) => states.find((s) => s.address === a)?.path, msgs, (f) => readFile(f, "utf8")));

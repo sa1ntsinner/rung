@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink, link, stat } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, unlink, link, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { WorkspaceError } from "./errors.js";
 
@@ -87,8 +87,10 @@ export interface GuardResult {
 export async function replaceGuarded(path: string, data: string | Uint8Array, opts: GuardOptions): Promise<GuardResult> {
   const tmp = await writeTemp(path, data);
   let preimage: string | undefined;
+  let mode: number | undefined;
   try {
     if (await exists(path)) {
+      mode = (await stat(path)).mode & 0o777; // a read-only file stays read-only
       await mkdir(opts.recoveryDir, { recursive: true });
       preimage = join(opts.recoveryDir, `${Date.now()}-${randomBytes(4).toString("hex")}-${basename(path)}`);
       await retry(() => rename(path, preimage!));
@@ -112,6 +114,7 @@ export async function replaceGuarded(path: string, data: string | Uint8Array, op
         await retry(() => rename(tmp, path)); // filesystems without hard links
       } else throw e;
     }
+    if (mode !== undefined && !(mode & 0o200)) await chmod(path, mode).catch(() => {});
     return preimage ? { preimage } : {};
   } catch (e) {
     // Never leave the destination empty: if the new file did not land, put the previous one back.

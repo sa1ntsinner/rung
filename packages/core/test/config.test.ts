@@ -10,6 +10,12 @@ describe("config", () => {
     const c = defaultConfig("C:\\fx\\RungFixture.ap20", "V20", "C:\\tools\\rung-bridge-v20.exe", ["PLC_1"]);
     expect(parseConfig(formatConfig(c))).toEqual(c);
   });
+  it("finds the bridge that comes with rung when rung.toml names none", () => {
+    const c = defaultConfig("C:\\p\\X.ap20", "V20");
+    const text = formatConfig(c);
+    expect(text).not.toContain("[bridge]");
+    expect(parseConfig(text).bridge).toEqual({ command: "", args: [] });
+  });
   it("requires a bound project path", () => {
     expect(() => parseConfig('format = 1\n[project]\ntiaVersion = "V20"\n[bridge]\ncommand = "x"\n')).toThrow(/project.path/);
   });

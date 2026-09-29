@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
@@ -17,11 +17,18 @@ class TiaFake extends FakeBridge {
   failImport = new Map<string, string>();
   compileErrors = new Map<string, string>();
   hangImport = false;
+  /** the rung process dies (Ctrl+C) before or after TIA Portal carried out the import */
+  killed: "before" | "after" | undefined;
 
   async importObject(address: string, form: string, path: string, expected: string): Promise<ExportResult> {
     const text = readFileSync(path, "utf8");
     this.imports.push({ address, expected, text });
     if (this.hangImport) throw new BridgeError("OUTCOME_UNKNOWN", "timed out");
+    if (this.killed === "before") throw new Error("killed");
+    if (this.killed === "after") {
+      this.add(address, { form, content: this.canon(text) });
+      throw new Error("killed");
+    }
     const code = this.failImport.get(address);
     if (code) throw new BridgeError(code, "import refused: " + code);
     const o = this.objects.get(address);
@@ -506,6 +513,144 @@ describe("syncOnce", () => {
     t.write(pA + ".conflict", "x");
     const r = await t.sync();
     expect(r.created + r.imported).toBe(0);
+  });
+
+  it("mirrors an instance of a library type read-only and says why an edit is not sent", async () => {
+    const t = setup();
+    await t.sync(); // mirrored before it was tied to the type
+    t.bridge.objects.get(A)!.entry.libraryType = "LGF_FloatingAverage 3.0.2";
+    await t.sync();
+    expect(await t.withState(async (s) => s.get(A)!.readOnly)).toBe(true);
+    t.write(pA, srcA.replace("#x := 1;", "#x := 9;"));
+    const r = await t.sync();
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.diagnostics.find((d) => d.code === "READ_ONLY_EDIT")?.message).toBe(
+      "Read-only in rung: an instance of the library type LGF_FloatingAverage 3.0.2; change the type in TIA Portal's library (Edit type). The edit is not sent to TIA Portal; restore the file",
+    );
+  });
+
+  it("a read-only file stays read-only when TIA Portal's change is written into it", async () => {
+    const t = setup();
+    await t.sync();
+    chmodSync(t.f(pA), 0o444);
+    t.bridge.edit(A, { ".scl": srcA.replace("#z := 3;", "#z := 30;") });
+    expect((await t.sync()).exported).toBe(1);
+    expect(t.read(pA)).toContain("#z := 30;");
+    expect(statSync(t.f(pA)).mode & 0o200).toBe(0);
+    chmodSync(t.f(pA), 0o644);
+  });
+
+  it("says which files it does not read: a second form, a spelling rung never writes, a wrong folder", async () => {
+    const t = setup();
+    await t.sync();
+    t.write("plc/PLC_1/blocks/Fx_A.awl", "x");
+    t.write("plc/PLC_1/blocks/Motor%2fValve.scl", 'FUNCTION "Motor/Valve" : Void\nBEGIN\nEND_FUNCTION\n');
+    t.write("plc/PLC_1/tags/Fx_T.scl", "x");
+    t.write("plc/PLC_1/blocks/Fx_N.scl", "x");
+    t.write("plc/PLC_1/blocks/Fx_N.awl", "x");
+    const r = await t.sync();
+    expect(r.warnings.filter((w) => w.code === "IGNORED_FILE").map((w) => `${w.address}: ${w.message}`).sort()).toEqual([
+      "plc/PLC_1/blocks/Fx_A.awl: a second file for Fx_A; rung mirrors it as plc/PLC_1/blocks/Fx_A.scl",
+      "plc/PLC_1/blocks/Fx_N.awl: plc/PLC_1/blocks/Fx_N.awl and plc/PLC_1/blocks/Fx_N.scl are the same object; keep one",
+      "plc/PLC_1/blocks/Fx_N.scl: plc/PLC_1/blocks/Fx_N.awl and plc/PLC_1/blocks/Fx_N.scl are the same object; keep one",
+      "plc/PLC_1/blocks/Motor%2fValve.scl: rung spells this file plc/PLC_1/blocks/Motor%2FValve.scl; rename it",
+      "plc/PLC_1/tags/Fx_T.scl: .scl files are not read in tags/ (.tags.xml)",
+    ]);
+    expect(r.created + r.imported).toBe(0);
+    expect(t.bridge.imports).toEqual([]);
+  });
+
+  it("finishes a create that Ctrl+C interrupted after TIA Portal made the object: no conflict, no second import", async () => {
+    const t = setup(() => {});
+    t.bridge.canon = (s) => s.replace("begin", "BEGIN");
+    await t.sync();
+    t.write(pA, srcA.replace("BEGIN", "begin"));
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    const r = await t.sync();
+    expect(r).toMatchObject({ created: 1, conflicts: 0 });
+    expect(t.bridge.imports).toHaveLength(1);
+    expect(t.read(pA)).toBe(srcA); // TIA's form
+    expect(existsSync(t.f(pA + ".conflict"))).toBe(false);
+    const idle = await t.sync();
+    expect(idle.imported + idle.exported + idle.created + idle.conflicts).toBe(0);
+  });
+
+  it("an interrupted create edited afterwards sends the newer file", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    const r = await t.sync();
+    expect(r).toMatchObject({ imported: 1, conflicts: 0 });
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 5;");
+  });
+
+  it("creates again what an interrupted pass never got into TIA Portal, and pull meanwhile keeps the file", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.killed = "before";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    await t.withState((s) => pull(t.root, t.bridge, s, { config: t.config, now: () => 1 }));
+    expect(t.read(pA)).toBe(srcA);
+    const r = await t.sync();
+    expect(r.created).toBe(1);
+    expect(t.bridge.objects.has(A)).toBe(true);
+  });
+
+  it("a refused create leaves just a new file behind", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.failImport.set(A, "IMPORT_FAILED");
+    expect((await t.sync()).created).toBe(0);
+    expect(await t.withState(async (s) => s.get(A))).toBeUndefined();
+    t.bridge.failImport.clear();
+    expect((await t.sync()).created).toBe(1);
+  });
+
+  it("clears staging folders an interrupted pass left in .rung/tmp, never a fresh one", async () => {
+    const t = setup();
+    await t.sync();
+    const old = t.f(".rung/tmp/left-over");
+    const fresh = t.f(".rung/tmp/in-use");
+    mkdirSync(old, { recursive: true });
+    mkdirSync(fresh, { recursive: true });
+    writeFileSync(join(old, "obj.scl"), "x");
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(old, hourAgo, hourAgo);
+    await t.sync();
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+  });
+
+  it("a read-only object whose edit was refused is synced again once the file is restored", async () => {
+    const t = setup((b) => b.add(A, { content: srcA, knowHowProtected: true }));
+    await t.sync();
+    const original = t.read(pA);
+    t.write(pA, original + "// mine\n");
+    expect((await t.sync()).diagnostics.map((d) => d.code)).toEqual(["READ_ONLY_EDIT"]);
+    expect(await t.withState(async (s) => s.get(A)!.status)).toBe("fileDirty");
+    t.write(pA, original);
+    await t.sync();
+    expect(await t.withState(async (s) => s.get(A)!.status)).toBe("synced");
+  });
+
+  it.runIf(process.platform === "win32")("creates nothing in TIA Portal whose files would be too long for Windows", async () => {
+    const t = setup();
+    await t.sync();
+    const deep = "plc/PLC_1/blocks/" + "Folder_With_A_Long_Name/".repeat(9) + "Fx_Deep.scl";
+    t.write(deep, 'FUNCTION "Fx_Deep" : Void\nBEGIN\nEND_FUNCTION\n');
+    const r = await t.sync();
+    expect(r.created).toBe(0);
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.warnings.find((w) => w.code === "PATH_TOO_LONG")?.address).toBe(deep);
   });
 
   it("interoperates with pull state (pull then sync is quiet)", async () => {

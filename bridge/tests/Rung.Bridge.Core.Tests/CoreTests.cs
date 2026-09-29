@@ -303,6 +303,14 @@ public class FormPolicyTests
     [InlineData(false, false, false, "GRAPH", true)]
     public void ReadOnlyRules(bool khp, bool fs, bool sys, string lang, bool expected) =>
         Assert.Equal(expected, FormPolicy.IsReadOnly(new ObjectEntry { Kind = "block", Language = lang, KnowHowProtected = khp, IsFailsafe = fs, IsSystem = sys }));
+
+    [Fact] public void LibraryTypeInstancesAreReadOnlyWithTheirType()
+    {
+        var e = new ObjectEntry { Kind = "block", Language = "SCL", LibraryType = "LGF_FloatingAverage 3.0.2" };
+        Assert.True(FormPolicy.IsReadOnly(e));
+        Assert.Equal("an instance of the library type LGF_FloatingAverage 3.0.2; change the type in TIA Portal's library (Edit type)", FormPolicy.ReadOnlyReason(e));
+        Assert.Null(FormPolicy.ReadOnlyReason(new ObjectEntry { Kind = "block", Language = "SCL" }));
+    }
 }
 
 public class CompileRouteTests
