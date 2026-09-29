@@ -69,6 +69,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       save(db);
       return reply({ deleted: true });
     }
+    case "objects.rename": {
+      // like TIA: the object gets the new name and every text naming the old one follows; fingerprints of users stay
+      if (!allowImport) return fail("READ_ONLY", "renames need --allow-import");
+      const o = db.objects.find((x) => x.address === p.address);
+      if (!o) return fail("NOT_FOUND", p.address);
+      if (fp(o) !== p.expectedTiaRevision) return fail("STALE_REVISION", "changed");
+      const old = o.address.split("/").pop();
+      o.address = o.address.slice(0, o.address.length - old.length) + p.newName;
+      if (o.entry) o.entry.address = o.address;
+      for (const x of db.objects) if (typeof x.content === "string") x.content = x.content.split(`"${old}"`).join(`"${p.newName}"`);
+      save(db);
+      return reply({ address: o.address });
+    }
     case "plc.online": {
       db.online = p.action === "online" ? "Online" : p.action === "offline" ? "Offline" : (db.online ?? "Offline");
       if (p.action === "online") db.onlineTarget = p.target ?? null;

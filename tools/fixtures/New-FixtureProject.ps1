@@ -101,12 +101,20 @@ try {
         $cpuItem.SetAttribute('CommunicationMode', [uint32]0)
     } catch { $manifest.skipped += "CPU security settings: $($_.Exception.Message)" }
 
-    # --- the first PROFINET interface on a subnet, as in real projects: TIA takes the target address from it
+    # --- PROFINET interfaces on unusual addresses: the factory ones (192.168.0.1, 192.168.1.1) are what real PLCs
+    # answer at on almost every network, and rung matches a PLC by its project address. The first interface
+    # goes on a subnet, as in real projects: TIA takes the target address from it.
     try {
         $subnet = $project.Subnets.Create('System:Subnet.Ethernet', 'PN/IE_1')
-        $x1 = $cpuItem.DeviceItems | Where-Object { $n = Get-Service2 $_ ([Siemens.Engineering.HW.Features.NetworkInterface]); $n -and "$($n.InterfaceType)" -eq 'Ethernet' } | Select-Object -First 1
-        (Get-Service2 $x1 ([Siemens.Engineering.HW.Features.NetworkInterface])).Nodes[0].ConnectToSubnet($subnet)
-    } catch { $manifest.skipped += "subnet: $($_.Exception.Message)" }
+        $ethernet = @($cpuItem.DeviceItems | Where-Object { $n = Get-Service2 $_ ([Siemens.Engineering.HW.Features.NetworkInterface]); $n -and "$($n.InterfaceType)" -eq 'Ethernet' })
+        $addresses = @('192.168.254.1', '192.168.253.1')
+        for ($i = 0; $i -lt $ethernet.Count -and $i -lt $addresses.Count; $i++) {
+            $node = (Get-Service2 $ethernet[$i] ([Siemens.Engineering.HW.Features.NetworkInterface])).Nodes[0]
+            $node.SetAttribute('Address', $addresses[$i])
+            if ($i -eq 0) { $node.ConnectToSubnet($subnet) }
+        }
+        $manifest.ip = $addresses[0..([Math]::Min($ethernet.Count, $addresses.Count) - 1)]
+    } catch { $manifest.skipped += "network: $($_.Exception.Message)" }
 
     # --- folders
     $drives = $plc.BlockGroup.Groups.Create('10_Drives')

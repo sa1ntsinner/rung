@@ -18,6 +18,7 @@ const ACTIONS: readonly Omit<Extract<Node, { type: "action" }>, "type" | "device
   { label: "Compile hardware", command: "rung.compileHardware", icon: "circuit-board", tooltip: "rung compile --hw" },
   { label: "Connect…", command: "rung.connect", icon: "link", tooltip: "rung connect: find the PLC on the network (or choose among what answers) and save the connection in rung.toml" },
   { label: "Interfaces…", command: "rung.interfaces", icon: "radio-tower", tooltip: "rung interfaces --scan: PG/PC interfaces and reachable devices; can write [plc.X] into rung.toml" },
+  { label: "Compare with PLC", command: "rung.compare", icon: "diff-multiple", tooltip: "rung compare: what on the PLC differs from the project (read-only)" },
   { label: "Download…", command: "rung.download", icon: "desktop-download", tooltip: "rung download: asks for confirmation first" },
 ];
 

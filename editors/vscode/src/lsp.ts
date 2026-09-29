@@ -28,6 +28,7 @@ export class Lsp implements vscode.Disposable {
       // TwinCAT sources stay XML-highlighted; the server reads the ST inside their CDATA sections.
       documentSelector: [
         { scheme: "file", language: "scl" },
+        { scheme: "file", language: "s7dcl" },
         { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO}" },
       ],
       synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },

@@ -10,6 +10,7 @@
   { "label": "rung: go offline", "command": "rung", "args": ["online", "--off"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: online state", "command": "rung", "args": ["online", "--state"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus" },
   { "label": "rung: interfaces and reachable devices", "command": "rung", "args": ["interfaces", "--scan"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: compare with PLC", "command": "rung", "args": ["compare"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: download to PLC (asks first)", "command": "rung", "args": ["download"], "cwd": "$ZED_WORKTREE_ROOT", "use_new_terminal": true, "reveal": "always", "allow_concurrent_runs": false },
   { "label": "rung: open in TIA Portal", "command": "rung", "args": ["open", "$ZED_FILE"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus", "tags": ["rung-block"] },
   { "label": "rung: status", "command": "rung", "args": ["status"], "cwd": "$ZED_WORKTREE_ROOT" },

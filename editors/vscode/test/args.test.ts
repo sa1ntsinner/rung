@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { Args, describeDownload, downloadArgs, effectiveDownload, parseCompileOutput, parseInterfaces, parseNeedsAllow, parseOnlineState, parseRefused, type DownloadOptions } from "../src/core/args";
+import { Args, describeDownload, downloadArgs, effectiveDownload, parseCompileOutput, parseInterfaces, parseNeedsAllow, parseOnlineState, parseRefused, type DownloadOptions, parseCompare, parseRenamed } from "../src/core/args";
 import { DOWNLOAD_DEFAULTS } from "../src/core/rungToml";
 
 const base: DownloadOptions = { device: "PLC_1", hardware: "rungToml", software: true, allBlocks: false, startAfter: true, allow: [] };
@@ -107,5 +107,14 @@ describe("Args", () => {
     expect(Args.offline("A")).toEqual(["online", "--off", "--plc", "A"]);
     expect(Args.interfaces("A")).toEqual(["interfaces", "--scan", "--plc", "A"]);
     expect(Args.resolve("plc/A/blocks/M.scl.conflict", "ours")).toEqual(["resolve", "plc/A/blocks/M.scl", "--ours"]);
+    expect(Args.compare("A")).toEqual(["compare", "--json", "--plc", "A"]);
+    expect(Args.rename("plc/A/blocks/M.scl", "Motor")).toEqual(["rename", "plc/A/blocks/M.scl", "Motor"]);
+  });
+
+  it("reads rung compare --json after progress lines, and the new file of a rename", () => {
+    const out = 'rung: looking for PLC_1 on the network (up to half a minute)…\n{\n  "device": "PLC_1",\n  "identical": 14,\n  "items": [{ "path": "Program blocks/M [FB2]", "name": "M [FB2]", "state": "Different", "file": "plc/PLC_1/blocks/M.scl" }]\n}\n';
+    expect(parseCompare(out)).toEqual({ identical: 14, items: [{ path: "Program blocks/M [FB2]", name: "M [FB2]", state: "Different", file: "plc/PLC_1/blocks/M.scl" }] });
+    expect(parseCompare("rung: ONLINE_FAILED: nope")).toBeUndefined();
+    expect(parseRenamed("renamed M to Motor: plc/A/blocks/M.scl → plc/A/blocks/Motor.scl\nupdated where it is used: x\n")).toBe("plc/A/blocks/Motor.scl");
   });
 });

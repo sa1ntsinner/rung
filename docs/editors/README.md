@@ -30,7 +30,7 @@ The extension runs the rung CLI for everything; it only reads `rung.toml` and `.
 - **Tests**: `npm run test:e2e` in `editors/vscode` runs integration tests inside a real VS Code (a fresh folder, a fake-bridge project, and the TIA Portal probe workspace when TIA Portal is running); see `editors/vscode/README.md`.
 - **Settings** (`rung.*`): command, auto-start watch, terminal reuse, output verbosity, CodeLens, compile on save (skipped while watch runs), status bar, project view grouping and read-only objects, online-state refresh interval (0 = off, only while watch runs), download confirmation (`typeName` or `modal`, user settings only), download defaults (hardware, all blocks, start after) and `rung.download.allow` (empty; leave it that way).
 
-Keys: `alt+q` and then a letter, the same letters as in Zed below: `s` sync, `w` watch, `b` compile file, `shift+b` compile PLC, `h` hardware, `t` test block, `shift+t` test all, `o` online, `f` offline, `i` interfaces, `d` download, `e` open in TIA Portal, `p` pull, `q` list of actions, and in VS Code also `c` connect. They are active only in a folder with `rung.toml`; `b`, `t` and `e` only in SCL editors.
+Keys: `alt+q` and then a letter, the same letters as in Zed below: `s` sync, `w` watch, `b` compile file, `shift+b` compile PLC, `h` hardware, `t` test block, `shift+t` test all, `o` online, `f` offline, `i` interfaces, `m` compare with the PLC, `d` download, `e` open in TIA Portal, `p` pull, `q` list of actions, and in VS Code also `c` connect and `r` rename in TIA Portal. They are active only in a folder with `rung.toml`; `b`, `t` and `e` only in SCL editors.
 
 ## Zed
 
@@ -71,6 +71,7 @@ Suggested keys (`keymap.json`): `alt-q` and then a letter.
     "alt-q f": ["task::Spawn", { "task_name": "rung: go offline" }],
     "alt-q i": ["task::Spawn", { "task_name": "rung: interfaces and reachable devices" }],
     "alt-q d": ["task::Spawn", { "task_name": "rung: download to PLC (asks first)" }],
+    "alt-q m": ["task::Spawn", { "task_name": "rung: compare with PLC" }],
     "alt-q e": ["task::Spawn", { "task_name": "rung: open in TIA Portal" }],
     "alt-q p": ["task::Spawn", { "task_name": "rung: pull from TIA Portal" }],
     "alt-q q": ["task::Spawn", { "task_name": "rung: status" }]

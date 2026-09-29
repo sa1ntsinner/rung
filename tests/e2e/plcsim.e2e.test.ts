@@ -27,6 +27,12 @@ describe.runIf(enabled)("e2e: download to S7-PLCSIM", () => {
   it("finds PLCSIM, downloads hardware and software, and the PLC then runs the project", async () => {
     expect((await run(["init", "--project", project])).code).toBe(0);
     expect([0, 2]).toContain((await run(["pull"])).code);
+    // a download never finds its PLC by itself: rung connect finds PLCSIM and saves the connection
+    const noTarget = await run(["download", "--yes"]);
+    expect(noTarget.text).toMatch(/rung never picks a PLC to download to by itself/);
+    const connect = await run(["connect"]);
+    expect(connect.code).toBe(0);
+    expect(connect.text).toMatch(/S7-PLCSIM \(PLCSIM → 1 X1\); saved/);
     // a fresh instance asks to be reset; a second run of this test does not, and the allow is simply unused
     const dl = await run(["download", "--yes", "--hw", "--allow", "reset-module"]);
     expect(dl.text).toMatch(/via PLCSIM/);

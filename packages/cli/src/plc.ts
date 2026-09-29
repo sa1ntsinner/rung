@@ -77,24 +77,33 @@ const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
  * PLC found on the network by its project address, which is then saved to rung.toml. Returns undefined when
  * TIA Portal's own remembered connection applies.
  */
-async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "download", force = false): Promise<ConnectionTarget | undefined> {
+async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "connect" | "download", force = false): Promise<ConnectionTarget | undefined> {
   const saved = targetOf(config, device);
   if (saved && !force) return saved;
   if (purpose === "online" && !force) {
     const quick = await link.call<ConnectionOptions>("connections", { device, scan: false }, (b) => b.connections(device, false));
     if (quick.configured) return undefined;
   }
+  // Factory addresses repeat on every network (192.168.0.1, 192.168.1.1): another machine can answer at the
+  // project's address. Going online only reads, but a download target is always chosen by a person.
+  const auto = purpose !== "download";
   io.stderr(`rung: looking for ${device} on the network (up to half a minute)…\n`);
   const options = await link.call<ConnectionOptions>("connections", { device, scan: true }, (b) => b.connections(device, true));
   const all = candidates(options);
   const matches = all.filter((c) => c.reason === "address-match");
   const sims = all.filter((c) => c.reason === "simulation");
-  let pick: Candidate | undefined = !force && matches.length === 1 ? matches[0] : !force && matches.length === 0 && sims.length === 1 ? sims[0] : undefined;
+  let pick: Candidate | undefined = !auto || force ? undefined : matches.length === 1 ? matches[0] : matches.length === 0 && sims.length === 1 ? sims[0] : undefined;
   if (!pick) {
     const choices = [...matches, ...sims, ...(matches.length ? [] : reachable(options))];
     if (!choices.length) throw new WorkspaceError("NO_TARGET", notFoundMessage(device, options));
-    if (!canPrompt(io)) throw new WorkspaceError("NO_TARGET", `${choices.length} ways to reach ${device}: ${choices.map(describe).join("; ")}. Choose one with rung connect --pick (or rung connect --json for editors).`);
-    io.stdout(`Where is ${device}?\n`);
+    if (!canPrompt(io))
+      throw new WorkspaceError(
+        "NO_TARGET",
+        auto
+          ? `${choices.length} ways to reach ${device}: ${choices.map(describe).join("; ")}. Choose one with rung connect --pick (or rung connect --json for editors).`
+          : `rung never picks a PLC to download to by itself, and ${device} has no saved connection. Found: ${choices.map(describe).join("; ")}. Choose it with rung connect --pick (it is saved in rung.toml), then download.`,
+      );
+    io.stdout(auto ? `Where is ${device}?\n` : `Which PLC should ${device} be downloaded to? Check name and address; rung never picks one by itself.\n`);
     choices.forEach((c, i) => io.stdout(`  ${i + 1}) ${describe(c)}\n`));
     const answer = Number((await ask(io, `Number (1-${choices.length}): `)).trim());
     pick = choices[answer - 1];
@@ -121,7 +130,7 @@ export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io
     io.stdout(JSON.stringify({ device, saved: targetOf(config, device) ?? null, configuredInTia: options.configured, plcAddresses: options.plcAddresses, candidates: all.map((c) => ({ ...c, label: describe(c) })), reachable: reachable(options).map((c) => ({ ...c, label: describe(c) })), notFound: all.length ? null : notFoundMessage(device, options) }, null, 2) + "\n");
     return 0;
   }
-  await ensureTarget(link, ws, config, io, device, "download", !!v.pick || !!targetOf(config, device));
+  await ensureTarget(link, ws, config, io, device, "connect", !!v.pick || !!targetOf(config, device));
   return 0;
 }
 

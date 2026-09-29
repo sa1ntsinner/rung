@@ -1,6 +1,6 @@
 name = "SCL"
 grammar = "scl"
-path_suffixes = ["scl", "db", "udt"]
+path_suffixes = ["scl", "db", "udt", "s7dcl"]
 line_comments = ["// "]
 block_comment = ["(* ", " *)"]
 autoclose_before = ";:.,=)]"

@@ -14,6 +14,7 @@ import type { WatchController } from "../runner/watch";
 import type { ProjectView } from "../views/projectView";
 import { isFile, type RungWorkspace } from "../workspace";
 import { Connector } from "./connect";
+import { compareCommand, renameCommand } from "./compare";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
 import { deviceTarget, fileTarget } from "./targets";
@@ -195,6 +196,8 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   );
   reg("rung.interfaces", inWs((arg) => interfacesCommand(ws, cli, connector, arg)));
   reg("rung.download", inWs((arg) => downloadCommand(ws, cli, online, connector, arg)));
+  reg("rung.compare", inWs((arg) => compareCommand(ws, cli, out, connector, arg)));
+  reg("rung.rename", inWs((arg) => renameCommand(ws, cli, out, arg)));
 
   // --- TIA Portal / conflicts
   reg(
@@ -295,7 +298,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     await vscode.commands.executeCommand("rung.init");
     return;
   }
-  const scl = vscode.window.activeTextEditor?.document.languageId === "scl";
+  const scl = ["scl", "s7dcl"].includes(vscode.window.activeTextEditor?.document.languageId ?? "");
   const sep = (label: string): ActionItem => ({ label, kind: vscode.QuickPickItemKind.Separator });
   const a = (icon: string, label: string, command: string, key?: string, detail?: string): ActionItem => ({ label: `$(${icon}) ${label}`, command, ...(key ? { description: `Alt+Q ${key}` } : {}), ...(detail ? { detail } : {}) });
   const running = watch.status === "running" || watch.status === "starting";
@@ -319,7 +322,9 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     a("pulse", "Online state", "rung.onlineState"),
     a("link", "Connect…", "rung.connect", "C", "find the PLC on the network and choose the connection"),
     a("radio-tower", "Interfaces…", "rung.interfaces", "I"),
+    a("diff-multiple", "Compare with PLC", "rung.compare", "M", "what on the PLC differs from the project"),
     a("desktop-download", "Download…", "rung.download", "D", "asks for confirmation first"),
+    ...(scl ? [a("edit", "Rename in TIA Portal…", "rung.rename", "R", "every use follows")] : []),
     sep("workspace"),
     a("settings-gear", "Open rung.toml", "rung.openConfig"),
     a("output", "Show output", "rung.showOutput"),

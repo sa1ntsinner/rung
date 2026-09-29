@@ -26,7 +26,7 @@ function setup(answers: string[] = []) {
   const db = () => JSON.parse(readFileSync(objects, "utf8")) as { downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean }[]; online?: string; onlineTarget?: Record<string, unknown> | null; scans?: number };
   const toml = join(dir, "rung.toml");
   const patch = (o: Record<string, unknown>) => writeFileSync(objects, JSON.stringify({ ...JSON.parse(readFileSync(objects, "utf8")), ...o }));
-  return { dir, run, out, err, db, questions, toml, patch };
+  return { dir, run, out, err, db, questions, toml, patch, objects };
 }
 
 describe("rung compare", () => {
@@ -58,6 +58,31 @@ describe("rung compare", () => {
 });
 
 describe("PLC commands", () => {
+  it("download never picks the PLC by itself: it asks, even when one device answers at the project address", async () => {
+    const t = setup([""]);
+    await t.run(["init"]);
+    expect(await t.run(["download", "--yes"])).toBe(1);
+    expect(t.out.join("")).toMatch(/Which PLC should PLC_1 be downloaded to\? Check name and address; rung never picks one by itself\./);
+    expect(t.questions[0]).toMatch(/^Number \(1-1\): $/);
+    expect(t.db().downloads).toBeUndefined();
+    expect(readFileSync(t.toml, "utf8")).not.toContain("[plc.PLC_1]");
+
+    const chosen = setup(["1"]);
+    await chosen.run(["init"]);
+    expect(await chosen.run(["download", "--yes", "--allow", "stop-cpu"])).toBe(0);
+    expect(chosen.db().downloads).toHaveLength(1);
+    expect(readFileSync(chosen.toml, "utf8")).toContain('pc_interface = "Ethernet"');
+  });
+
+  it("without a terminal a download with no saved connection explains instead of choosing", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    const err: string[] = [];
+    const code = await main(["download", "--yes"], { cwd: t.dir, stdout: () => {}, stderr: (s) => err.push(s), env: { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: t.objects } });
+    expect(code).toBe(1);
+    expect(err.join("")).toMatch(/NO_TARGET: rung never picks a PLC to download to by itself/);
+  });
+
   it("download asks for the PLC name and does nothing on a wrong answer", async () => {
     const t = setup(["PLC_2"]);
     await t.run(["init"]);

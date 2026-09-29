@@ -196,4 +196,31 @@ export const Args = {
   open: (file: string) => ["open", file],
   resolve: (file: string, mode: "ours" | "theirs") => ["resolve", file.replace(/\.(conflict|tia)$/, ""), `--${mode}`],
   init: (project: string) => ["init", "--project", project],
+  compare: (device?: string) => ["compare", "--json", ...(device ? ["--plc", device] : [])],
+  rename: (file: string, newName: string) => ["rename", file, newName],
 } as const;
+
+export interface CompareItem {
+  path: string;
+  name: string;
+  state: "Different" | "OnlyInProject" | "OnlyOnPlc" | string;
+  file?: string;
+}
+
+/** The JSON `rung compare --json` prints (stdout may be preceded by progress lines on stderr). */
+export function parseCompare(output: string): { identical: number; items: CompareItem[] } | undefined {
+  const start = output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (start < 0 || end < start) return undefined;
+  try {
+    const r = JSON.parse(output.slice(start, end + 1)) as { identical?: number; items?: CompareItem[] };
+    return Array.isArray(r.items) ? { identical: r.identical ?? 0, items: r.items } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Workspace file of the renamed object, from `renamed A to B: old → new`. */
+export function parseRenamed(output: string): string | undefined {
+  return /^renamed .* → (\S.*)$/m.exec(output)?.[1]?.trim();
+}

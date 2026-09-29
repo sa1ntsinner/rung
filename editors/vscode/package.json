@@ -12,7 +12,7 @@
   "categories": ["Programming Languages", "Linters", "Other"],
   "keywords": ["scl", "siemens", "tia portal", "plc", "structured text", "iec 61131-3", "twincat", "s7"],
   "main": "./out/extension.js",
-  "activationEvents": ["workspaceContains:rung.toml", "workspaceContains:**/*.TcPOU", "workspaceContains:**/*.st", "onLanguage:scl"],
+  "activationEvents": ["workspaceContains:rung.toml", "workspaceContains:**/*.TcPOU", "workspaceContains:**/*.st", "onLanguage:scl", "onLanguage:s7dcl"],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
@@ -27,9 +27,18 @@
         "aliases": ["SCL", "Siemens SCL", "IEC Structured Text"],
         "extensions": [".scl", ".db", ".udt", ".awl", ".st"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "s7dcl",
+        "aliases": ["LAD (SIMATIC SD)", "s7dcl"],
+        "extensions": [".s7dcl"],
+        "configuration": "./language-configuration.json"
       }
     ],
-    "grammars": [{ "language": "scl", "scopeName": "source.scl", "path": "./syntaxes/scl.tmLanguage.json" }],
+    "grammars": [
+      { "language": "scl", "scopeName": "source.scl", "path": "./syntaxes/scl.tmLanguage.json" },
+      { "language": "s7dcl", "scopeName": "source.s7dcl", "path": "./syntaxes/s7dcl.tmLanguage.json" }
+    ],
     "viewsContainers": {
       "activitybar": [{ "id": "rung", "title": "rung", "icon": "media/rung.svg" }]
     },
@@ -83,6 +92,8 @@
       { "command": "rung.connect", "title": "Connect… (Find the PLC, Choose the Connection)", "category": "rung", "icon": "$(link)" },
       { "command": "rung.interfaces", "title": "Interfaces and Reachable Devices…", "category": "rung", "icon": "$(radio-tower)" },
       { "command": "rung.download", "title": "Download to PLC…", "category": "rung", "icon": "$(desktop-download)", "enablement": "!rung.downloading" },
+      { "command": "rung.compare", "title": "Compare with PLC", "category": "rung", "icon": "$(diff-multiple)" },
+      { "command": "rung.rename", "title": "Rename in TIA Portal…", "category": "rung", "icon": "$(edit)" },
       { "command": "rung.openInTia", "title": "Open in TIA Portal", "category": "rung", "icon": "$(link-external)" },
       { "command": "rung.resolveOurs", "title": "Resolve Conflict: Keep My File", "category": "rung", "icon": "$(file)" },
       { "command": "rung.resolveTheirs", "title": "Resolve Conflict: Take TIA Version", "category": "rung", "icon": "$(cloud)" },
@@ -97,6 +108,8 @@
     ],
     "menus": {
       "commandPalette": [
+        { "command": "rung.compare", "when": "rung.workspace" },
+        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/" },
         { "command": "rung.pull", "when": "rung.workspace" },
         { "command": "rung.sync", "when": "rung.workspace" },
         { "command": "rung.watch.start", "when": "rung.workspace && !rung.watching" },
@@ -163,7 +176,8 @@
         { "command": "rung.connect", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@0" },
         { "command": "rung.interfaces", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@1" },
         { "command": "rung.openConfig", "when": "view == rung.plc && viewItem == rung.connection", "group": "inline" },
-        { "command": "rung.download", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@2" }
+        { "command": "rung.download", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@2" },
+        { "command": "rung.compare", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@4" }
       ],
       "editor/title": [
         { "command": "rung.compileFile", "when": "rung.workspace && resourceLangId == scl", "group": "navigation@1" },
@@ -172,9 +186,11 @@
       ],
       "editor/context": [
         { "command": "rung.resolveOurs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@1" },
-        { "command": "rung.resolveTheirs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@2" }
+        { "command": "rung.resolveTheirs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@2" },
+        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl)$/", "group": "rung@3" }
       ],
       "explorer/context": [
+        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/", "group": "rung@5" },
         { "command": "rung.compileFile", "when": "rung.workspace && resourceLangId == scl", "group": "rung@1" },
         { "command": "rung.openInTia", "when": "rung.workspace && resourceLangId == scl", "group": "rung@2" },
         { "command": "rung.resolveOurs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@3" },
@@ -194,6 +210,8 @@
       { "key": "alt+q c", "command": "rung.connect", "when": "rung.workspace" },
       { "key": "alt+q i", "command": "rung.interfaces", "when": "rung.workspace" },
       { "key": "alt+q d", "command": "rung.download", "when": "rung.workspace" },
+      { "key": "alt+q m", "command": "rung.compare", "when": "rung.workspace" },
+      { "key": "alt+q r", "command": "rung.rename", "when": "rung.workspace && editorLangId =~ /^(scl|s7dcl)$/" },
       { "key": "alt+q e", "command": "rung.openInTia", "when": "rung.workspace && editorLangId == scl" },
       { "key": "alt+q p", "command": "rung.pull", "when": "rung.workspace" },
       { "key": "alt+q q", "command": "rung.quickPick", "when": "rung.workspace" }

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LAD (SIMATIC SD)",
+  "scopeName": "source.s7dcl",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#pragma" },
+    { "include": "#strings" },
+    { "include": "#structure" },
+    { "include": "#elements" },
+    { "include": "#declarations" },
+    { "include": "#operands" },
+    { "include": "#literals" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.s7dcl", "match": "//.*$" },
+        { "name": "comment.block.s7dcl", "begin": "\\(\\*", "end": "\\*\\)" }
+      ]
+    },
+    "pragma": {
+      "name": "meta.pragma.s7dcl",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        { "name": "variable.other.property.s7dcl", "match": "\\bS7_[A-Za-z_]+\\b|\\b(InstructionName|LibVersion)\\b" },
+        { "include": "#strings" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "name": "string.quoted.single.s7dcl", "begin": "'", "end": "'" }
+      ]
+    },
+    "structure": {
+      "patterns": [
+        { "name": "keyword.control.network.s7dcl", "match": "\\b(NETWORK|END_NETWORK|RUNG|END_RUNG)\\b" },
+        { "name": "entity.name.label.wire.s7dcl", "match": "\\bwire#[A-Za-z0-9_]+\\b" },
+        { "name": "keyword.other.block.s7dcl", "match": "\\b(FUNCTION_BLOCK|END_FUNCTION_BLOCK|FUNCTION|END_FUNCTION|ORGANIZATION_BLOCK|END_ORGANIZATION_BLOCK|DATA_BLOCK|END_DATA_BLOCK|TYPE|END_TYPE|VERSION|BEGIN)\\b" }
+      ]
+    },
+    "elements": {
+      "patterns": [
+        { "name": "support.function.contact.s7dcl", "match": "\\b(Contact|I_Contact|P_Contact|N_Contact|Not)(?=\\s*\\()" },
+        { "name": "support.function.coil.s7dcl", "match": "\\b(Coil|I_Coil|S_Coil|R_Coil|P_Coil|N_Coil)(?=\\s*\\()" },
+        { "name": "support.function.box.s7dcl", "match": "\\b(TON|TOF|TP|TONR|CTU|CTD|CTUD|R_TRIG|F_TRIG|Move|Gt|Ge|Lt|Le|Eq|Ne|Add|Sub|Mul|Div|Mod|Convert)(?=\\s*[{(])" }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        { "name": "keyword.other.var.s7dcl", "match": "\\b(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR CONSTANT|VAR|END_VAR|STRUCT|END_STRUCT|RETAIN|NON_RETAIN)\\b" },
+        { "name": "storage.type.s7dcl", "match": "\\b(Bool|Byte|Word|DWord|LWord|SInt|USInt|Int|UInt|DInt|UDInt|LInt|ULInt|Real|LReal|Time|LTime|Date|Time_Of_Day|TOD|DTL|Char|WChar|String|WString|Array|of|Void|TON_TIME|TOF_TIME|TP_TIME|IEC_TIMER|IEC_COUNTER)\\b" }
+      ]
+    },
+    "operands": {
+      "patterns": [
+        { "name": "variable.other.local.s7dcl", "match": "#[A-Za-z_][A-Za-z0-9_]*" },
+        { "name": "variable.other.global.s7dcl", "match": "\"[^\"]*\"" },
+        { "name": "variable.other.absolute.s7dcl", "match": "%[IQMD][A-Z]?\\d+(\\.\\d+)?" },
+        { "name": "keyword.operator.assignment.s7dcl", "match": ":=|=>" }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        { "name": "constant.language.boolean.s7dcl", "match": "\\b(TRUE|FALSE)\\b" },
+        { "name": "constant.numeric.time.s7dcl", "match": "\\b(T|LT|TIME|S5T)#[0-9A-Za-z_.]+" },
+        { "name": "constant.numeric.s7dcl", "match": "\\b\\d+(\\.\\d+)?([eE][-+]?\\d+)?\\b" }
+      ]
+    }
+  }
+}

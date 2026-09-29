@@ -518,7 +518,8 @@ describe("rung extension on a fake-bridge workspace", function () {
     it("a rung.toml that rung connect cannot update is reported, not silently broken", async () => {
       const tomlPath = join(root(), "rung.toml");
       const before = readFileSync(tomlPath, "utf8");
-      writeFileSync(tomlPath, `${before.trimEnd()}\n\n[plc.PLC_1]  # our line PLC\nmode = "PN/IE"\npc_interface = "Ethernet"\n`);
+      // an inline table rung does not rewrite: the [plc.PLC_1] it adds makes the file invalid TOML
+      writeFileSync(tomlPath, `${before.trimEnd()}\n\n[plc]\nPLC_1 = { mode = "PN/IE", pc_interface = "Ethernet" }\n`);
       try {
         await api.ws.reload();
         d.pickLabel(/via Ethernet/);
@@ -622,6 +623,39 @@ describe("rung extension on a fake-bridge workspace", function () {
       });
       await waitFor("status bar idle", () => api.statusBar.text.startsWith("$(circle-slash) rung: idle"));
       assert.equal(api.project.view.badge, undefined);
+    });
+  });
+
+  describe("compare and rename", () => {
+    it("compare with PLC lists what differs and opens the chosen file", async () => {
+      patchFake({ compare: undefined, reach: undefined });
+      d.pick((items) => items[0]);
+      await vscode.commands.executeCommand("rung.compare");
+      assert.deepEqual(cli.find("compare")?.args, ["compare", "--json", "--plc", "PLC_1"]);
+      const qp = d.of("quickPick").at(-1)!;
+      assert.match(qp.message, /^PLC_1: 1 object not as in the project \(7 identical\)$/);
+      assert.match(String((qp.items[0] as vscode.QuickPickItem).description), /differs/);
+      await waitFor("the differing file", () => vscode.window.activeTextEditor?.document.uri.fsPath.replace(/\\/g, "/").endsWith("plc/PLC_1/blocks/Main.scl"));
+    });
+
+    it("compare says so when the PLC runs the project", async () => {
+      patchFake({ compare: [] });
+      await vscode.commands.executeCommand("rung.compare");
+      await waitFor("the notice", () => d.texts.find((t) => /^info: PLC_1 runs what the project has \(7 objects compared\)\.$/.test(t)));
+    });
+
+    it("rename asks for the new name, renames in TIA Portal and opens the renamed file", async () => {
+      await openDoc(PUMP);
+      d.input("Fx_Pump2");
+      await vscode.commands.executeCommand("rung.rename");
+      assert.deepEqual(cli.find("rename")?.args, ["rename", PUMP, "Fx_Pump2"]);
+      assert.equal(d.of("inputBox")[0]?.message, "Rename Fx_Pump in TIA Portal");
+      await waitFor("the renamed file", () => vscode.window.activeTextEditor?.document.uri.fsPath.replace(/\\/g, "/").endsWith("Pumps/Fx_Pump2.scl"));
+      assert.match(readText("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Pump2.scl"), /FUNCTION_BLOCK "Fx_Pump2"/);
+      // back, so later tests see the fixture as it was
+      d.input("Fx_Pump");
+      await vscode.commands.executeCommand("rung.rename");
+      await waitFor("the name back", () => vscode.window.activeTextEditor?.document.uri.fsPath.replace(/\\/g, "/").endsWith(PUMP));
     });
   });
 
