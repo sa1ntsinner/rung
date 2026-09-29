@@ -638,6 +638,52 @@ def plc_download(params):
     return base
 
 
+def describe(params):
+    """Read-only views (rung views). CODESYS: its library managers, with each library or placeholder and its version."""
+    scope = params.get("scope")
+    pr = project()
+    root = {"type": "Project", "name": os.path.splitext(os.path.basename(pr.path))[0], "attributes": {}, "children": {}}
+    if scope != "libraries":
+        return root  # hardware, HMI and technology objects are TIA Portal's
+    managers = []
+
+    def attr(o, name):
+        try:
+            v = getattr(o, name)
+            return None if v is None else str(v)
+        except Exception:
+            return None
+
+    for c in pr.get_children(True):
+        if not getattr(c, "is_libman", False):
+            continue
+        refs = []
+        for r in c.references:
+            a = {}
+            for key, name in (("namespace", "namespace"), ("systemLibrary", "system_library"), ("qualifiedOnly", "qualified_only"), ("optional", "optional")):
+                v = attr(r, name)
+                if v is not None:
+                    a[key] = v
+            if getattr(r, "is_placeholder", False):
+                for key, name in (("defaultResolution", "default_resolution"), ("effectiveResolution", "effective_resolution")):
+                    v = attr(r, name)
+                    if v is not None:
+                        a[key] = v
+                refs.append({"type": "Placeholder", "name": attr(r, "placeholder_name") or attr(r, "name"), "attributes": a, "children": {}})
+                continue
+            lib = getattr(r, "managed_library", None) if getattr(r, "is_managed", False) else None
+            if lib is not None:
+                for key in ("title", "company", "version", "displayname"):
+                    v = attr(lib, key)
+                    if v is not None:
+                        a[key] = v
+            refs.append({"type": "Library", "name": attr(r, "name"), "attributes": a, "children": {}})
+        parent = c.parent.get_name() if getattr(c, "parent", None) is not None else "Project"
+        managers.append({"type": "LibraryManager", "name": parent, "attributes": {}, "children": {"References": sorted(refs, key=lambda x: (x["type"], x["name"] or ""))}})
+    root["children"]["LibraryManagers"] = managers
+    return root
+
+
 def plc_read(params):
     oa = online_app(params["device"], None)
     if not oa.is_logged_in:
@@ -686,6 +732,8 @@ def handle(method, p):
         return plc_online(p)
     if method == "plc.download":
         return plc_download(p.get("request", p))
+    if method == "model.describe":
+        return describe(p)
     if method == "plc.read":
         return plc_read(p)
     if method == "debug.texts":

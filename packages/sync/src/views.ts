@@ -35,7 +35,7 @@ export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "
     const keep = new Set<string>();
     for (const [group, list] of Object.entries(tree.children ?? {})) {
       for (const node of list) {
-        const file = join(dir, group === "Devices" || group === "HmiUnified" || group === "Plcs" || group === "ProjectLibrary" ? "" : group, `${escapeSegment(node.name ?? node.type)}.yaml`);
+        const file = join(dir, group === "Devices" || group === "HmiUnified" || group === "Plcs" || group === "ProjectLibrary" || group === "LibraryManagers" ? "" : group, `${escapeSegment(node.name ?? node.type)}.yaml`);
         await writeFileAtomic(file, toYaml(toView(node), VIEW_HEADER));
         keep.add(file);
         report.written.push(relative(root, file).split(sep).join("/"));

@@ -386,15 +386,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         for (const f of results) {
           if (f.error) {
             failed++;
-            io.stdout(`FAIL ${f.file}: ${f.error}
-`);
+            io.stdout(`FAIL ${f.file}: ${f.error}\n`);
             continue;
           }
           for (const c of f.cases) {
-            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.error}` : ""}
-`);
-            for (const x of c.failures) io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}
-`);
+            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.error}` : ""}\n`);
+            for (const x of c.failures) io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}\n`);
             if (!c.passed) failed++;
           }
         }
@@ -404,9 +401,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)\n`);
           return 1;
         }
-        io.stdout(`
-${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
-`);
+        io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n`);
         return failed ? 2 : total ? 0 : 1;
       }
       case "live":
@@ -424,24 +419,22 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
           const config = await loadConfig(ws);
           const client = await bridgeFor(config, io);
           try {
-            const r = await writeModelViews(ws, client);
+            // CODESYS: its library managers; hardware, HMI and technology objects are TIA Portal's
+            const r = await writeModelViews(ws, client, config.project.tiaVersion === "CODESYS" ? ["libraries"] : undefined);
             model = r.written;
-            for (const t of r.truncated) io.stderr(`rung views: ${t} view truncated (object limit)
-`);
+            for (const t of r.truncated) io.stderr(`rung views: ${t} view truncated (object limit)\n`);
           } finally {
             await client.close();
           }
         }
-        io.stdout(`wrote ${tags.length + model.length} views under ${join(ws, "views")}
-`);
+        io.stdout(`wrote ${tags.length + model.length} views under ${join(ws, "views")}\n`);
         return 0;
       }
       case "agents": {
         const ws = await findWorkspace(dir);
         const config = await loadConfig(ws);
         await writeAgentsFile(ws, config.project.path, await agentsTemplate(config.project.path));
-        io.stdout(`updated ${join(ws, "AGENTS.md")}
-`);
+        io.stdout(`updated ${join(ws, "AGENTS.md")}\n`);
         return 0;
       }
       case "mcp": {

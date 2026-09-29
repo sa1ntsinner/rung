@@ -12,8 +12,7 @@ void main(process.argv.slice(2), {
     process.exitCode = code;
   },
   (e: unknown) => {
-    process.stderr.write(`rung: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}
-`);
+    process.stderr.write(`rung: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
     process.exitCode = 1;
   },
 );

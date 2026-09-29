@@ -4,7 +4,7 @@
 //   RUNG_E2E_CODESYS=1 pnpm vitest run tests/e2e/codesys.e2e.test.ts
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,18 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
     );
     expect(readFileSync(file("plc/Device/types/ST_Axis.st"), "utf8")).toContain("TYPE ST_Axis :");
     expect(readFileSync(file("plc/Device/tags/GVL_Plant.st"), "utf8")).toContain("VAR_GLOBAL");
+  }, 600_000);
+
+  it("rung views shows the library manager: libraries, placeholders and their versions", async () => {
+    const r = await run("views");
+    expect(r.code).toBe(0);
+    const dir = file("views/libraries");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
+    expect(files.length).toBeGreaterThan(0);
+    const text = files.map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    expect(text).toMatch(/type: LibraryManager/);
+    expect(text).toMatch(/type: (Library|Placeholder)/);
+    expect(text).toMatch(/Standard/);
   }, 600_000);
 
   it("an edit, a new method and a new FB in a new folder go into CODESYS; then quiet", async () => {
