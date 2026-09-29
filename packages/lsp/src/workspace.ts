@@ -298,6 +298,15 @@ export function tagTableName(uri: string): string {
   return decodeURIComponent(uri.split("/").pop()!).replace(TAG_TEXT, "").replace(/%([0-9A-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
 }
 
+/** The tag table as text a new PLC tag of the file's PLC goes in: the default tag table, else the first. */
+export function tagTableFor(index: WorkspaceIndex, uri: string): { uri: string; name: string } | undefined {
+  const device = /^(.*\/plc\/[^/]+\/)/.exec(uri)?.[1];
+  if (!device) return undefined;
+  const tables = [...index.docs.keys()].filter((u) => u.startsWith(device + "tags/") && TAG_TEXT.test(u)).sort();
+  const pick = tables.find((u) => tagTableName(u).toLowerCase() === "default tag table") ?? tables[0];
+  return pick ? { uri: pick, name: tagTableName(pick) } : undefined;
+}
+
 /** PLC tags and user constants of a `.tags.st` file, as parseTags gives them for SimaticML. */
 export function tagsOfText(d: Doc): GlobalSymbol[] {
   const table = tagTableName(d.uri);

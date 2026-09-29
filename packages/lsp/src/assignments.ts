@@ -30,6 +30,15 @@ export interface Overlap {
   nested: boolean;
 }
 
+/** Bits of the elementary types a PLC tag can have at an I, Q or M address. */
+export const TYPE_BITS: Readonly<Record<string, number>> = {
+  BOOL: 1,
+  BYTE: 8, SINT: 8, USINT: 8, CHAR: 8,
+  WORD: 16, INT: 16, UINT: 16, WCHAR: 16, DATE: 16, S5TIME: 16,
+  DWORD: 32, DINT: 32, UDINT: 32, REAL: 32, TIME: 32, TIME_OF_DAY: 32, TOD: 32,
+  LWORD: 64, LINT: 64, ULINT: 64, LREAL: 64, LTIME: 64,
+};
+
 const ADDRESS = /^%([IEQAM])([XBWDL])?(\d+)(?:\.([0-7]))?(:P)?$/i;
 const SIZE: Record<string, number> = { X: 1, B: 8, W: 16, D: 32, L: 64 };
 
@@ -66,16 +75,21 @@ export function assignmentList(index: WorkspaceIndex): { items: Assignment[]; ov
   };
   const tagAddress = new Map<string, Assignment>();
   for (const g of index.allGlobals()) {
-    if (!g.tag?.address) continue;
-    const a = entry(g.tag.address);
+    // PLC tags, and located variables of IEC global variable lists (CODESYS: x AT %IX0.0 : BOOL)
+    const at = g.tag?.address ?? g.gvar?.decl.at;
+    if (!at) continue;
+    const a = entry(at);
     if (!a) continue;
-    a.tags.push({ name: g.name, table: g.tag.table, dataType: g.tag.dataType });
+    a.tags.push({ name: g.name, table: g.tag?.table ?? g.gvar!.list, dataType: g.tag?.dataType ?? g.gvar!.decl.type });
     tagAddress.set(g.name.toUpperCase(), a);
   }
   for (const doc of index.docs.values()) {
     if (!doc.parsed) continue;
-    for (const t of doc.parsed.tokens) {
-      if (t.kind === "absolute") {
+    const tokens = doc.parsed.tokens;
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i]!;
+      // `AT %I0.0` declares where a variable lives; it is not a use
+      if (t.kind === "absolute" && tokens[i - 1]?.text.toUpperCase() !== "AT") {
         const a = entry(t.text);
         if (a) a.uses.push({ uri: doc.uri, line: doc.lines.position(t.start).line });
       }

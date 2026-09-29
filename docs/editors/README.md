@@ -2,7 +2,7 @@
 
 All editors use the same language server: `rung lsp --stdio` (run from the workspace folder, the one with `rung.toml`). It works offline on any OS; with `rung watch` running it also shows TIA Portal compile errors and sync conflicts.
 
-What it does in every editor: completion (locals, DB and UDT members, instructions), go to definition and references across files, rename, the block outline, errors while typing, help on hover (an instruction's parameters, a data type's size and range, a PLC data type's members) and quick fixes like TIA Portal's: declare an undeclared `#tag` as a temporary or a static, and give an FB called without an instance a new instance DB or a multi-instance.
+What it does in every editor: completion (locals, DB and UDT members, instructions), go to definition and references across files, rename, the block outline, errors while typing, help on hover (an instruction's parameters, a data type's size and range, a PLC data type's members) and quick fixes like TIA Portal's: declare an undeclared `#tag` as a temporary or a static, define an unknown `"tag"` as a PLC tag (a line in the tag table at the next free bit memory), give an FB called without an instance a new instance DB or a multi-instance, and update a block call after its interface changed (remove stale arguments, add the FC parameters it leaves out). In a tag table (`.tags.st`) it flags a tag without an address and a type that does not fit its address.
 
 ## VS Code (and Cursor, Windsurf, VSCodium)
 

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Quick fixes like TIA Portal's: declare a local that is used but not declared, and give a function block that
-// is called without an instance a single instance (a new instance DB) or a multi-instance.
+// Quick fixes like TIA Portal's: declare a local that is used but not declared, give a function block that is
+// called without an instance a single instance (a new instance DB) or a multi-instance, and define a PLC tag.
 import { escapeSegment } from "@rung/core";
 import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
-import type { WorkspaceIndex } from "./workspace.js";
+import { tagTableFor, type WorkspaceIndex } from "./workspace.js";
+import { TYPE_BITS, assignmentList } from "./assignments.js";
 import { calledWithoutInstance, scopeDecl } from "./features.js";
 import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
 
@@ -18,7 +19,7 @@ export interface EditAt {
 export interface QuickFix {
   title: string;
   /** Diagnostic code the fix answers. */
-  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER";
+  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER" | "UNKNOWN_GLOBAL";
   edits: EditAt[];
   /** A new file (an instance DB); rung sync creates it in TIA Portal. */
   create?: { uri: string; text: string };
@@ -35,6 +36,7 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
       if (ref.end < start || ref.start > end) continue;
       if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
       if (calledWithoutInstance(index, ref)) out.push(...instanceFixes(index, doc.text, uri, block, ref));
+      if (canBeATag(index, ref)) out.push(...tagFixes(index, doc.text, uri, block, ref));
     }
   }
   // TIA Portal's "Update block call": arguments the callee no longer has, parameters an FC call leaves out
@@ -92,6 +94,48 @@ function instanceFixes(index: WorkspaceIndex, text: string, uri: string, block: 
     });
   }
   return fixes;
+}
+
+/** A "name" the workspace does not know, used as a value: TIA Portal's "Define tag" makes it a PLC tag. */
+export function canBeATag(index: WorkspaceIndex, ref: Ref): boolean {
+  return ref.kind === "global" && ref.access !== "call" && !ref.members.length && !ref.name.includes("~") && !index.global(ref.name) && !index.enumTypesWith(ref.name).length;
+}
+
+/** A new line in the PLC's tag table (.tags.st) at the next free bit memory address. */
+function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: BlockModel, ref: Ref): QuickFix[] {
+  const table = tagTableFor(index, uri);
+  const tableText = table && index.docs.get(table.uri)?.text;
+  if (!table || tableText === undefined) return [];
+  const type = guessType(index, text, uri, block, ref);
+  const bits = TYPE_BITS[type.toUpperCase()];
+  if (!bits) return []; // a String or a PLC data type needs its size chosen in TIA Portal
+  const address = freeMemory(index, bits);
+  const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(ref.name) ? ref.name : `"${ref.name}"`;
+  // before the END_VAR of the tags (VAR_GLOBAL, not the constants)
+  const section = /^[ \t]*VAR_GLOBAL[ \t]*(\r?\n|$)/m.exec(tableText);
+  const close = section ? /^[ \t]*END_VAR\b/m.exec(tableText.slice(section.index + section[0].length)) : null;
+  const edit: EditAt = close
+    ? { uri: table.uri, start: section!.index + section![0].length + close.index, end: section!.index + section![0].length + close.index, newText: `    ${name} AT ${address} : ${type};\n` }
+    : { uri: table.uri, start: tableText.length, end: tableText.length, newText: `${tableText.endsWith("\n") || !tableText ? "" : "\n"}VAR_GLOBAL\n    ${name} AT ${address} : ${type};\nEND_VAR\n` };
+  return [{ title: `Create the PLC tag "${ref.name}" : ${type} at ${address} in ${table.name}`, code: "UNKNOWN_GLOBAL", edits: [edit], preferred: true }];
+}
+
+/** Bit memory after the highest byte in use (never one a tag or the code uses); bits share the last byte of bits. */
+function freeMemory(index: WorkspaceIndex, bits: number): string {
+  const used = assignmentList(index).items.filter((a) => a.area === "M");
+  let top = -1;
+  for (const a of used) top = Math.max(top, a.byte + Math.max(1, a.bits / 8) - 1);
+  if (bits === 1) {
+    const last = used.filter((a) => a.byte <= top && a.byte + Math.max(1, a.bits / 8) - 1 >= top);
+    if (top >= 0 && last.every((a) => a.bits === 1)) {
+      const taken = new Set(last.map((a) => a.bit));
+      for (let b = 0; b < 8; b++) if (!taken.has(b)) return `%M${top}.${b}`;
+    }
+    return `%M${top + 1}.0`;
+  }
+  let at = top + 1;
+  if (bits >= 16 && at % 2) at++; // words on even bytes, as S7 programs keep them
+  return bits === 64 ? `%M${at}.0` : `%M${({ 8: "B", 16: "W", 32: "D" } as Record<number, string>)[bits]}${at}`;
 }
 
 /** Declaration sections in the order TIA Portal writes them. */

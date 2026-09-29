@@ -2,9 +2,9 @@
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import type { BlockModel, Ref, VarDecl } from "./parser.js";
-import { TAG_TEXT, type Member, type WorkspaceIndex } from "./workspace.js";
+import { TAG_TEXT, tagTableFor, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, unknownArgs } from "./calls.js";
-import { parseAbsolute } from "./assignments.js";
+import { TYPE_BITS, parseAbsolute } from "./assignments.js";
 
 export interface Location {
   uri: string;
@@ -92,15 +92,6 @@ function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref, uri: st
   return [];
 }
 
-/** Bits of the elementary types a PLC tag can have at an I, Q or M address. */
-const TYPE_BITS: Readonly<Record<string, number>> = {
-  BOOL: 1,
-  BYTE: 8, SINT: 8, USINT: 8, CHAR: 8,
-  WORD: 16, INT: 16, UINT: 16, WCHAR: 16, DATE: 16, S5TIME: 16,
-  DWORD: 32, DINT: 32, UDINT: 32, REAL: 32, TIME: 32, TIME_OF_DAY: 32, TOD: 32,
-  LWORD: 64, LINT: 64, ULINT: 64, LREAL: 64, LTIME: 64,
-};
-
 /** The same place with the size the type needs: %IW40 for a Bool → %I40.0, %I0.0 for an Int → %IW0. */
 function suggestAddress(a: { area: string; byte: number }, bits: number): string {
   return bits === 1 || bits === 64 ? `%${a.area}${a.byte}.0` : `%${a.area}${({ 8: "B", 16: "W", 32: "D" } as Record<number, string>)[bits]}${a.byte}`;
@@ -150,7 +141,8 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       }
       // "Device~Module" names are hardware identifiers (system constants): exports never contain them
       if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length) {
-        out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored)`, code: "UNKNOWN_GLOBAL" });
+        const definable = ref.access !== "call" && !ref.members.length && /\.scl$/i.test(uri) && tagTableFor(index, uri);
+        out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored${definable ? "; quick fix: create it as a PLC tag" : ""})`, code: "UNKNOWN_GLOBAL" });
         continue;
       }
       // Member names: only report when the type is known completely.

@@ -53,6 +53,30 @@ describe("update block calls, like TIA Portal", () => {
   });
 });
 
+describe("define a PLC tag, like TIA Portal's Define tag", () => {
+  const TABLE = "file:///w/plc/P/tags/Default%20tag%20table.tags.st";
+  const table = "VAR_GLOBAL\n    A AT %M10.0 : Bool;\n    B AT %M10.1 : Bool;\nEND_VAR\n\nVAR_GLOBAL CONSTANT\n    K : Int := 3;\nEND_VAR\n";
+  const src = 'FUNCTION "Fx_T" : Void\nBEGIN\n\t"Pump_On" := TRUE;\n\t"Level" := 5;\n\t"Fx_Missing"();\nEND_FUNCTION\n';
+  const setup = () => {
+    const idx = new WorkspaceIndex();
+    idx.set(TABLE, table, 0);
+    idx.set(FB, src, 0);
+    return idx;
+  };
+
+  it("adds the tag to the tag table at the next free bit memory, with the type its use suggests", () => {
+    const idx = setup();
+    const on = codeActions(idx, FB, src.indexOf('"Pump_On"') + 1, src.indexOf('"Pump_On"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL");
+    expect(on.map((f) => f.title)).toEqual(['Create the PLC tag "Pump_On" : Bool at %M10.2 in Default tag table']);
+    expect(apply(table, on[0]!, TABLE)).toBe(table.replace("    B AT %M10.1 : Bool;\n", "    B AT %M10.1 : Bool;\n    Pump_On AT %M10.2 : Bool;\n"));
+    const level = codeActions(idx, FB, src.indexOf('"Level"') + 1, src.indexOf('"Level"') + 1).find((f) => f.code === "UNKNOWN_GLOBAL")!;
+    expect(level.title).toBe('Create the PLC tag "Level" : Int at %MW12 in Default tag table');
+    expect(diagnostics(idx, FB).find((d) => d.code === "UNKNOWN_GLOBAL")!.message).toContain("quick fix: create it as a PLC tag");
+    // a call is a block, not a tag
+    expect(codeActions(idx, FB, src.indexOf('"Fx_Missing"') + 1, src.indexOf('"Fx_Missing"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL")).toEqual([]);
+  });
+});
+
 describe("help on hover", () => {
   it("describes types in declarations: instructions with their parameters, data types with their range, PLC data types", () => {
     const idx = new WorkspaceIndex();
