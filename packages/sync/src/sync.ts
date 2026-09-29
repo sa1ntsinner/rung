@@ -99,7 +99,7 @@ interface ImportJob {
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
 const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
-const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml"]);
+const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml", "st"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 
 interface LocalFile {

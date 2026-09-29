@@ -95,7 +95,7 @@ export class WorkspaceIndex {
         if (e.name.startsWith(".")) continue;
         const p = join(dir, e.name);
         if (e.isDirectory()) await walk(p);
-        else if (SOURCE.test(e.name) || OTHER.test(e.name) || e.name.endsWith(".tags.xml")) this.set(uriOf(p), await readFile(p, "utf8"), 0);
+        else if (SOURCE.test(e.name) || OTHER.test(e.name) || IEC_SOURCE.test(e.name) || e.name.endsWith(".tags.xml")) this.set(uriOf(p), await readFile(p, "utf8"), 0);
       }
     };
     await walk(join(root, "plc"));

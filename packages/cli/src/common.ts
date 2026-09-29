@@ -2,6 +2,7 @@
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { bridgeExecutable } from "./paths.js";
+import { codesysBridgeCommand } from "./codesys.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
 import { BridgeClient, type BridgeEvent } from "@rung/bridge-client";
 
@@ -49,9 +50,17 @@ export function cleanEnv(env: Io["env"]): Record<string, string> {
 }
 
 export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
+  if (config.project.tiaVersion === "CODESYS" && !io.env.RUNG_BRIDGE && !config.bridge.command) {
+    // CODESYS: rung itself relays to its bridge script inside CODESYS (codesys.ts); imports are always allowed
+    // there, sync.import decides whether rung sends any
+    const b = codesysBridgeCommand(config.project.path);
+    const client = await BridgeClient.spawn({ command: b.command, args: b.args, env: cleanEnv(io.env), requestTimeoutMs: 300_000 });
+    client.onEvent((e) => showBridgeEvent(io, e));
+    return client;
+  }
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
-  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion);
+  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   const client = await BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
   client.onEvent((e) => showBridgeEvent(io, e));

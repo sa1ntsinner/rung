@@ -86,3 +86,58 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
   }
   return { block: block.name, kind: block.kind, ...(inst ? { instance: inst } : {}), vars, lines };
 }
+
+/**
+ * The same for IEC structured text (CODESYS): values by their instance path. A PROGRAM or a GVL is its own
+ * instance (PLC_PRG.nCycles, GVL_Plant.nSpeed); an FB is read through the PROGRAM variable that holds it
+ * (PLC_PRG.fbCount.nCount), found by itself when there is one; its METHODs show the FB's variables.
+ */
+export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: string): MonitorPlan {
+  const doc = index.docs.get(uri);
+  const block: BlockModel | undefined = doc?.parsed?.blocks[0];
+  if (!doc || !block) throw new WorkspaceError("BAD_ARGUMENT", "this file holds no POU rung can monitor");
+  const vars: Record<string, string> = {};
+  const lines: Record<number, string[]> = {};
+  const add = (offset: number, label: string, name: string) => {
+    vars[label] = name;
+    const list = (lines[doc.lines.position(offset).line] ??= []);
+    if (!list.includes(label)) list.push(label);
+  };
+  let base: string | undefined;
+  if (block.kind === "PRG" || block.kind === "GVL") base = block.name;
+  else if (block.kind === "FB") {
+    const uses = index
+      .allGlobals()
+      .filter((g) => g.block?.kind === "PRG")
+      .flatMap((g) => g.block!.vars.filter((v) => !v.isArray && (v.typeRef ?? v.type).toUpperCase() === block.name.toUpperCase()).map((v) => `${g.name}.${v.name}`));
+    base = instance?.trim() || (uses.length === 1 ? uses[0] : undefined);
+    if (!base)
+      throw new WorkspaceError(
+        "NO_INSTANCE",
+        uses.length ? `${block.name} has ${uses.length} instances (${uses.join(", ")}); choose one with --instance` : `${block.name} has no instance in a PROGRAM; name it with --instance, e.g. PLC_PRG.fbCount`,
+      );
+  } else if (block.kind !== "FC") throw new WorkspaceError("BAD_ARGUMENT", `a ${block.kind} holds no values to monitor`);
+  const readable = (v: VarDecl | undefined) => !!v && v.section !== "Temp" && v.section !== "Constant";
+  if (base) for (const v of block.vars) if (readable(v) && elementary(v)) add(v.start, v.name, `${base}.${v.name}`);
+  for (const b of doc.parsed!.blocks) {
+    for (const ref of b.refs) {
+      const path = [ref.name, ...ref.members.map((m) => m.name)];
+      if (ref.kind === "local") {
+        // the POU's own variables (a METHOD's own are temporary, like a FUNCTION's)
+        if (!base || block.kind === "GVL") continue;
+        const d = block.vars.find((v) => v.name.toUpperCase() === ref.name.toUpperCase());
+        if (!readable(d) || (b !== block && b.vars.some((v) => v.name.toUpperCase() === ref.name.toUpperCase()))) continue;
+        const leaf = ref.members.length ? index.resolveChain(index.membersOf(d!), ref.members).at(-1) : d;
+        if (elementary(leaf)) add(ref.start, path.join("."), `${base}.${path.join(".")}`);
+      } else if (ref.kind === "global") {
+        const g = index.global(ref.name);
+        if (g?.gvar && !ref.members.length && elementary(g.gvar.decl)) add(ref.start, ref.name, `${g.gvar.list}.${ref.name}`);
+        else if ((g?.block?.kind === "GVL" || g?.block?.kind === "PRG") && ref.members.length) {
+          const leaf = index.resolveChain(g.block.vars.map((m) => ({ ...m, uri: g.uri })), ref.members).at(-1);
+          if (elementary(leaf)) add(ref.start, path.join("."), path.join("."));
+        }
+      }
+    }
+  }
+  return { block: block.name, kind: block.kind, ...(block.kind === "FB" ? { instance: base! } : {}), vars, lines };
+}

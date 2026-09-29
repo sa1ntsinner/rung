@@ -26,6 +26,9 @@ mkdirSync(join(stage, "bridge"), { recursive: true });
 cpSync(join(out, "rung.exe"), join(stage, "rung.exe"));
 const bridgeBin = join(root, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48");
 for (const f of readdirSync(bridgeBin)) if (!f.endsWith(".pdb")) cpSync(join(bridgeBin, f), join(stage, "bridge", f));
+// the CODESYS bridge is a script that runs inside CODESYS (rung codesys-bridge starts it)
+mkdirSync(join(stage, "bridge", "codesys"), { recursive: true });
+cpSync(join(root, "bridge", "codesys", "rung_bridge_codesys.py"), join(stage, "bridge", "codesys", "rung_bridge_codesys.py"));
 cpSync(join(root, "agents", "AGENTS.template.md"), join(stage, "AGENTS.template.md"));
 // rung setup openness uses it to register the bridge in the Openness whitelist
 cpSync(join(root, "tools", "openness", "Register-OpennessWhitelist.ps1"), join(stage, "tools", "Register-OpennessWhitelist.ps1"));

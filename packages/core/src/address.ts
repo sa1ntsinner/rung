@@ -12,7 +12,8 @@ export interface Address {
   namespace?: string;
 }
 
-export type TextForm = "scl" | "awl" | "db" | "udt" | "s7dcl" | "xml" | "tags.xml" | "protected.yaml";
+/** st: IEC structured text of a CODESYS POU, DUT or GVL. */
+export type TextForm = "scl" | "awl" | "db" | "udt" | "s7dcl" | "xml" | "tags.xml" | "protected.yaml" | "st";
 
 export const KIND_DIR: Readonly<Record<ObjectKind, string>> = {
   block: "blocks",
@@ -25,12 +26,12 @@ export const KIND_DIR: Readonly<Record<ObjectKind, string>> = {
 const DIR_KIND = new Map(Object.entries(KIND_DIR).map(([k, v]) => [v, k as ObjectKind]));
 
 /** Longest suffix first so "tags.xml" and "protected.yaml" win over "xml". */
-const FORMS: readonly TextForm[] = ["protected.yaml", "tags.xml", "s7dcl", "scl", "awl", "db", "udt", "xml"];
+const FORMS: readonly TextForm[] = ["protected.yaml", "tags.xml", "s7dcl", "scl", "awl", "db", "udt", "xml", "st"];
 
 export const FORMS_BY_KIND: Readonly<Record<ObjectKind, readonly TextForm[]>> = {
-  block: ["scl", "awl", "db", "s7dcl", "xml", "protected.yaml"],
-  type: ["udt", "s7dcl", "xml", "protected.yaml"],
-  tagtable: ["tags.xml"],
+  block: ["scl", "awl", "db", "s7dcl", "xml", "protected.yaml", "st"],
+  type: ["udt", "s7dcl", "xml", "protected.yaml", "st"],
+  tagtable: ["tags.xml", "st"],
   techobject: ["xml"],
   watchtable: ["xml"],
   forcetable: ["xml"],

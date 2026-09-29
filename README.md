@@ -7,9 +7,9 @@
 
 TIA Portal projects as plain text.
 
-rung keeps a Siemens TIA Portal project and a folder of text files in sync, both ways. You write SCL in VS Code, Zed or Neovim, review changes in git like any other code, and coding agents work on the same files you do.
+rung keeps a Siemens TIA Portal project, or a CODESYS project, and a folder of text files in sync, both ways. You write SCL or structured text in VS Code, Zed or Neovim, review changes in git like any other code, and coding agents work on the same files you do.
 
-It's pre-alpha. It runs against TIA Portal V20 and the full test suite passes on a real project, but there is no release yet.
+It's pre-alpha. It runs against TIA Portal V20 and CODESYS V3.5, and the full test suite passes on real projects of both, but there is no release yet.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ rung talks to TIA Portal only through Siemens' Openness API. It never opens proj
 
 ## Requirements
 
-Windows with TIA Portal V20 and the Openness option, and Node.js 22 or newer.
+Windows with TIA Portal V20 and the Openness option, or with CODESYS V3.5 (tested with SP22; see [CODESYS](docs/codesys.md)), and Node.js 22 or newer. TwinCAT projects are files already: rung's language server and simulator read them as they are.
 
 <details>
 <summary>Working on rung</summary>

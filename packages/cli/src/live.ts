@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
-// rung live: read-only access to a running S7-1500 through its Web API.
-import { WorkspaceError, loadConfig } from "@rung/core";
+// rung live: read-only values of a running PLC: an S7-1500 through its Web API, CODESYS through rung's CODESYS bridge.
+import { WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
 import { WebApiClient } from "@rung/live";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import { WorkspaceIndex, uriOf } from "@rung/lsp";
-import { findWorkspace, type Io } from "./common.js";
-import { monitorPlan, type MonitorPlan } from "./monitor.js";
+import { bridgeFor, findWorkspace, type Io } from "./common.js";
+import { OwnerClient } from "@rung/sync";
+import { monitorPlan, monitorPlanIec, type MonitorPlan } from "./monitor.js";
 
 export async function webApiFor(dir: string, env: Io["env"]): Promise<WebApiClient> {
   const ws = await findWorkspace(dir);
@@ -34,11 +35,15 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live diag\n');
     return 1;
   }
+  if (sub === "watch") {
+    const ws = await findWorkspace(dir);
+    if ((await loadConfig(ws)).project.tiaVersion === "CODESYS") return await watchCodesys(ws, io, opts);
+  }
   // the plan comes first: a block that cannot be monitored needs no PLC connection to say so
   const plan = sub === "watch" ? await watchPlan(dir, io, opts) : undefined;
   const client = await webApiFor(dir, io.env);
   try {
-    if (plan) return await watchValues(client, plan, io, opts);
+    if (plan) return await watchValues((names) => client.read(names), plan, io, opts);
     return await liveRun(client, sub, args, io);
   } catch (e) {
     // network and PLC errors are expected here (wrong address, PLC off, wrong password): one clear line, no stack
@@ -69,7 +74,42 @@ async function watchPlan(dir: string, io: Io, opts: LiveOptions): Promise<Monito
 }
 
 /** Reads the plan's variables every interval until stopped. */
-async function watchValues(client: WebApiClient, plan: MonitorPlan, io: Io, opts: LiveOptions): Promise<number> {
+type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; error?: string }[]>;
+
+/**
+ * CODESYS: the values come from the application CODESYS runs, through rung's CODESYS bridge. While rung watch runs
+ * it owns that bridge (and CODESYS's simulation lives in it); otherwise this command logs in with its own.
+ */
+async function watchCodesys(ws: string, io: Io, opts: LiveOptions): Promise<number> {
+  if (!opts.file) throw new WorkspaceError("BAD_ARGUMENT", "rung live watch needs --file <POU file>");
+  const config = await loadConfig(ws);
+  const index = new WorkspaceIndex();
+  await index.load(ws);
+  const file = resolve(io.cwd, opts.file);
+  const uri = uriOf(file);
+  if (!index.docs.get(uri)) index.set(uri, await readFile(file, "utf8"), 0);
+  const plan = monitorPlanIec(index, uri, opts.instance);
+  const hit = pathToAddress(relative(ws, file).split(sep).join("/"));
+  if (!hit) throw new WorkspaceError("BAD_ARGUMENT", `${opts.file} is not a mirrored object of this workspace`);
+  const device = hit.address.device;
+  const owner = await OwnerClient.connect(ws);
+  let bridge: Awaited<ReturnType<typeof bridgeFor>> | undefined;
+  try {
+    let read: Reader;
+    if (owner) read = (names) => owner.request("read", { device, expressions: names });
+    else {
+      const b = (bridge = await bridgeFor(config, io));
+      await b.online(device, "online", config.plc[device]);
+      read = (names) => b.read(device, names);
+    }
+    return await watchValues(read, plan, io, opts);
+  } finally {
+    owner?.close();
+    await bridge?.close();
+  }
+}
+
+async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOptions): Promise<number> {
   const labels = Object.keys(plan.vars);
   if (opts.json) io.stdout(JSON.stringify({ plan }) + "\n");
   else io.stdout(`rung live watch: ${plan.block}${plan.instance ? ` through ${plan.instance}` : ""}, ${labels.length} values (Ctrl+C to stop)\n`);
@@ -80,7 +120,7 @@ async function watchValues(client: WebApiClient, plan: MonitorPlan, io: Io, opts
   void stop.then(() => (stopped = true));
   const interval = Math.max(100, opts.intervalMs ?? 500);
   while (!stopped) {
-    const rows = await client.read(labels.map((l) => plan.vars[l]!));
+    const rows = await read(labels.map((l) => plan.vars[l]!));
     const values: Record<string, unknown> = {};
     const errors: Record<string, string> = {};
     rows.forEach((r, i) => (r.error ? (errors[labels[i]!] = r.error) : (values[labels[i]!] = r.value)));

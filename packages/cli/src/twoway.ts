@@ -74,7 +74,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   });
   const tools = () => {
     const b = watcher.bridgeForTools;
-    if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
+    if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
     return b as import("@rung/bridge-client").BridgeClient;
   };
   server = await OwnerServer.start(dir, {
@@ -88,24 +88,26 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     },
     confirmDelete: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
+      if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       await confirmDelete(dir, b as never, state, String(p.address));
       return { deleted: true };
     },
     rename: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
+      if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
     },
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
     online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
     connections: async (p) => tools().connections(String(p.device), !!p.scan),
     compare: async (p) => tools().compare(String(p.device), p.target as never),
+    projectInfo: async () => tools().projectInfo(),
+    read: async (p) => tools().read(String(p.device), (p.expressions as string[]) ?? []),
     download: async (p) => tools().download(p.request as never),
     show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;
-      if (!b) throw new WorkspaceError("NOT_READY", "rung watch is still connecting to TIA Portal; try again in a moment");
+      if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       const devices = config.devices.length ? config.devices : (await (b as import("@rung/bridge-client").BridgeClient).projectInfo()).devices;
       if (!p.device && devices.length !== 1) throw new WorkspaceError("BAD_ARGUMENT", `the project has several PLCs (${devices.join(", ")}); name one`);
       const msgs = await b.compile(String(p.device ?? devices[0]), (p.addresses as string[] | undefined) ?? []);

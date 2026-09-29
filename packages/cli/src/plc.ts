@@ -4,8 +4,8 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
-import { WorkspaceError, loadConfig, type RungConfig } from "@rung/core";
-import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus } from "@rung/bridge-client";
+import { WorkspaceError, loadConfig, parseAddress, type RungConfig } from "@rung/core";
+import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus, ProjectInfo } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages } from "@rung/sync";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
 
@@ -61,13 +61,17 @@ export async function closePlcLinks(): Promise<void> {
   await Promise.all([...PlcLink.open].map((l) => l.close()));
 }
 
-async function deviceOf(config: RungConfig, v: Record<string, unknown>): Promise<string> {
+async function deviceOf(config: RungConfig, v: Record<string, unknown>, ws: string, link: PlcLink): Promise<string> {
   const plc = v.plc as string | undefined;
   if (plc) return plc;
   if (config.devices.length === 1) return config.devices[0]!;
   if (Object.keys(config.plc).length === 1) return Object.keys(config.plc)[0]!;
-  if (config.devices.length === 0) return "PLC_1";
-  throw new WorkspaceError("BAD_ARGUMENT", `this workspace mirrors several PLCs (${config.devices.join(", ")}); choose one with --plc`);
+  // devices = [] mirrors every PLC of the project: the ones the workspace has objects of, else the project's own
+  let mirrored = config.devices.length ? config.devices : [...new Set((await snapshot(ws)).map((o) => parseAddress(o.address).device))].sort();
+  if (!mirrored.length) mirrored = (await link.call<ProjectInfo>("projectInfo", {}, (b) => b.projectInfo())).devices;
+  if (mirrored.length === 1) return mirrored[0]!;
+  if (!mirrored.length) throw new WorkspaceError("BAD_ARGUMENT", "the project has no PLC");
+  throw new WorkspaceError("BAD_ARGUMENT", `this workspace mirrors several PLCs (${mirrored.join(", ")}); choose one with --plc`);
 }
 
 const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
@@ -117,7 +121,7 @@ async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: I
 /** rung connect: find the PLC (or pick among what answers) and remember it; --json lists the choices for editors. */
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   if (v.use) {
     const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1), ...(v.target ? { targetInterface: String(v.target) } : {}) };
     await saveTarget(ws, device, t);
@@ -156,7 +160,7 @@ async function printCompile(ws: string, _config: RungConfig, io: Io, raw: Compil
 
 export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   if (v.hw) {
     const msgs = await link.call<CompileMessage[]>("compileHardware", { device }, (b) => b.compileHardware(device));
     return printCompile(ws, config, io, msgs);
@@ -177,7 +181,7 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
 
 export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   const action = v.off ? "offline" : v.state ? "state" : "online";
   const target = action === "online" ? await ensureTarget(link, ws, config, io, device, "online") : targetOf(config, device);
   const s = await link.call<OnlineStatus>("online", { device, action, ...(target ? { target } : {}) }, (b) => b.online(device, action, target));
@@ -190,7 +194,7 @@ const COMPARE_LABEL: Record<string, string> = { Different: "differs", OnlyInProj
 /** rung compare: the project against the PLC, read-only. Exit 0 when they match, 2 when they differ. */
 export async function cmdCompare(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   const target = await ensureTarget(link, ws, config, io, device, "online");
   const r = await link.call<CompareOutcome>("compare", { device, ...(target ? { target } : {}) }, (b) => b.compare(device, target));
   const objects = await snapshot(ws);
@@ -213,7 +217,7 @@ export async function cmdCompare(dir: string, v: Record<string, unknown>, io: Io
 
 export async function cmdInterfaces(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   const scan = !!v.scan;
   const c = await link.call<ConnectionOptions>("connections", { device, scan }, (b) => b.connections(device, scan));
   io.stdout(`${c.device}: ${c.configured ? "a connection is configured in TIA Portal" : "no connection configured in TIA Portal yet"}\n`);
@@ -247,7 +251,7 @@ async function ask(io: Io, question: string): Promise<string> {
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
-  const device = await deviceOf(config, v);
+  const device = await deviceOf(config, v, ws, link);
   const target = await ensureTarget(link, ws, config, io, device, "download");
   if (!target) throw new WorkspaceError("NO_TARGET", `no connection for ${device}: run rung connect`);
   const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;

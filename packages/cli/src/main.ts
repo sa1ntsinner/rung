@@ -4,16 +4,18 @@ import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   CONFIG_FILE,
+  ENGINEERING_VERSIONS,
   StateStore,
   WorkspaceError,
   defaultConfig,
   loadConfig,
   saveConfig,
   writeFileAtomic,
+  type EngineeringVersion,
   type RungConfig,
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
-import { doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
+import { OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
 import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
@@ -27,6 +29,7 @@ import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInte
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { cmdCheck } from "./check.js";
+import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
 
 export type { Io } from "./common.js";
@@ -95,23 +98,25 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     io.stderr(`rung: ${cfgPath} already exists (use --rebind to bind it to another project)\n`);
     return 1;
   }
-  const bridge = defaultBridge(io.env);
+  // a .project file is CODESYS: rung relays to its bridge script inside CODESYS (codesys.ts)
+  const codesys = !!v.project && /\.project$/i.test(String(v.project)) && !io.env.RUNG_BRIDGE;
+  const bridge = codesys ? codesysBridgeCommand(resolve(io.cwd, String(v.project))) : defaultBridge(io.env);
   // with an explicit project the bridge may open it in the background when no TIA Portal has it open
-  const args = [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless"] : [])];
+  const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless"] : [])];
   const client = await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string> });
   try {
     const info = await client.projectInfo();
     const tia = (v.tia as string | undefined) ?? info.tiaVersion;
-    if (tia !== "V20" && tia !== "V21") throw new WorkspaceError("BAD_ARGUMENT", `unsupported TIA version ${tia} (V20 or V21)`);
+    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V20, V21 or CODESYS)`);
     if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
     const devices = (v.device as string[] | undefined) ?? [];
     for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BAD_ARGUMENT", `device ${d} not in project (${info.devices.join(", ")})`);
     // On --rebind keep the user's sync/bridge settings; only the binding changes.
     const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir).catch(() => undefined) : undefined;
     const config = previous
-      ? { ...previous, project: { path: info.path, tiaVersion: tia as "V20" | "V21" }, devices }
+      ? { ...previous, project: { path: info.path, tiaVersion: tia as EngineeringVersion }, devices }
       : // the bridge that comes with rung is found at run time; only an explicit RUNG_BRIDGE is written down
-        { ...defaultConfig(info.path, tia, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
+        { ...defaultConfig(info.path, tia as EngineeringVersion, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
     // Take the state lock before touching rung.toml so config and state never disagree about the binding.
     // devices = [] means "all PLCs" and is stored as such, so adding a PLC later does not break the binding.
     const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices }, { rebind: !!v.rebind });
@@ -224,6 +229,7 @@ const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   download: { options: ["hw", "no-hw", "no-sw", "all-blocks", "allow", "no-start", "yes", "plc"], positionals: 1 },
   open: { options: ["dir"], positionals: 1 },
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
+  "codesys-bridge": { options: ["project"], positionals: 0 },
 };
 
 /** Why these arguments do not fit the command, or undefined. */
@@ -430,6 +436,8 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
         return await cmdOpen(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
       case "init":
         return await cmdInit(dir, v, io);
+      case "codesys-bridge":
+        return await cmdCodesysBridge(v, io);
       case "pull":
         return await cmdPull(await findWorkspace(dir), v, io);
       case "status":
@@ -467,7 +475,7 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
         return 1;
     }
   } catch (e) {
-    if (e instanceof BridgeError || e instanceof WorkspaceError) {
+    if (e instanceof BridgeError || e instanceof WorkspaceError || e instanceof OwnerError) {
       io.stderr(`rung: ${e.code}: ${e.message}\n`);
       const hint = HINTS[e.code];
       if (hint) io.stderr(`hint: ${hint}\n`);

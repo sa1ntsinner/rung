@@ -106,8 +106,9 @@ END_METHOD
       expect([...w.docs.keys()].some((k) => k.endsWith("Vci.db")), "binary TIA project files are skipped").toBe(false);
       expect(w.allGlobals().map((g) => `${g.kind}:${g.name}`).sort(), dir).toEqual(["FB:FB_Axis", "FC:M_Reset", "GVAR:MAX", "GVAR:aItems", "GVL:GVL_Cfg"]);
     }
-    const rung = await loadDir({ "rung.toml": "", "plc/PLC_1/blocks/B.scl": 'FUNCTION "B" : Void\nBEGIN\nEND_FUNCTION\n', "plc/x.st": FB });
-    expect(rung.allGlobals().map((g) => g.name)).toEqual(["B"]);
+    // a rung workspace reads .st too: the sources of a CODESYS project
+    const rung = await loadDir({ "rung.toml": "", "plc/PLC_1/blocks/B.scl": 'FUNCTION "B" : Void\nBEGIN\nEND_FUNCTION\n', "plc/Device/blocks/FB_Axis.st": FB });
+    expect(rung.allGlobals().map((g) => g.name).sort()).toEqual(["B", "FB_Axis", "M_Reset"]);
   });
 
   it("reports only the genuinely unknown identifier (nested comments, S=/R=, AT %I*, pointers, constant bounds, methods)", async () => {

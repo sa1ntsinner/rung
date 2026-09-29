@@ -7,7 +7,8 @@ import { WorkspaceError } from "./errors.js";
 
 export interface RungConfig {
   format: 1;
-  project: { path: string; tiaVersion: "V20" | "V21" };
+  /** tiaVersion "CODESYS": a CODESYS project (.project) through rung's CODESYS bridge */
+  project: { path: string; tiaVersion: EngineeringVersion };
   /** command "" = the bridge that comes with rung, found at run time (an absolute path would pin one install) */
   bridge: { command: string; args: string[] };
   /** PLC aliases (TIA device names) mirrored into plc/<alias>/. Empty = all PLCs of the project. */
@@ -60,7 +61,10 @@ export interface DownloadSettings {
 
 export const CONFIG_FILE = "rung.toml";
 
-export function defaultConfig(projectPath: string, tiaVersion: "V20" | "V21", bridgeCommand = "", devices: string[] = []): RungConfig {
+export type EngineeringVersion = "V20" | "V21" | "CODESYS";
+export const ENGINEERING_VERSIONS: readonly EngineeringVersion[] = ["V20", "V21", "CODESYS"];
+
+export function defaultConfig(projectPath: string, tiaVersion: EngineeringVersion, bridgeCommand = "", devices: string[] = []): RungConfig {
   return {
     format: 1,
     project: { path: projectPath, tiaVersion },
@@ -88,10 +92,10 @@ export function parseConfig(text: string): RungConfig {
   if (raw.format !== 1) fail(`unsupported format ${String(raw.format)}`);
   const project = raw.project as Record<string, unknown> | undefined;
   if (!project || typeof project.path !== "string" || !project.path) fail("project.path is required");
-  if (project.tiaVersion !== "V20" && project.tiaVersion !== "V21") fail("project.tiaVersion must be V20 or V21");
+  if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V20, V21 or CODESYS");
   const bridge = (raw.bridge ?? {}) as Record<string, unknown>;
   if (bridge.command !== undefined && typeof bridge.command !== "string") fail("bridge.command must be a path");
-  const base = defaultConfig(project.path, project.tiaVersion, (bridge.command as string | undefined) ?? "");
+  const base = defaultConfig(project.path, project.tiaVersion as EngineeringVersion, (bridge.command as string | undefined) ?? "");
   const sync = { ...base.sync, ...((raw.sync as object) ?? {}) } as RungConfig["sync"];
   if (!(sync.pollMs >= 250)) fail("sync.pollMs must be >= 250");
   if (!["fingerprint", "vci"].includes(sync.detect)) fail("sync.detect must be fingerprint or vci");

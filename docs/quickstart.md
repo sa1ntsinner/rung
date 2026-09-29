@@ -39,7 +39,7 @@ rung pull                               # blocks, UDTs, tag tables → plc/<PLC>
 git init && git add -A && git commit -m "baseline"
 ```
 
-If the project is not open, rung opens it in a TIA Portal without window (`[tia] start = "headless"` in `rung.toml`; `"never"` turns that off). Without `--project`, `rung init` binds the project that is open.
+If the project is not open, rung opens it in a TIA Portal without window (`[tia] start = "headless"` in `rung.toml`; `"never"` turns that off). Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works the same way, through a CODESYS without window: see [CODESYS](codesys.md).
 
 ## 4. Work two-way
 

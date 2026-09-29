@@ -177,6 +177,7 @@ export class Monitor implements vscode.Disposable {
 
   /** The PLC web server password: from RUNG_WEBAPI_PASSWORD, else asked once and kept in VS Code's secret storage. */
   private async password(): Promise<string | undefined> {
+    if (this.ws.config?.tiaVersion === "CODESYS") return ""; // CODESYS is read through rung's bridge, no web server
     if (process.env.RUNG_WEBAPI_PASSWORD) return process.env.RUNG_WEBAPI_PASSWORD;
     const kept = await this.secrets.get(this.secretKey());
     if (kept) return kept;

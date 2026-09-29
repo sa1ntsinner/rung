@@ -561,7 +561,7 @@ describe("syncOnce", () => {
       "plc/PLC_1/blocks/Fx_N.awl: plc/PLC_1/blocks/Fx_N.awl and plc/PLC_1/blocks/Fx_N.scl are the same object; keep one",
       "plc/PLC_1/blocks/Fx_N.scl: plc/PLC_1/blocks/Fx_N.awl and plc/PLC_1/blocks/Fx_N.scl are the same object; keep one",
       "plc/PLC_1/blocks/Motor%2fValve.scl: rung spells this file plc/PLC_1/blocks/Motor%2FValve.scl; rename it",
-      "plc/PLC_1/tags/Fx_T.scl: .scl files are not read in tags/ (.tags.xml)",
+      "plc/PLC_1/tags/Fx_T.scl: .scl files are not read in tags/ (.tags.xml, .st)",
     ]);
     expect(r.created + r.imported).toBe(0);
     expect(t.bridge.imports).toEqual([]);

@@ -188,6 +188,11 @@ export class BridgeClient {
     return this.request("objects.show", { address }) as Promise<{ shown: boolean }>;
   }
 
+  /** Values of a running application (CODESYS: its own IEC paths such as PLC_PRG.fbCount.nCount). Read-only. */
+  read(device: string, expressions: string[]): Promise<{ name: string; value?: unknown; error?: string }[]> {
+    return this.request("plc.read", { device, expressions }, 30_000) as Promise<{ name: string; value?: unknown; error?: string }[]>;
+  }
+
   async close(): Promise<void> {
     if (!this.exited) {
       this.child.stdin.end();
