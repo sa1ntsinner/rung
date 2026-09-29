@@ -8,3 +8,6 @@ obj/
 *.log
 TestResults/
 .rung-live/
+
+# local agent worktrees
+.claude/worktrees/
