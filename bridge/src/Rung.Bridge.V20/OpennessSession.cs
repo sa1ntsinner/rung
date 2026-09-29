@@ -537,6 +537,18 @@ namespace Rung.Bridge.V20
                             default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot export " + r.Entry.Address + " as XML");
                         }
                         return form;
+                    case "tags.st":
+                    {
+                        if (!(r.Obj is PlcTagTable)) throw new RpcException(ErrorCodes.BadRequest, "Only tag tables have the form tags.st");
+                        var converted = TagTableText.FromXml(TableXml(r));
+                        if (converted.Text == null)
+                        {
+                            warnings.Add(WarningCodes.TagsXmlFallback);
+                            return ExportInto(r, "tags.xml", dir, warnings);
+                        }
+                        File.WriteAllText(primary.FullName, converted.Text, new UTF8Encoding(false));
+                        return form;
+                    }
                     case "protected.yaml":
                         File.WriteAllText(primary.FullName, ProtectedYaml.Render(r.Entry), new UTF8Encoding(false));
                         return form;
@@ -662,6 +674,40 @@ namespace Rung.Bridge.V20
             return result;
         }
 
+        /// <summary>A tag table's SimaticML as TIA Portal exports it now.</summary>
+        static string TableXml(ObjectRef r)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "rung-tags-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var f = new FileInfo(Path.Combine(dir, "table.xml"));
+                ((PlcTagTable)r.Obj).Export(f, ExportOptions.None, DocumentInfoOptions.None);
+                return File.ReadAllText(f.FullName);
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>
+        /// The language a .tags.st file's comments go in: the one the table's comments are in now, else the project's
+        /// editing language. A table that now holds what the text cannot (comments in two languages) is refused.
+        /// </summary>
+        string CommentCulture(ObjectRef r)
+        {
+            if (r.Obj is PlcTagTable)
+            {
+                var now = TagTableText.FromXml(TableXml(r));
+                if (now.Reason != null)
+                    throw new RpcException(ErrorCodes.ImportFailed, "The table in TIA Portal now holds what the text form cannot (" + now.Reason + "); run rung pull to get it as .tags.xml. Nothing was changed");
+                if (now.Culture != null) return now.Culture;
+            }
+            try { return _project.LanguageSettings.EditingLanguage.Culture.Name; }
+            catch (EngineeringException) { return "en-US"; }
+        }
+
         /// <summary>The table as TIA Portal exports it now, to put back if an import fails half-way.</summary>
         string BackupTable(ObjectRef r, string operationId)
         {
@@ -720,7 +766,7 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.NameTaken, "\"" + parts.Name + "\" already exists at " + clash.Entry.Address + "; TIA Portal names are unique per PLC. To move a block to another folder, move it in TIA Portal and rung follows.");
             var allowed = parts.Kind == "block" ? new[] { "scl", "awl", "db", "s7dcl", "xml" }
                 : parts.Kind == "type" ? new[] { "udt", "s7dcl", "xml" }
-                : parts.Kind == "tagtable" ? new[] { "tags.xml" }
+                : parts.Kind == "tagtable" ? new[] { "tags.st", "tags.xml" }
                 : parts.Kind == "watchtable" ? new[] { "xml" } : new string[0];
             if (Array.IndexOf(allowed, form) < 0) throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create a " + parts.Kind + " from form " + form);
             return new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind, Fingerprint = "absent" }, Plc = Plc(parts.Device) };
@@ -1207,6 +1253,19 @@ namespace Rung.Bridge.V20
                     break;
                 case "tags.xml":
                     if (r.ParentGroup is PlcTagTableGroup tt) return tt.TagTables.Import(new FileInfo(path), ImportOptions.Override).Select(t => t.Name).ToList();
+                    break;
+                case "tags.st":
+                    if (r.ParentGroup is PlcTagTableGroup ts)
+                    {
+                        // the text becomes SimaticML; comments go in the language they are in now, else the editing language
+                        var name = AddressFormat.Parse(r.Entry.Address).Name;
+                        string xml;
+                        try { xml = TagTableText.ToXml(File.ReadAllText(path), name, CommentCulture(r), TiaVersion.Name); }
+                        catch (TagTableTextException e) { throw new RpcException(ErrorCodes.ImportFailed, e.Message + ". Nothing was changed"); }
+                        var tmp = Path.Combine(WorkDir(operationId, "src"), Stem + ".tags.xml");
+                        File.WriteAllText(tmp, xml, new UTF8Encoding(true));
+                        return ts.TagTables.Import(new FileInfo(tmp), ImportOptions.Override).Select(t => t.Name).ToList();
+                    }
                     break;
             }
             // watch tables are SimaticML too; force tables stay read-only (FormPolicy)

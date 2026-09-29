@@ -46,6 +46,8 @@ namespace Rung.Bridge.Core.Protocol
         public const string UnsupportedUnit = "UNSUPPORTED_UNIT";
         public const string Inconsistent = "INCONSISTENT";
         public const string SdFallback = "SD_FALLBACK";
+        /// <summary>A tag table stays SimaticML: the text form (.tags.st) would lose something it holds.</summary>
+        public const string TagsXmlFallback = "TAGS_XML_FALLBACK";
         /// <summary>TIA asked for a know-how password during the import; rung cancelled the prompt.</summary>
         public const string PasswordPromptCancelled = "PASSWORD_PROMPT_CANCELLED";
         /// <summary>The import is in TIA but saving the project failed; a TIA crash before the next save would lose it.</summary>

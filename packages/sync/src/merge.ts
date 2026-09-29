@@ -41,7 +41,7 @@ function markerLines(file: string[], base: string[], tia: string[]): string[] {
 }
 const markers = (a: string[], o: string[], b: string[]) => join(markerLines(a, o, b));
 
-export const SOURCE_FORMS = new Set(["scl", "awl", "db", "udt", "st", "yaml"]);
+export const SOURCE_FORMS = new Set(["scl", "awl", "db", "udt", "st", "tags.st", "yaml"]);
 
 export type BundleMerge = { kind: "clean"; files: Record<string, string> } | { kind: "conflict"; files: Record<string, string>; conflicts: number };
 

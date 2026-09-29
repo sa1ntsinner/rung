@@ -99,7 +99,7 @@ export async function findWorkspace(start: string): Promise<string> {
 }
 
 /** Warnings that describe how an object is mirrored, not a problem: they are printed but do not make the exit code 2. */
-const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "INCONSISTENT"]);
+const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT"]);
 export const isNotice = (code: string) => NOTICES.has(code);
 
 export function printWarnings(io: Io, warnings: readonly { address: string; code: string; message?: string }[]) {

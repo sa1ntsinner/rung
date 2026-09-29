@@ -28,6 +28,11 @@ export interface PullOptions {
 }
 
 const INCONSISTENT_HINT = "not compiled in TIA Portal since its last change (rung compile)";
+const EXPORT_HINTS: Readonly<Record<string, string>> = {
+  INCONSISTENT: INCONSISTENT_HINT,
+  SD_FALLBACK: "kept as SimaticML XML: SD text would lose something it holds (OB type, network titles or comments)",
+  TAGS_XML_FALLBACK: "kept as SimaticML XML (.tags.xml): the one-line-per-tag form would lose something it holds (comments in several languages, other settings)",
+};
 
 /** Bridge failures after which every remaining call would fail or wait for its own timeout. */
 export const FATAL_BRIDGE_CODES = new Set(["TIA_NOT_RUNNING", "PORTAL_DISPOSED", "BRIDGE_EXITED", "ACCESS_DENIED", "TIMEOUT", "OUTCOME_UNKNOWN", "DIALOG_REQUIRED"]);
@@ -110,7 +115,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
         state.remove(adoptedFrom);
         adopted.add(adoptedFrom);
       }
-      for (const w of staged.result.warnings ?? []) warn(entry.address, w, w === "INCONSISTENT" ? INCONSISTENT_HINT : undefined);
+      for (const w of staged.result.warnings ?? []) warn(entry.address, w, EXPORT_HINTS[w]);
       // re-verified objects without a fingerprint (force tables) whose bytes did not change are not "exported"
       if (plan.targets.length || plan.removes.length || !prev) report.exported++;
       else report.unchanged++;

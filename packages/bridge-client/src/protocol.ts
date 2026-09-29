@@ -37,6 +37,8 @@ export const WarningCodes = {
   UNSUPPORTED_UNIT: "UNSUPPORTED_UNIT",
   INCONSISTENT: "INCONSISTENT",
   SD_FALLBACK: "SD_FALLBACK",
+  /** a tag table stays .tags.xml: the text form would lose something it holds */
+  TAGS_XML_FALLBACK: "TAGS_XML_FALLBACK",
   /** TIA asked for a know-how password during an import (project has protected blocks); rung cancelled it. */
   PASSWORD_PROMPT_CANCELLED: "PASSWORD_PROMPT_CANCELLED",
   /** the import is in TIA, but saving the project failed */

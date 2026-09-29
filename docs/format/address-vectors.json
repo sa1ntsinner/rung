@@ -97,6 +97,12 @@
       "string": "plc:PLC_1/hardware/network",
       "form": "yaml",
       "path": "plc/PLC_1/hardware/network.yaml"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "tagtable", "groups": ["IO"], "name": "Inputs" },
+      "string": "plc:PLC_1/tags/IO/Inputs",
+      "form": "tags.st",
+      "path": "plc/PLC_1/tags/IO/Inputs.tags.st"
     }
   ],
   "invalidAddressStrings": [

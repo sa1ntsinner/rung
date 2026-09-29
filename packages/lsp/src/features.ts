@@ -2,8 +2,9 @@
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import type { BlockModel, Ref, VarDecl } from "./parser.js";
-import type { Member, WorkspaceIndex } from "./workspace.js";
+import { TAG_TEXT, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, unknownArgs } from "./calls.js";
+import { parseAbsolute } from "./assignments.js";
 
 export interface Location {
   uri: string;
@@ -91,10 +92,41 @@ function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref, uri: st
   return [];
 }
 
+/** Bits of the elementary types a PLC tag can have at an I, Q or M address. */
+const TYPE_BITS: Readonly<Record<string, number>> = {
+  BOOL: 1,
+  BYTE: 8, SINT: 8, USINT: 8, CHAR: 8,
+  WORD: 16, INT: 16, UINT: 16, WCHAR: 16, DATE: 16, S5TIME: 16,
+  DWORD: 32, DINT: 32, UDINT: 32, REAL: 32, TIME: 32, TIME_OF_DAY: 32, TOD: 32,
+  LWORD: 64, LINT: 64, ULINT: 64, LREAL: 64, LTIME: 64,
+};
+
+/** The same place with the size the type needs: %IW40 for a Bool → %I40.0, %I0.0 for an Int → %IW0. */
+function suggestAddress(a: { area: string; byte: number }, bits: number): string {
+  return bits === 1 || bits === 64 ? `%${a.area}${a.byte}.0` : `%${a.area}${({ 8: "B", 16: "W", 32: "D" } as Record<number, string>)[bits]}${a.byte}`;
+}
+
 export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnostic[] {
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
+  // a TIA tag table as text: TIA Portal keeps every PLC tag at an address
+  if (TAG_TEXT.test(uri))
+    for (const b of doc.parsed.blocks)
+      for (const v of b.vars) {
+        if (v.section === "Constant") continue;
+        if (!v.at) out.push({ start: v.start, end: v.end, severity: "error", message: `${v.name} has no address: a PLC tag is at an address (${v.name} AT %M10.0 : ${v.type};)`, code: "NO_ADDRESS" });
+        else if (!/^%[A-Za-z]{1,3}\d+(\.\d+)?$/.test(v.at)) out.push({ start: v.start, end: v.end, severity: "error", message: `${v.at} is not an address such as %I0.0, %QW4 or %MD10`, code: "BAD_ADDRESS" });
+        else {
+          // TIA Portal keeps a tag whose type does not fit its address, and shows it red
+          const a = parseAbsolute(v.at);
+          const bits = TYPE_BITS[v.type.toUpperCase()];
+          // 64-bit tags: TIA Portal has no L size and writes them at a bit address, %I1000.0
+          const fits = !a || !bits || a.bits === bits || (bits === 64 && a.bit === 0);
+          if (a && bits && !fits)
+            out.push({ start: v.start, end: v.end, severity: "error", message: `${v.name} is a ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`, code: "ADDRESS_SIZE" });
+        }
+      }
   // calls against the interface they call (TIA Portal's "Update block call")
   for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n))) {
     for (const a of unknownArgs(site))

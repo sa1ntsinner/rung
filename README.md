@@ -29,6 +29,7 @@ The [quickstart](docs/quickstart.md) walks through setup, including the Openness
 - An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
 - `rung test`, which runs YAML unit tests for SCL and LAD blocks on an offline simulator and prints JUnit. See [testing](docs/testing.md).
 - Compile, go online, compare with the PLC and download, from the terminal or the editor. A person starts every download and allows each risky question TIA asks by name. See [downloads](docs/downloads.md).
+- Tag tables as text, one tag per line (`Start AT %I0.0 : Bool;  // start button`), with the address and type checked as you type.
 - Network settings as a file: IP addresses, subnet masks, routers and PROFINET device names of the PLC and its IO devices in `hardware/network.yaml`.
 - Read-only views of hardware, HMI, technology objects and the project library (types, versions, which blocks are instances).
 

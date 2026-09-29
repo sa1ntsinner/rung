@@ -118,7 +118,7 @@ public class AdapterTests : IClassFixture<FixtureSession>
     [InlineData("plc:PLC_1/types/Fx_Types", "udt")]
     [InlineData("plc:PLC_1/blocks/Fx_Global", "db")]
     [InlineData("plc:PLC_1/blocks/Fx_Stl", "awl")]
-    [InlineData("plc:PLC_1/tags/Fx_Inputs", "tags.xml")]
+    [InlineData("plc:PLC_1/tags/Fx_Inputs", "tags.st")]
     public void ExportsEachKindInItsForm(string address, string form)
     {
         var r = _fx.Session.Export(address, "auto", Tmp());
@@ -268,6 +268,37 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
     }
 
     static string Tmp() => Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName;
+
+    [Fact] public void TagTableIsATextListThatGoesBothWays()
+    {
+        const string address = "plc:PLC_1/tags/Fx_Outputs";
+        var cur = _fx.Session.Export(address, "auto", Tmp());
+        Assert.Equal("tags.st", cur.Form);
+        var original = File.ReadAllText(cur.Files[0].Path).Replace("\r\n", "\n");
+        Assert.Contains("\nVAR_GLOBAL\n", original);
+        string Write(string text) { var p = Path.Combine(Tmp(), "obj.tags.st"); File.WriteAllText(p, text); return p; }
+        try
+        {
+            // unchanged text: the same table comes back
+            var same = _fx.Session.Import(address, "tags.st", Write(original), cur.Fingerprint, Guid.NewGuid().ToString());
+            Assert.Equal(cur.BundleHash, same.BundleHash);
+            // a new tag with a comment and an HMI setting, and a constant
+            var edited = original.Replace("END_VAR\n", "    \"Horn on\" {ExternalWritable := 'false'} AT %Q9.7 : Bool;  // warning horn\nEND_VAR\n\nVAR_GLOBAL CONSTANT\n    HornPulses : Int := 3;\nEND_VAR\n");
+            var after = _fx.Session.Import(address, "tags.st", Write(edited), same.Fingerprint, Guid.NewGuid().ToString());
+            Assert.Equal(edited, File.ReadAllText(after.Files[0].Path).Replace("\r\n", "\n"));
+            // a tag without an address: refused with its line, nothing changed
+            var ex = Assert.Throws<RpcException>(() => _fx.Session.Import(address, "tags.st", Write(edited.Replace(" AT %Q9.7", "")), after.Fingerprint, Guid.NewGuid().ToString()));
+            Assert.Equal("IMPORT_FAILED", ex.Code);
+            Assert.Contains("Horn on has no address", ex.Message);
+            Assert.Equal(after.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
+        }
+        finally
+        {
+            var now = _fx.Session.Export(address, "auto", Tmp());
+            _fx.Session.Import(address, "tags.st", Write(original), now.Fingerprint, Guid.NewGuid().ToString());
+        }
+        Assert.Equal(cur.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
+    }
 
     [Fact] public void CreatesANewBlockInANewFolderAndCompilesIt()
     {

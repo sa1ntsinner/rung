@@ -284,7 +284,7 @@ public class FormPolicyTests
     [InlineData("type", null, null, false, false, "udt")]
     [InlineData("type", null, null, false, true, "xml")]
     [InlineData("type", null, null, true, false, "protected.yaml")]
-    [InlineData("tagtable", null, null, false, false, "tags.xml")]
+    [InlineData("tagtable", null, null, false, false, "tags.st")]
     [InlineData("watchtable", null, null, false, false, "xml")]
     public void Chooses(string kind, string lang, string bt, bool khp, bool fs, string expected) =>
         Assert.Equal(expected, FormPolicy.Choose(new ObjectEntry { Kind = kind, Language = lang, BlockType = bt, KnowHowProtected = khp, IsFailsafe = fs }, new FormCapabilities { SdLad = true }));

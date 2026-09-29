@@ -13,7 +13,7 @@ Only when a person says so. `rung download` (or the editor's Download… button)
 Failsafe (F-) blocks, know-how-protected blocks, system blocks, GRAPH blocks and instances of library types are read-only in rung. Their files are generated for reading and review only; a library type is changed in TIA Portal's library (Edit type).
 
 **Which languages become text?**
-SCL, STL and data blocks/UDTs as sources; LAD as SIMATIC SD text (`.s7dcl`); other graphical blocks as SimaticML XML; tag tables and watch tables as XML; the network settings (IP addresses, PROFINET device names) as YAML. The rest of the hardware, HMI, technology objects and the project library appear as read-only YAML views.
+SCL, STL and data blocks/UDTs as sources; LAD as SIMATIC SD text (`.s7dcl`); other graphical blocks as SimaticML XML; tag tables as text with one tag per line (`.tags.st`), watch tables as XML; the network settings (IP addresses, PROFINET device names) as YAML. The rest of the hardware, HMI, technology objects and the project library appear as read-only YAML views.
 
 **Does it work without TIA Portal?**
 The language server, `rung test` and `rung views --offline` work on any OS with an existing workspace (for example in CI). Syncing needs Windows with TIA Portal running.

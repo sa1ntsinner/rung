@@ -168,7 +168,8 @@ export class WorkspaceIndex {
       g.set(k, [...(g.get(k) ?? []), s]);
     };
     for (const d of this.docs.values()) {
-      if (d.parsed)
+      if (d.parsed && TAG_TEXT.test(d.uri)) for (const t of tagsOfText(d)) add(t);
+      else if (d.parsed)
         for (const b of d.parsed.blocks) {
           add({ name: b.name, kind: b.kind, uri: d.uri, start: b.nameStart, end: b.nameEnd, block: b });
           if (b.kind === "GVL") for (const v of b.vars) add({ name: v.name, kind: "GVAR", uri: d.uri, start: v.start, end: v.end, gvar: { decl: v, list: b.name } });
@@ -289,6 +290,29 @@ async function isRungLayout(root: string): Promise<boolean> {
 }
 
 /** Extracts tags from a SimaticML tag-table export (regex-based; the files are machine-generated). */
+/** A TIA tag table as text (rung `*.tags.st`): an IEC global variable list whose entries are PLC tags. */
+export const TAG_TEXT = /\.tags\.st$/i;
+
+/** The table named by the file (`Fx_Inputs.tags.st` → Fx_Inputs). */
+export function tagTableName(uri: string): string {
+  return decodeURIComponent(uri.split("/").pop()!).replace(TAG_TEXT, "").replace(/%([0-9A-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** PLC tags and user constants of a `.tags.st` file, as parseTags gives them for SimaticML. */
+export function tagsOfText(d: Doc): GlobalSymbol[] {
+  const table = tagTableName(d.uri);
+  return (d.parsed?.blocks ?? []).flatMap((b) =>
+    b.vars.map((v) => ({
+      name: v.name,
+      kind: "TAG" as const,
+      uri: d.uri,
+      start: v.start,
+      end: v.end,
+      tag: { dataType: v.type, table, ...(v.at ? { address: v.at } : {}), ...(v.section === "Constant" && v.init !== undefined ? { value: v.init } : {}) },
+    })),
+  );
+}
+
 export function parseTags(xml: string, uri: string): GlobalSymbol[] {
   const out: GlobalSymbol[] = [];
   const table = /<SW\.Tags\.PlcTagTable[\s\S]*?<Name>([^<]*)<\/Name>/.exec(xml)?.[1] ?? "";

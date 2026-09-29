@@ -6,7 +6,7 @@ This folder is a text mirror of the TIA Portal project `{{PROJECT}}`, maintained
 ## Layout
 - `plc/<Device>/blocks/<folder>/…` — program blocks. `.scl` = SCL source, `.db` = data blocks, `.awl` = STL, `.s7dcl` + `.s7res` = LAD/FBD in SIMATIC SD format, `.xml` = SimaticML (GRAPH and fallbacks).
 - `plc/<Device>/types/…` — PLC data types (`.udt`).
-- `plc/<Device>/tags/…` — tag tables (`.tags.xml`).
+- `plc/<Device>/tags/…` — tag tables: `.tags.st`, one tag per line (`Start AT %I0.0 : Bool;  // comment`, constants in `VAR_GLOBAL CONSTANT`); `.tags.xml` where that text would lose something.
 - File names are escaped: `%2F` = `/`, `%3A` = `:`, `A~B` = block `B` in namespace `A`.
 - `.rung/` is machine state. Never edit it.
 

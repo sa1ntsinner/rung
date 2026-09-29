@@ -99,7 +99,7 @@ interface ImportJob {
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
 const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
-const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml", "st"]);
+const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml", "tags.st", "st"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 
 interface LocalFile {
@@ -191,7 +191,7 @@ function referencedNames(texts: string[], self: string): string[] {
 }
 
 function rankOf(form: string, texts: string[]): number {
-  if (form === "udt" || form === "tags.xml") return 0;
+  if (form === "udt" || form === "tags.xml" || form === "tags.st") return 0;
   if (form === "db") return 1;
   if (texts.some((t) => /^\s*ORGANIZATION_BLOCK\b/m.test(t))) return 3;
   return 2;

@@ -19,6 +19,8 @@ export interface VarDecl {
   members?: VarDecl[];
   init?: string;
   comment?: string;
+  /** Address of a located variable (`x AT %I0.0 : Bool`). */
+  at?: string;
 }
 
 export interface Ref {
@@ -227,9 +229,10 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       }
       next();
       while (peek().kind === "pragma") next();
+      let at: string | undefined;
       if (isKw(peek(), "AT")) {
         next();
-        next(); // overlaid variable
+        at = next().text; // %I0.0, %IX0.1, %Q* (located variable)
       }
       if (peek().text !== ":") {
         err(`Expected ':' after ${t.text}`, peek());
@@ -248,7 +251,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       const semi = peek();
       if (semi.text === ";") next();
       else err("Missing ';'", semi);
-      vars.push({ name: unquote(t.text), start: t.start, end: t.end, section: local, ...ty, ...(init !== undefined ? { init } : {}), ...(lineComment(t.end) ? { comment: lineComment(t.end)! } : {}) });
+      vars.push({ name: unquote(t.text), start: t.start, end: t.end, section: local, ...ty, ...(at ? { at } : {}), ...(init !== undefined ? { init } : {}), ...(lineComment(t.end) ? { comment: lineComment(t.end)! } : {}) });
     }
     return vars;
   }

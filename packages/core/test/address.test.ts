@@ -62,7 +62,7 @@ describe("addresses", () => {
     expect(ignoredSourceReason("plc/P/blocks/Trail.scl")).toBeUndefined(); // a source
     expect(ignoredSourceReason("plc/P/blocks/Fx.s7res")).toBeUndefined(); // a companion
     expect(ignoredSourceReason("plc/P/blocks/notes.txt")).toBeUndefined();
-    expect(ignoredSourceReason("plc/P/tags/T.scl")).toBe(".scl files are not read in tags/ (.tags.xml, .st)");
+    expect(ignoredSourceReason("plc/P/tags/T.scl")).toBe(".scl files are not read in tags/ (.tags.st, .tags.xml, .st)");
     expect(ignoredSourceReason("plc/P/stuff/X.scl")).toMatch(/^not in a folder rung mirrors \(plc\/<PLC>\/blocks\|types\|tags/);
   });
   it("rejects a form that does not fit the kind", () => {

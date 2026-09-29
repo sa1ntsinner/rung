@@ -52,7 +52,7 @@ rung watch         # keeps both sides in sync; Ctrl+C to stop
 - Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`.
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
-- Tag tables (`.tags.xml`) and watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
+- Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor flags a tag without an address or with a type that does not fit it. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
 - `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
 `rung sync` does one pass instead of watching; `rung status` shows what is open.

@@ -83,7 +83,7 @@ export class ProjectItem extends vscode.TreeItem {
     const compilable = !o.readOnly && (o.kind === "block" || o.kind === "type");
     if (compilable) tags.push("compilable");
     if (o.kind === "block" && (type === "FB" || type === "FC" || type === undefined) && !o.readOnly) tags.push("testable");
-    if (o.kind !== "tagtable") tags.push("openable");
+    if (o.kind !== "tagtable" || o.form === "tags.st") tags.push("openable"); // a SimaticML table is not for reading
     if (o.flag === "conflict" && o.status === "conflicted") tags.push("conflicted");
     if (o.readOnly) tags.push("readonly");
     this.contextValue = tags.join(" ");
