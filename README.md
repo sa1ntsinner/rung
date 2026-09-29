@@ -46,7 +46,7 @@ pnpm test                                         # TypeScript packages
 dotnet test bridge/tests/Rung.Bridge.Core.Tests   # bridge core, no TIA Portal needed
 ```
 
-The live tests against TIA Portal run headless, without windows or prompts. The steps are in [docs/STATUS.md](docs/STATUS.md), and what we learned about Openness V20 along the way is in [docs/facts](docs/facts/openness-v20.md).
+The live tests against TIA Portal run headless, without windows or prompts; the steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>
 

@@ -15,10 +15,12 @@
 param(
     [string]$FixtureDir = $(if ($env:RUNG_FIXTURE_DIR) { $env:RUNG_FIXTURE_DIR } else { Join-Path $env:USERPROFILE 'rung-fixtures' }),
     [string]$OpennessDir = 'C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20',
+    [string]$Name = 'RungFixture',
+    [switch]$WithUserInterface,
     [switch]$Stop
 )
 $ErrorActionPreference = 'Stop'
-$target = Join-Path $FixtureDir 'RungFixture'
+$target = Join-Path $FixtureDir $Name
 $stopFile = Join-Path $target '.rung-host.stop'
 $readyFile = Join-Path $target '.rung-host.ready'
 
@@ -34,10 +36,12 @@ if (-not (Test-Path (Join-Path $target '.rung-fixture'))) { throw "$target is no
 try { Add-Type -Path (Join-Path $OpennessDir 'Siemens.Engineering.dll') } catch [System.Reflection.ReflectionTypeLoadException] { }
 
 Remove-Item $stopFile, $readyFile -ErrorAction SilentlyContinue
-$tia = New-Object Siemens.Engineering.TiaPortal([Siemens.Engineering.TiaPortalMode]::WithoutUserInterface)
+$tiaMode = if ($WithUserInterface) { [Siemens.Engineering.TiaPortalMode]::WithUserInterface } else { [Siemens.Engineering.TiaPortalMode]::WithoutUserInterface }
+$tia = New-Object Siemens.Engineering.TiaPortal($tiaMode)
+$proc = $null
 try {
-    $project = $tia.Projects.Open((New-Object IO.FileInfo((Join-Path $target 'RungFixture.ap20'))))
-    $proc = [Siemens.Engineering.TiaPortal]::GetProcesses() | Where-Object { $_.Mode -eq 'WithoutUserInterface' -and $_.ProjectPath -and $_.ProjectPath.FullName -eq $project.Path.FullName } | Select-Object -First 1
+    $project = $tia.Projects.Open((New-Object IO.FileInfo((Join-Path $target ($Name + '.ap20')))))
+    $proc = [Siemens.Engineering.TiaPortal]::GetProcesses() | Where-Object { $_.Mode -eq $tiaMode -and $_.ProjectPath -and $_.ProjectPath.FullName -eq $project.Path.FullName } | Select-Object -First 1
     Set-Content -Path $readyFile -Value "$($proc.Id)" -Encoding ASCII
     Write-Output "FIXTURE HOST READY tia-pid=$($proc.Id) $($project.Path.FullName)"
     while (-not (Test-Path $stopFile)) { Start-Sleep -Seconds 1 }
@@ -45,5 +49,7 @@ try {
 }
 finally {
     $tia.Dispose()
+    # Dispose only detaches from a TIA Portal with user interface; this host started it, so it ends it
+    if ($WithUserInterface -and $proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item $stopFile, $readyFile -ErrorAction SilentlyContinue
 }

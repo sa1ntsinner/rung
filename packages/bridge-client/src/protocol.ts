@@ -128,13 +128,13 @@ export interface CompileMessage {
   description: string;
   line?: number;
   column?: number;
-  /** line counted from the line after BEGIN, as TIA reports it (fact F7) */
+  /** line counted from the line after BEGIN, as TIA reports it */
   bodyLine?: number;
   /** "body" or "interface" */
   section?: string;
 }
 
-/** Where to connect; names as TIA shows them in "Extended download" (docs/decisions/0002-plc-actions.md). */
+/** Where to connect; names as TIA shows them in "Extended download" (docs/downloads.md). */
 export interface ConnectionTarget {
   mode: string;
   pcInterface: string;

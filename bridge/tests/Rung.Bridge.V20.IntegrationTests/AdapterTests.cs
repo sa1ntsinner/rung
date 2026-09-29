@@ -216,7 +216,7 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
 
     [Fact] public void RepeatedInventoriesReuseFingerprintsButSeeChanges()
     {
-        // QA-10: an idle watch must not recompute every fingerprint on every pass
+        // an idle watch must not recompute every fingerprint on every pass
         _fx.Session.ListObjects("PLC_1");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var first = _fx.Session.ListObjects("PLC_1").ToDictionary(o => o.Address, o => o.Fingerprint);
@@ -252,7 +252,7 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
 
     [Fact] public void ACopyInAnotherFolderNeverOverwritesTheOriginal()
     {
-        // QA-1: GenerateBlocksFromSource replaces a same-named block wherever it lives
+        // GenerateBlocksFromSource replaces a same-named block wherever it lives
         var original = "plc:PLC_1/blocks/20_Valves/Fx_Valve";
         var before = _fx.Session.Export(original, "auto", Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N")));
         var copy = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
@@ -285,7 +285,7 @@ public class XRefAdapterTests : IClassFixture<FixtureSession>
     {
         _fx.Session.ListObjects("PLC_1");
         var entries = _fx.Session.XRef("plc:PLC_1/blocks/Fx_Global");
-        Assert.NotNull(entries); // shape is recorded as fact F14; content depends on fixture usage
+        Assert.NotNull(entries); // content depends on fixture usage
     }
 }
 

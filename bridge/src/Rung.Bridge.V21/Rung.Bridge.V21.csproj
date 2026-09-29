@@ -2,7 +2,7 @@
   <!-- SPDX-License-Identifier: BUSL-1.1 -->
   <!--
     TIA Portal V21 adapter: the V20 sources compiled against the modular V21 Openness assemblies
-    (PublicAPI\V21\net48). UNVERIFIED until built on a host with V21 installed (fact sheet F15/F16).
+    (PublicAPI\V21\net48). Not yet built against an installed V21.
     Not part of Rung.Bridge.sln so machines without V21 keep building.
   -->
   <PropertyGroup>

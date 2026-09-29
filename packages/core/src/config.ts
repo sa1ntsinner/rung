@@ -27,7 +27,7 @@ export interface RungConfig {
   tia: { start: "headless" | "never" };
   /** Connection per PLC for online and download ([plc.<device>] in rung.toml; see rung interfaces). */
   plc: Record<string, PlcConnection>;
-  /** How downloads behave (docs/decisions/0002-plc-actions.md). A person always starts a download. */
+  /** How downloads behave (docs/downloads.md). A person always starts a download. */
   download: DownloadSettings;
   /** Optional live-data sources (read-only). Passwords never live in rung.toml: RUNG_WEBAPI_PASSWORD. */
   live?: { webapi?: { url: string; user: string; insecure?: boolean } };

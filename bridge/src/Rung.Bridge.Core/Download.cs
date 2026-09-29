@@ -97,7 +97,7 @@ namespace Rung.Bridge.Core
     }
 
     /// <summary>
-    /// Answers TIA's download questions (docs/decisions/0002-plc-actions.md). Default answer: the one that
+    /// Answers TIA's download questions (docs/downloads.md). Default answer: the one that
     /// cancels the download. A question is accepted only when its name is allowed.
     /// </summary>
     public static class DownloadPolicy

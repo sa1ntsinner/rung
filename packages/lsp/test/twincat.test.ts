@@ -53,7 +53,7 @@ describe("TwinCAT sources", () => {
   });
 });
 
-describe("IEC workspaces (QA-23)", () => {
+describe("IEC workspaces", () => {
   const FB = `FUNCTION_BLOCK FB_Axis
 VAR_INPUT
   bEnable : BOOL;

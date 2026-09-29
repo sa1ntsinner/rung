@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Online, download, connection listing and "show in TIA Portal" (docs/decisions/0002-plc-actions.md).
-// UNVERIFIED against a real PLC or S7-PLCSIM: written from the V20 Openness API surface (reflection) and
-// Siemens' documented flow; the answers to TIA's download questions come from DownloadPolicy.
+// Online, download, connection listing and "show in TIA Portal" (docs/downloads.md).
+// The answers to TIA's download questions come from DownloadPolicy.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,8 +39,11 @@ namespace Rung.Bridge.V20
             var compiler = target.GetService<ICompilable>() ?? item.GetService<ICompilable>();
             if (compiler == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " cannot be compiled as hardware");
             var messages = new List<CompileMessage>();
-            try { Flatten(compiler.Compile().Messages, null, new Dictionary<string, string>(), messages); }
-            catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+            using (OfflineFor(device))
+            {
+                try { Flatten(compiler.Compile().Messages, null, new Dictionary<string, string>(), messages); }
+                catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+            }
             return messages;
         }
 
@@ -50,6 +52,7 @@ namespace Rung.Bridge.V20
             Alive();
             var provider = CpuItem(device).GetService<OnlineProvider>();
             if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
+            string reached = null;
             try
             {
                 switch (action)
@@ -57,11 +60,25 @@ namespace Rung.Bridge.V20
                     case "state":
                         break;
                     case "online":
+                        if (provider.State == OnlineState.Online) break;
+                        // NotReachable, Connecting and friends still count as online mode for Openness: leave it first
+                        GoOfflineQuietly(provider);
                         if (target != null && !string.IsNullOrEmpty(target.Mode))
                             provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
                         else if (!provider.Configuration.IsConfigured)
                             throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
-                        provider.GoOnline();
+                        try { provider.GoOnline(); }
+                        catch (EngineeringException)
+                        {
+                            GoOfflineQuietly(provider);
+                            throw;
+                        }
+                        // a half-open connection (not reachable, wrong device) would block compile and download
+                        if (provider.State != OnlineState.Online)
+                        {
+                            reached = provider.State.ToString();
+                            GoOfflineQuietly(provider);
+                        }
                         break;
                     case "offline":
                         provider.GoOffline();
@@ -71,7 +88,46 @@ namespace Rung.Bridge.V20
                 }
             }
             catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
-            return new OnlineStatus { Device = device, State = provider.State.ToString() };
+            return new OnlineStatus { Device = device, State = reached ?? provider.State.ToString() };
+        }
+
+        static void GoOfflineQuietly(OnlineProvider provider)
+        {
+            if (provider.State == OnlineState.Offline) return;
+            try { provider.GoOffline(); } catch (EngineeringException) { }
+        }
+
+        /// <summary>
+        /// Openness refuses compile, import and download while TIA Portal is in online mode with the CPU (the
+        /// TIA Portal window allows them). The scope leaves online mode and goes back online when disposed.
+        /// </summary>
+        IDisposable OfflineFor(string device)
+        {
+            OnlineProvider provider = null;
+            try { provider = CpuItem(device).GetService<OnlineProvider>(); }
+            catch (RpcException) { }
+            catch (EngineeringException) { }
+            return new OfflineScope(provider);
+        }
+
+        sealed class OfflineScope : IDisposable
+        {
+            readonly OnlineProvider _provider;
+            readonly bool _restore;
+
+            public OfflineScope(OnlineProvider provider)
+            {
+                _provider = provider;
+                if (provider == null || provider.State == OnlineState.Offline) return;
+                _restore = provider.State == OnlineState.Online;
+                GoOfflineQuietly(provider);
+            }
+
+            public void Dispose()
+            {
+                if (!_restore) return;
+                try { _provider.GoOnline(); } catch (EngineeringException) { }
+            }
         }
 
         public ConnectionOptions Connections(string device, bool scan)
@@ -128,6 +184,7 @@ namespace Rung.Bridge.V20
             var outcome = new DownloadOutcome { Device = request.Device };
             DownloadConfigurationDelegate pre = c => Answer(c, "pre", request, outcome);
             DownloadConfigurationDelegate post = c => Answer(c, "post", request, outcome);
+            using (OfflineFor(request.Device))
             try
             {
                 var result = provider.Download(target, pre, post, options);

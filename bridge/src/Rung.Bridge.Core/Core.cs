@@ -16,7 +16,7 @@ namespace Rung.Bridge.Core
         IReadOnlyList<ObjectEntry> ListObjects(string device);
         /// <param name="form">A TextForm or "auto" (FormPolicy).</param>
         ExportResult Export(string address, string form, string targetDir);
-        /// <summary>Guarded import (fixture-only in M1). expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>
+        /// <summary>Guarded import. expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>
         ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId);
         /// <summary>Compiles the given objects (or the whole PLC when addresses is empty) and flattens the messages.</summary>
         IReadOnlyList<CompileMessage> Compile(string device, string[] addresses);
@@ -32,7 +32,7 @@ namespace Rung.Bridge.Core
         OnlineStatus Online(string device, string action, ConnectionTarget target);
         /// <summary>Modes, PG/PC interfaces and target interfaces TIA offers; scan also lists reachable devices.</summary>
         ConnectionOptions Connections(string device, bool scan);
-        /// <summary>Downloads to the PLC, answering TIA's questions with DownloadPolicy (docs/decisions/0002).</summary>
+        /// <summary>Downloads to the PLC, answering TIA's questions with DownloadPolicy (docs/downloads.md).</summary>
         DownloadOutcome Download(DownloadRequest request);
         /// <summary>Opens the object's editor in the TIA Portal window (needs a TIA Portal with user interface).</summary>
         void Show(string address);

@@ -4,7 +4,7 @@ using System.Linq;
 using Rung.Bridge.Core;
 using Xunit;
 
-// docs/decisions/0002-plc-actions.md: every download question is answered "don't" unless allowed.
+// docs/downloads.md: every download question is answered "don't" unless allowed.
 public class DownloadPolicyTests
 {
     static readonly string[] None = new string[0];

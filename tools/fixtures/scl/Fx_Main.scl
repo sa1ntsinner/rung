@@ -1,0 +1,10 @@
+ORGANIZATION_BLOCK "Main"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+	// counts cycles, so a PLC or PLCSIM running this program shows a changing value
+	"Fx_Global".Count := "Fx_Global".Count + 1;
+	"Fx_Global".Ready := TRUE;
+	"Fx_CounterDB"(Pulse := "Fx_Global".Ready, Reset := FALSE);
+END_ORGANIZATION_BLOCK

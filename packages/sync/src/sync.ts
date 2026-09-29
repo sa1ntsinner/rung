@@ -157,7 +157,7 @@ function rankOf(form: string, texts: string[]): number {
 }
 
 /**
- * Writes this pass's diagnostics. Compile messages of earlier passes stay (QA-4) while their object was not
+ * Writes this pass's diagnostics. Compile messages of earlier passes stay while their object was not
  * compiled again and still has the TIA revision they were produced for: a broken block stays red.
  */
 async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Diagnostic) => boolean = () => false): Promise<number> {
@@ -425,7 +425,7 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
       diag({ address: job.address, path: primaryPath, severity: "error", code: "DEPENDENCY_BLOCKED", message: cyclic.has(job.address) ? "Cyclic dependency between changed objects; import them together with rung sync --batch (not automatic)" : `Waiting for ${blockedBy!.address}, which could not be imported` });
       continue;
     }
-    // QA-7: a file saved in another encoding (e.g. Windows-1252) would lose its umlauts on the way to TIA
+    // a file saved in another encoding (e.g. Windows-1252) would lose its umlauts on the way to TIA
     if (Object.values(job.bundle).some((t) => t.includes("�"))) {
       const bad = [];
       for (const c of job.captured) if (!isUtf8(await readFile(rel2abs(root, c.path)).catch(() => Buffer.alloc(0)))) bad.push(c.path);
@@ -543,7 +543,7 @@ export async function resolveConflict(root: string, state: StateStore, path: str
   const tiaFingerprint = st.conflict?.tiaFingerprint ?? st.tiaFingerprint;
   const recoveryDir = join(root, ".rung", "recovery", "resolve-" + randomUUID());
   if (st.conflict?.deletedInTia) {
-    // QA-5: the object no longer exists in TIA Portal
+    // the object no longer exists in TIA Portal
     if (mode === "theirs") {
       // accept the delete: the edited files go to recovery, nothing is lost
       for (const f of st.files) {
@@ -569,7 +569,7 @@ export async function resolveConflict(root: string, state: StateStore, path: str
       const primary = await readFile(rel2abs(root, f.path), "utf8").catch(() => "");
       const merged = await readFile(rel2abs(root, f.path + ".conflict"), "utf8").catch(() => null);
       if (mode === "merged" && merged !== null && !markers.test(merged)) {
-        // QA-3: the user merged inside the .conflict file; it becomes the file (the old one is kept for recovery)
+        // the user merged inside the .conflict file; it becomes the file (the old one is kept for recovery)
         await replaceGuarded(rel2abs(root, f.path), Buffer.from(merged, "utf8"), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
       } else if (markers.test(primary)) {
         throw new WorkspaceError("CONFIG_INVALID", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);

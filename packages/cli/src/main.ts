@@ -167,7 +167,7 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
     return 1;
   }
   const config = await loadConfig(dir);
-  // QA-11: doctor imports over every object; running next to rung watch makes both fail. Take the state lock.
+  // doctor imports over every object; running next to rung watch makes both fail. Take the state lock.
   const state = await openState(dir, config);
   const client = await bridgeFor(config, io, ["--allow-fixture-import"]);
   try {

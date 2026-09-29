@@ -15,4 +15,4 @@ every source file carries an SPDX-License-Identifier header.
   Commercial                                pro/ (not part of this repository's
                                             public distribution)
 
-See docs/decisions/0001-licensing.md for the reasoning.
+See docs/faq.md for what this means in practice.

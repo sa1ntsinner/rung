@@ -143,7 +143,7 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
   io.stdout(`${s.objects} objects, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
   for (const [label, list] of [["conflicted", s.conflicted], ["file dirty", s.fileDirty], ["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
-  // compile errors TIA reported and that still apply (QA-4)
+  // compile errors TIA reported and that still apply
   let compileErrors: { path?: string; line?: number; message: string; severity: string; code: string }[] = [];
   try {
     compileErrors = ((JSON.parse(await readFile(join(dir, ".rung", "diagnostics.json"), "utf8")) as { items?: typeof compileErrors }).items ?? []).filter((d) => d.code === "COMPILE" && d.severity === "error" && !/^Compiling finished/.test(d.message));

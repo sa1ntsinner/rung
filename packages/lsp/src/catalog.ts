@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Built-in knowledge written for rung from the IEC 61131-3 standard: keywords, elementary types,
-// standard functions and function blocks. No vendor documentation is copied; the full Siemens
-// instruction catalog is generated at runtime from the user's own installation (M3.3).
+// standard functions and function blocks. No vendor documentation is copied; the Siemens
+// instruction catalog is not bundled.
 
 export interface CatalogParam {
   name: string;

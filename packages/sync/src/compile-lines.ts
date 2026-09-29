@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Maps TIA compiler positions to lines of the workspace file.
-// Fact F7 (docs/facts/openness-v20.md): V20 reports body messages with the line number counted from the line
+// Fact F7: V20 reports body messages with the line number counted from the line
 // after BEGIN, and declaration messages with the path "Interface". The workspace file is TIA's own source
 // export, so BEGIN is the same line TIA counts from.
 

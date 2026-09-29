@@ -80,7 +80,7 @@ namespace Rung.Bridge.Core
 
         public static void Check(bool allowed, string projectFilePath)
         {
-            if (!allowed) throw new RpcException(ErrorCodes.ReadOnly, "Imports are disabled. rung M1 imports only into generated fixture projects (--allow-fixture-import).");
+            if (!allowed) throw new RpcException(ErrorCodes.ReadOnly, "Imports are disabled; start the bridge with --allow-import (or --allow-fixture-import for generated fixture projects).");
             var dir = Path.GetDirectoryName(projectFilePath) ?? "";
             var marker = Path.Combine(dir, MarkerName);
             if (!File.Exists(marker) || !File.ReadAllText(marker).StartsWith(MarkerContent, StringComparison.Ordinal))

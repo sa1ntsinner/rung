@@ -11,7 +11,7 @@ namespace Rung.Bridge.V20
         public string ProjectPath;
         public bool AllowFixtureImport;
         public bool AllowImport;
-        /// <summary>Save the project after every successful import, so a TIA crash cannot silently undo what rung wrote (QA-2).</summary>
+        /// <summary>Save the project after every successful import, so a TIA crash cannot silently undo what rung wrote.</summary>
         public bool SaveAfterImport;
         /// <summary>When no TIA Portal has the project open, open it in a TIA Portal without window, owned by this bridge.</summary>
         public bool OpenHeadless;

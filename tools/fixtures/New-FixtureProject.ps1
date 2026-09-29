@@ -7,15 +7,20 @@
   blocks, an optional LAD FC (xml\Fx_LadInterlock.xml), tag tables and a deliberately broken block.
   Writes .rung-fixture (the marker that allows rung imports) and fixture-manifest.json.
   Idempotent: an existing target is deleted only if it carries the marker.
+  -Runnable builds a program that compiles cleanly and runs (no broken block, an OB1 that counts cycles),
+  for downloads to S7-PLCSIM; use it with another -Name, e.g. RungPlcsim.
   Must run in Windows PowerShell 5.1 (.NET Framework), as a member of "Siemens TIA Openness".
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\fixtures\New-FixtureProject.ps1
+  powershell -ExecutionPolicy Bypass -File tools\fixtures\New-FixtureProject.ps1 -Name RungPlcsim -Runnable
 #>
 [CmdletBinding()]
 param(
     [string]$FixtureDir = $(if ($env:RUNG_FIXTURE_DIR) { $env:RUNG_FIXTURE_DIR } else { Join-Path $env:USERPROFILE 'rung-fixtures' }),
     [string]$OpennessDir = 'C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20',
     [string]$CpuOrderNumber = '6ES7 516-3AN02-0AB0',
+    [string]$Name = 'RungFixture',
+    [switch]$Runnable,
     [switch]$WithUserInterface,
     [switch]$KeepOpen
 )
@@ -23,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -eq 'Core') { throw 'Run this script with Windows PowerShell 5.1 (powershell.exe), not pwsh.' }
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$target = Join-Path $FixtureDir 'RungFixture'
+$target = Join-Path $FixtureDir $Name
 $marker = Join-Path $target '.rung-fixture'
 
 try { Add-Type -Path (Join-Path $OpennessDir 'Siemens.Engineering.dll') } catch [System.Reflection.ReflectionTypeLoadException] { }
@@ -47,7 +52,7 @@ function Import-Source($plc, [string]$path, $group, [string]$option = 'None') {
     $name = 'fx_' + [IO.Path]::GetFileNameWithoutExtension($path) -replace '[^A-Za-z0-9_]', '_'
     # Openness requires UTF-8 with BOM for sources with non-ASCII characters.
     $tmp = Join-Path $env:TEMP ("rung-fx-" + [guid]::NewGuid().ToString('N') + [IO.Path]::GetExtension($path))
-    # CRLF: with LF endings TIA adds a blank line at both ends of every SCL body (docs/facts/openness-v20.md, F20)
+    # CRLF: with LF endings TIA adds a blank line at both ends of every SCL body
     $text = [IO.File]::ReadAllText($path) -replace "`r`n", "`n" -replace "`n", "`r`n"
     [IO.File]::WriteAllText($tmp, $text, (New-Object Text.UTF8Encoding($true)))
     $src = $plc.ExternalSourceGroup.ExternalSources.CreateFromFile($name, $tmp)
@@ -70,8 +75,11 @@ $tia = New-Object Siemens.Engineering.TiaPortal($mode)
 $ok = $false
 $manifest = [ordered]@{ generatedAt = (Get-Date).ToString('o'); tia = 'V20'; addresses = @(); skipped = @() }
 try {
-    $project = $tia.Projects.Create((New-Object IO.DirectoryInfo($FixtureDir)), 'RungFixture')
+    $project = $tia.Projects.Create((New-Object IO.DirectoryInfo($FixtureDir)), $Name)
     Set-Content -Path $marker -Value 'rung-fixture-v1' -Encoding ASCII -NoNewline
+    # S7-PLCSIM only accepts programs compiled with simulation support
+    $project.IsSimulationDuringBlockCompilationEnabled = $true
+    $manifest.runnable = [bool]$Runnable
 
     # --- CPU: pick the newest firmware of the order number in the installed catalog
     $entries = @($tia.HardwareCatalog.Find($CpuOrderNumber) | Where-Object { $_.TypeIdentifier -like "OrderNumber:$CpuOrderNumber/*" })
@@ -81,6 +89,17 @@ try {
     $device = $project.Devices.CreateWithItem($typeId, 'PLC_1', 'PLC_1')
     $plc = Find-PlcSoftware $device.DeviceItems
     if (-not $plc) { throw 'No PLC software found on the created device.' }
+
+    # --- security the TIA Portal wizard would set for a lab PLC: no configuration-data password, full access,
+    # no secure-only PG/PC communication. Without it the hardware does not compile and nothing can be downloaded.
+    $cpuItem = $device.DeviceItems | Where-Object { Get-Service2 $_ ([Siemens.Engineering.HW.Features.SoftwareContainer]) } | Select-Object -First 1
+    try {
+        $secret = Get-Service2 $cpuItem ([Siemens.Engineering.HW.Features.PlcMasterSecretConfigurator])
+        if ($secret -and "$($secret.MasterSecretConfiguration)" -ne 'None') { $secret.Unprotect() }
+        $access = Get-Service2 $cpuItem ([Siemens.Engineering.HW.Features.PlcAccessLevelProvider])
+        if ($access) { $access.PlcProtectionAccessLevel = [Siemens.Engineering.HW.PlcProtectionAccessLevel]::FullAccess }
+        $cpuItem.SetAttribute('CommunicationMode', [uint32]0)
+    } catch { $manifest.skipped += "CPU security settings: $($_.Exception.Message)" }
 
     # --- folders
     $drives = $plc.BlockGroup.Groups.Create('10_Drives')
@@ -100,8 +119,14 @@ try {
     $manifest.addresses += 'plc:PLC_1/blocks/20_Valves/Fx_Valve'
     Import-Source $plc (Join-Path $here 'scl\Fx_Stl.awl') $null
     $manifest.addresses += 'plc:PLC_1/blocks/Fx_Stl'
-    Import-Source $plc (Join-Path $here 'scl\Fx_Broken.scl') $null 'KeepOnError'
-    $manifest.addresses += 'plc:PLC_1/blocks/Fx_Broken'
+    if ($Runnable) {
+        Import-Source $plc (Join-Path $here 'scl\Fx_CounterDB.db') $null
+        $manifest.addresses += 'plc:PLC_1/blocks/Fx_CounterDB'
+        Import-Source $plc (Join-Path $here 'scl\Fx_Main.scl') $null
+    } else {
+        Import-Source $plc (Join-Path $here 'scl\Fx_Broken.scl') $null 'KeepOnError'
+        $manifest.addresses += 'plc:PLC_1/blocks/Fx_Broken'
+    }
 
     # --- know-how protected block (fixture-only password)
     Import-Source $plc (Join-Path $here 'scl\Fx_Secret.scl') $null

@@ -56,7 +56,7 @@ namespace Rung.Bridge.Core.Model
         public string Description;
         public int? Line;
         public int? Column;
-        /// <summary>Line counted from the line after BEGIN, as TIA reports it (fact F7); the client maps it to a file line.</summary>
+        /// <summary>Line counted from the line after BEGIN, as TIA reports it; the client maps it to a file line.</summary>
         public int? BodyLine;
         /// <summary>"body" or "interface" when TIA says where in the block the message belongs.</summary>
         public string Section;

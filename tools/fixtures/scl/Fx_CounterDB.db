@@ -1,0 +1,9 @@
+DATA_BLOCK "Fx_CounterDB"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+"Fx_Counter"
+
+BEGIN
+
+END_DATA_BLOCK

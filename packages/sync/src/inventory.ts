@@ -46,7 +46,7 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
   for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BINDING_MISMATCH", `device ${d} not found in project`);
   for (const u of info.units ?? []) {
     const [dev, unit] = u.split("/");
-    if (dev && unit && devices.includes(dev)) w(`plc:${dev}/units/${unit}`, "UNSUPPORTED_UNIT", "software units are mirrored from M5 on");
+    if (dev && unit && devices.includes(dev)) w(`plc:${dev}/units/${unit}`, "UNSUPPORTED_UNIT", "software units are not mirrored yet");
   }
 
   await sweepTempFiles(root);
@@ -74,7 +74,7 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
         continue;
       }
       if (address.unit !== undefined) {
-        w(entry.address, "UNSUPPORTED_UNIT", "software units are mirrored from M5 on");
+        w(entry.address, "UNSUPPORTED_UNIT", "software units are not mirrored yet");
         skipped.add(entry.address);
         continue;
       }

@@ -107,14 +107,14 @@ describe("parse structure", () => {
     expect(r.blocks[0]!.vars.map((v) => v.name)).toEqual(["A", "B", "Q"]);
   });
 
-  it("parses a standard-access DB declared with STRUCT … END_STRUCT (QA-24)", () => {
+  it("parses a standard-access DB declared with STRUCT … END_STRUCT", () => {
     const r = parse('DATA_BLOCK "S"\n{ S7_Optimized_Access := \'FALSE\' }\nVERSION : 0.1\nNON_RETAIN\n   STRUCT\n      Limits : Struct\n         MaxCurrent : Int;\n      END_STRUCT;\n      Flag : Bool;\n   END_STRUCT;\n\nBEGIN\n   Flag := TRUE;\nEND_DATA_BLOCK\n');
     expect(r.diagnostics).toEqual([]);
     expect(r.blocks[0]!.vars.map((v) => v.name)).toEqual(["Limits", "Flag"]);
     expect(r.blocks[0]!.vars[0]!.members!.map((m) => m.name)).toEqual(["MaxCurrent"]);
   });
 
-  it("indexes the interface of STL sources but ignores the STL body (QA-24)", () => {
+  it("indexes the interface of STL sources but ignores the STL body", () => {
     const src = 'FUNCTION "S" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = with brackets\n      A(;\n      A "Db".x;\n      O #a;\n      );\n      L s5t#10ms;\n      = "Db".y;\n      JC m001;\nm001: NOP 0;\nEND_FUNCTION\n';
     for (const r of [parse(src, { dialect: "stl" }), parse(src)]) {
       expect(r.diagnostics).toEqual([]);
@@ -139,7 +139,7 @@ describe("parse structure", () => {
     ]);
   });
 
-  it("collects DB start values with member paths as references to the DB's variables (QA-21)", () => {
+  it("collects DB start values with member paths as references to the DB's variables", () => {
     const b = parse('DATA_BLOCK "D"\nVAR\n  Plug : Struct\n    Delay_time : S5Time;\n  END_STRUCT;\nEND_VAR\nBEGIN\n   Plug.Delay_time := S5T#1s;\n   arr[1].x := 16#2;\nEND_DATA_BLOCK\n').blocks[0]!;
     expect(b.refs.map((r) => [r.kind, r.name, r.members.map((m) => m.name).join("."), r.access])).toEqual([
       ["local", "Plug", "Delay_time", "write"],

@@ -74,7 +74,7 @@ describe("rung test runner", () => {
     expect(r.cases[0]!.error).toMatch(/unknown step "jump"/);
   });
 
-  it("runs every key of a multi-key step in the order set, cycle, advance, expect (QA-17)", async () => {
+  it("runs every key of a multi-key step in the order set, cycle, advance, expect", async () => {
     const r = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - expect: { Running: true }\n        cycle: 1\n        set: { Start: true }\n  - steps:\n      - cycle: 1\n        expect: { Running: true }\n");
     expect(r.cases.map((c) => [c.passed, c.error])).toEqual([
       [true, undefined],

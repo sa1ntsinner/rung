@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// rung compile / online / interfaces / download / open (docs/decisions/0002-plc-actions.md).
+// rung compile / online / interfaces / download / open (docs/downloads.md).
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";

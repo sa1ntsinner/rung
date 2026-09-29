@@ -2,7 +2,7 @@
 using Rung.Bridge.Core;
 using Xunit;
 
-// Shapes seen live on V20 (docs/facts/openness-v20.md, F7): PLC_1 > "Program blocks" > "Fx_Broken (FC3)" > "3".
+// Shapes seen live on V20: PLC_1 > "Program blocks" > "Fx_Broken (FC3)" > "3".
 public class CompilePathTests
 {
     [Theory]

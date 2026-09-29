@@ -32,7 +32,7 @@ namespace Rung.Bridge.V20
 
     public sealed partial class OpennessSession : ITiaSession, IDisposable
     {
-        // V20 facts (docs/facts/openness-v20.md): SD documents for LAD, not FBD.
+        // V20: SD documents for LAD, not FBD.
         static readonly FormCapabilities Caps = new FormCapabilities { SdLad = true, SdFbd = false, SourceStl = true };
         const string Stem = "obj";
 
@@ -193,7 +193,7 @@ namespace Rung.Bridge.V20
 
         static string Dates(params DateTime[] d) => "dt:" + string.Join(":", d.Select(x => x.Ticks));
 
-        // QA-10: fingerprints cost 25-60 ms per block (fact F1); an idle watch re-read all of them on every pass.
+        // fingerprints cost 25-60 ms per block; an idle watch re-read all of them on every pass.
         // Between full refreshes an object whose modification dates and consistency are unchanged keeps its
         // fingerprint. Revision checks before imports and exports never use the cache (Revision()).
         static readonly TimeSpan FingerprintRefresh = TimeSpan.FromMinutes(5);
@@ -271,7 +271,7 @@ namespace Rung.Bridge.V20
                     Language = "UDT",
                     Namespace = string.IsNullOrEmpty(t.Namespace) ? null : t.Namespace,
                     KnowHowProtected = t.IsKnowHowProtected,
-                    IsFailsafe = false, // F-UDT detection is fact F13; unverified in V20
+                    IsFailsafe = false, // V20 offers no way to tell an F-UDT
                     IsConsistent = t.IsConsistent,
                 };
                 entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, Dates(t.ModifiedDate, t.InterfaceModifiedDate));
@@ -285,7 +285,7 @@ namespace Rung.Bridge.V20
         {
             foreach (PlcTagTable t in group.TagTables)
             {
-                // ModifiedTimeStamp is weak (fact F25): "dt:" makes rung verify it by hash periodically.
+                // ModifiedTimeStamp is weak: "dt:" makes rung verify it by hash periodically.
                 var entry = new ObjectEntry { Address = Addr(device, "tagtable", path, t.Name, null), Kind = "tagtable", Fingerprint = Dates(t.ModifiedTimeStamp) };
                 refs.Add(new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc });
             }
@@ -407,7 +407,7 @@ namespace Rung.Bridge.V20
                         return form;
                     case "s7dcl":
                     {
-                        // QA-6: blocks with networks in several languages (and other SD gaps) throw instead of
+                        // blocks with networks in several languages (and other SD gaps) throw instead of
                         // returning a failed result; both cases fall back to SimaticML XML
                         var sdOk = false;
                         try
@@ -450,11 +450,17 @@ namespace Rung.Bridge.V20
             }
         }
 
-        // ---------------------------------------------------------------- import (fixture only in M1)
+        // ---------------------------------------------------------------- import
 
         public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId)
         {
             Alive();
+            using (OfflineFor(AddressFormat.Parse(address).Device))
+                return ImportOffline(address, form, path, expectedTiaRevision, operationId);
+        }
+
+        ExportResult ImportOffline(string address, string form, string path, string expectedTiaRevision, string operationId)
+        {
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             if (!Guid.TryParseExact(operationId, "D", out var opGuid))
                 throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
@@ -523,7 +529,7 @@ namespace Rung.Bridge.V20
             ListObjects(parts.Device);
             if (_index.ContainsKey(address)) throw new RpcException(ErrorCodes.StaleRevision, address + " already exists in TIA Portal");
             // GenerateBlocksFromSource replaces a same-named block wherever it lives, so a file copied or moved
-            // into another folder would overwrite the original (QA-1). Names are unique per PLC across blocks and types.
+            // into another folder would overwrite the original. Names are unique per PLC across blocks and types.
             var want = Identity(parts.Name, parts.Namespace);
             var clashKinds = parts.Kind == "block" || parts.Kind == "type" ? new[] { "block", "type" } : new[] { parts.Kind };
             var clash = _index.Values.FirstOrDefault(v => Array.IndexOf(clashKinds, v.Entry.Kind) >= 0
@@ -781,6 +787,7 @@ namespace Rung.Bridge.V20
                 .GroupBy(v => AddressFormat.Parse(v.Entry.Address).Name, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
             var messages = new List<CompileMessage>();
+            using (OfflineFor(device))
             try
             {
                 if (addresses.Length == 0)

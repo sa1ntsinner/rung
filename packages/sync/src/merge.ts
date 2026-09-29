@@ -47,7 +47,7 @@ export type BundleMerge = { kind: "clean"; files: Record<string, string> } | { k
 
 /**
  * Merge whole object bundles (suffix → text). Sources merge per file; SD/XML/resource bundles are
- * structural, so concurrent changes conflict until the semantic merge of M8.
+ * structural, so concurrent changes always conflict.
  */
 export function mergeBundle(form: string, base: Record<string, string> | null, file: Record<string, string>, tia: Record<string, string>): BundleMerge {
   const same = (a: Record<string, string> | null, b: Record<string, string>) =>

@@ -5,7 +5,7 @@ using System.Globalization;
 namespace Rung.Bridge.Core
 {
     /// <summary>
-    /// Reads the Path of Openness compiler messages. V20 (fact F7) nests them as
+    /// Reads the Path of Openness compiler messages. V20 nests them as
     /// PLC > "Program blocks" > "Name (FC3)" > leaf, where the leaf path is the line number counted from the
     /// line after BEGIN ("3") or "Interface" for declaration errors.
     /// </summary>

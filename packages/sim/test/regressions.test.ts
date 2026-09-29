@@ -24,7 +24,7 @@ const errorOf = (f: () => unknown) => {
 };
 
 describe("Simulator QA regressions", () => {
-  it("RETURN in a called FC or FB ends only that call (QA-12)", () => {
+  it("RETURN in a called FC or FB ends only that call", () => {
     const s = sim({
       Early: 'FUNCTION "Early" : Int\nVAR_INPUT\n  x : Int;\nEND_VAR\nBEGIN\n  #Early := 1;\n  IF #x > 0 THEN\n    RETURN;\n  END_IF;\n  #Early := 2;\nEND_FUNCTION\n',
       Inner: fb("Inner", "VAR\n  n : Int;\nEND_VAR", "  #n := 1;\n  RETURN;\n  #n := 2;"),
@@ -34,7 +34,7 @@ describe("Simulator QA regressions", () => {
     expect([m.A, m.B, (m.I as Instance).mem.N]).toEqual([1, 42, 1]);
   });
 
-  it("divides REALs on members, globals and call results; INTs stay integer (QA-13)", () => {
+  it("divides REALs on members, globals and call results; INTs stay integer", () => {
     const s = sim({
       T: 'TYPE "T"\nSTRUCT\n  r : Real;\n  i : Int;\nEND_STRUCT;\nEND_TYPE\n',
       G: 'DATA_BLOCK "G"\nVAR\n  g : Real := 3.0;\n  n : Int := 7;\nEND_VAR\nBEGIN\nEND_DATA_BLOCK\n',
@@ -49,7 +49,7 @@ describe("Simulator QA regressions", () => {
     expect([m.O1, m.O2, m.O3, m.O4, m.O5, m.I1, m.I2]).toEqual([2.5, 0.5, 0.75, 2.5, 0.25, 3, 3]);
   });
 
-  it("matches CASE labels that are constants, ranges, lists, hex and typed literals (QA-15)", () => {
+  it("matches CASE labels that are constants, ranges, lists, hex and typed literals", () => {
     const s = sim({
       C: fb(
         "C",
@@ -60,7 +60,7 @@ describe("Simulator QA regressions", () => {
     expect([0, 1, 0x8201, 5, 16, -1, 100].map((st) => run(s, "C", { st }).HIT)).toEqual([10, 11, 11, 12, 13, 13, 99]);
   });
 
-  it("builds arrays inside array-of-struct elements with their own shape, quickly (QA-16)", () => {
+  it("builds arrays inside array-of-struct elements with their own shape, quickly", () => {
     const members = Array.from({ length: 10 }, (_, k) => `      m${k} : Array[1..4] of Bool;`).join("\n");
     const s = sim({
       N: fb(
@@ -80,14 +80,14 @@ describe("Simulator QA regressions", () => {
     expect((m.GRID as unknown as { items: { items: number[] }[] }).items[1]!.items).toEqual([0, 0, 7]);
   });
 
-  it("counts every loop iteration against the step limit (FOR BY 0, empty bodies) (QA-18)", () => {
+  it("counts every loop iteration against the step limit (FOR BY 0, empty bodies)", () => {
     const f = sim({ L: fb("L", "VAR\n  i : Int;\nEND_VAR", "  FOR #i := 0 TO 10 BY 0 DO\n  END_FOR;") }, 10_000);
     expect(() => f.callBlock(f.newInstance("L"))).toThrow(/step limit/);
     const w = sim({ W: fb("W", "VAR\n  i : Int;\nEND_VAR", "  WHILE TRUE DO\n  END_WHILE;") }, 10_000);
     expect(() => w.callBlock(w.newInstance("W"))).toThrow(/step limit/);
   });
 
-  it("supports END_REGION names, compound assignment, slice access and WSTRING literals (QA-19)", () => {
+  it("supports END_REGION names, compound assignment, slice access and WSTRING literals", () => {
     const s = sim({
       X: fb(
         "X",
@@ -99,7 +99,7 @@ describe("Simulator QA regressions", () => {
     expect([m.N, m.R, m.B3, m.W, m.B0, m.HI, m.LO, m.DW, m.WS, m.S, m.C]).toEqual([7, 0.25, true, 0xabf9, 0xf9, 0x12, 0x5678, 0xffffffff, "wide", "it's", "z"]);
   });
 
-  it("fails calls of STL blocks and technology objects with a clear message (QA-19)", () => {
+  it("fails calls of STL blocks and technology objects with a clear message", () => {
     const s = sim({
       "file:///w/plc/P/blocks/Stl.awl": 'FUNCTION "Stl" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = x\n      A #a;\n      = #a;\nEND_FUNCTION\n',
       "file:///w/plc/P/technology/Axis_1.xml": "<to/>",
@@ -111,7 +111,7 @@ describe("Simulator QA regressions", () => {
     expect(errorOf(() => s.callBlock(i, { mode: 3 }))).toMatch(/"Axis_1" is a technology object.*not simulated/);
   });
 
-  it("applies DB BEGIN start values, including instance DBs (QA-20)", () => {
+  it("applies DB BEGIN start values, including instance DBs", () => {
     const s = sim({
       "file:///w/plc/P/blocks/D.db": 'DATA_BLOCK "D"\nVAR\n  cnt : Int := 100;\n  Plug : Struct\n    Delay : S5Time;\n  END_STRUCT;\n  arr : Array[1..2] of Int;\nEND_VAR\nBEGIN\n  cnt := 200;\n  Plug.Delay := S5T#1s;\n  arr[2] := 16#10;\nEND_DATA_BLOCK\n',
       Tm: fb("Tm", "VAR\n  T1 : TON_TIME;\n  n : Int;\nEND_VAR", "  #n := #n + 1;"),

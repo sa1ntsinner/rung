@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-// rung setup openness: registers the bridge in the TIA Portal Openness whitelist (QA-9).
+// rung setup openness: registers the bridge in the TIA Portal Openness whitelist.
 // TIA remembers an allowed Openness client by file name + SHA-256 + write time under
-// HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist (docs/facts/openness-v20.md). A bridge that is
+// HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist. A bridge that is
 // not in the list makes TIA ask "Openness access"; a TIA Portal without user interface cannot ask and hangs.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";

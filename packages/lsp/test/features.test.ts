@@ -184,14 +184,14 @@ END_FUNCTION_BLOCK
   q.set(u("Q_Stl.awl"), STL, 0);
   const diag = (n: string) => diagnostics(q, u(n)).map((d) => [d.code, q.docs.get(u(n))!.text.slice(d.start, d.end)]);
 
-  it("accepts DB start values of own members and of instance DBs (QA-21)", () => {
+  it("accepts DB start values of own members and of instance DBs", () => {
     expect(diag("Q_Start.db")).toEqual([]);
     expect(diag("Q_Inst.db")).toEqual([["UNKNOWN_MEMBER", "XX"]]);
     const off = INST.indexOf("PT :=");
     expect(hover(q, u("Q_Inst.db"), off)!.markdown).toMatch(/\*\*PT\*\* : `Time`/);
   });
 
-  it("resolves system-type members on UDT members, IEC_TIMER calls and REF_TO (QA-22)", () => {
+  it("resolves system-type members on UDT members, IEC_TIMER calls and REF_TO", () => {
     expect(diag("Q_Fb.scl")).toEqual([
       ["UNKNOWN_MEMBER", "NOPE"],
       ["UNKNOWN_MEMBER", "Nope"],
@@ -199,7 +199,7 @@ END_FUNCTION_BLOCK
     expect(hover(q, u("Q_Fb.scl"), FB.indexOf("YEAR") + 1)!.markdown).toMatch(/\*\*YEAR\*\* : `UInt`/);
   });
 
-  it("indexes standard-access DB members and ignores STL bodies (QA-24)", () => {
+  it("indexes standard-access DB members and ignores STL bodies", () => {
     expect(diag("Q_Struct.db")).toEqual([]);
     expect(diag("Q_Stl.awl")).toEqual([]);
     expect(q.global("Q_Stl")!.block!.vars.map((v) => v.name)).toEqual(["a"]);

@@ -164,7 +164,7 @@ describe("syncOnce", () => {
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#y := 23;");
   });
 
-  it("resolve --merged takes a hand-merged .conflict file and keeps a recovery copy of the rest (QA-3)", async () => {
+  it("resolve --merged takes a hand-merged .conflict file and keeps a recovery copy of the rest", async () => {
     const t = setup();
     await t.sync();
     t.write(pA, srcA.replace("#y := 2;", "#y := 21;"));
@@ -258,7 +258,7 @@ describe("syncOnce", () => {
     expect(t.bridge.imports).toEqual([]);
   });
 
-  it("refuses to import a file that is not UTF-8 instead of dropping its characters (QA-7)", async () => {
+  it("refuses to import a file that is not UTF-8 instead of dropping its characters", async () => {
     const t = setup();
     await t.sync();
     // "Grüße" in Windows-1252: ü = 0xFC, ß = 0xDF
@@ -268,7 +268,7 @@ describe("syncOnce", () => {
     expect(r.diagnostics).toContainEqual(expect.objectContaining({ code: "INVALID_ENCODING", address: A }));
   });
 
-  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("skips an unreadable file for one pass instead of aborting the whole sync (QA-8)", async () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("skips an unreadable file for one pass instead of aborting the whole sync", async () => {
     const t = setup();
     await t.sync();
     t.write(pA, srcA.replace("#x := 1;", "#x := 9;"));
@@ -295,7 +295,7 @@ describe("syncOnce", () => {
     expect(saved.seq).toBeGreaterThan(0);
   });
 
-  it("keeps compile errors of a still-broken block across quiet passes, and drops them once it compiles (QA-4)", async () => {
+  it("keeps compile errors of a still-broken block across quiet passes, and drops them once it compiles", async () => {
     const t = setup();
     await t.sync();
     t.bridge.compileErrors.set(A, "Tag #q not defined");
@@ -417,7 +417,7 @@ describe("syncOnce", () => {
     expect(t.read(pA)).toBe("my edit\n");
   });
 
-  it("resolve --ours recreates an object that was deleted in TIA; the conflict does not come back (QA-5)", async () => {
+  it("resolve --ours recreates an object that was deleted in TIA; the conflict does not come back", async () => {
     const t = setup();
     await t.sync();
     const mine = srcA.replace("#x := 1;", "#x := 7;");
@@ -433,7 +433,7 @@ describe("syncOnce", () => {
     expect(again.conflicts).toBe(0);
   });
 
-  it("resolve --theirs accepts a TIA delete and keeps the edited file in recovery (QA-5)", async () => {
+  it("resolve --theirs accepts a TIA delete and keeps the edited file in recovery", async () => {
     const t = setup();
     await t.sync();
     t.write(pA, "my edit\n");

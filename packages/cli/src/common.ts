@@ -3,7 +3,7 @@ import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { bridgeExecutable } from "./paths.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
-import { BridgeClient } from "@rung/bridge-client";
+import { BridgeClient, type BridgeEvent } from "@rung/bridge-client";
 
 export interface Io {
   cwd: string;
@@ -49,12 +49,26 @@ export function cleanEnv(env: Io["env"]): Record<string, string> {
   return Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)) as Record<string, string>;
 }
 
-export function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
+export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
   const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command;
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
-  return BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
+  const client = await BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
+  client.onEvent((e) => showBridgeEvent(io, e));
+  return client;
+}
+
+/** TIA Portal's own questions and notifications explain many online and download failures; RUNG_DEBUG=1 shows every bridge event. */
+export function showBridgeEvent(io: Io, e: BridgeEvent): void {
+  if (io.env.RUNG_DEBUG) {
+    io.stderr(`rung-bridge: ${e.event} ${typeof e.params === "string" ? e.params.trimEnd() : JSON.stringify(e.params)}\n`);
+    return;
+  }
+  if (e.event !== "tia-confirmation" && e.event !== "tia-notification") return;
+  const p = (e.params ?? {}) as { caption?: string; text?: string; detail?: string; result?: string | null };
+  const text = [p.caption, p.text, p.detail].filter((s) => s && s.trim()).join(": ").replace(/\s+/g, " ").trim();
+  if (text) io.stderr(`TIA Portal: ${text}${p.result ? ` (rung answered ${p.result})` : ""}\n`);
 }
 
 /** Bridge launch flags for two-way work: imports are only enabled when the workspace asks for them. */

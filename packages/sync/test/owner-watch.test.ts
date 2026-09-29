@@ -134,7 +134,7 @@ describe("Watcher", () => {
     expect(reports.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("polls at most every other pass length and never queues ticks behind a running pass (QA-10)", async () => {
+  it("polls at most every other pass length and never queues ticks behind a running pass", async () => {
     const root = ws();
     const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");
     config.sync.pollMs = 60_000; // ticks are driven by hand below

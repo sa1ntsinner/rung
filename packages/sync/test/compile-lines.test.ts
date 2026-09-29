@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { fileLineOf } from "../src/compile-lines.js";
 
-// Cases measured live on TIA Portal V20 (docs/facts/openness-v20.md, F7).
+// Cases measured live on TIA Portal V20.
 const C2 = 'FUNCTION "Probe_C2" : Void\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\nBEGIN\n\t// one\n\t// two\n\n\tIF #A THEN\n\t    #X2 := 1;\n\tEND_IF;\n\t#Y2 := 2;\nEND_FUNCTION\n';
 const C3 = 'FUNCTION_BLOCK "Probe_C3"\nVERSION : 0.1\n   VAR\n      t : NoSuchType;\n   END_VAR\nBEGIN\n\t;\nEND_FUNCTION_BLOCK\n';
 

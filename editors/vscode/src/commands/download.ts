@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Download to a PLC (docs/decisions/0002-plc-actions.md): a person starts it, sees what goes where in a
+// Download to a PLC (docs/downloads.md): a person starts it, sees what goes where in a
 // modal, types the PLC name (setting), and watches TIA's questions and rung's answers in a terminal.
 // Nothing else in the extension downloads: no CodeLens, no save hook.
 import * as vscode from "vscode";

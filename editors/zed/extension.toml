@@ -15,5 +15,5 @@ languages = ["SCL"]
 
 [grammars.scl]
 repository = "https://github.com/sa1ntsinner/rung"
-rev = "0ebb538ca3e199116a98dce14db79374338ad22f"
+rev = "5138f1f7d3c9e7ca44519a7cf7c95423e26e092d"
 path = "grammars/tree-sitter-scl"

@@ -10,7 +10,7 @@ namespace Rung.Bridge.V20
 {
     /// <summary>
     /// Cancels TIA Portal's know-how password dialog while rung writes to the project.
-    /// Fact (docs/facts/openness-v20.md): GenerateBlocksFromSource shows a modal "Access protection"
+    /// GenerateBlocksFromSource shows a modal "Access protection"
     /// prompt when the PLC contains a know-how protected block. Openness raises no Confirmation for it
     /// and the call blocks until someone answers. Cancelling lets the generation finish normally.
     /// </summary>
