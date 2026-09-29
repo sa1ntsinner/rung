@@ -255,6 +255,33 @@ namespace Rung.Bridge.V20
             return fallback();
         }
 
+        void LibraryInstances(string device, PlcBlockGroup group, List<string> path, Dictionary<string, List<string>> into)
+        {
+            foreach (PlcBlock b in group.Blocks)
+            {
+                var address = Addr(device, "block", path, b.Name, b.Namespace);
+                AddInstance(into, CachedLibraryType(address, b, Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate)), address);
+            }
+            foreach (PlcBlockUserGroup g in group.Groups) LibraryInstances(device, g, new List<string>(path) { g.Name }, into);
+        }
+
+        void LibraryInstances(string device, PlcTypeGroup group, List<string> path, Dictionary<string, List<string>> into)
+        {
+            foreach (PlcType t in group.Types)
+            {
+                var address = Addr(device, "type", path, t.Name, t.Namespace);
+                AddInstance(into, CachedLibraryType(address, t, Dates(t.ModifiedDate, t.InterfaceModifiedDate)), address);
+            }
+            foreach (PlcTypeUserGroup g in group.Groups) LibraryInstances(device, g, new List<string>(path) { g.Name }, into);
+        }
+
+        static void AddInstance(Dictionary<string, List<string>> into, string type, string address)
+        {
+            if (type == null) return;
+            if (!into.TryGetValue(type, out var list)) into[type] = list = new List<string>();
+            list.Add(address);
+        }
+
         static string BlockTypeOf(PlcBlock b)
         {
             if (b is FB) return "FB";
@@ -728,12 +755,14 @@ namespace Rung.Bridge.V20
             ["hardware"] = new[] { "DeviceItems", "Addresses", "Nodes", "Subnets", "IoSystems" },
             ["hmi"] = new[] { "Screens", "ScreenItems", "Tags", "Connections", "AlarmClasses", "DiscreteAlarms", "AnalogAlarms", "HmiTextLists", "Scripts", "Dynamizations", "EventHandlers" },
             ["techobjects"] = new[] { "TechnologicalObjects", "Groups" },
+            // the project library: type folders, types and their versions (which rung mirrors read-only), master copies
+            ["libraries"] = new[] { "Folders", "Types", "Versions", "MasterCopies" },
         };
 
         public DescribeNode Describe(string scope, int maxNodes)
         {
             Alive();
-            if (!ViewCompositions.TryGetValue(scope, out var allowed)) throw new RpcException(ErrorCodes.BadRequest, "Unknown scope " + scope + " (hardware, hmi, techobjects)");
+            if (!ViewCompositions.TryGetValue(scope, out var allowed)) throw new RpcException(ErrorCodes.BadRequest, "Unknown scope " + scope + " (hardware, hmi, techobjects, libraries)");
             var budget = Math.Max(10, Math.Min(maxNodes, 200000));
             var count = 0;
             var root = new DescribeNode { Type = "Project", Name = _project.Name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
@@ -756,6 +785,32 @@ namespace Rung.Bridge.V20
                     break;
                 case "techobjects":
                     foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
+                    break;
+                case "libraries":
+                    // the type and master copy folders are properties of the library, not compositions
+                    var lib = _project.ProjectLibrary;
+                    var libNode = new DescribeNode { Type = "ProjectLibrary", Name = "Project library", Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+                    count++;
+                    var types = Node(lib.TypeFolder, allowed, 1, ref count, budget, "Types");
+                    if (types != null) libNode.Children["Types"] = new List<DescribeNode> { types };
+                    var copies = Node(lib.MasterCopyFolder, allowed, 1, ref count, budget, "Master copies");
+                    if (copies != null) libNode.Children["MasterCopies"] = new List<DescribeNode> { copies };
+                    // which blocks and PLC data types are instances of each version
+                    var instances = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+                    foreach (var plc in Plcs())
+                    {
+                        LibraryInstances(plc.Name, plc.BlockGroup, new List<string>(), instances);
+                        LibraryInstances(plc.Name, plc.TypeGroup, new List<string>(), instances);
+                    }
+                    void Attach(DescribeNode n)
+                    {
+                        if (n.Attributes.TryGetValue("TypeObject", out var t) && n.Attributes.TryGetValue("VersionNumber", out var v)
+                            && instances.TryGetValue(t.Replace("→ ", "") + " " + v, out var used))
+                            n.Children["Instances"] = used.OrderBy(a => a, StringComparer.Ordinal).Select(a => new DescribeNode { Type = "Instance", Name = a, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) }).ToList();
+                        foreach (var list in n.Children.Values) foreach (var c in list) Attach(c);
+                    }
+                    Attach(libNode);
+                    Add("ProjectLibrary", libNode);
                     break;
             }
             root.Truncated = count >= budget;
@@ -789,6 +844,7 @@ namespace Rung.Bridge.V20
                 case string s: return s;
                 case bool b: return b ? "true" : "false";
                 case Enum e: return e.ToString();
+                case Version ver: return ver.ToString();
                 case DateTime dt: return dt.ToString("o");
                 case IFormattable f when v.GetType().IsPrimitive || v is decimal: return f.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
                 case IEngineeringObject o:
@@ -816,7 +872,8 @@ namespace Rung.Bridge.V20
                 }
             }
             catch (EngineeringException) { }
-            node.Name = nameOverride ?? (node.Attributes.TryGetValue("Name", out var n) ? n : null);
+            // a library type version has no name: its version number is one
+            node.Name = nameOverride ?? (node.Attributes.TryGetValue("Name", out var n) ? n : node.Attributes.TryGetValue("VersionNumber", out var vn) ? vn : null);
             try
             {
                 foreach (var ci in obj.GetCompositionInfos())

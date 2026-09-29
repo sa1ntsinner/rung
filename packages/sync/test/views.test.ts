@@ -41,6 +41,31 @@ describe("views", () => {
     expect(existsSync(join(root, "views", "hardware", "Old_Device.yaml"))).toBe(false);
   });
 
+  it("writes the project library: types, their versions and which blocks are instances", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-views-"));
+    const node = (type: string, name: string, attributes: Record<string, string> = {}, children: DescribeNode["children"] = {}): DescribeNode => ({ type, name, attributes, children });
+    const lib: DescribeNode = node("Project", "RungFixture", {}, {
+      ProjectLibrary: [
+        node("ProjectLibrary", "Project library", {}, {
+          Types: [
+            node("LibraryTypeSystemFolder", "Types", {}, {
+              Types: [
+                node("CodeBlockLibraryType", "Fx_Valve", { Name: "Fx_Valve" }, {
+                  Versions: [node("CodeBlockLibraryTypeVersion", "1.0.1", { VersionNumber: "1.0.1", State: "Committed" }, { Instances: [node("Instance", "plc:PLC_1/blocks/Fx_Valve")] })],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+    const r = await writeModelViews(root, { describe: async () => lib }, ["libraries"]);
+    expect(r.written).toEqual(["views/libraries/Project library.yaml"]);
+    const y = readFileSync(join(root, "views", "libraries", "Project library.yaml"), "utf8");
+    expect(y).toContain('name: "1.0.1"');
+    expect(y).toContain('name: "plc:PLC_1/blocks/Fx_Valve"');
+  });
+
   it("sorts attributes and children for stable diffs", () => {
     const v = toView({ type: "X", name: "n", attributes: { b: "2", a: "1", Name: "n" }, children: { Z: [], A: [] } });
     expect(Object.keys(v)).toEqual(["type", "name", "attributes", "A", "Z"]);

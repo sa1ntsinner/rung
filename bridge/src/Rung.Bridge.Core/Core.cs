@@ -24,7 +24,7 @@ namespace Rung.Bridge.Core
         void Delete(string address, string expectedTiaRevision, string operationId);
         /// <summary>Cross references reported by TIA Portal for one object.</summary>
         IReadOnlyList<XRefEntry> XRef(string address);
-        /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi or techobjects.</summary>
+        /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi, techobjects or libraries.</summary>
         DescribeNode Describe(string scope, int maxNodes);
         /// <summary>Compiles the hardware configuration of the PLC device (and its software).</summary>
         IReadOnlyList<CompileMessage> CompileHardware(string device);

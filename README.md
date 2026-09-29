@@ -29,7 +29,7 @@ The [quickstart](docs/quickstart.md) walks through setup, including the Openness
 - An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
 - `rung test`, which runs YAML unit tests for SCL and LAD blocks on an offline simulator and prints JUnit. See [testing](docs/testing.md).
 - Compile, go online, compare with the PLC and download, from the terminal or the editor. A person starts every download and allows each risky question TIA asks by name. See [downloads](docs/downloads.md).
-- Read-only views of hardware, HMI and technology objects.
+- Read-only views of hardware, HMI, technology objects and the project library (types, versions, which blocks are instances).
 
 ## What it won't do
 

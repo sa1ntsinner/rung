@@ -57,7 +57,7 @@ Usage:
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung assignments [dir] [--json]     the assignment list: used inputs, outputs and bit memory, and overlaps
-  rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
+  rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the library and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
