@@ -777,6 +777,59 @@ namespace Rung.Bridge.V20
 
         // ---------------------------------------------------------------- delete
 
+        /// <summary>
+        /// Renames a block, PLC data type or tag table. TIA keeps every use symbolic, so callers and instance DBs
+        /// follow the new name; their fingerprints stay the same, which is why the client re-exports them.
+        /// </summary>
+        public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
+        {
+            Alive();
+            FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
+            if (!Guid.TryParseExact(operationId, "D", out _)) throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
+            newName = (newName ?? "").Trim();
+            if (newName.Length == 0 || newName.Length > 125 || newName.IndexOf('"') >= 0)
+                throw new RpcException(ErrorCodes.BadRequest, "\"" + newName + "\" is not a valid name");
+            var parts = AddressFormat.Parse(address);
+            var newAddress = AddressFormat.Format(new AddressParts { Device = parts.Device, Unit = parts.Unit, Kind = parts.Kind, Groups = parts.Groups, Name = newName, Namespace = parts.Namespace });
+            using (OfflineFor(parts.Device))
+            {
+                var r = Resolve(address);
+                if (FormPolicy.IsReadOnly(r.Entry)) throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only");
+                if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+                var clashKinds = parts.Kind == "block" || parts.Kind == "type" ? new[] { "block", "type" } : new[] { parts.Kind };
+                var want = Identity(newName, parts.Namespace);
+                var clash = _index.Values.FirstOrDefault(v => v.Entry.Address != address && Array.IndexOf(clashKinds, v.Entry.Kind) >= 0
+                    && string.Equals(AddressFormat.Parse(v.Entry.Address).Device, parts.Device, StringComparison.Ordinal)
+                    && string.Equals(Identity(AddressFormat.Parse(v.Entry.Address).Name, AddressFormat.Parse(v.Entry.Address).Namespace), want, StringComparison.OrdinalIgnoreCase));
+                if (clash != null) throw new RpcException(ErrorCodes.NameTaken, "\"" + newName + "\" already exists at " + clash.Entry.Address);
+                _inImport = true;
+                try
+                {
+                    using (var access = _portal.ExclusiveAccess("rung: renaming " + parts.Name))
+                    using (var tx = access.Transaction(_project, "rung rename " + operationId))
+                    {
+                        if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+                        switch (r.Obj)
+                        {
+                            case PlcBlock b: b.Name = newName; break;
+                            case PlcType t: t.Name = newName; break;
+                            case PlcTagTable tt: tt.Name = newName; break;
+                            default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot rename " + address);
+                        }
+                        tx.CommitOnDispose();
+                    }
+                }
+                catch (EngineeringException e) { throw new RpcException(ErrorCodes.ImportFailed, e.Message); }
+                finally { _inImport = false; }
+                _index.Clear();
+                // the users of the old name are inconsistent until compiled, and inconsistent blocks have no fingerprint
+                try { Plc(parts.Device).GetService<ICompilable>()?.Compile(); } catch (EngineeringException) { }
+                _index.Clear();
+                if (_args.SaveAfterImport) { try { _project.Save(); } catch (EngineeringException) { } }
+            }
+            return newAddress;
+        }
+
         public void Delete(string address, string expectedTiaRevision, string operationId)
         {
             Alive();

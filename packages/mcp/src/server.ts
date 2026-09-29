@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
 import { BlobStore, loadConfig, normalizeText, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
-import { OwnerClient, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type Diagnostic, type SyncBridge, type SyncReport } from "@rung/sync";
+import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
@@ -264,6 +264,35 @@ export function createMcpServer(ctx: McpContext): McpServer {
         }
       }
       return text(`resolved ${path} (${mode})`);
+    },
+  );
+
+  server.registerTool(
+    "rung_rename",
+    {
+      description:
+        "Rename a block, PLC data type or tag table in TIA Portal. TIA keeps every call, instance DB and access pointing at it; rung moves the file and brings back every file and unit test that used the old name. Never rename by editing a block header: that creates a second block. The file must be synced first.",
+      inputSchema: { address: z.string().describe("address or workspace path of the object"), newName: z.string() },
+    },
+    async ({ address, newName }) => {
+      const states = await stateSnapshot(ctx.root);
+      const target = states.find((s) => s.address === address || s.path === address)?.address;
+      if (!target) return fail(`${address} is not a mirrored object`);
+      const viaOwner = await withOwner((o) => o.request<RenameReport>("rename", { address: target, newName }));
+      if (viaOwner !== undefined) return json(viaOwner);
+      if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is available.");
+      const config = await loadConfig(ctx.root);
+      const b = await ctx.bridgeFactory();
+      try {
+        const state = await StateStore.open(ctx.root, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices });
+        try {
+          return json(await renameObject(ctx.root, b as never, state, config, target, newName));
+        } finally {
+          await state.close();
+        }
+      } finally {
+        await b.close();
+      }
     },
   );
 

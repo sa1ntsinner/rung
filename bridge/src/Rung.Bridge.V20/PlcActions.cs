@@ -256,7 +256,7 @@ namespace Rung.Bridge.V20
             }
             catch (EngineeringException e)
             {
-                outcome.Messages.Add(e.Message);
+                outcome.Messages.Add(TiaText.Clean(e.Message));
                 outcome.State = outcome.Decisions.Any(d => d.Blocks) ? "Cancelled" : "Error";
             }
             outcome.NeedsAllow = outcome.Decisions.Where(d => d.Blocks).Select(d => d.Name).Distinct().ToArray();

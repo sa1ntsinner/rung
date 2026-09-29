@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
-import { StateStore, WorkspaceError, loadConfig } from "@rung/core";
-import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, resolveConflict, syncOnce, type SyncReport } from "@rung/sync";
+import { StateStore, WorkspaceError, loadConfig, parseAddress } from "@rung/core";
+import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type RenameReport, type SyncReport } from "@rung/sync";
 import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
 
@@ -84,6 +84,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
       await confirmDelete(dir, b as never, state, String(p.address));
       return { deleted: true };
+    },
+    rename: async (p) => {
+      const b = watcher.bridgeForTools;
+      if (!b) throw new WorkspaceError("CONFIG_INVALID", "bridge not connected yet");
+      return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
     },
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
     online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
@@ -201,5 +206,54 @@ export async function cmdConfirmDelete(dir: string, address: string, io: Io): Pr
     }
   }
   io.stdout(`deleted ${address} in TIA Portal\n`);
+  return 0;
+}
+
+/** Address of a mirrored object named by its workspace file or by its name (read without the state lock). */
+async function addressOf(ws: string, what: string, cwd: string): Promise<string> {
+  let objects: { address: string; path: string }[] = [];
+  try {
+    objects = Object.values((JSON.parse(await readFile(join(ws, ".rung", "state.json"), "utf8")) as { objects?: Record<string, { address: string; path: string }> }).objects ?? {});
+  } catch {
+    /* no state yet */
+  }
+  const rel = relative(ws, resolve(cwd, what)).split(sep).join("/");
+  const byPath = objects.find((o) => o.path === rel || o.address === what);
+  if (byPath) return byPath.address;
+  const named = objects.filter((o) => parseAddress(o.address).name.toLowerCase() === what.replace(/^"|"$/g, "").toLowerCase());
+  if (named.length === 1) return named[0]!.address;
+  if (named.length > 1) throw new WorkspaceError("CONFIG_INVALID", `several objects are named ${what}: ${named.map((o) => o.path).join(", ")}; give the file instead`);
+  throw new WorkspaceError("NOT_MIRRORED", `no mirrored object or file ${what}; run rung pull`);
+}
+
+/** rung rename <file|name> <new-name>: TIA Portal renames it and keeps every use; the files that use it follow. */
+export async function cmdRename(dir: string, what: string, newName: string, io: Io): Promise<number> {
+  const ws = await findWorkspace(dir);
+  const address = await addressOf(ws, what, io.cwd);
+  let r: RenameReport;
+  const owner = await OwnerClient.connect(ws);
+  if (owner) {
+    try {
+      r = await owner.request<RenameReport>("rename", { address, newName });
+    } finally {
+      owner.close();
+    }
+  } else {
+    const config = await loadConfig(ws);
+    const client = await bridgeFor(config, io, importFlags(config));
+    try {
+      const state = await openState(ws, config);
+      try {
+        r = await renameObject(ws, client, state, config, address, newName);
+      } finally {
+        await state.close();
+      }
+    } finally {
+      await client.close();
+    }
+  }
+  io.stdout(`renamed ${parseAddress(r.from).name} to ${newName}: ${r.oldPath} → ${r.newPath ?? "(not mirrored)"}\n`);
+  if (r.users.length) io.stdout(`updated where it is used: ${r.users.join(", ")}\n`);
+  printWarnings(io, r.pull.warnings);
   return 0;
 }

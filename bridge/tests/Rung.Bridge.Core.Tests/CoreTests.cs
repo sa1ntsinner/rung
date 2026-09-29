@@ -332,6 +332,14 @@ public class PlcActionRouteTests
         Assert.Equal("BAD_REQUEST", Call("{\"id\":3,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"reboot\"}}").GetProperty("error").GetProperty("code").GetString());
     }
 
+    [Fact] public void RenameReturnsTheNewAddress()
+    {
+        _s.Objects.Add(new ObjectEntry { Address = "plc:PLC_1/blocks/10_Drives/Fx_Counter", Kind = "block", Fingerprint = "fp:1" });
+        var r = Call("{\"id\":1,\"method\":\"objects.rename\",\"params\":{\"address\":\"plc:PLC_1/blocks/10_Drives/Fx_Counter\",\"newName\":\"Fx_Pulse\",\"expectedTiaRevision\":\"fp:1\",\"operationId\":\"6f1f9c1e-2b4a-4c83-9a3e-1d2b3c4d5e6f\"}}");
+        Assert.Equal("plc:PLC_1/blocks/10_Drives/Fx_Pulse", r.GetProperty("result").GetProperty("address").GetString());
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":2,\"method\":\"objects.rename\",\"params\":{\"address\":\"plc:PLC_1/blocks/Fx_Pulse\"}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
     [Fact] public void CompareReportsDifferingObjectsWithTheirAddress()
     {
         var r = Call("{\"id\":1,\"method\":\"plc.compare\",\"params\":{\"device\":\"PLC_1\"}}").GetProperty("result");
@@ -341,6 +349,13 @@ public class PlcActionRouteTests
         Assert.Equal("plc:PLC_1/blocks/Fx_Motor", item.GetProperty("address").GetString());
         Assert.Equal("BAD_REQUEST", Call("{\"id\":2,\"method\":\"plc.compare\",\"params\":{}}").GetProperty("error").GetProperty("code").GetString());
     }
+
+    [Theory]
+    [InlineData("Error when calling method 'GoOnline' of type 'Siemens.Engineering.Online.OnlineProvider'.\r\n\r\nChanging to online mode failed.", "Changing to online mode failed.")]
+    [InlineData("Error when calling method 'Export' of type 'X'.\n\nThe table is inconsistent and cannot be exported.", "The table is inconsistent and cannot be exported.")]
+    [InlineData("Error when calling method 'Download' of type 'X'.", "Error when calling method 'Download' of type 'X'.")]
+    [InlineData("No PLC named PLC_9", "No PLC named PLC_9")]
+    public void TiaMessagesLoseTheirMethodPrefix(string raw, string clean) => Assert.Equal(clean, TiaText.Clean(raw));
 
     [Fact] public void CompareStatesMapToWhereTheObjectIs()
     {

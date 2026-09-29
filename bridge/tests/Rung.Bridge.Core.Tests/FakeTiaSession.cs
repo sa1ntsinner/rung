@@ -85,6 +85,16 @@ public sealed class FakeTiaSession : ITiaSession
     public IReadOnlyList<XRefEntry> XRef(string address) =>
         new[] { new XRefEntry { Source = address, SourceName = "Fx_Motor", TargetName = "Start_Button", TargetType = "Tag", TargetAddress = "%I0.0", Access = "Read", ReferenceType = "Uses", Location = "@Fx_Motor NW1" } };
 
+    public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
+    {
+        var e = Objects.Find(o => o.Address == address) ?? throw new RpcException(ErrorCodes.NotFound, address);
+        if (e.Fingerprint != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address);
+        var parts = AddressFormat.Parse(address);
+        parts.Name = newName;
+        e.Address = AddressFormat.Format(parts);
+        return e.Address;
+    }
+
     public void Delete(string address, string expectedTiaRevision, string operationId)
     {
         var e = Objects.Find(o => o.Address == address) ?? throw new RpcException(ErrorCodes.NotFound, address);

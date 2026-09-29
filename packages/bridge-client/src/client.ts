@@ -39,7 +39,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import", "objects.delete", "plc.download"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -143,6 +143,11 @@ export class BridgeClient {
 
   deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
     return this.request("objects.delete", { address, expectedTiaRevision, operationId }) as Promise<{ deleted: boolean }>;
+  }
+
+  /** Renames a block, type or tag table in TIA Portal (uses follow there); compiles, so it can take a while. */
+  renameObject(address: string, newName: string, expectedTiaRevision: string, operationId: string): Promise<{ address: string }> {
+    return this.request("objects.rename", { address, newName, expectedTiaRevision, operationId }, 600_000) as Promise<{ address: string }>;
   }
 
   describe(scope: "hardware" | "hmi" | "techobjects", maxNodes = 20000): Promise<DescribeNode> {

@@ -30,6 +30,8 @@ namespace Rung.Bridge.Core
         IReadOnlyList<CompileMessage> CompileHardware(string device);
         /// <summary>action: state | online | offline. Uses the target when given, else the one TIA has configured.</summary>
         OnlineStatus Online(string device, string action, ConnectionTarget target);
+        /// <summary>Renames a block, type or tag table (uses follow in TIA); returns the new address.</summary>
+        string Rename(string address, string newName, string expectedTiaRevision, string operationId);
         /// <summary>Compares the project's PLC software with the PLC (read-only); connects with the target when given.</summary>
         CompareOutcome Compare(string device, ConnectionTarget target);
         /// <summary>Modes, PG/PC interfaces and target interfaces TIA offers; scan also lists reachable devices.</summary>

@@ -22,7 +22,7 @@ import { cmdLive } from "./live.js";
 import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
-import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
+import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
@@ -46,7 +46,8 @@ Usage:
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <address> [--dir <workspace>]
-  rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline SCL simulator
+  rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
+  rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
@@ -383,6 +384,14 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
           return 1;
         }
         return await cmdResolve(target, mode, io);
+      }
+      case "rename": {
+        const newName = positionals[2];
+        if (!target || !newName) {
+          io.stderr("rung: usage: rung rename <file|name> <new-name> [--dir <workspace>]\n");
+          return 1;
+        }
+        return await cmdRename(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, newName, io);
       }
       case "confirm-delete":
         if (!target) {

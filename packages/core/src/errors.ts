@@ -13,7 +13,8 @@ export type WorkspaceErrorCode =
   | "PATH_ESCAPE"
   | "RECOVERY_REQUIRED"
   | "CONFIG_INVALID"
-  | "NOT_A_WORKSPACE";
+  | "NOT_A_WORKSPACE"
+  | "READ_ONLY";
 
 export class WorkspaceError extends Error {
   override name = "WorkspaceError";

@@ -50,6 +50,25 @@ export class FakeBridge {
     return [...this.objects.values()].filter((o) => o.entry.address.startsWith(`plc:${device}/`)).map((o) => ({ ...o.entry }));
   }
 
+  renameCalls: { address: string; newName: string; rev: string }[] = [];
+
+  /** Like TIA: the object gets the new name, every text that used the old one follows, no fingerprint changes. */
+  async renameObject(address: string, newName: string, rev: string, _op: string): Promise<{ address: string }> {
+    this.renameCalls.push({ address, newName, rev });
+    const o = this.objects.get(address);
+    if (!o) throw new BridgeError("NOT_FOUND", address);
+    if (o.entry.fingerprint !== rev) throw new BridgeError("STALE_REVISION", address);
+    const oldName = address.split("/").pop()!;
+    const to = address.slice(0, address.length - oldName.length) + newName;
+    this.objects.delete(address);
+    const swap = (t: string) => t.split(`"${oldName}"`).join(`"${newName}"`);
+    o.entry = { ...o.entry, address: to };
+    o.files = Object.fromEntries(Object.entries(o.files).map(([k, v]) => [k, swap(v)]));
+    this.objects.set(to, o);
+    for (const other of this.objects.values()) other.files = Object.fromEntries(Object.entries(other.files).map(([k, v]) => [k, swap(v)]));
+    return { address: to };
+  }
+
   async exportObject(address: string, _form: string, dir: string): Promise<ExportResult> {
     this.exportCalls.push(address);
     if (this.failExport.has(address)) throw new BridgeError("EXPORT_FAILED", "cannot export " + address);

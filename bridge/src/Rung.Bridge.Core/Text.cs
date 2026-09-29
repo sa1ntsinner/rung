@@ -8,6 +8,20 @@ using Rung.Bridge.Core.Protocol;
 
 namespace Rung.Bridge.Core
 {
+    /// <summary>TIA Portal's exception texts start with "Error when calling method 'X' of type 'Y'." before the part a person needs.</summary>
+    public static class TiaText
+    {
+        static readonly System.Text.RegularExpressions.Regex Prefix =
+            new System.Text.RegularExpressions.Regex(@"^\s*Error when calling method '[^']*' of type '[^']*'\.\s*", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        public static string Clean(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return message;
+            var rest = Prefix.Replace(message, "").Trim();
+            return rest.Length == 0 ? message.Trim() : rest;
+        }
+    }
+
     public static class TextNormalizer
     {
         static readonly UTF8Encoding Utf8 = new UTF8Encoding(false);

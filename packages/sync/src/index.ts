@@ -7,3 +7,4 @@ export { OwnerServer, OwnerClient, OwnerError, OWNER_PROTOCOL, type OwnerInfo, t
 export { Watcher, type WatcherOptions, type ClosableBridge } from "./watch.js";
 export { writeModelViews, writeTagViews, toView, parseTagRows, VIEW_HEADER, type ViewsReport } from "./views.js";
 export * from "./compile-lines.js";
+export { renameObject, mentions, type RenameReport, type RenameBridge } from "./rename.js";
