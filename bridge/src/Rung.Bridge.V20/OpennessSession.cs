@@ -189,6 +189,7 @@ namespace Rung.Bridge.V20
                     WalkTypes(plc, device, plc.TypeGroup, new List<string>(), refs);
                     WalkTags(plc, device, plc.TagTableGroup, new List<string>(), refs);
                     WalkWatch(plc, device, plc.WatchAndForceTableGroup, new List<string>(), refs);
+                    WalkNetwork(plc, device, refs);
                     break;
                 }
                 catch (Exception e) when (attempt < 3 && (e is EngineeringObjectDisposedException || e is InvalidOperationException))
@@ -401,6 +402,7 @@ namespace Rung.Bridge.V20
                     case PlcTagTable tt: return Addr(device, "tagtable", groups, tt.Name, null);
                     case PlcWatchTable w: return Addr(device, "watchtable", groups, w.Name, null);
                     case PlcForceTable f: return Addr(device, "forcetable", groups, f.Name, null);
+                    case DeviceItem _ when r.Entry.Kind == "hardware": return Addr(device, "hardware", groups, NetworkLeaf, null);
                     default: return null;
                 }
             }
@@ -417,6 +419,7 @@ namespace Rung.Bridge.V20
                 case PlcType t: return Fingerprint(t, t.IsConsistent, () => Dates(t.ModifiedDate, t.InterfaceModifiedDate));
                 case PlcTagTable tt: return Dates(tt.ModifiedTimeStamp);
                 case PlcWatchTable w: return ContentRevision(f => w.Export(f, ExportOptions.None, DocumentInfoOptions.None));
+                case DeviceItem _ when r.Entry.Kind == "hardware": return NetworkRevision(r);
                 default: return "none";
             }
         }
@@ -457,7 +460,7 @@ namespace Rung.Bridge.V20
                 try
                 {
                     // a watch table's revision is its exported bytes (ContentRevision): taken from this export
-                    var fromContent = r.Obj is PlcWatchTable;
+                    var fromContent = r.Obj is PlcWatchTable || r.Entry.Kind == "hardware";
                     before = fromContent ? null : Revision(r);
                     foreach (var f in Directory.GetFiles(targetDir, Stem + ".*")) File.Delete(f);
                     if (r.Entry.IsConsistent == false) warnings.Add(WarningCodes.Inconsistent);
@@ -537,6 +540,9 @@ namespace Rung.Bridge.V20
                     case "protected.yaml":
                         File.WriteAllText(primary.FullName, ProtectedYaml.Render(r.Entry), new UTF8Encoding(false));
                         return form;
+                    case "yaml" when r.Entry.Kind == "hardware":
+                        File.WriteAllText(primary.FullName, NetworkText(AddressFormat.Parse(r.Entry.Address).Device, NetworkNodes((DeviceItem)r.Obj)), new UTF8Encoding(false));
+                        return form;
                     default:
                         throw new RpcException(ErrorCodes.BadRequest, "Unknown form " + form);
                 }
@@ -586,7 +592,14 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
             operationId = opGuid.ToString("D");
             var isNew = expectedTiaRevision == "absent";
+            if (isNew && AddressFormat.Parse(address).Kind == "hardware")
+                throw new RpcException(ErrorCodes.UnsupportedObject, "A PLC's network settings come with the PLC in TIA Portal; rung does not create them (" + address + ")");
             var r = isNew ? NewObjectRef(address, form) : Resolve(address);
+            if (r.Entry.Kind == "hardware")
+            {
+                if (form != "yaml") throw new RpcException(ErrorCodes.BadRequest, "Network settings are imported as yaml");
+                return ImportNetwork(r, path, expectedTiaRevision, operationId);
+            }
             if (FormPolicy.IsReadOnly(r.Entry) || form == "protected.yaml") throw new RpcException(ErrorCodes.ReadOnly, address + " is read-only: " + (FormPolicy.ReadOnlyReason(r.Entry) ?? "know-how protected"));
             if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
             var name = r.Entry.Address;
@@ -787,14 +800,19 @@ namespace Rung.Bridge.V20
                     foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
                     break;
                 case "libraries":
-                    // the type and master copy folders are properties of the library, not compositions
-                    var lib = _project.ProjectLibrary;
-                    var libNode = new DescribeNode { Type = "ProjectLibrary", Name = "Project library", Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
-                    count++;
-                    var types = Node(lib.TypeFolder, allowed, 1, ref count, budget, "Types");
-                    if (types != null) libNode.Children["Types"] = new List<DescribeNode> { types };
-                    var copies = Node(lib.MasterCopyFolder, allowed, 1, ref count, budget, "Master copies");
-                    if (copies != null) libNode.Children["MasterCopies"] = new List<DescribeNode> { copies };
+                    var libNode = LibraryNode(_project.ProjectLibrary, "ProjectLibrary", "Project library", allowed, ref count, budget);
+                    // global libraries open in TIA Portal with their types; the others (system, corporate) as TIA lists them, unopened
+                    var open = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (Siemens.Engineering.Library.GlobalLibrary g in _portal.GlobalLibraries)
+                    {
+                        var gn = LibraryNode(g, "GlobalLibrary", g.Name, allowed, ref count, budget);
+                        foreach (var a in new[] { "Author", "Path", "Version", "IsReadOnly" })
+                            try { var s = Scalar(g.GetAttribute(a)); if (s != null) gn.Attributes[a] = s; } catch (Exception) { }
+                        open.Add(g.Name);
+                        Add("GlobalLibraries", gn);
+                    }
+                    foreach (var info in _portal.GlobalLibraries.GetGlobalLibraryInfos())
+                        if (!open.Contains(info.Name)) Add("GlobalLibraries", Node(info, allowed, 0, ref count, budget));
                     // which blocks and PLC data types are instances of each version
                     var instances = new Dictionary<string, List<string>>(StringComparer.Ordinal);
                     foreach (var plc in Plcs())
@@ -815,6 +833,18 @@ namespace Rung.Bridge.V20
             }
             root.Truncated = count >= budget;
             return root;
+        }
+
+        // the type and master copy folders are properties of a library, not compositions
+        static DescribeNode LibraryNode(Siemens.Engineering.Library.ILibrary lib, string type, string name, string[] allowed, ref int count, int budget)
+        {
+            var node = new DescribeNode { Type = type, Name = name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+            count++;
+            var types = Node(lib.TypeFolder, allowed, 1, ref count, budget, "Types");
+            if (types != null) node.Children["Types"] = new List<DescribeNode> { types };
+            var copies = Node(lib.MasterCopyFolder, allowed, 1, ref count, budget, "Master copies");
+            if (copies != null) node.Children["MasterCopies"] = new List<DescribeNode> { copies };
+            return node;
         }
 
         List<Device> AllDevices()
@@ -845,6 +875,7 @@ namespace Rung.Bridge.V20
                 case bool b: return b ? "true" : "false";
                 case Enum e: return e.ToString();
                 case Version ver: return ver.ToString();
+                case System.IO.FileSystemInfo fi: return fi.FullName;
                 case DateTime dt: return dt.ToString("o");
                 case IFormattable f when v.GetType().IsPrimitive || v is decimal: return f.ToString(null, System.Globalization.CultureInfo.InvariantCulture);
                 case IEngineeringObject o:
@@ -1024,6 +1055,7 @@ namespace Rung.Bridge.V20
                         case PlcType t: t.Delete(); break;
                         case PlcTagTable tt: tt.Delete(); break;
                         case PlcWatchTable w: w.Delete(); break;
+                        case DeviceItem _ when r.Entry.Kind == "hardware": throw new RpcException(ErrorCodes.UnsupportedObject, "A PLC's network settings cannot be deleted; they stay with the PLC in TIA Portal");
                         default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot delete " + address);
                     }
                     tx.CommitOnDispose();
@@ -1056,6 +1088,15 @@ namespace Rung.Bridge.V20
                     foreach (var a in addresses)
                     {
                         var r = Resolve(a);
+                        if (r.Entry.Kind == "hardware")
+                        {
+                            // network settings are hardware: the station compiles them (and its software). Its closing
+                            // count ("Compiling finished (errors: 1; warnings: 2)") counts the software too: not about the file
+                            var top = StationCompiler(device).Compile().Messages.Cast<CompilerResultMessage>().ToList();
+                            if (top.Count > 0 && top[top.Count - 1].Messages.Count == 0) top.RemoveAt(top.Count - 1);
+                            Flatten(top, a, byName, messages);
+                            continue;
+                        }
                         var c = (r.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>();
                         if (c == null) continue; // types and tables are compiled together with their users
                         Flatten(c.Compile().Messages, a, byName, messages);
@@ -1076,7 +1117,7 @@ namespace Rung.Bridge.V20
                 .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
         }
 
-        static void Flatten(CompilerResultMessageComposition list, string address, Dictionary<string, string> byName, List<CompileMessage> into)
+        static void Flatten(IEnumerable<CompilerResultMessage> list, string address, Dictionary<string, string> byName, List<CompileMessage> into)
         {
             foreach (CompilerResultMessage m in list)
             {

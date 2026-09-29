@@ -31,14 +31,19 @@ namespace Rung.Bridge.V20
             return item;
         }
 
+        /// <summary>The station (device) compiles hardware and software together.</summary>
+        ICompilable StationCompiler(string device)
+        {
+            var item = CpuItem(device);
+            var target = (IEngineeringServiceProvider)StationOf(item) ?? item;
+            return target.GetService<ICompilable>() ?? item.GetService<ICompilable>()
+                ?? throw new RpcException(ErrorCodes.UnsupportedCapability, device + " cannot be compiled as hardware");
+        }
+
         public IReadOnlyList<CompileMessage> CompileHardware(string device)
         {
             Alive();
-            var item = CpuItem(device);
-            // the station (device) compiles hardware and software together
-            var target = (IEngineeringServiceProvider)(item.Parent as Device) ?? item;
-            var compiler = target.GetService<ICompilable>() ?? item.GetService<ICompilable>();
-            if (compiler == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " cannot be compiled as hardware");
+            var compiler = StationCompiler(device);
             var messages = new List<CompileMessage>();
             using (OfflineFor(device))
             {

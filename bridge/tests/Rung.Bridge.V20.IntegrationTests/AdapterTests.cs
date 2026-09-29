@@ -190,6 +190,40 @@ public class AdapterTests : IClassFixture<FixtureSession>
         Assert.Equal("IMPORT_FAILED", ex.Code);
         Assert.DoesNotContain(_fx.Session.ListObjects("PLC_1"), o => o.Address.EndsWith("/Fx_Intruder")); // rolled back
     }
+
+    [Fact] public void NetworkSettingsAreAFileThatSetsTheInterfaces()
+    {
+        const string address = "plc:PLC_1/hardware/network";
+        Assert.Equal("hardware", _fx.Session.ListObjects("PLC_1").Single(o => o.Address == address).Kind);
+        var cur = _fx.Session.Export(address, "auto", Tmp());
+        Assert.Equal("yaml", cur.Form);
+        var original = File.ReadAllText(cur.Files[0].Path).Replace("\r\n", "\n");
+        Assert.Contains("\n\"PLC_1 / PROFINET interface_1\":\n  ip: ", original);
+        var ip = System.Text.RegularExpressions.Regex.Match(original, @"\n  ip: (\S+)").Groups[1].Value;
+        string Write(string text) { var p = Path.Combine(Tmp(), "obj.yaml"); File.WriteAllText(p, text); return p; }
+        try
+        {
+            // an address and a PROFINET name set, then read back as TIA Portal has them
+            var edited = original.Replace("  ip: " + ip + "\n", "  ip: 192.168.77.1\n");
+            edited = edited.Substring(0, edited.IndexOf("deviceName: auto", StringComparison.Ordinal)) + "deviceName: Line PLC" + edited.Substring(edited.IndexOf('\n', edited.IndexOf("deviceName: auto", StringComparison.Ordinal)));
+            var after = _fx.Session.Import(address, "yaml", Write(edited), cur.Fingerprint, Guid.NewGuid().ToString());
+            var text = File.ReadAllText(after.Files[0].Path);
+            Assert.Contains("ip: 192.168.77.1", text);
+            Assert.Contains("deviceName: Line PLC\n", text.Replace("\r\n", "\n"));
+            // a value TIA Portal refuses: the whole file is refused, with its line
+            var bad = _fx.Session.Export(address, "auto", Tmp());
+            var ex = Assert.Throws<RpcException>(() => _fx.Session.Import(address, "yaml", Write(File.ReadAllText(bad.Files[0].Path).Replace("ip: 192.168.77.1", "ip: 0.0.0.0")), bad.Fingerprint, Guid.NewGuid().ToString()));
+            Assert.Equal("IMPORT_FAILED", ex.Code);
+            Assert.StartsWith("line 8: PLC_1 / PROFINET interface_1: ", ex.Message);
+            Assert.Equal(bad.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
+        }
+        finally
+        {
+            var now = _fx.Session.Export(address, "auto", Tmp());
+            _fx.Session.Import(address, "yaml", Write(original), now.Fingerprint, Guid.NewGuid().ToString());
+        }
+        Assert.Equal(cur.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
+    }
 }
 
 [Trait("Category", "NoPortal")]
@@ -332,6 +366,14 @@ public class DescribeAdapterTests : IClassFixture<FixtureSession>
     {
         var tree = _fx.Session.Describe("hardware", 5000);
         Assert.Contains(tree.Children["Devices"], d => d.Name != null);
+    }
+
+    [Fact] public void LibrariesViewHasTheProjectLibraryAndTheSystemLibraries()
+    {
+        var tree = _fx.Session.Describe("libraries", 5000);
+        var lib = Assert.Single(tree.Children["ProjectLibrary"]);
+        Assert.Equal("Types", Assert.Single(lib.Children["Types"]).Name);
+        Assert.Contains(tree.Children["GlobalLibraries"], g => g.Attributes.TryGetValue("LibraryType", out var t) && t == "System");
     }
 
     [Fact] public void UnknownScopeIsRejected() =>

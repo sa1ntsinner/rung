@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { AddressError, escapeSegment, unescapeSegment, leafSegment, splitLeaf } from "./escape.js";
 
-export type ObjectKind = "block" | "type" | "tagtable" | "techobject" | "watchtable" | "forcetable";
+/** hardware: the network settings of a PLC (plc/<PLC>/hardware/network.yaml). */
+export type ObjectKind = "block" | "type" | "tagtable" | "techobject" | "watchtable" | "forcetable" | "hardware";
 
 export interface Address {
   device: string;
@@ -12,8 +13,8 @@ export interface Address {
   namespace?: string;
 }
 
-/** st: IEC structured text of a CODESYS POU, DUT or GVL. */
-export type TextForm = "scl" | "awl" | "db" | "udt" | "s7dcl" | "xml" | "tags.xml" | "protected.yaml" | "st";
+/** st: IEC structured text of a CODESYS POU, DUT or GVL. yaml: network settings. */
+export type TextForm = "scl" | "awl" | "db" | "udt" | "s7dcl" | "xml" | "tags.xml" | "protected.yaml" | "st" | "yaml";
 
 export const KIND_DIR: Readonly<Record<ObjectKind, string>> = {
   block: "blocks",
@@ -22,11 +23,12 @@ export const KIND_DIR: Readonly<Record<ObjectKind, string>> = {
   techobject: "techobjects",
   watchtable: "watch",
   forcetable: "force",
+  hardware: "hardware",
 };
 const DIR_KIND = new Map(Object.entries(KIND_DIR).map(([k, v]) => [v, k as ObjectKind]));
 
 /** Longest suffix first so "tags.xml" and "protected.yaml" win over "xml". */
-const FORMS: readonly TextForm[] = ["protected.yaml", "tags.xml", "s7dcl", "scl", "awl", "db", "udt", "xml", "st"];
+const FORMS: readonly TextForm[] = ["protected.yaml", "tags.xml", "s7dcl", "scl", "awl", "db", "udt", "xml", "st", "yaml"];
 
 export const FORMS_BY_KIND: Readonly<Record<ObjectKind, readonly TextForm[]>> = {
   block: ["scl", "awl", "db", "s7dcl", "xml", "protected.yaml", "st"],
@@ -35,6 +37,7 @@ export const FORMS_BY_KIND: Readonly<Record<ObjectKind, readonly TextForm[]>> = 
   techobject: ["xml"],
   watchtable: ["xml"],
   forcetable: ["xml"],
+  hardware: ["yaml"],
 };
 
 function segments(a: Address): string[] {

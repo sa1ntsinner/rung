@@ -53,6 +53,7 @@ rung watch         # keeps both sides in sync; Ctrl+C to stop
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
 - Tag tables (`.tags.xml`) and watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
+- `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
 `rung sync` does one pass instead of watching; `rung status` shows what is open.
 

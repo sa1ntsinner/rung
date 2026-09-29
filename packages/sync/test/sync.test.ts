@@ -705,3 +705,26 @@ describe("syncOnce", () => {
     expect(readdirSync(t.f("plc/PLC_1/blocks"))).toEqual(["Fx_A.scl"]);
   });
 });
+
+describe("network settings (plc/<PLC>/hardware/network.yaml)", () => {
+  const N = "plc:PLC_1/hardware/network";
+  const pN = "plc/PLC_1/hardware/network.yaml";
+  const yaml = '"PLC_1 / PROFINET interface_1":\n  ip: 192.168.0.1\n  subnetMask: 255.255.255.0\n\n"IO device_1 / PROFINET interface":\n  ip: 192.168.0.2\n  deviceName: auto\n';
+
+  it("sends an edit, merges it with a change made in TIA Portal, and puts a deleted file back", async () => {
+    const t = setup((b) => b.add(N, { kind: "hardware", form: "yaml", content: yaml }));
+    await t.sync();
+    expect(t.read(pN)).toBe(yaml);
+    t.write(pN, yaml.replace("192.168.0.1", "192.168.0.10"));
+    t.bridge.edit(N, { ".yaml": yaml.replace("deviceName: auto", "deviceName: line-io") });
+    const r = await t.sync(2000);
+    expect(r.merged).toBe(1);
+    expect(t.read(pN)).toBe(yaml.replace("192.168.0.1", "192.168.0.10").replace("deviceName: auto", "deviceName: line-io"));
+    unlinkSync(t.f(pN));
+    const d = await t.sync(3000);
+    expect(d.pendingDeletes).toBe(0);
+    expect(d.warnings.map((w) => w.code)).toContain("NOT_DELETABLE");
+    expect(t.read(pN)).toContain("ip: 192.168.0.10");
+    expect(t.bridge.deletes).toEqual([]);
+  });
+});

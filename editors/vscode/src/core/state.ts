@@ -44,7 +44,7 @@ export function parseState(text: string): StateDoc | undefined {
   }
 }
 
-export type ObjectKind = "block" | "type" | "tagtable" | "techobject" | "watchtable" | "forcetable";
+export type ObjectKind = "block" | "type" | "tagtable" | "techobject" | "watchtable" | "forcetable" | "hardware";
 
 const DIR_KIND: Readonly<Record<string, ObjectKind>> = {
   blocks: "block",
@@ -53,9 +53,10 @@ const DIR_KIND: Readonly<Record<string, ObjectKind>> = {
   techobjects: "techobject",
   watch: "watchtable",
   force: "forcetable",
+  hardware: "hardware",
 };
 
-export const KIND_ORDER: readonly ObjectKind[] = ["block", "type", "tagtable", "techobject", "watchtable", "forcetable"];
+export const KIND_ORDER: readonly ObjectKind[] = ["block", "type", "tagtable", "techobject", "watchtable", "forcetable", "hardware"];
 
 export const KIND_LABEL: Readonly<Record<ObjectKind, string>> = {
   block: "Program blocks",
@@ -64,6 +65,7 @@ export const KIND_LABEL: Readonly<Record<ObjectKind, string>> = {
   techobject: "Technology objects",
   watchtable: "Watch tables",
   forcetable: "Force tables",
+  hardware: "Network settings",
 };
 
 export interface ParsedAddress {

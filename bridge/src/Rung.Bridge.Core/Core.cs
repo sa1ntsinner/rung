@@ -116,6 +116,7 @@ namespace Rung.Bridge.Core
             {
                 case "type": return e.IsFailsafe ? "xml" : "udt";
                 case "tagtable": return "tags.xml";
+                case "hardware": return "yaml";
                 case "block": break;
                 default: return "xml";
             }

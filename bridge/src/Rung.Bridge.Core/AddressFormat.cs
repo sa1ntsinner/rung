@@ -34,7 +34,7 @@ namespace Rung.Bridge.Core
         static readonly Dictionary<string, string> KindDir = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["block"] = "blocks", ["type"] = "types", ["tagtable"] = "tags",
-            ["techobject"] = "techobjects", ["watchtable"] = "watch", ["forcetable"] = "force",
+            ["techobject"] = "techobjects", ["watchtable"] = "watch", ["forcetable"] = "force", ["hardware"] = "hardware",
         };
         static readonly Dictionary<string, string> DirKind = KindDir.ToDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
 

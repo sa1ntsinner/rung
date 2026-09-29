@@ -26,6 +26,7 @@ const KIND_ICON: Readonly<Record<string, string>> = {
   techobject: "settings",
   watchtable: "eye",
   forcetable: "pinned",
+  hardware: "server-environment",
 };
 
 const SECTION_ICON: Readonly<Record<string, string>> = {
@@ -35,6 +36,7 @@ const SECTION_ICON: Readonly<Record<string, string>> = {
   techobject: "settings-gear",
   watchtable: "eye",
   forcetable: "pinned",
+  hardware: "server-environment",
 };
 
 export class ProjectItem extends vscode.TreeItem {

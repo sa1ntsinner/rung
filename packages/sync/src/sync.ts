@@ -396,7 +396,10 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         if (status === "missing") {
-          if (!tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
+          // a PLC's network settings cannot be deleted: the file comes back
+          const deletable = parseAddress(address).kind !== "hardware";
+          if (!deletable) warn(address, "NOT_DELETABLE", "a PLC's network settings stay with the PLC; the file was put back");
+          if (deletable && !tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
             state.upsert({ ...cur, status: "pendingDelete" });
             report.pendingDeletes++;
             diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: "Deleted in the workspace; run rung confirm-delete to delete it in TIA Portal, or restore the file" });

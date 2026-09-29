@@ -91,6 +91,12 @@
       "string": "plc:My%3APLC/watch/A%2E/B/%43ON",
       "form": "xml",
       "path": "plc/My%3APLC/watch/A%2E/B/%43ON.xml"
+    },
+    {
+      "address": { "device": "PLC_1", "kind": "hardware", "groups": [], "name": "network" },
+      "string": "plc:PLC_1/hardware/network",
+      "form": "yaml",
+      "path": "plc/PLC_1/hardware/network.yaml"
     }
   ],
   "invalidAddressStrings": [
