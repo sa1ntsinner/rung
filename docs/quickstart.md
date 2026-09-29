@@ -75,6 +75,7 @@ rung download               # you type the PLC name to confirm; TIA's risky ques
 
 ## More
 
+- `rung init --from-plc <ip> --project <new .ap20>`: no project file, only a running PLC? rung makes a new project from it (TIA's upload device as new station) and binds the folder to it ([downloads](downloads.md#uploading-from-a-plc)).
 - `rung assignments`: TIA Portal's assignment list, every input, output and bit memory address in use with its tag and where the code uses it, and overlapping accesses (exit 2 when two cross).
 - `rung views`: read-only YAML views of hardware, HMI, technology objects and the project library.
 - `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. All over the S7-1500 Web API, read-only.

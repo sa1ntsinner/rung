@@ -391,6 +391,16 @@ public class PlcActionRouteTests
         Assert.Equal("Success", ok.GetProperty("state").GetString());
     }
 
+    [Fact] public void UploadTakesTheAddressAndDefaultsToPnIe()
+    {
+        var r = Call("{\"id\":1,\"method\":\"plc.upload\",\"params\":{\"request\":{\"address\":\"192.168.0.9\"}}}").GetProperty("result");
+        Assert.Equal("PLC_2", r.GetProperty("plcs")[0].GetString());
+        Assert.Equal("192.168.0.9", _s.LastUpload.Address);
+        Assert.Equal("PN/IE", _s.LastUpload.Mode);
+        Assert.Null(_s.LastUpload.PcInterface);
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":2,\"method\":\"plc.upload\",\"params\":{\"request\":{}}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
     [Fact] public void DownloadNeedsADevice() =>
         Assert.Equal("BAD_REQUEST", Call("{\"id\":1,\"method\":\"plc.download\",\"params\":{\"request\":{}}}").GetProperty("error").GetProperty("code").GetString());
 

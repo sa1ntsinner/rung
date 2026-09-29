@@ -1284,12 +1284,20 @@ namespace Rung.Bridge.V20
         static OpennessSession OpenHeadless(BridgeArgs args, Action<string, object> emit)
         {
             var file = new FileInfo(Path.GetFullPath(args.ProjectPath));
-            if (!file.Exists) throw new RpcException(ErrorCodes.NoProject, "Project file not found: " + file.FullName);
+            var create = !file.Exists && args.CreateProject;
+            if (!file.Exists && !create) throw new RpcException(ErrorCodes.NoProject, "Project file not found: " + file.FullName);
+            // TIA Portal puts a new project in a folder of its name: <dir>\Line\Line.ap20
+            var name = Path.GetFileNameWithoutExtension(file.Name);
+            if (create && (file.Directory == null || file.Directory.Parent == null || !string.Equals(file.Directory.Name, name, StringComparison.OrdinalIgnoreCase)))
+                throw new RpcException(ErrorCodes.BadRequest, "A new project goes in a folder of its own name, like " + Path.Combine(file.DirectoryName ?? "", name, name + file.Extension));
+            if (create && file.Directory.Exists && file.Directory.EnumerateFileSystemInfos().Any())
+                throw new RpcException(ErrorCodes.BadRequest, file.Directory.FullName + " is not empty; a new project needs a new folder");
             emit("tia-starting", new { project = file.FullName, headless = true });
             var portal = new TiaPortal(TiaPortalMode.WithoutUserInterface);
             try
             {
-                var project = portal.Projects.Open(file);
+                // a DirectoryInfo from .Parent keeps a relative original path, which TIA Portal refuses
+                var project = create ? portal.Projects.Create(new DirectoryInfo(file.Directory.Parent.FullName), name) : portal.Projects.Open(file);
                 var pid = TiaPortal.GetProcesses().FirstOrDefault(p => p.Mode == TiaPortalMode.WithoutUserInterface && p.ProjectPath != null && string.Equals(p.ProjectPath.FullName, file.FullName, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
                 SweepWorkDirs();
                 emit("tia-started", new { project = file.FullName, pid });

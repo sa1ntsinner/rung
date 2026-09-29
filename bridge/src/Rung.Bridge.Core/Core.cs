@@ -38,6 +38,8 @@ namespace Rung.Bridge.Core
         ConnectionOptions Connections(string device, bool scan);
         /// <summary>Downloads to the PLC, answering TIA's questions with DownloadPolicy (docs/downloads.md).</summary>
         DownloadOutcome Download(DownloadRequest request);
+        /// <summary>Reads the station of a PLC into the project as a new station (the PLC is only read), then saves.</summary>
+        UploadOutcome UploadStation(UploadRequest request);
         /// <summary>Opens the object's editor in the TIA Portal window (needs a TIA Portal with user interface).</summary>
         void Show(string address);
     }

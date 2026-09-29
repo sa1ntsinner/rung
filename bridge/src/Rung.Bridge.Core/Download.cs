@@ -122,6 +122,25 @@ namespace Rung.Bridge.Core
         public bool Blocks;              // this answer makes TIA cancel the download
     }
 
+    /// <summary>TIA Portal's "Upload device as new station": the station of the PLC at Address becomes a new station of the project.</summary>
+    public sealed class UploadRequest
+    {
+        public string Address;           // the PLC's IP address, e.g. "192.168.0.1"
+        public string Mode = "PN/IE";
+        public string PcInterface;       // null = the only PG/PC interface of the mode
+        public int PcInterfaceNumber = 1;
+        // a read access password comes from RUNG_PLC_PASSWORD in the bridge's environment, as for downloads
+    }
+
+    public sealed class UploadOutcome
+    {
+        public string State;             // Success | Information | Warning | Error
+        public string Station;
+        /// <summary>The PLCs of the uploaded station, as rung names them (plc/&lt;name&gt;/).</summary>
+        public string[] Plcs = new string[0];
+        public List<string> Messages = new List<string>();
+    }
+
     public sealed class DownloadOutcome
     {
         public string Device;

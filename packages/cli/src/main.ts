@@ -26,7 +26,7 @@ import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex, assignmentList } from "@rung/lsp";
 import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
-import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
+import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { cmdCheck } from "./check.js";
@@ -44,6 +44,8 @@ Usage:
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
+  rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>]
+                                       a new project from a running PLC (TIA's "Upload device as new station")
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
@@ -69,6 +71,7 @@ PLC:
   rung compare [dir] [--json] [--plc <name>]                 the project against the PLC (read-only); exit 2 if they differ
   rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
+  rung upload [dir] --ip <address> [--use <PG/PC interface>]  the PLC as a new station of the project (the PLC is only read)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
                                        download to the PLC; asks you to type the PLC name first, and
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
@@ -80,7 +83,7 @@ PLC:
 Environment:
   RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
   RUNG_WEBAPI_PASSWORD  password of the PLC web server user for rung live
-  RUNG_PLC_PASSWORD     password of a protected CPU for rung download
+  RUNG_PLC_PASSWORD     password of a protected CPU for rung download and rung upload
 `;
 
 async function agentsTemplate(project: string): Promise<string> {
@@ -104,10 +107,20 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   const codesys = !!v.project && /\.project$/i.test(String(v.project)) && !io.env.RUNG_BRIDGE;
   const bridge = codesys ? codesysBridgeCommand(resolve(io.cwd, String(v.project))) : defaultBridge(io.env);
   // with an explicit project the bridge may open it in the background when no TIA Portal has it open
-  const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless"] : [])];
+  // --from-plc: a new project, and the running PLC uploaded into it as its station
+  const fromPlc = v["from-plc"] === undefined ? undefined : uploadRequest(String(v["from-plc"]), v);
+  if (fromPlc && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --from-plc needs --project <folder>/<name>/<name>.ap20, where the new TIA Portal project goes");
+  const create = fromPlc ? ["--create-project", "--allow-import"] : [];
+  const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless", ...create] : [])];
   const client = await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string> });
   try {
-    const info = await client.projectInfo();
+    let info = await client.projectInfo();
+    if (fromPlc) {
+      io.stderr(`reading the station at ${fromPlc.address} into ${info.path} (the PLC is only read) …\n`);
+      const code = reportUpload(io, await client.upload(fromPlc), fromPlc.address);
+      if (code !== 0) return code;
+      info = await client.projectInfo();
+    }
     const tia = (v.tia as string | undefined) ?? info.tiaVersion;
     if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V20, V21 or CODESYS)`);
     if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
@@ -208,7 +221,7 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
 const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
-  init: { options: ["project", "tia", "device", "rebind"], positionals: 1 },
+  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number"], positionals: 1 },
   pull: { options: ["force"], positionals: 1 },
   sync: { options: [], positionals: 1 },
   watch: { options: [], positionals: 1 },
@@ -233,6 +246,7 @@ const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
   "codesys-bridge": { options: ["project"], positionals: 0 },
   assignments: { options: ["json"], positionals: 1 },
+  upload: { options: ["ip", "use", "mode", "number"], positionals: 1 },
 };
 
 /** Why these arguments do not fit the command, or undefined. */
@@ -303,6 +317,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         target: { type: "string" },
         instance: { type: "string" },
         interval: { type: "string" },
+        ip: { type: "string" },
+        "from-plc": { type: "string" },
       },
     });
   } catch (e) {
@@ -427,6 +443,8 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
         return await cmdCompare(dir, v, io);
       case "connect":
         return await cmdConnect(dir, v, io);
+      case "upload":
+        return await cmdUpload(dir, v, io);
       case "interfaces":
         return await cmdInterfaces(dir, v, io);
       case "download":

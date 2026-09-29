@@ -31,6 +31,13 @@ public sealed class FakeTiaSession : ITiaSession
         Device = device,
         Modes = { new ConnectionModeInfo { Name = "PN/IE", PcInterfaces = { new PcInterfaceInfo { Name = "PLCSIM", Number = 1, TargetInterfaces = new[] { "1 X1" }, Subnets = new string[0] } } } },
     };
+    public UploadRequest LastUpload;
+    public UploadOutcome UploadStation(UploadRequest request)
+    {
+        LastUpload = request;
+        return new UploadOutcome { State = "Success", Station = "S71500/ET200MP station_1", Plcs = new[] { "PLC_2" } };
+    }
+
     public DownloadOutcome Download(DownloadRequest request)
     {
         LastDownload = request;

@@ -216,6 +216,24 @@ export interface DownloadOutcome {
   needsAllow: string[];
 }
 
+/** TIA Portal's "Upload device as new station"; a read password comes from RUNG_PLC_PASSWORD in the bridge's environment. */
+export interface UploadRequest {
+  /** The PLC's IP address. */
+  address: string;
+  mode?: string;
+  /** Default: the only PG/PC interface of the mode. */
+  pcInterface?: string;
+  pcInterfaceNumber?: number;
+}
+
+export interface UploadOutcome {
+  state: "Success" | "Information" | "Warning" | "Error" | string;
+  station?: string;
+  /** PLCs of the new station (plc/<name>/ after a pull). */
+  plcs: string[];
+  messages: string[];
+}
+
 export interface BridgeEvent {
   event: string;
   params: unknown;

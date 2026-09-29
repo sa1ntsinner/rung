@@ -5,9 +5,9 @@ import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
 import { WorkspaceError, loadConfig, parseAddress, type RungConfig } from "@rung/core";
-import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus, ProjectInfo } from "@rung/bridge-client";
+import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus, ProjectInfo, UploadOutcome, UploadRequest } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages } from "@rung/sync";
-import { bridgeFor, findWorkspace, type Io } from "./common.js";
+import { bridgeFor, findWorkspace, importFlags, type Io } from "./common.js";
 
 /**
  * Read-only view of .rung/state.json. These commands only look up paths and addresses, so they must not take
@@ -304,4 +304,42 @@ export async function cmdOpen(dir: string, file: string, io: Io): Promise<number
   await link.call("show", { address: s.address }, (b) => b.show(s.address));
   io.stdout(`opened ${s.address} in TIA Portal\n`);
   return 0;
+}
+
+/** --use/--mode/--number of rung connect name the PG/PC interface; without --use the bridge takes the only one. */
+export function uploadRequest(address: string, v: Record<string, unknown>): UploadRequest {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) throw new WorkspaceError("BAD_ARGUMENT", `${address} is not an IP address such as 192.168.0.1`);
+  return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1) } : {}) };
+}
+
+/** Prints what an upload brought; exit 3 when no station came. */
+export function reportUpload(io: Io, r: UploadOutcome, address: string): number {
+  for (const m of r.messages) io.stdout(`  ${m}\n`);
+  if (!r.station) {
+    io.stderr(`rung: nothing was uploaded from ${address} (${r.state})\n`);
+    return 3;
+  }
+  io.stdout(`uploaded the station "${r.station}" from ${address}${r.plcs.length ? `: ${r.plcs.join(", ")}` : ""} (${r.state})\n`);
+  return 0;
+}
+
+/**
+ * TIA Portal's "Upload device as new station": the PLC at --ip becomes a station of the bound project (hardware
+ * and program), and the project is saved. The PLC is only read. Next, rung pull mirrors its program.
+ */
+export async function cmdUpload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  if (!v.ip) throw new WorkspaceError("BAD_ARGUMENT", "rung upload needs --ip <address of the PLC>");
+  const request = uploadRequest(String(v.ip), v);
+  const ws = await findWorkspace(dir);
+  const config = await loadConfig(ws);
+  // the project gains a station: allowed where the workspace allows imports (sync.import = "auto")
+  const client = await bridgeFor(config, io, importFlags(config));
+  try {
+    io.stderr(`reading the station at ${request.address} into the project (the PLC is only read) …\n`);
+    const code = reportUpload(io, await client.upload(request), request.address);
+    if (code === 0) io.stdout("Next: rung pull\n");
+    return code;
+  } finally {
+    await client.close();
+  }
 }

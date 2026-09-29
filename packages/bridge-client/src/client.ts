@@ -18,6 +18,8 @@ import {
   type HelloResult,
   type ObjectEntry,
   type ProjectInfo,
+  type UploadOutcome,
+  type UploadRequest,
 } from "./protocol.js";
 
 export interface BridgeClientOptions {
@@ -39,7 +41,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download", "plc.upload"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -182,6 +184,11 @@ export class BridgeClient {
   /** A download can take minutes (hardware, large programs); it is never retried. */
   download(request: DownloadRequest): Promise<DownloadOutcome> {
     return this.request("plc.download", { request }, 1_800_000) as Promise<DownloadOutcome>;
+  }
+
+  /** Reads a PLC into the project as a new station (the PLC is only read); large programs take minutes. */
+  upload(request: UploadRequest): Promise<UploadOutcome> {
+    return this.request("plc.upload", { request }, 1_800_000) as Promise<UploadOutcome>;
   }
 
   show(address: string): Promise<{ shown: boolean }> {

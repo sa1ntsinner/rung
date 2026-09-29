@@ -113,6 +113,12 @@ namespace Rung.Bridge.Core.Protocol
                     if (string.IsNullOrEmpty(req.Device)) throw new RpcException(ErrorCodes.BadRequest, "request.device is required");
                     return Session.Download(req);
                 }
+                case "plc.upload":
+                {
+                    var req = Obj<UploadRequest>(p, "request") ?? throw new RpcException(ErrorCodes.BadRequest, "Missing request");
+                    if (string.IsNullOrEmpty(req.Address)) throw new RpcException(ErrorCodes.BadRequest, "request.address is required");
+                    return Session.UploadStation(req);
+                }
                 case "objects.show":
                     Session.Show(Str(p, "address"));
                     return new { shown = true };

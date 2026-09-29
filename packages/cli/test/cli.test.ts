@@ -48,6 +48,31 @@ describe("rung CLI from inside a workspace", () => {
   });
 });
 
+describe("upload from a PLC (TIA Portal's Upload device as new station)", () => {
+  it("rung upload reads the PLC into the bound project as a new station", async () => {
+    const t = setup();
+    expect(await t.run("init")).toBe(0);
+    const code = await t.run("upload", "--ip", "192.168.0.9", "--use", "Intel(R) Ethernet");
+    expect(t.err.join("")).toBe("reading the station at 192.168.0.9 into the project (the PLC is only read) …\n");
+    expect(code).toBe(0);
+    expect(t.out.join("")).toContain('uploaded the station "S7-1500 station_2" from 192.168.0.9: PLC_2 (Success)\nNext: rung pull\n');
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.uploads[0].request).toEqual({ address: "192.168.0.9", pcInterface: "Intel(R) Ethernet", pcInterfaceNumber: 1 });
+    expect(await t.run("upload", "--ip", "192.168.0")).toBe(1);
+    expect(t.err.join("")).toContain("192.168.0 is not an IP address such as 192.168.0.1");
+  });
+
+  it("rung init --from-plc makes a new project from the PLC and binds it", async () => {
+    const t = setup();
+    expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT)).toBe(0);
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.uploads[0].argv).toEqual(expect.arrayContaining(["--open-headless", "--create-project", "--allow-import"]));
+    expect(t.out.join("")).toMatch(/uploaded the station "S7-1500 station_2"[\s\S]*Bound .* \(V20, devices: PLC_1, PLC_2\)/);
+    expect(existsSync(join(t.dir, "rung.toml"))).toBe(true);
+    expect(await setup().run("init", "--from-plc", "192.168.0.9")).toBe(1);
+  });
+});
+
 describe("rung CLI", () => {
   it("prints help and version", async () => {
     const t = setup();

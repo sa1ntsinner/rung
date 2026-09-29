@@ -15,6 +15,8 @@ namespace Rung.Bridge.V20
         public bool SaveAfterImport;
         /// <summary>When no TIA Portal has the project open, open it in a TIA Portal without window, owned by this bridge.</summary>
         public bool OpenHeadless;
+        /// <summary>With OpenHeadless: create the project when its file does not exist yet (rung init --from-plc).</summary>
+        public bool CreateProject;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -38,6 +40,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--open-headless":
                         a.OpenHeadless = true;
+                        break;
+                    case "--create-project":
+                        a.CreateProject = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);

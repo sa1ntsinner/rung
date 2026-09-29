@@ -17,6 +17,8 @@ using Siemens.Engineering.Download.Configurations;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.Online;
+using Siemens.Engineering.Upload;
+using Siemens.Engineering.Upload.Configurations;
 
 namespace Rung.Bridge.V20
 {
@@ -298,6 +300,80 @@ namespace Rung.Bridge.V20
                     Message = (message ?? "") + " (rung could not answer: " + inner.Message.Split('\n')[0].Trim() + ")",
                 });
             }
+        }
+
+        /// <summary>
+        /// TIA Portal's "Upload device as new station": reads hardware and software of the PLC at an address into a
+        /// new station of this project and saves. The PLC is only read. S7-PLCSIM cannot be uploaded (TIA Portal:
+        /// "Substitute Object … cannot be uploaded from the device").
+        /// </summary>
+        public UploadOutcome UploadStation(UploadRequest request)
+        {
+            Alive();
+            // the project gains a station: a project change like an import
+            FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
+            var provider = _project.GetService<StationUploadProvider>() ?? throw new RpcException(ErrorCodes.UnsupportedCapability, "This TIA Portal offers no station upload");
+            var cfg = provider.Configuration;
+            var mode = cfg.Modes.Find(string.IsNullOrEmpty(request.Mode) ? "PN/IE" : request.Mode)
+                ?? throw new RpcException(ErrorCodes.NoTarget, "No connection mode \"" + request.Mode + "\" (" + string.Join(", ", cfg.Modes.Select(m => m.Name)) + ")");
+            var all = mode.PcInterfaces.ToList();
+            var names = string.Join(", ", all.Select(i => i.Name + (i.Number > 1 ? " (" + i.Number + ")" : "")));
+            ConfigurationPcInterface pc;
+            if (!string.IsNullOrEmpty(request.PcInterface))
+                pc = mode.PcInterfaces.Find(request.PcInterface, request.PcInterfaceNumber <= 0 ? 1 : request.PcInterfaceNumber)
+                    ?? throw new RpcException(ErrorCodes.NoTarget, "No PG/PC interface \"" + request.PcInterface + "\" in " + mode.Name + " (" + names + ")");
+            else if (all.Count == 1) pc = all[0];
+            else throw new RpcException(ErrorCodes.NoTarget, (all.Count == 0 ? "No PG/PC interface in " + mode.Name : "Several PG/PC interfaces (" + names + "): pass --pc-interface <name>"));
+
+            var outcome = new UploadOutcome();
+            var needsPassword = false;
+            UploadResult result;
+            using (var guard = new PasswordPromptGuard(_tiaPid))
+            {
+                try
+                {
+                    var address = pc.Addresses.Create(request.Address);
+                    result = provider.StationUpload(address, c =>
+                    {
+                        if (c is UploadMissingProducts missing) missing.CurrentSelection = UploadMissingProductsSelections.TryUpload;
+                        else if (c is UploadPasswordConfiguration pw)
+                        {
+                            var secret = Environment.GetEnvironmentVariable("RUNG_PLC_PASSWORD");
+                            if (string.IsNullOrEmpty(secret)) { needsPassword = true; return; }
+                            var s = new SecureString();
+                            foreach (var ch in secret) s.AppendChar(ch);
+                            pw.SetPassword(s);
+                        }
+                        outcome.Messages.Add(c.Message);
+                    });
+                }
+                catch (EngineeringException e)
+                {
+                    throw new RpcException(ErrorCodes.OnlineFailed, "Upload from " + request.Address + " failed: " + Sentence(TiaReason(e))
+                        + (needsPassword ? " The PLC asks for a password to read it: set RUNG_PLC_PASSWORD." : "")
+                        + (string.Equals(pc.Name, "PLCSIM", StringComparison.OrdinalIgnoreCase) ? " S7-PLCSIM cannot be uploaded as a station; upload from a real PLC." : ""));
+                }
+            }
+            outcome.State = result.State.ToString();
+            void Flatten(UploadResultMessageComposition list)
+            {
+                foreach (UploadResultMessage m in list)
+                {
+                    if (!string.IsNullOrEmpty(m.Message)) outcome.Messages.Add(m.Message);
+                    Flatten(m.Messages);
+                }
+            }
+            Flatten(result.Messages);
+            var station = result.UploadedStation;
+            if (station != null)
+            {
+                outcome.Station = station.Name;
+                outcome.Plcs = SoftwareOf(station.DeviceItems).OfType<Siemens.Engineering.SW.PlcSoftware>().Select(p => p.Name).ToArray();
+                try { _project.Save(); }
+                catch (EngineeringException e) { outcome.Messages.Add("Saving the project failed: " + e.Message); }
+            }
+            _index.Clear();
+            return outcome;
         }
 
         static void AnswerCore(DownloadConfiguration c, string phase, DownloadRequest request, DownloadOutcome outcome)

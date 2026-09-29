@@ -28,3 +28,15 @@ A password-protected CPU gets its password from `RUNG_PLC_PASSWORD`; passwords n
 `rung connect` finds the PLC like TIA's "Go online": it scans the PG/PC interfaces for the IP address configured in the project and saves what it found under `[plc.<device>]` in `rung.toml`. `rung online` and `rung compare` do the same by themselves when nothing is saved, because they only read. `rung download` never does: factory addresses such as 192.168.0.1 repeat on every network, so the machine that answers at the project's address can be another one. It downloads only over a connection a person saved or chose. `rung connect --pick` chooses again, `rung interfaces --scan` shows everything TIA can reach.
 
 While `rung watch` runs, these commands go through its bridge, so a download never races a sync.
+
+## Uploading from a PLC
+
+TIA Portal's *Upload device as new station* reads a running PLC, its hardware and its program, into a project. The PLC is only read.
+
+```
+rung init --from-plc 192.168.0.1 --project D:\Projects\Line3\Line3.ap20   # a new project from the PLC, then bound to this folder
+rung upload --ip 192.168.0.1                                               # the PLC as a new station of the bound project
+rung pull                                                                  # its program as files
+```
+
+With more than one network adapter, name the one to use with `--use` (as `rung interfaces` lists them). A PLC that protects reading asks for its password: set `RUNG_PLC_PASSWORD`. S7-PLCSIM cannot be uploaded this way; TIA Portal refuses it.

@@ -116,6 +116,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const stop = (r.allow ?? []).includes("stop-cpu");
       return reply({ device: r.device, state: stop ? "Success" : "Cancelled", errors: 0, warnings: 0, messages: [], decisions: [{ phase: "pre", kind: "StopModules", name: "stop-cpu", choice: stop ? "StopAll" : "NoAction", allowed: stop, blocks: !stop }], needsAllow: stop ? [] : ["stop-cpu"] });
     }
+    case "plc.upload": {
+      if (!allowImport) return fail("IMPORT_DISABLED", "imports are off");
+      db.uploads = [...(db.uploads ?? []), { request: p.request, argv }];
+      if (!db.project.devices.includes("PLC_2")) db.project.devices.push("PLC_2");
+      save(db);
+      return reply({ state: "Success", station: "S7-1500 station_2", plcs: ["PLC_2"], messages: ["Upload completed"] });
+    }
     case "objects.show":
       return fail("UNSUPPORTED_CAPABILITY", "TIA Portal was started without user interface");
     case "plc.compile":
