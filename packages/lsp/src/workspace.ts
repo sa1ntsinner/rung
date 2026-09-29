@@ -163,15 +163,16 @@ export class WorkspaceIndex {
   private rebuild() {
     if (!this.dirty) return;
     const g = new Map<string, GlobalSymbol[]>();
-    const add = (s: GlobalSymbol) => {
-      const k = s.name.toUpperCase();
+    // a METHOD or PROPERTY is known as FB.Name: a bare name means the object of that name, not a member
+    const add = (s: GlobalSymbol, key = s.name) => {
+      const k = key.toUpperCase();
       g.set(k, [...(g.get(k) ?? []), s]);
     };
     for (const d of this.docs.values()) {
       if (d.parsed && TAG_TEXT.test(d.uri)) for (const t of tagsOfText(d)) add(t);
       else if (d.parsed)
         for (const b of d.parsed.blocks) {
-          add({ name: b.name, kind: b.kind, uri: d.uri, start: b.nameStart, end: b.nameEnd, block: b });
+          add({ name: b.name, kind: b.kind, uri: d.uri, start: b.nameStart, end: b.nameEnd, block: b }, b.owner ? `${b.owner}.${b.name}` : b.name);
           if (b.kind === "GVL") for (const v of b.vars) add({ name: v.name, kind: "GVAR", uri: d.uri, start: v.start, end: v.end, gvar: { decl: v, list: b.name } });
         }
       else if (d.tagTable) for (const t of parseTags(d.text, d.uri)) add(t);
@@ -233,7 +234,19 @@ export class WorkspaceIndex {
       const b = g.block;
       if (b.kind === "DB" && b.dbOf) return this.membersOfType(b.dbOf, seen);
       const visible = b.kind === "FB" || b.kind === "PRG" ? b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant") : b.vars;
-      return visible.map((v) => ({ ...v, uri: g.uri }));
+      // an IEC FB's properties (read and written like variables) and methods are members too
+      const owned = (this.docs.get(g.uri)?.parsed?.blocks ?? []).filter((x) => x.owner?.toUpperCase() === b.name.toUpperCase());
+      const extra: Member[] = owned.map((x) => ({
+        name: x.name,
+        type: x.property ? (x.returnType ?? "?") : `method of ${b.name}`,
+        ...(x.property && x.returnType ? { typeRef: x.returnType.replace(/^"|"$/g, "") } : {}),
+        isArray: false,
+        section: x.property ? "Property" : "Method",
+        uri: g.uri,
+        start: x.nameStart,
+        end: x.nameEnd,
+      }));
+      return [...visible.map((v) => ({ ...v, uri: g.uri })), ...extra];
     }
     const std = STANDARD_BY_NAME.get(key);
     if (std?.kind === "functionBlock") {

@@ -25,7 +25,7 @@ VERSION = "0.1.0"
 KIND_DIR = {"block": "blocks", "type": "types", "tagtable": "tags"}
 DIR_KIND = dict((v, k) for k, v in KIND_DIR.items())
 POU_KEYWORDS = {"PROGRAM": "PRG", "FUNCTION_BLOCK": "FB", "FUNCTION": "FC", "INTERFACE": "INTERFACE"}
-END = {"PROGRAM": "END_PROGRAM", "FUNCTION_BLOCK": "END_FUNCTION_BLOCK", "FUNCTION": "END_FUNCTION", "METHOD": "END_METHOD", "ACTION": "END_ACTION", "INTERFACE": "END_INTERFACE"}
+END = {"PROGRAM": "END_PROGRAM", "FUNCTION_BLOCK": "END_FUNCTION_BLOCK", "FUNCTION": "END_FUNCTION", "METHOD": "END_METHOD", "PROPERTY": "END_PROPERTY", "ACTION": "END_ACTION", "INTERFACE": "END_INTERFACE"}
 SKIP = set(["Library Manager", "Task Configuration", "Symbol Configuration", "Project Settings", "__VisualizationStyle"])
 
 
@@ -165,6 +165,17 @@ def unit_text(obj, kw):
     return decl + impl + END[kw] + "\n"
 
 
+def property_text(prop):
+    """A PROPERTY with its accessors: the declaration, then GET … END_GET and SET … END_SET, then END_PROPERTY."""
+    out = ensure_nl(text_of(prop.textual_declaration))
+    accessors = dict((c.get_name().upper(), c) for c in prop.get_children(False) if str(c.type).lower() == ACCESSOR_TYPE)
+    for name in ("GET", "SET"):
+        acc = accessors.get(name)
+        if acc is not None:
+            out += name + "\n" + ensure_nl(text_of(acc.textual_declaration)) + ensure_nl(text_of(acc.textual_implementation)) + "END_" + name + "\n"
+    return out + "END_PROPERTY\n"
+
+
 def export_text(obj, kind):
     if kind != "block":
         return ensure_nl(text_of(obj.textual_declaration))
@@ -173,6 +184,8 @@ def export_text(obj, kind):
     for c in obj.get_children(False):
         if is_method(c):
             parts.append(unit_text(c, "METHOD"))
+        elif is_property(c):
+            parts.append(property_text(c))
         elif is_action(c):
             parts.append(unit_text(c, "ACTION"))
     return "\n".join(parts)
@@ -180,14 +193,20 @@ def export_text(obj, kind):
 
 # by object type, not by text: a method whose declaration is broken is still a method
 METHOD_TYPE = "f8a58466-d7f6-439f-bbb8-d4600e41d099"
+PROPERTY_TYPE = "5a3b8626-d3e9-4f37-98b5-66420063d91e"
+ACCESSOR_TYPE = "792f2eb6-721e-4e64-ba20-bc98351056db"  # a property's Get or Set
 
 
 def is_method(c):
     return str(c.type).lower() == METHOD_TYPE or decl_keyword(c) == "METHOD"
 
 
+def is_property(c):
+    return str(c.type).lower() == PROPERTY_TYPE
+
+
 def is_action(c):
-    return not is_method(c) and not getattr(c, "has_textual_declaration", False) and getattr(c, "has_textual_implementation", False)
+    return not is_method(c) and not is_property(c) and not getattr(c, "has_textual_declaration", False) and getattr(c, "has_textual_implementation", False)
 
 
 def fingerprint(text):
@@ -228,7 +247,7 @@ def find(addr):
 # ------------------------------------------------------------------ import: a file back into CODESYS objects
 
 # [ \t]*, not \s*: \s* would start a unit at the blank line before its header
-HEADER = re.compile(r"^[ \t]*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|ACTION|INTERFACE)\b", re.I | re.M)
+HEADER = re.compile(r"^[ \t]*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|PROPERTY|ACTION|INTERFACE)\b", re.I | re.M)
 
 
 def split_units(text):
@@ -280,13 +299,58 @@ def split_decl_impl(unit):
     return decl, (impl + "\n") if impl else ""
 
 
+ACCESSOR = re.compile(r"^[ \t]*(GET|SET)[ \t]*$", re.I | re.M)
+
+
+def accessor_decl_impl(body):
+    """An accessor's VAR sections, then its code."""
+    lines = body.split("\n")
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+        if re.match(r"^VAR\w*\b", s, re.I):
+            while i < len(lines) and not re.match(r"^\s*END_VAR\b", lines[i], re.I):
+                i += 1
+            i += 1
+            continue
+        if s == "" and i + 1 < len(lines) and re.match(r"^\s*VAR\w*\b", lines[i + 1], re.I):
+            i += 1
+            continue
+        break
+    decl = "\n".join(lines[:i]).strip("\n")
+    impl = "\n".join(lines[i:]).strip("\n")
+    return (decl + "\n") if decl else "", (impl + "\n") if impl else ""
+
+
+def split_property(unit):
+    """A PROPERTY unit (without END_PROPERTY): its declaration, and {"GET": (decl, impl), "SET": (decl, impl)}."""
+    first = ACCESSOR.search(unit)
+    decl = (unit[:first.start()] if first else unit).rstrip() + "\n"
+    accessors = {}
+    rest = unit[first.start():] if first else ""
+    while rest.strip():
+        rest = re.sub(r"^(?:[ \t]*\n)+", "", rest)
+        m = ACCESSOR.match(rest)
+        if not m:
+            raise RpcError("IMPORT_FAILED", "a PROPERTY holds GET … END_GET and SET … END_SET; found: " + rest.strip().split("\n")[0])
+        name = m.group(1).upper()
+        end = re.search(r"^[ \t]*END_" + name + r"\b[^\n]*(\n|$)", rest, re.I | re.M)
+        if not end:
+            raise RpcError("IMPORT_FAILED", "END_" + name + " is missing in the PROPERTY")
+        if name in accessors:
+            raise RpcError("IMPORT_FAILED", "the PROPERTY has two " + name + " sections")
+        accessors[name] = accessor_decl_impl(rest[m.end():end.start()])
+        rest = rest[end.end():]
+    return decl, accessors
+
+
 def header_name(unit):
-    m = re.search(r"^[ \t]*(?:PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|ACTION|INTERFACE)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*([A-Za-z_][A-Za-z0-9_]*)", unit, re.I | re.M)
+    m = re.search(r"^[ \t]*(?:PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|PROPERTY|ACTION|INTERFACE)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*([A-Za-z_][A-Za-z0-9_]*)", unit, re.I | re.M)
     return m.group(1) if m else None
 
 
 def return_type(unit):
-    m = re.search(r"^[ \t]*(?:METHOD|FUNCTION)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([^\n;]+)", unit, re.I | re.M)
+    m = re.search(r"^[ \t]*(?:METHOD|FUNCTION|PROPERTY)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([^\n;]+)", unit, re.I | re.M)
     return m.group(1).strip() if m else None
 
 
@@ -352,7 +416,7 @@ def import_object(addr, path, expected):
     set_text(obj.textual_declaration, decl)
     if getattr(obj, "has_textual_implementation", False):
         set_text(obj.textual_implementation, impl)
-    # methods and actions: the file is the list; what it no longer has is removed
+    # methods, properties and actions: the file is the list; what it no longer has is removed
     wanted = []
     for ukw, unit in units[1:]:
         uname = header_name(unit)
@@ -363,6 +427,25 @@ def import_object(addr, path, expected):
             d, i = split_decl_impl(unit)
             set_text(child.textual_declaration, d)
             set_text(child.textual_implementation, i)
+        elif ukw == "PROPERTY":
+            decl, accs = split_property(unit)
+            child = [c for c in child if is_property(c)]
+            child = child[0] if child else None
+            if child is not None and not set(accs) <= set(a.get_name().upper() for a in child.get_children(False)):
+                # CODESYS adds no accessor to an existing property: it is made again, with the file's texts
+                child.remove()
+                child = None
+            if child is None:
+                child = obj.create_property(uname, return_type(unit))  # with a Get and a Set
+            set_text(child.textual_declaration, decl)
+            for a in child.get_children(False):
+                name = a.get_name().upper()
+                if name not in accs:
+                    a.remove()  # a property without SET is read-only
+                    continue
+                d, i = accs[name]
+                set_text(a.textual_declaration, d)
+                set_text(a.textual_implementation, i)
         elif ukw == "ACTION":
             head = re.search(r"^[ \t]*ACTION\s+[A-Za-z_][A-Za-z0-9_]*\s*:?[ \t]*\n?", unit, re.I | re.M)
             # an action has no declaration: a comment above it would have nowhere to go in CODESYS
@@ -371,7 +454,7 @@ def import_object(addr, path, expected):
             child = child[0] if child else obj.create_action(uname)
             set_text(child.textual_implementation, ensure_nl(unit[head.end():].strip("\n")))
     for c in obj.get_children(False):
-        if (is_method(c) or is_action(c)) and c.get_name() not in wanted:
+        if (is_method(c) or is_property(c) or is_action(c)) and c.get_name() not in wanted:
             c.remove()
     return obj, kind
 

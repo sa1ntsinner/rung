@@ -2500,6 +2500,44 @@
           "named": true
         },
         {
+          "type": "property_accessor",
+          "named": true
+        },
+        {
+          "type": "var_section",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "property_accessor",
+    "named": true,
+    "fields": {
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "GET",
+            "named": false
+          },
+          {
+            "type": "SET",
+            "named": false
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        },
+        {
           "type": "var_section",
           "named": true
         }
@@ -3669,6 +3707,10 @@
     "named": false
   },
   {
+    "type": "END_GET",
+    "named": false
+  },
+  {
     "type": "END_IF",
     "named": false
   },
@@ -3698,6 +3740,10 @@
   },
   {
     "type": "END_REPEAT",
+    "named": false
+  },
+  {
+    "type": "END_SET",
     "named": false
   },
   {
@@ -3746,6 +3792,10 @@
   },
   {
     "type": "FUNCTION_BLOCK",
+    "named": false
+  },
+  {
+    "type": "GET",
     "named": false
   },
   {
@@ -3854,6 +3904,10 @@
   },
   {
     "type": "RETURN",
+    "named": false
+  },
+  {
+    "type": "SET",
     "named": false
   },
   {

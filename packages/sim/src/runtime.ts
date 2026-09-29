@@ -180,8 +180,9 @@ export class Simulator {
     return new SimError(`"${name}" is a technology object or a graphical/protected block; it is not simulated`);
   }
 
-  private body(b: BlockModel): Stmt[] {
-    const key = `${b.kind}:${b.owner ? b.owner.toUpperCase() + "." : ""}${b.name.toUpperCase()}`;
+  /** The statements of a block, or of one accessor of a PROPERTY. */
+  private body(b: BlockModel, accessor?: "get" | "set"): Stmt[] {
+    const key = `${b.kind}:${b.owner ? b.owner.toUpperCase() + "." : ""}${b.name.toUpperCase()}${accessor ? ":" + accessor : ""}`;
     let s = this.bodies.get(key);
     if (!s) {
       if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
@@ -197,12 +198,13 @@ export class Simulator {
         this.bodies.set(key, s);
         return s;
       }
-      const g = this.index.global(b.name)!;
+      const g = this.index.global(b.owner ? `${b.owner}.${b.name}` : b.name)!; // a METHOD is known as FB.Name
       const doc = this.index.docs.get(g.uri)!;
       const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out
       const iec = doc.code !== undefined || /\.st$/i.test(doc.uri);
+      const range = accessor ? b.property?.[accessor] : b.bodyStart === undefined ? undefined : { start: b.bodyStart, end: b.end };
       try {
-        s = b.bodyStart === undefined ? [] : parseBody(src, b.bodyStart, b.end, { iec });
+        s = range ? parseBody(src, range.start, range.end, { iec }) : [];
       } catch (e) {
         if (e instanceof SclSyntaxError) throw new SimError(`Syntax error in ${b.name} (line ${doc.lines.position(e.offset).line + 1}): ${e.message}`, b.name, e.offset);
         throw e;
@@ -455,6 +457,8 @@ export class Simulator {
     if (en !== undefined) return en;
     const last = ref.path[ref.path.length - 1];
     if (last && "slice" in last) return sliceGet(this.read({ ...ref, path: ref.path.slice(0, -1) }, frame), last);
+    const p = this.propertyAt(ref, frame);
+    if (p) return this.runProperty(p.inst, p.prop, "get");
     const { obj, key } = this.locate(ref, frame);
     return (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
   }
@@ -464,6 +468,11 @@ export class Simulator {
     if (last && "slice" in last) {
       const base = { ...ref, path: ref.path.slice(0, -1) };
       this.write(base, sliceSet(this.read(base, frame), last, value), frame);
+      return;
+    }
+    const p = this.propertyAt(ref, frame);
+    if (p) {
+      this.runProperty(p.inst, p.prop, "set", value);
       return;
     }
     const { obj, key } = this.locate(ref, frame);
@@ -620,12 +629,12 @@ export class Simulator {
     if (c.callee.root.kind === "ident") {
       const [p0, p1] = path;
       if (upper === "THIS" && p0 && "deref" in p0 && p1 && "member" in p1 && path.length === 2 && frame?.inst) {
-        const m = this.methodOf(frame.inst.__fb, p1.member);
+        const m = this.callableOf(frame.inst.__fb, p1.member);
         if (!m) throw new SimError(`${frame.inst.__fb} has no METHOD ${p1.member}`, frame.block.name, c.callee.start);
         return this.callMethod(frame.inst, m, c, frame);
       }
       if (!path.length && frame?.inst && !(upper in frame.temps) && !(upper in frame.mem)) {
-        const m = this.methodOf(frame.inst.__fb, name);
+        const m = this.callableOf(frame.inst.__fb, name);
         if (m) return this.callMethod(frame.inst, m, c, frame);
       }
       if (!path.length && (upper === "ADR" || upper === "REF") && c.args.length === 1 && c.args[0]!.value.k === "ref") return { __ptr: this.locate(c.args[0]!.value.ref, frame) };
@@ -639,7 +648,7 @@ export class Simulator {
     if (lastSeg && "member" in lastSeg) {
       const base = this.read({ ...c.callee, path: path.slice(0, -1) }, frame);
       if (isInstance(base) && !base.std) {
-        const m = this.methodOf(base.__fb, lastSeg.member);
+        const m = this.callableOf(base.__fb, lastSeg.member);
         if (m) return this.callMethod(base, m, c, frame);
       }
     }
@@ -768,9 +777,9 @@ export class Simulator {
   }
 
   /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
-  private runBody(b: BlockModel, frame: Frame) {
+  private runBody(b: BlockModel, frame: Frame, accessor?: "get" | "set") {
     try {
-      this.exec(this.body(b), frame);
+      this.exec(this.body(b, accessor), frame);
     } catch (e) {
       if (e instanceof Return) return;
       if (e instanceof Exit || e instanceof Continue) throw new SimError(`${e instanceof Exit ? "EXIT" : "CONTINUE"} outside of a loop in ${b.name}`, b.name);
@@ -845,12 +854,74 @@ export class Simulator {
     });
   }
 
+  /**
+   * A PROPERTY of a function block instance: fb.Speed, THIS^.Speed, or Speed inside the FB or its methods (where no
+   * variable has the name). Reading it runs its GET, writing its SET.
+   */
+  private propertyAt(ref: LRef, frame: Frame | null): { inst: Instance; prop: BlockModel } | undefined {
+    this.methodOf("", ""); // fills the table of methods and properties
+    if (!this.hasProperties) return undefined;
+    let inst: Instance | undefined;
+    let name: string;
+    const last = ref.path[ref.path.length - 1];
+    if (!ref.path.length) {
+      if (!frame?.inst || ref.root.kind !== "ident") return undefined;
+      const u = ref.root.name.toUpperCase();
+      if (u in frame.temps || u in frame.mem) return undefined;
+      inst = frame.inst;
+      name = ref.root.name;
+    } else {
+      if (!last || !("member" in last)) return undefined;
+      const base = { ...ref, path: ref.path.slice(0, -1) };
+      const first = base.path[0];
+      if (ref.root.name.toUpperCase() === "THIS" && base.path.length === 1 && first && "deref" in first) inst = frame?.inst;
+      else {
+        let v: Value;
+        try {
+          v = this.read(base, frame);
+        } catch {
+          return undefined; // not an instance: the normal path reports what is wrong
+        }
+        if (!isInstance(v)) return undefined;
+        inst = v;
+      }
+      name = last.member;
+    }
+    if (!inst) return undefined;
+    const prop = this.methodOf(inst.__fb, name);
+    return prop?.property ? { inst, prop } : undefined;
+  }
+
+  private runProperty(inst: Instance, prop: BlockModel, accessor: "get" | "set", value?: Value): Value {
+    if (!prop.property?.[accessor])
+      throw new SimError(`${prop.owner}.${prop.name} has no ${accessor.toUpperCase()}: it ${accessor === "set" ? "is read-only" : "can only be written"}`, prop.name);
+    return this.enter(prop, () => {
+      const own = this.structOf(prop.vars, prop);
+      Object.assign(own, this.constants(prop));
+      const key = prop.name.toUpperCase();
+      own[key] = accessor === "set" ? value : this.defaultValue({ type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false }, prop);
+      this.runBody(prop, { block: prop, mem: inst.mem, temps: own, inst }, accessor);
+      return own[key];
+    });
+  }
+
+  /** A METHOD to call: a PROPERTY of the same name is read or written, never called. */
+  private callableOf(fb: string, name: string): BlockModel | undefined {
+    const m = this.methodOf(fb, name);
+    return m?.property ? undefined : m;
+  }
+
+  private hasProperties = false;
   private methods?: Map<string, BlockModel>;
   /** METHOD `name` of the function block `fb`. */
   private methodOf(fb: string, name: string): BlockModel | undefined {
     if (!this.methods) {
       this.methods = new Map();
-      for (const g of this.index.allGlobals()) if (g.block?.owner) this.methods.set(`${g.block.owner}.${g.block.name}`.toUpperCase(), g.block);
+      for (const g of this.index.allGlobals())
+        if (g.block?.owner) {
+          this.methods.set(`${g.block.owner}.${g.block.name}`.toUpperCase(), g.block);
+          if (g.block.property) this.hasProperties = true;
+        }
     }
     return this.methods.get(`${fb}.${name}`.toUpperCase());
   }

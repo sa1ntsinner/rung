@@ -175,6 +175,101 @@ cases:
     expect(diagnostics(idx, "file:///w/FB_Axis.st").map((d) => `${d.code}: ${text.slice(d.start, d.end)}`)).toEqual([]);
   });
 
+  it("runs PROPERTY accessors: GET when read, SET when written, from outside, by THIS^ and inside the FB", () => {
+    const idx = new WorkspaceIndex();
+    idx.set(
+      "file:///w/FB_Drive.st",
+      [
+        "FUNCTION_BLOCK FB_Drive",
+        "VAR",
+        "  _speed : REAL;",
+        "  nSets : INT;",
+        "  fDouble : REAL;",
+        "END_VAR",
+        "fDouble := Speed * 2.0;",
+        "END_FUNCTION_BLOCK",
+        "",
+        "{attribute 'monitoring' := 'variable'}",
+        "PROPERTY PUBLIC Speed : REAL",
+        "GET",
+        "VAR",
+        "END_VAR",
+        "Speed := _speed;",
+        "END_GET",
+        "SET",
+        "_speed := LIMIT(0.0, Speed, 100.0);",
+        "nSets := nSets + 1;",
+        "END_SET",
+        "END_PROPERTY",
+        "",
+        "PROPERTY MaxSpeed : REAL",
+        "GET",
+        "MaxSpeed := 100.0;",
+        "END_GET",
+        "END_PROPERTY",
+        "",
+        "METHOD Boost : BOOL",
+        "THIS^.Speed := THIS^.Speed + 10.0;",
+        "Boost := TRUE;",
+        "END_METHOD",
+        "",
+      ].join("\n"),
+      0,
+    );
+    idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  fb : FB_Drive;\n  fRead : REAL;\n  fMax : REAL;\nEND_VAR\nfb.Speed := 150.0;\nfb.Boost();\nfb();\nfRead := fb.Speed;\nfMax := fb.MaxSpeed;\nEND_PROGRAM\n", 0);
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_Main");
+    s.runInstance(main);
+    const drive = (main.mem.FB as Instance).mem;
+    // SET limits 150 to 100; Boost reads 100 and sets 110, limited to 100 again
+    expect([drive._SPEED, drive.NSETS, drive.FDOUBLE, main.mem.FREAD, main.mem.FMAX]).toEqual([100, 2, 200, 100, 100]);
+    for (const uri of ["file:///w/FB_Drive.st", "file:///w/PRG_Main.st"]) expect(diagnostics(idx, uri).map((d) => d.code + ": " + d.message)).toEqual([]);
+    // a property without SET is read-only
+    idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  fb : FB_Drive;\nEND_VAR\nfb.MaxSpeed := 5.0;\nEND_PROGRAM\n", 1);
+    const s2 = new Simulator(idx);
+    expect(() => s2.runInstance(s2.newInstance("PRG_Main"))).toThrow(/FB_Drive.MaxSpeed has no SET: it is read-only/);
+  });
+
+  it("runs a property of a TwinCAT .TcPOU (<Property> with <Get> and <Set>)", () => {
+    const idx = new WorkspaceIndex();
+    const cdata = (s: string) => `<![CDATA[${s}]]>`;
+    idx.set(
+      "file:///w/FB_Valve.TcPOU",
+      `<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_Valve" Id="{1}" SpecialFunc="None">
+    <Declaration>${cdata("FUNCTION_BLOCK FB_Valve\nVAR\n  _open : BOOL;\nEND_VAR\n")}</Declaration>
+    <Implementation>
+      <ST>${cdata("")}</ST>
+    </Implementation>
+    <Property Name="Open" Id="{2}">
+      <Declaration>${cdata("PROPERTY Open : BOOL")}</Declaration>
+      <Get Name="Get" Id="{3}">
+        <Declaration>${cdata("VAR\nEND_VAR\n")}</Declaration>
+        <Implementation>
+          <ST>${cdata("Open := _open;")}</ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{4}">
+        <Declaration>${cdata("")}</Declaration>
+        <Implementation>
+          <ST>${cdata("_open := Open;")}</ST>
+        </Implementation>
+      </Set>
+    </Property>
+  </POU>
+</TcPlcObject>
+`,
+      0,
+    );
+    idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  v : FB_Valve;\n  b : BOOL;\nEND_VAR\nv.Open := TRUE;\nb := v.Open;\nEND_PROGRAM\n", 0);
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_Main");
+    s.runInstance(main);
+    expect([(main.mem.V as Instance).mem._OPEN, main.mem.B]).toEqual([true, true]);
+    expect(diagnostics(idx, "file:///w/PRG_Main.st")).toEqual([]);
+  });
+
   it("calls functions from TwinCAT .TcPOU files", () => {
     const sim = new Simulator(index());
     expect(sim.callBlock("FC_Scale", { fIn: 4 }).returnValue).toBe(10);

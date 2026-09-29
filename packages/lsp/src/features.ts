@@ -66,6 +66,12 @@ export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel,
     if (v) return { ...v, uri: g!.uri };
   }
   if (block.kind === "DB" && block.dbOf) return index.membersOfType(block.dbOf).find((m) => m.name.toUpperCase() === u);
+  // an IEC FB, its METHODs and PROPERTYs see the FB's properties and methods by their bare names
+  if (/\.st$/i.test(uri) || index.docs.get(uri)?.code !== undefined) {
+    const fb = block.owner ?? (block.kind === "FB" || block.kind === "PRG" ? block.name : undefined);
+    const m = fb ? index.membersOfType(fb).find((x) => (x.section === "Property" || x.section === "Method") && x.name.toUpperCase() === u) : undefined;
+    if (m) return m;
+  }
   return undefined;
 }
 
@@ -142,7 +148,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
         continue;
       }
       // "Device~Module" names are hardware identifiers (system constants): exports never contain them
-      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length) {
+      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length && !scopeDecl(index, uri, block, ref.name)) {
         const definable = ref.access !== "call" && !ref.members.length && /\.scl$/i.test(uri) && tagTableFor(index, uri);
         out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored${definable ? "; quick fix: create it as a PLC tag" : ""})`, code: "UNKNOWN_GLOBAL" });
         continue;

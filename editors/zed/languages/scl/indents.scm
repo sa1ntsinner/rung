@@ -15,4 +15,5 @@
 (program "END_PROGRAM" @end) @indent
 (method "END_METHOD" @end) @indent
 (property "END_PROPERTY" @end) @indent
+(property_accessor ["END_GET" "END_SET"] @end) @indent
 (interface "END_INTERFACE" @end) @indent

@@ -42,7 +42,10 @@ module.exports = grammar({
     program: ($) => seq(kw("PROGRAM"), field("name", $._name), repeat($._block_header), repeat($.var_section), optional($._code), kw("END_PROGRAM")),
     method: ($) =>
       seq(kw("METHOD"), repeat($._modifier), field("name", $._name), optional(seq(":", field("return_type", $._type))), repeat($._block_header), repeat($.var_section), optional($._code), kw("END_METHOD")),
-    property: ($) => seq(kw("PROPERTY"), repeat($._modifier), field("name", $._name), ":", field("type", $._type), repeat($.var_section), optional($._code), kw("END_PROPERTY")),
+    // CODESYS / TwinCAT: GET … END_GET and SET … END_SET, each with its own variables; an interface property has none
+    property: ($) =>
+      seq(kw("PROPERTY"), repeat($._modifier), field("name", $._name), ":", field("type", $._type), repeat($.var_section), choice(repeat1($.property_accessor), optional($._code)), kw("END_PROPERTY")),
+    property_accessor: ($) => seq(field("kind", choice(kw("GET"), kw("SET"))), repeat($.var_section), optional($._code), choice(kw("END_GET"), kw("END_SET"))),
     interface: ($) => seq(kw("INTERFACE"), field("name", $._name), optional($.extends), repeat(choice($.method, $.property)), kw("END_INTERFACE")),
     organization_block: ($) => seq(kw("ORGANIZATION_BLOCK"), field("name", $._name), repeat($._block_header), repeat($.var_section), optional($.body), kw("END_ORGANIZATION_BLOCK")),
     data_block: ($) =>

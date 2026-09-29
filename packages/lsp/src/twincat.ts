@@ -26,6 +26,17 @@ export function extractTwinCat(xml: string): TwinCatUnit {
     // separate consecutive sections so tokens from two CDATA blocks never merge
     if (start - 1 >= 0 && out[start - 1] !== "\n") out[start - 1] = " ";
   }
+  // a <Property> keeps its accessors as <Get>/<Set> elements: their keywords go into the blanked markup (GET over
+  // the opening tag, END_GET over </Implementation>), so the code reads as CODESYS writes a property as text
+  for (const m of xml.matchAll(/<(Get|Set)\b[^>]*>[\s\S]*?<\/\1>/g)) {
+    const word = m[1]!.toUpperCase();
+    const write = (at: number, text: string) => {
+      for (let k = 0; k < text.length; k++) out[at + k] = text[k]!;
+    };
+    write(m.index!, word);
+    const close = m[0].lastIndexOf("</Implementation>");
+    if (close >= 0) write(m.index! + close, "END_" + word);
+  }
   const root = /<(POU|DUT|GVL|Itf)\s[^>]*Name="([^"]+)"/.exec(xml);
   return { code: out.join(""), ...(root ? { name: root[2], kind: (root[1]!.toUpperCase() === "ITF" ? "ITF" : root[1]!.toUpperCase()) as TwinCatUnit["kind"] } : {}) };
 }

@@ -56,8 +56,10 @@ export interface BlockModel {
   refs: Ref[];
   bodyStart?: number;
   comment?: string;
-  /** IEC METHOD: the function block it belongs to (the method body sees the FB's variables). */
+  /** IEC METHOD or PROPERTY: the function block it belongs to (its body sees the FB's variables). */
   owner?: string;
+  /** IEC PROPERTY: the code of its GET and SET accessors (offsets); the property's name is its value in both. */
+  property?: { get?: { start: number; end: number }; set?: { start: number; end: number } };
   /** STL (.awl) body: not analysed, only the interface is indexed. */
   stl?: boolean;
   /** Read from a SimaticML (XML) export: interface only, the body is LAD/FBD/GRAPH or not present. */
@@ -98,6 +100,7 @@ const HEADERS_IEC: Record<string, { kind: BlockKind; end: string }> = {
   FUNCTION: { kind: "FC", end: "END_FUNCTION" },
   PROGRAM: { kind: "PRG", end: "END_PROGRAM" },
   METHOD: { kind: "FC", end: "END_METHOD" },
+  PROPERTY: { kind: "FC", end: "END_PROPERTY" },
   TYPE: { kind: "UDT", end: "END_TYPE" },
 };
 
@@ -389,16 +392,19 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       while (peek().kind !== "eof" && !(peek().kind === "ident" && (headers[peek().upper] || (iec && peek().upper === "VAR_GLOBAL")))) next();
       continue;
     }
+    // METHOD PUBLIC Reset, PROPERTY PROTECTED Speed: the access modifier stands before the name
+    if (iec) while (peek().kind === "ident" && /^(ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)$/.test(peek().upper) && peek(1).kind === "ident") next();
     const nameTok = next();
     if (nameTok.kind !== "global" && nameTok.kind !== "ident") err("Expected a block name", nameTok);
     const block: BlockModel = { kind: h.kind, name: unquote(nameTok.text), nameStart: nameTok.start, nameEnd: nameTok.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
     ownerVars = undefined;
-    if (iec && t.upper === "METHOD") {
-      const owner = [...blocks].reverse().find((b) => b.kind === "FB" || b.kind === "PRG");
+    if (iec && (t.upper === "METHOD" || t.upper === "PROPERTY")) {
+      const owner = [...blocks].reverse().find((b) => (b.kind === "FB" || b.kind === "PRG") && !b.owner);
       if (owner) {
         block.owner = owner.name;
         ownerVars = owner.vars;
       }
+      if (t.upper === "PROPERTY") block.property = {};
     }
     const c = lineComment(nameTok.end);
     if (c) block.comment = c;
@@ -480,6 +486,23 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
           continue;
         }
         parseBody(block, h.end);
+        continue;
+      }
+      if (block.property && isKw(x, "GET", "SET")) {
+        // an accessor: its own VAR sections, then its code up to END_GET / END_SET
+        next();
+        const end = x.upper === "GET" ? "END_GET" : "END_SET";
+        while (peek().kind === "ident" && SECTIONS[peek().upper]) {
+          block.vars.push(...parseDecls(SECTIONS[next().upper]!));
+          if (isKw(peek(), "END_VAR")) next();
+          else err("Missing END_VAR", peek());
+        }
+        const start = peek().start;
+        block.bodyStart ??= start;
+        parseBody(block, end);
+        block.property[x.upper === "GET" ? "get" : "set"] = { start, end: peek().start };
+        if (isKw(peek(), end)) next();
+        else err(`Missing ${end}`, x);
         continue;
       }
       if (iec && h.kind !== "UDT") {

@@ -184,3 +184,53 @@ END_PROGRAM
           (argument
             (identifier)
             (number)))))))
+
+==================
+CODESYS property with GET and SET accessors
+==================
+
+FUNCTION_BLOCK FB_Drive
+VAR
+    _speed : REAL;
+END_VAR
+_speed := _speed;
+END_FUNCTION_BLOCK
+
+PROPERTY PUBLIC Speed : REAL
+GET
+VAR
+END_VAR
+Speed := _speed;
+END_GET
+SET
+_speed := Speed;
+END_SET
+END_PROPERTY
+
+---
+
+(source_file
+  (function_block
+    name: (identifier)
+    (var_section
+      (var_declaration
+        name: (identifier)
+        type: (identifier)))
+    (body
+      (assignment_statement
+        left: (identifier)
+        right: (identifier))))
+  (property
+    name: (identifier)
+    type: (identifier)
+    (property_accessor
+      (var_section)
+      (body
+        (assignment_statement
+          left: (identifier)
+          right: (identifier))))
+    (property_accessor
+      (body
+        (assignment_statement
+          left: (identifier)
+          right: (identifier))))))

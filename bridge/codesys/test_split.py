@@ -8,7 +8,13 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = open(os.path.join(HERE, "rung_bridge_codesys.py"), encoding="utf-8").read()
 # END and the import helpers are plain Python; the rest needs CODESYS
-ns = {"re": re}
+class RpcError(Exception):
+    def __init__(self, code, message):
+        Exception.__init__(self, message)
+        self.code = code
+
+
+ns = {"re": re, "RpcError": RpcError}
 exec(re.search(r"^END = .*$", SOURCE, re.M).group(0), ns)
 exec(SOURCE[SOURCE.index("# [ \\t]*, not \\s*"):SOURCE.index("def set_text")], ns)
 
@@ -54,6 +60,33 @@ class SplitTests(unittest.TestCase):
         mdecl, mimpl = ns["split_decl_impl"](method)
         self.assertTrue(mdecl.startswith("{attribute 'monitoring' := 'call'}\nMETHOD Start : BOOL\n"))
         self.assertEqual(mimpl, "Start := TRUE;\n")
+
+    def test_a_property_with_its_accessors(self):
+        text = FILE.replace("ACTION Reset:", """{attribute 'monitoring' := 'variable'}
+PROPERTY PUBLIC Speed : REAL
+GET
+VAR
+END_VAR
+Speed := _speed;
+END_GET
+SET
+_speed := Speed;
+END_SET
+END_PROPERTY
+
+ACTION Reset:""")
+        units = ns["split_units"](text)
+        self.assertEqual([k for k, _ in units], ["FUNCTION_BLOCK", "METHOD", "PROPERTY", "ACTION"])
+        prop = units[2][1]
+        self.assertEqual(ns["header_name"](prop), "Speed")
+        self.assertEqual(ns["return_type"](prop), "REAL")
+        decl, accs = ns["split_property"](prop)
+        self.assertEqual(decl, "{attribute 'monitoring' := 'variable'}\nPROPERTY PUBLIC Speed : REAL\n")
+        self.assertEqual(accs, {"GET": ("VAR\nEND_VAR\n", "Speed := _speed;\n"), "SET": ("", "_speed := Speed;\n")})
+        # read-only: GET only
+        self.assertEqual(sorted(ns["split_property"]("PROPERTY P : INT\nGET\nP := 1;\nEND_GET\n")[1]), ["GET"])
+        with self.assertRaises(RpcError):
+            ns["split_property"]("PROPERTY P : INT\nGET\nP := 1;\n")
 
     def test_a_plain_file_is_unchanged(self):
         units = ns["split_units"]("PROGRAM PLC_PRG\nVAR\n    n : INT;\nEND_VAR\nn := n + 1;\nEND_PROGRAM\n")

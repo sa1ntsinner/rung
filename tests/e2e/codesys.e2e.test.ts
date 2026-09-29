@@ -65,6 +65,33 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
     expect(idle.text).toMatch(/exported 0\s+imported 0\s+created 0/);
   }, 600_000);
 
+  it("a PROPERTY with GET and SET goes into CODESYS; without SET it is read-only; SET comes back", async () => {
+    const lamp = file("plc/Device/blocks/Lights/FB_Lamp.st");
+    const prop = (set: boolean) =>
+      "\nPROPERTY Brightness : INT\nGET\nVAR\nEND_VAR\nBrightness := SEL(bLit, 0, 100);\nEND_GET\n" + (set ? "SET\nVAR\nEND_VAR\nbOn := Brightness > 0;\nEND_SET\n" : "") + "END_PROPERTY\n";
+    const base = readFileSync(lamp, "utf8");
+    writeFileSync(lamp, base + prop(true));
+    let r = await run("sync");
+    expect(r.text).toMatch(/imported 1/);
+    expect(r.text).toMatch(/Compile complete -- 0 errors/);
+    const back = readFileSync(lamp, "utf8");
+    expect(back).toContain("PROPERTY Brightness : INT\nGET\n");
+    expect(back).toContain("bOn := Brightness > 0;\nEND_SET\nEND_PROPERTY\n");
+    // read-only: no SET
+    writeFileSync(lamp, back.replace(/SET\nVAR\nEND_VAR\nbOn := Brightness > 0;\nEND_SET\n/, ""));
+    r = await run("sync");
+    expect(r.text).toMatch(/imported 1/);
+    expect(readFileSync(lamp, "utf8")).not.toContain("END_SET");
+    // SET again: CODESYS rebuilds the property with both accessors
+    writeFileSync(lamp, readFileSync(lamp, "utf8").replace("END_GET\nEND_PROPERTY", "END_GET\nSET\nVAR\nEND_VAR\nbOn := Brightness > 0;\nEND_SET\nEND_PROPERTY"));
+    r = await run("sync");
+    expect(r.text).toMatch(/imported 1/);
+    expect(r.text).toMatch(/Compile complete -- 0 errors/);
+    expect(readFileSync(lamp, "utf8")).toContain("bOn := Brightness > 0;\nEND_SET\nEND_PROPERTY\n");
+    const idle = await run("sync");
+    expect(idle.text).toMatch(/exported 0\s+imported 0\s+created 0/);
+  }, 600_000);
+
   it("a compile error points at its line in the file", async () => {
     const prg = file("plc/Device/blocks/PLC_PRG.st");
     const before = readFileSync(prg, "utf8");

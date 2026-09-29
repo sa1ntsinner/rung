@@ -21,7 +21,22 @@ CODESYS takes about 15 seconds to start. `rung watch` starts it once and keeps i
 | DUT (structure, enumeration, …) | `plc/<Device>/types/<folders>/<Name>.st` |
 | GVL | `plc/<Device>/tags/<folders>/<Name>.st` |
 
-Folders in the POU tree are folders on disk. A new `.st` file creates the POU in CODESYS (PROGRAM, FUNCTION_BLOCK or FUNCTION, from its first line); a METHOD added to the file becomes a method of the FB, one removed from the file is removed. Properties, visualizations, the task configuration, libraries and devices stay in CODESYS.
+Folders in the POU tree are folders on disk. A new `.st` file creates the POU in CODESYS (PROGRAM, FUNCTION_BLOCK or FUNCTION, from its first line); a METHOD added to the file becomes a method of the FB, one removed from the file is removed. A PROPERTY is written with its accessors, as CODESYS keeps them:
+
+```
+PROPERTY PUBLIC Speed : REAL
+GET
+VAR
+END_VAR
+Speed := _speed;
+END_GET
+SET
+_speed := LIMIT(0.0, Speed, 100.0);
+END_SET
+END_PROPERTY
+```
+
+Without SET it is read-only. The language server knows properties as members of the FB, and `rung test` runs GET when a property is read and SET when it is written, in CODESYS files and in TwinCAT's `.TcPOU` alike. Visualizations, the task configuration, libraries and devices stay in CODESYS.
 
 The language server, `rung test` (the offline simulator) and the editors read these files as IEC 61131-3 structured text: METHODs with `THIS^`, enumerations, `POINTER TO`, `REFERENCE TO`.
 
