@@ -186,7 +186,7 @@ describe("Simulator QA regressions", () => {
     const i = s.newInstance("U");
     s.callBlock(i);
     expect([i.mem.R, (i.mem.A as unknown as { items: unknown[] }).items.length]).toEqual([7.5, 3]);
-    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"XFb" is a graphical \(LAD\/FBD\/GRAPH\) or XML block.*not simulated/);
+    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"XFb" is kept as SimaticML XML .*not simulated/);
   });
 
   it("writes FC IN_OUT parameters back to the caller, named or positional", () => {

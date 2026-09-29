@@ -149,7 +149,18 @@ export class Simulator {
     let s = this.bodies.get(key);
     if (!s) {
       if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
-      if (b.xml) throw new SimError(`"${b.name}" is a graphical (LAD/FBD/GRAPH) or XML block; it is not simulated (only SCL sources are)`, b.name);
+      if (b.xml) throw new SimError(`"${b.name}" is kept as SimaticML XML (FBD, GRAPH, or LAD whose texts SD would lose); it is not simulated`, b.name);
+      if (b.ladUnsupported?.length) throw new SimError(`"${b.name}" uses LAD elements the simulator does not run yet: ${b.ladUnsupported.join("; ")}`, b.name);
+      if (b.lad !== undefined) {
+        try {
+          s = parseBody(b.lad);
+        } catch (e) {
+          if (e instanceof SclSyntaxError) throw new SimError(`LAD block ${b.name} could not be translated for the simulator: ${e.message}`, b.name);
+          throw e;
+        }
+        this.bodies.set(key, s);
+        return s;
+      }
       const g = this.index.global(b.name)!;
       const doc = this.index.docs.get(g.uri)!;
       const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out

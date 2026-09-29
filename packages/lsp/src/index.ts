@@ -7,3 +7,4 @@ export * from "./features.js";
 export { startServer, type ServerHandle } from "./server.js";
 export * from "./twincat.js";
 export * from "./simaticml.js";
+export * from "./simaticsd.js";

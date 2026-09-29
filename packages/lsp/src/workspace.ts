@@ -8,6 +8,7 @@ import { parse, type BlockModel, type ParsedDocument, type VarDecl } from "./par
 import { STANDARD_BY_NAME, SYSTEM_TYPES } from "./catalog.js";
 import { TWINCAT_FILE, extractTwinCat } from "./twincat.js";
 import { isSimaticMl, parseSimaticMl } from "./simaticml.js";
+import { parseSd } from "./simaticsd.js";
 
 export type SymbolKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "PRG" | "GVL" | "GVAR" | "TAG" | "OBJECT";
 
@@ -61,6 +62,7 @@ const IEC_SOURCE = /\.st$/i;
 const XML = /\.xml$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".rung", ".vci", "_Boot", "_CompileInfo", "_Libraries", "bin", "obj", "dist", "views"]);
 const OTHER = /\.(s7dcl|xml|protected\.yaml)$/i;
+const SD = /\.s7dcl$/i;
 /** Top-level folders of a TIA Portal VCI (version control interface) export. */
 const VCI_DIRS = new Set(["program blocks", "plc tags", "plc data types", "technology objects", ".vci"]);
 
@@ -129,6 +131,11 @@ export class WorkspaceIndex {
   set(uri: string, text: string, version: number): Doc {
     const doc: Doc = { uri, text, lines: new LineIndex(text), version };
     if (SOURCE.test(uri)) doc.parsed = parse(text, /\.awl$/i.test(uri) ? { dialect: "stl" } : {});
+    else if (SD.test(uri)) {
+      // unreadable SD stays known by its file name, like other graphical objects
+      const sd = parseSd(text);
+      if (sd.blocks.length) doc.parsed = sd;
+    }
     else if (IEC_SOURCE.test(uri)) doc.parsed = parse(text, { dialect: "iec", unitName: decodeURIComponent(uri.split("/").pop()!).replace(/\.st$/i, "") });
     else if (TWINCAT_FILE.test(uri)) {
       const unit = extractTwinCat(text);

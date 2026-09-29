@@ -1,6 +1,6 @@
-# Unit tests for SCL blocks (`rung test`)
+# Unit tests for SCL and LAD blocks (`rung test`)
 
-rung runs unit tests for SCL function blocks and functions on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
+rung runs unit tests for SCL and LAD function blocks and functions on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
 
 ```
 rung test                       # all tests/**/*.test.yaml
@@ -38,7 +38,8 @@ cases:
 - Expressions with SCL precedence, integer vs. real division, typed literals (`16#FF`, `T#1s`, `DINT#5`).
 - User FBs (single and multi-instance), FCs, global DBs (including UDT members and start values), PLC tags.
 - IEC standard FBs with virtual time: TON/TOF/TP (and `_TIME`/`_LTIME`), CTU/CTD/CTUD, R_TRIG/F_TRIG, SR/RS; standard functions (LIMIT, MIN/MAX, SEL, MUX, math, strings, shifts, `*_TO_*` conversions).
+- LAD blocks mirrored as SIMATIC SD (`.s7dcl`): contacts, negated contacts, coils, set/reset coils, parallel branches, IEC timer/counter/trigger boxes, comparisons, MOVE, ADD/SUB/MUL/DIV/MOD and calls of FBs and FCs. A block with anything else (edge contacts, for example) is refused with the list of what is missing.
 
 ## What it does not do
 
-It is a logic simulator, not an emulation of the S7-1500 runtime: no integer overflow wrap-around, no system instructions (communication, motion, diagnostics), no LAD/FBD/GRAPH blocks, no OB scheduling or interrupts, and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.
+It is a logic simulator, not an emulation of the S7-1500 runtime: no integer overflow wrap-around, no system instructions (communication, motion, diagnostics), no FBD, GRAPH or STL blocks, no OB scheduling or interrupts, and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.

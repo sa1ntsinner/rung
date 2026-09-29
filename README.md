@@ -26,12 +26,13 @@ The [quickstart](docs/quickstart.md) walks through setup, including the Openness
 - Two-way sync. Save a file and rung imports it, compiles the block and writes TIA's version back. Changes made in TIA Portal come back to the files. If both sides changed, you get a line merge or a conflict to resolve.
 - A language server for SCL: completion, go to definition through DBs, UDTs and FB instances, references, rename, and TIA's compile errors on the right line. There are extensions for [VS Code and Zed](docs/editors/README.md) and a config for Neovim.
 - An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
-- `rung test`, which runs YAML unit tests for FBs and FCs on an offline simulator and prints JUnit. See [testing](docs/testing.md).
+- `rung test`, which runs YAML unit tests for SCL and LAD blocks on an offline simulator and prints JUnit. See [testing](docs/testing.md).
+- Compile, go online, compare with the PLC and download, from the terminal or the editor. A person starts every download and allows each risky question TIA asks by name. See [downloads](docs/downloads.md).
 - Read-only views of hardware, HMI and technology objects, and live values from the S7-1500 Web API.
 
 ## What it won't do
 
-rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself and never downloads to a PLC. Failsafe, know-how protected, system and GRAPH blocks stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
+rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself, and agents never download to a PLC. Failsafe, know-how protected, system and GRAPH blocks stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
 
 ## Requirements
 

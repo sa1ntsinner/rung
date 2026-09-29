@@ -292,7 +292,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
         io.stdout(`
-${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
+${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
 `);
         return failed ? 2 : total ? 0 : 1;
       }

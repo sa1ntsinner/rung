@@ -1,0 +1,89 @@
+{
+    S7_Optimized := "TRUE";
+    S7_Language := "LAD";
+}
+FUNCTION_BLOCK "FB_Pump"
+    VAR_INPUT 
+        Start : Bool;
+        Stop : Bool;
+        Fault : Bool;
+        Pressure : Real;
+    END_VAR
+    VAR_OUTPUT 
+        Run : Bool;
+        Ready : Bool;
+        HighPressure : Bool;
+        Alarm : Bool;
+    END_VAR
+    VAR 
+        {
+             InstructionName := "TON_TIME";
+             LibVersion := "1.0";
+             S7_Setpoint := "False"
+        }
+        StartDelay : TON_TIME;
+    END_VAR
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Start )
+            wire#w1
+            I_Contact( #Stop )
+            I_Contact( #Fault )
+            Coil( #Run )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Run )
+        END_RUNG wire#w1
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Run )
+            #StartDelay.TON{ time_type := Time }(
+                PT := T#3S, 
+                ET =>  
+            )
+            Coil( #Ready )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Gt{ SrcType := Real }(
+                IN1 := #Pressure, 
+                IN2 := 6.5
+            )
+            Coil( #HighPressure )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Fault )
+            S_Coil( #Alarm )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Start )
+            I_Contact( #Fault )
+            R_Coil( #Alarm )
+        END_RUNG
+
+    END_NETWORK
+
+END_FUNCTION_BLOCK

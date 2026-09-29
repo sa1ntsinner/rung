@@ -60,6 +60,10 @@ export interface BlockModel {
   stl?: boolean;
   /** Read from a SimaticML (XML) export: interface only, the body is LAD/FBD/GRAPH or not present. */
   xml?: boolean;
+  /** LAD block in SIMATIC SD text: its networks translated to SCL statements (for the simulator). */
+  lad?: string;
+  /** LAD elements the translation does not cover; the simulator refuses the block with this list. */
+  ladUnsupported?: string[];
 }
 
 export interface ParseDiagnostic {

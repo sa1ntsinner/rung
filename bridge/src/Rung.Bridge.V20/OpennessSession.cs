@@ -362,11 +362,8 @@ namespace Rung.Bridge.V20
         public ExportResult Export(string address, string form, string targetDir)
         {
             Alive();
-            // Openness exports nothing in online mode ("This function is not supported in online mode"). A pull
-            // exports object after object, so rung leaves online mode here and stays offline; compare and download
-            // go online again by themselves.
-            LeaveOnline(AddressFormat.Parse(address).Device);
             var r = Resolve(address);
+            var leftOnline = false;
             if (form == "auto") form = FormPolicy.Choose(r.Entry, Caps);
             Directory.CreateDirectory(targetDir);
             for (var attempt = 0; attempt < 3; attempt++)
@@ -386,6 +383,15 @@ namespace Rung.Bridge.V20
                     // TIA replaced the object (seen right after an import and compile): look it up again
                     _index.Clear();
                     r = Resolve(address);
+                    continue;
+                }
+                catch (EngineeringException e) when (!leftOnline && e.Message.IndexOf("online", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    // Openness exports nothing in online mode ("This function is not supported in online mode").
+                    // A pull exports object after object, so rung leaves online mode and stays offline; compare and
+                    // download go online again by themselves.
+                    LeaveOnline(AddressFormat.Parse(address).Device);
+                    leftOnline = true;
                     continue;
                 }
                 var files = Directory.GetFiles(targetDir, Stem + ".*").OrderBy(f => f, StringComparer.Ordinal)
@@ -420,7 +426,7 @@ namespace Rung.Bridge.V20
                             sdOk = res.State == DocumentResultState.Success;
                         }
                         catch (EngineeringException) { sdOk = false; }
-                        if (sdOk) return form;
+                        if (sdOk && (r.Obj is PlcType || SdKeepsEverything((PlcBlock)r.Obj, dir))) return form;
                         warnings.Add(WarningCodes.SdFallback);
                         foreach (var f in Directory.GetFiles(dir, Stem + ".*")) File.Delete(f);
                         return ExportInto(r, "xml", dir, warnings);
@@ -451,6 +457,29 @@ namespace Rung.Bridge.V20
             catch (EngineeringException e)
             {
                 throw new RpcException(ErrorCodes.ExportFailed, e.Message);
+            }
+        }
+
+        /// <summary>
+        /// SD must not lose what the block holds: TIA V20 before Update 4 writes no network titles or comments into
+        /// SD, and SD drops the OB type. Compared against the block's SimaticML export; any loss means XML.
+        /// </summary>
+        bool SdKeepsEverything(PlcBlock block, string sdDir)
+        {
+            var probe = Path.Combine(Path.GetTempPath(), "rung-sdcheck-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(probe);
+            try
+            {
+                var xmlFile = new FileInfo(Path.Combine(probe, "block.xml"));
+                block.Export(xmlFile, ExportOptions.None, DocumentInfoOptions.None);
+                var xml = File.ReadAllText(xmlFile.FullName);
+                var sd = string.Join("\n", Directory.GetFiles(sdDir, Stem + ".*").Select(File.ReadAllText));
+                return !SdCheck.LosesObType(xml) && SdCheck.MissingTexts(xml, sd).Count == 0;
+            }
+            catch (EngineeringException) { return false; }
+            finally
+            {
+                try { Directory.Delete(probe, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
         }
 

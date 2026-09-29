@@ -42,7 +42,7 @@ export interface SkillInfo {
 export function bundledSkills(env: Record<string, string | undefined>): SkillInfo[] {
   const root = [installRoot(env) && join(installRoot(env)!, "agents", "claude-plugin", "skills"), devPath("../../../agents/claude-plugin/skills")].find((d): d is string => !!d && existsSync(d));
   if (!root) return [];
-  const siemens = new Set(["scl-craft", "rung-workflow", "rung-review", "plc-data-design", "plc-commissioning"]);
+  const siemens = new Set(["scl-craft", "lad-in-text", "rung-workflow", "rung-review", "plc-data-design", "plc-commissioning"]);
   return readdirSync(root)
     .filter((n) => existsSync(join(root, n, "SKILL.md")))
     .map((n) => {
