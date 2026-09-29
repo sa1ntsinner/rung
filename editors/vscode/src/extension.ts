@@ -71,6 +71,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       await cli.run(fix.args, { terminal: "rung setup", icon: "tools" });
       await environment.refresh();
     }),
+    vscode.commands.registerCommand("rung.assignments", async () => {
+      // TIA Portal's assignment list: which I/O and memory addresses are used, by which tag, where
+      const r = await cli.capture(["assignments"], { progress: "rung: collecting the assignment list…" });
+      if (r.error) return;
+      const doc = await vscode.workspace.openTextDocument({ content: r.output, language: "plaintext" });
+      await vscode.window.showTextDocument(doc, { preview: true });
+    }),
     vscode.commands.registerCommand("rung.setup", async () => {
       await cli.run(["setup"], { terminal: "rung setup", icon: "tools" });
       await environment.refresh();

@@ -72,6 +72,7 @@
       }
     ],
     "commands": [
+      { "command": "rung.assignments", "title": "Assignment List (Used I/O and Memory)", "category": "rung", "icon": "$(list-tree)" },
       { "command": "rung.monitor.toggle", "title": "Monitor Values (Live)", "category": "rung", "icon": "$(eye)" },
       { "command": "rung.monitor.stop", "title": "Stop Monitoring", "category": "rung", "icon": "$(eye-closed)" },
       { "command": "rung.env.refresh", "title": "Check This PC Again", "category": "rung", "icon": "$(refresh)" },
@@ -155,6 +156,7 @@
         { "command": "rung.pull", "when": "view == rung.project", "group": "1_sync@1" },
         { "command": "rung.status", "when": "view == rung.project", "group": "1_sync@2" },
         { "command": "rung.views", "when": "view == rung.project", "group": "1_sync@3" },
+        { "command": "rung.assignments", "when": "view == rung.project", "group": "1_sync@4" },
         { "command": "rung.openConfig", "when": "view == rung.project", "group": "2_workspace@1" },
         { "command": "rung.showOutput", "when": "view == rung.project", "group": "2_workspace@2" },
         { "command": "rung.refreshPlc", "when": "view == rung.plc && rung.workspace", "group": "navigation@1" },

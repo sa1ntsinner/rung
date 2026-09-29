@@ -2,13 +2,14 @@
 // rung mcp: a small, agent-native tool surface. Agents read and edit the mirrored files directly;
 // the tools cover what files cannot tell: sync, compile, diagnostics, graph, conflicts and safety.
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
 import { BlobStore, loadConfig, normalizeText, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
 import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
-import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
+import { WorkspaceIndex, assignmentList, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
 import { runTests } from "@rung/sim";
@@ -189,6 +190,17 @@ export function createMcpServer(ctx: McpContext): McpServer {
       } finally {
         await b.close();
       }
+    },
+  );
+
+  server.registerTool(
+    "rung_assignments",
+    { description: "The assignment list, like TIA Portal's: every input, output and bit memory address in use, with its tags and where the code uses it, and overlapping accesses (crossing ones are usually mistakes). Read before choosing a free address." },
+    async () => {
+      const { index } = await model();
+      const r = assignmentList(index);
+      const rel = (u: { uri: string; line: number }) => `${relative(ctx.root, fileURLToPath(u.uri)).split(sep).join("/")}:${u.line + 1}`;
+      return json({ items: r.items.map((a) => ({ ...a, uses: a.uses.map(rel) })), crossing: r.overlaps.filter((o) => !o.nested), nestedCount: r.overlaps.filter((o) => o.nested).length });
     },
   );
 

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { parseArgs } from "node:util";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CONFIG_FILE,
   ENGINEERING_VERSIONS,
@@ -23,7 +24,7 @@ import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
 import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
-import { WorkspaceIndex } from "@rung/lsp";
+import { WorkspaceIndex, assignmentList } from "@rung/lsp";
 import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
@@ -55,6 +56,7 @@ Usage:
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
+  rung assignments [dir] [--json]     the assignment list: used inputs, outputs and bit memory, and overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
@@ -230,6 +232,7 @@ const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   open: { options: ["dir"], positionals: 1 },
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
   "codesys-bridge": { options: ["project"], positionals: 0 },
+  assignments: { options: ["json"], positionals: 1 },
 };
 
 /** Why these arguments do not fit the command, or undefined. */
@@ -438,6 +441,34 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
         return await cmdInit(dir, v, io);
       case "codesys-bridge":
         return await cmdCodesysBridge(v, io);
+      case "assignments": {
+        const ws = await findWorkspace(dir).catch(() => dir);
+        const index = new WorkspaceIndex();
+        await index.load(ws);
+        const r = assignmentList(index);
+        const where = (u: { uri: string; line: number }) => `${relative(ws, fileURLToPath(u.uri)).split(sep).join("/")}:${u.line + 1}`;
+        if (v.json) {
+          io.stdout(JSON.stringify({ items: r.items.map((a) => ({ ...a, uses: a.uses.map(where) })), overlaps: r.overlaps }, null, 2) + "\n");
+          return r.overlaps.some((o) => !o.nested) ? 2 : 0;
+        }
+        const heading: Record<string, string> = { I: "Inputs", Q: "Outputs", M: "Bit memory" };
+        let area = "";
+        for (const a of r.items) {
+          if (a.area !== area) io.stdout(`${area ? "\n" : ""}${heading[(area = a.area)]}\n`);
+          const tag = a.tags.map((t) => `${t.name} : ${t.dataType} (${t.table})`).join(", ") || "(no tag)";
+          const uses = a.uses.length ? `  used in ${a.uses.slice(0, 3).map(where).join(", ")}${a.uses.length > 3 ? ` and ${a.uses.length - 3} more` : ""}` : "";
+          io.stdout(`  ${(a.address + (a.peripheral ? ":P" : "")).padEnd(10)} ${tag}${uses}\n`);
+        }
+        if (!r.items.length) io.stdout("no input, output or bit memory address is used\n");
+        const crossing = r.overlaps.filter((o) => !o.nested);
+        const nested = r.overlaps.length - crossing.length;
+        if (crossing.length) {
+          io.stdout(`\nOverlaps that cross (two accesses share only part of their bytes; usually a mistake):\n`);
+          for (const o of crossing) io.stdout(`  ${o.a} and ${o.b} share byte${o.bytes.length > 1 ? "s" : ""} ${o.bytes.join(", ")}\n`);
+        }
+        if (nested) io.stdout(`\n${nested} address${nested > 1 ? "es are" : " is"} also used as part of a larger one (a byte and its bits, a word and its bytes); --json lists them.\n`);
+        return crossing.length ? 2 : 0;
+      }
       case "pull":
         return await cmdPull(await findWorkspace(dir), v, io);
       case "status":
