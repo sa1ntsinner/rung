@@ -24,4 +24,13 @@ set RUNG_E2E=1 && pnpm vitest run tests/e2e
 powershell -ExecutionPolicy Bypass -File tools\fixtures\Start-FixtureHost.ps1 -Stop
 ```
 
-For S7-PLCSIM, generate a program that compiles and runs: `New-FixtureProject.ps1 -Name RungPlcsim -Runnable`.
+Downloads run against S7-PLCSIM V20, also without a window: the script starts PLCSIM on its own Windows desktop with one powered-on S7-1500. TIA Portal lists the PLCSIM interface only if it starts after PLCSIM.
+
+```bat
+node tools\fixtures\plcsim.mjs start
+powershell -ExecutionPolicy Bypass -File tools\fixtures\New-FixtureProject.ps1 -Name RungPlcsim -Runnable
+start /b powershell -ExecutionPolicy Bypass -File tools\fixtures\Start-FixtureHost.ps1 -Name RungPlcsim
+set RUNG_E2E_PLCSIM=1 && pnpm vitest run tests/e2e/plcsim.e2e.test.ts
+powershell -ExecutionPolicy Bypass -File tools\fixtures\Start-FixtureHost.ps1 -Name RungPlcsim -Stop
+node tools\fixtures\plcsim.mjs stop
+```
