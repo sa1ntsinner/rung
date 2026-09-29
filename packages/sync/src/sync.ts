@@ -98,6 +98,7 @@ interface ImportJob {
 }
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
+const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 
@@ -316,7 +317,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     } else {
       for (const [suffix, text] of staged.texts) await writeFileAtomic(rel2abs(root, stem + suffix + ".tia"), text);
     }
-    state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files } });
+    state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files }, sending: undefined });
     report.conflicts++;
     diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: "Edited in the workspace and in TIA Portal; resolve with rung resolve" });
   };
@@ -389,7 +390,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
             report.exported++;
           } else {
             // a restored file ends a pending delete or a refused edit
-            if (cur.status === "pendingDelete" || cur.status === "fileDirty") state.upsert({ ...cur, status: "synced" });
+            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending) state.upsert({ ...cur, status: "synced", sending: undefined });
             report.unchanged++;
           }
           continue;
@@ -431,13 +432,20 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           await writeConflict(cur, stem, bundle, staged!, false);
           continue;
         }
-        const m = mergeBundle(cur.form, base, bundle, tia);
+        let m = mergeBundle(cur.form, base, bundle, tia);
+        if (m.kind === "conflict" && cur.sending) {
+          // the last pass stopped during an import (Ctrl+C, a crash). If TIA Portal already has what it sent,
+          // that is the base the file was edited from since; if not, the conflict is real.
+          const sent = await baseBundle(root, stemOf(cur), cur.sending);
+          const probe = mergeBundle(cur.form, base, sent, tia);
+          if (probe.kind !== "conflict" && sameTexts(probe.files, tia)) m = mergeBundle(cur.form, sent, bundle, tia);
+        }
         if (m.kind === "conflict") {
           await writeConflict(cur, stem, m.files, staged!, SOURCE_FORMS.has(cur.form));
           continue;
         }
         const mergedTexts = Object.values(m.files);
-        if (JSON.stringify(m.files) === JSON.stringify(tia)) {
+        if (sameTexts(m.files, tia)) {
           await publish(address, captured, staged!, readOnly, false);
           report.exported++;
         } else
@@ -503,6 +511,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const { bundle, captured } = await localBundle(root, loc.stem, loc.path);
         const name = parseAddress(address).name;
         const texts = Object.values(bundle);
+        // a file being written (an editor's new file, a quick fix's DB before it is saved) creates nothing yet
+        if (!(bundle["." + loc.form] ?? "").trim()) continue;
         queue.push({ address, name, form: loc.form, stem, bundle, expected: "absent", captured, kind: "create", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
       }
     } catch (e) {
@@ -565,6 +575,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       }
     }
     const stage = await stageForImport(root, job.form, job.bundle);
+    if (st) {
+      // what is sent, kept until the import's outcome is recorded (see ObjectState.sending)
+      const blobs = new BlobStore(root);
+      const sending: StateFile[] = [];
+      for (const [suffix, text] of Object.entries(job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
+      state.upsert({ ...st, sending });
+      await state.flush();
+    }
     if (job.kind === "create" && !st) {
       // written down before TIA Portal creates it: an interrupted pass then knows the object came from this file
       state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing" });

@@ -116,4 +116,18 @@ END_METHOD
     const d = diagnostics(w, fb).map((x) => [x.code, w.docs.get(fb)!.text.slice(x.start, x.end)]);
     expect(d).toEqual([["UNKNOWN_GLOBAL", "nUnknown"]]);
   });
+
+  it("knows enumeration values, with and without their type", () => {
+    const w = new WorkspaceIndex();
+    w.set("file:///e/E_State.st", "TYPE E_State :\n(\n  Idle := 0,\n  Running := 10,\n  Stopping\n) INT := Idle;\nEND_TYPE\n", 0);
+    w.set(
+      "file:///e/FB_Seq.st",
+      "FUNCTION_BLOCK FB_Seq\nVAR\n  eState : E_State;\nEND_VAR\nCASE eState OF\n  E_State.Idle: eState := E_State#Running;\n  E_State.Running: eState := Stopping;\nEND_CASE\nnOther := 1;\nEND_FUNCTION_BLOCK\n",
+      0,
+    );
+    expect(w.global("E_State")!.block!.enumValues).toEqual([{ name: "Idle", value: 0 }, { name: "Running", value: 10 }, { name: "Stopping", value: 11 }]);
+    expect(w.global("E_State")!.block!.enumDefault).toBe("Idle");
+    const text = w.docs.get("file:///e/FB_Seq.st")!.text;
+    expect(diagnostics(w, "file:///e/FB_Seq.st").map((x) => text.slice(x.start, x.end))).toEqual(["nOther"]);
+  });
 });

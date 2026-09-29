@@ -37,13 +37,15 @@ describe("doctor", () => {
     expect(rows).toEqual([{ address: "plc:PLC_1/blocks/A", form: "scl", pass1Equal: true, pass2Equal: true }]);
   });
 
-  it("skips export-only objects such as force tables", async () => {
+  it("skips export-only objects such as technology objects, and force tables as read-only", async () => {
     const b = new ImportingFake();
+    b.add("plc:PLC_1/techobjects/Axis", { kind: "techobject", form: "xml", content: "<t/>\n" });
+    b.noImport.add("plc:PLC_1/techobjects/Axis");
     b.add("plc:PLC_1/force/F", { kind: "forcetable", form: "xml", content: "<f/>\n" });
-    b.noImport.add("plc:PLC_1/force/F");
-    const [row] = await doctor(root(), b);
-    expect(row).toMatchObject({ form: "xml", skipped: "no-import" });
-    expect(row!.error).toBeUndefined();
+    const rows = await doctor(root(), b);
+    expect(rows.find((r) => r.address.endsWith("/Axis"))).toMatchObject({ form: "xml", skipped: "no-import" });
+    expect(rows.find((r) => r.address.endsWith("/F"))).toMatchObject({ skipped: "read-only" });
+    expect(rows.every((r) => !r.error)).toBe(true);
   });
 
   it("detects normalization that converges on the second pass", async () => {

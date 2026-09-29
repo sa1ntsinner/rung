@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung lsp: Language Server Protocol adapter over the workspace index and the rung sync diagnostics.
 import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  CodeActionKind,
   createConnection,
   DiagnosticSeverity,
   DocumentSymbol,
@@ -24,6 +25,7 @@ import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, hover, outline, references, rename, type CompletionKind, type OutlineSymbol } from "./features.js";
+import { codeActions } from "./actions.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
 const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
@@ -112,6 +114,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
         referencesProvider: true,
         renameProvider: true,
         documentSymbolProvider: true,
+        codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
+        executeCommandProvider: { commands: ["rung.lsp.createFile"] },
       },
       serverInfo: { name: "rung", version: "0.1.0" },
     };
@@ -185,6 +189,32 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
     const changes: Record<string, { range: ReturnType<typeof range>; newText: string }[]> = {};
     for (const e of r) (changes[e.uri] ??= []).push({ range: range(e.uri, e.start, e.end), newText: e.newText });
     return { changes };
+  });
+  connection.onCodeAction((p) => {
+    const uri = p.textDocument.uri;
+    return codeActions(index, uri, offsetOf(uri, p.range.start), offsetOf(uri, p.range.end)).map((f) => {
+      const byUri = new Map<string, { range: ReturnType<typeof range>; newText: string }[]>();
+      for (const e of f.edits) byUri.set(e.uri, [...(byUri.get(e.uri) ?? []), { range: range(e.uri, e.start, e.end), newText: e.newText }]);
+      const documentChanges = [...byUri].map(([u, edits]) => ({ textDocument: { uri: u, version: documents.get(u)?.version ?? null }, edits }));
+      return {
+        title: f.title,
+        kind: CodeActionKind.QuickFix,
+        isPreferred: !!f.preferred,
+        diagnostics: p.context.diagnostics.filter((d) => d.code === f.code),
+        edit: { documentChanges },
+        // a new file is written by the server with its content (an LSP create-file edit carries none)
+        ...(f.create ? { command: { title: f.title, command: "rung.lsp.createFile", arguments: [f.create.uri, f.create.text] } } : {}),
+      };
+    });
+  });
+  connection.onExecuteCommand(async (p) => {
+    if (p.command !== "rung.lsp.createFile" || !root) return;
+    const [uri, text] = (p.arguments ?? []) as [string, string];
+    const path = fileURLToPath(uri);
+    // only new sources inside the workspace's plc folder
+    if (!resolve(path).toLowerCase().startsWith(resolve(root, "plc").toLowerCase() + sep) || !/\.(scl|db|udt)$/i.test(path)) return;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text, { flag: "wx" }).catch(() => {}); // never over an existing file
   });
   connection.onDocumentSymbol((p) => {
     const conv = (s: OutlineSymbol): DocumentSymbol => ({

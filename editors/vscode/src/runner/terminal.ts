@@ -30,10 +30,10 @@ export function killTree(child: ChildProcess): void {
 }
 
 /** Starts a child process and collects its output. */
-export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void): { child: ChildProcess; done: Promise<RunResult> } {
+export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void, env: Record<string, string> = {}): { child: ChildProcess; done: Promise<RunResult> } {
   const child = spawn(inv.file, inv.args, {
     cwd,
-    env: { ...process.env, FORCE_COLOR: "0" },
+    env: { ...process.env, FORCE_COLOR: "0", ...env },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     windowsVerbatimArguments: inv.shell,

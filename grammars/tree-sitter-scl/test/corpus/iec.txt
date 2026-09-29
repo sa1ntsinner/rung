@@ -1,0 +1,186 @@
+========================================
+TwinCAT structured text: enumeration, global variables, interface, FB with methods, pointers, references, THIS^
+========================================
+
+TYPE E_State :
+(
+  Idle := 0,
+  Running := 10,
+  Stopping
+) INT := Idle;
+END_TYPE
+
+VAR_GLOBAL
+  bStart AT %I* : BOOL;
+  nA, nB : INT;
+END_VAR
+
+INTERFACE I_Axis
+  METHOD MoveTo : BOOL
+  VAR_INPUT
+    fTarget : REAL;
+  END_VAR
+  END_METHOD
+END_INTERFACE
+
+FUNCTION_BLOCK PUBLIC FB_Axis EXTENDS FB_Base IMPLEMENTS I_Axis
+VAR
+  eState : E_State;
+  pCount : POINTER TO INT;
+  rPos : REFERENCE TO REAL;
+  sName : STRING(80);
+  bLatch : BOOL;
+END_VAR
+CASE eState OF
+  E_State.Idle: eState := E_State#Running;
+  E_State.Running: eState := Stopping;
+END_CASE
+pCount^ := pCount^ + 1;
+rPos REF= fPos;
+bLatch S= bStart;
+bLatch R= NOT bStart;
+THIS^.nMoves := THIS^.nMoves + 1;
+END_FUNCTION_BLOCK
+
+METHOD PRIVATE Home : BOOL
+Home := TRUE;
+END_METHOD
+
+PROGRAM MAIN
+VAR
+  fbAxis : FB_Axis;
+END_VAR
+fbAxis.MoveTo(fTarget := 1.5);
+END_PROGRAM
+
+----------------------------------------
+
+(source_file
+  (type_definition
+    (identifier)
+    (enum_type
+      (enum_value
+        (identifier)
+        (number))
+      (enum_value
+        (identifier)
+        (number))
+      (enum_value
+        (identifier))
+      (identifier))
+    (identifier))
+  (var_section
+    (var_declaration
+      (identifier)
+      (absolute_address)
+      (identifier))
+    (var_declaration
+      (identifier)
+      (identifier)
+      (identifier)))
+  (interface
+    (identifier)
+    (method
+      (identifier)
+      (identifier)
+      (var_section
+        (var_declaration
+          (identifier)
+          (identifier)))))
+  (function_block
+    (identifier)
+    (extends
+      (identifier))
+    (implements
+      (identifier))
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier))
+      (var_declaration
+        (identifier)
+        (pointer_type
+          (identifier)))
+      (var_declaration
+        (identifier)
+        (pointer_type
+          (identifier)))
+      (var_declaration
+        (identifier)
+        (string_type
+          (number)))
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (case_statement
+        (identifier)
+        (case_item
+          (case_label
+            (member_expression
+              (identifier)
+              (identifier)))
+          (assignment_statement
+            (identifier)
+            (typed_literal)))
+        (case_item
+          (case_label
+            (member_expression
+              (identifier)
+              (identifier)))
+          (assignment_statement
+            (identifier)
+            (identifier))))
+      (assignment_statement
+        (deref_expression
+          (identifier))
+        (binary_expression
+          (deref_expression
+            (identifier))
+          (number)))
+      (assignment_statement
+        (identifier)
+        (ref_bind)
+        (identifier))
+      (assignment_statement
+        (identifier)
+        (set_reset)
+        (identifier))
+      (assignment_statement
+        (identifier)
+        (set_reset)
+        (unary_expression
+          (identifier)))
+      (assignment_statement
+        (member_expression
+          (deref_expression
+            (identifier))
+          (identifier))
+        (binary_expression
+          (member_expression
+            (deref_expression
+              (identifier))
+            (identifier))
+          (number)))))
+  (method
+    (identifier)
+    (identifier)
+    (body
+      (assignment_statement
+        (identifier)
+        (boolean))))
+  (program
+    (identifier)
+    (var_section
+      (var_declaration
+        (identifier)
+        (identifier)))
+    (body
+      (call_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (argument
+            (identifier)
+            (number)))))))

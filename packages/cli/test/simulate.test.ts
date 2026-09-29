@@ -99,4 +99,52 @@ describe("rung simulate (virtual S7-1500)", () => {
     mkdirSync(join(dir, "plc", "PLC_1", "blocks"), { recursive: true });
     await expect(startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 })).rejects.toThrow(/no SCL organization block/);
   });
+
+  it("rung live watch monitors a block like TIA Portal: which values show on which line, then the values", async () => {
+    const dir = workspace();
+    const blocks = join(dir, "plc", "PLC_1", "blocks");
+    const LAMP = 'FUNCTION_BLOCK "Fx_Lamp"\nVERSION : 0.1\n   VAR_INPUT \n      On : Bool;\n   END_VAR\n   VAR_OUTPUT \n      Lit : Bool;\n   END_VAR\n   VAR \n      Count : DInt;\n   END_VAR\n   VAR_TEMP \n      t : Int;\n   END_VAR\n\nBEGIN\n\t#Lit := #On;\n\tIF #On THEN\n\t    #Count := #Count + 1;\n\tEND_IF;\n\t#t := 1;\nEND_FUNCTION_BLOCK\n';
+    writeFileSync(join(blocks, "Fx_Lamp.scl"), LAMP);
+    writeFileSync(join(blocks, "Lamp_DB.db"), 'DATA_BLOCK "Lamp_DB"\nVERSION : 0.1\nNON_RETAIN\n"Fx_Lamp"\n\nBEGIN\n\nEND_DATA_BLOCK\n');
+    writeFileSync(join(blocks, "Main.scl"), MAIN.replace("END_ORGANIZATION_BLOCK", '\t"Lamp_DB"(On := TRUE);\nEND_ORGANIZATION_BLOCK'));
+    const plc = await startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 });
+    try {
+      writeFileSync(join(dir, "rung.toml"), `format = 1\ndevices = []\n[project]\npath = "C:\\\\x.ap20"\ntiaVersion = "V20"\n[live.webapi]\nurl = "${plc.url}"\nuser = "any"\n`);
+      const out: string[] = [];
+      const err: string[] = [];
+      let stop!: () => void;
+      const stopSignal = new Promise<void>((r) => (stop = r));
+      const io = { cwd: dir, stdout: (s: string) => out.push(s), stderr: (s: string) => err.push(s), env: { RUNG_WEBAPI_PASSWORD: "x" }, stopSignal };
+      const running = main(["live", "watch", "--file", "plc/PLC_1/blocks/Fx_Lamp.scl", "--json", "--interval", "100"], io);
+      for (let i = 0; i < 100 && out.filter((l) => l.includes('"values"')).length < 2; i++) await sleep(50);
+      stop();
+      expect(await running).toBe(0);
+      expect(err.join("")).toBe("");
+      const [first, ...reads] = out.join("").trim().split("\n").map((l) => JSON.parse(l) as { plan?: { instance: string; vars: Record<string, string>; lines: Record<string, string[]> }; values?: Record<string, unknown> });
+      const plan = first!.plan!;
+      const line = (needle: string) => String(LAMP.split("\n").findIndex((l) => l.includes(needle)));
+      expect(plan.instance).toBe('"Lamp_DB"'); // the only instance DB of Fx_Lamp
+      expect(plan.vars["#Count"]).toBe('"Lamp_DB".Count');
+      expect(plan.lines[line("On : Bool")]).toEqual(["On"]);
+      expect(plan.lines[line("#Lit := #On")]).toEqual(["#Lit", "#On"]);
+      expect(plan.lines[line("#t := 1")]).toBeUndefined(); // a temporary has no value between cycles
+      const last = reads.at(-1)!.values!;
+      expect(last["#On"]).toBe(true);
+      expect(Number(last["#Count"])).toBeGreaterThan(0);
+    } finally {
+      await plc.close();
+    }
+  });
+
+  it("rung live watch asks which instance when an FB has several", async () => {
+    const dir = workspace();
+    const blocks = join(dir, "plc", "PLC_1", "blocks");
+    writeFileSync(join(blocks, "Fx_Lamp.scl"), 'FUNCTION_BLOCK "Fx_Lamp"\n   VAR \n      Count : DInt;\n   END_VAR\nBEGIN\n\t;\nEND_FUNCTION_BLOCK\n');
+    for (const n of ["A_DB", "B_DB"]) writeFileSync(join(blocks, `${n}.db`), `DATA_BLOCK "${n}"\n"Fx_Lamp"\nBEGIN\nEND_DATA_BLOCK\n`);
+    writeFileSync(join(dir, "rung.toml"), 'format = 1\ndevices = []\n[project]\npath = "C:\\\\x.ap20"\ntiaVersion = "V20"\n');
+    const err: string[] = [];
+    const code = await main(["live", "watch", "--file", "plc/PLC_1/blocks/Fx_Lamp.scl", "--json"], { cwd: dir, stdout: () => {}, stderr: (s) => err.push(s), env: {} });
+    expect(code).toBe(1);
+    expect(err.join("")).toMatch(/NO_INSTANCE: Fx_Lamp has 2 instance DBs \(A_DB, B_DB\); choose one with --instance/);
+  });
 });

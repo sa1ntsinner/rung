@@ -6,6 +6,7 @@ import { BlockCodeLens } from "./codelens";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
 import { Lsp } from "./lsp";
+import { Monitor } from "./monitor";
 import { OnlineMonitor } from "./online";
 import { Output } from "./output";
 import { CompileProblems } from "./problems";
@@ -16,6 +17,7 @@ import { readSettings } from "./settings";
 import { StatusBar } from "./statusBar";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
+import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
 import { RungWorkspace } from "./workspace";
 
 let lsp: Lsp | undefined;
@@ -29,6 +31,8 @@ export interface RungExtensionApi {
   problems: CompileProblems;
   project: ProjectView;
   plc: PlcView;
+  environment: EnvironmentView;
+  monitor: Monitor;
   statusBar: StatusBar;
   decorations: ObjectDecorations;
   lsp: Lsp;
@@ -51,7 +55,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const plc = new PlcView(ws, online, watch);
   const statusBar = new StatusBar(ws, watch, online);
   const decorations = new ObjectDecorations(ws);
-  context.subscriptions.push(project, plc, decorations, statusBar, new BlockCodeLens(ws));
+  const environment = new EnvironmentView(cli);
+  const monitor = new Monitor(ws, cli, out, context.secrets);
+  context.subscriptions.push(
+    monitor,
+    vscode.commands.registerCommand("rung.monitor.toggle", (uri?: vscode.Uri) => monitor.toggle(uri instanceof vscode.Uri ? uri : undefined)),
+    vscode.commands.registerCommand("rung.monitor.stop", () => monitor.stop()),
+  );
+  context.subscriptions.push(project, plc, environment, decorations, statusBar, new BlockCodeLens(ws));
+  context.subscriptions.push(
+    vscode.commands.registerCommand("rung.env.refresh", () => environment.refresh()),
+    vscode.commands.registerCommand("rung.env.fix", async (item?: CheckItem) => {
+      const fix = item && FIXES[item.id];
+      if (!fix) return;
+      await cli.run(fix.args, { terminal: "rung setup", icon: "tools" });
+      await environment.refresh();
+    }),
+    vscode.commands.registerCommand("rung.setup", async () => {
+      await cli.run(["setup"], { terminal: "rung setup", icon: "tools" });
+      await environment.refresh();
+    }),
+  );
   registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp });
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
@@ -81,7 +105,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, statusBar, decorations, lsp };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp };
 }
 
 export async function deactivate(): Promise<void> {

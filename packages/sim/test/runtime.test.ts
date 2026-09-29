@@ -31,6 +31,14 @@ describe("Simulator", () => {
     expect([m.mem.RUNNING, m.mem.SPEEDOUT]).toEqual([false, 0]);
   });
 
+  it("wraps integers around on overflow like an S7-1500", () => {
+    const s = sim({
+      Fx_Wrap: 'FUNCTION "Fx_Wrap" : Void\nVAR_TEMP\n  i : Int;\n  si : SInt;\n  us : USInt;\n  w : Word;\n  d : DInt;\n  r : Real;\nEND_VAR\nVAR_OUTPUT\n  oi : Int;\n  osi : SInt;\n  ous : USInt;\n  ow : Word;\n  od : DInt;\n  oreal : Real;\nEND_VAR\nBEGIN\n  #i := 32767;\n  #oi := #i + 1;\n  #si := -128;\n  #osi := #si - 1;\n  #us := 0;\n  #ous := #us - 1;\n  #w := 16#FFFF;\n  #ow := #w + 2;\n  #d := 2147483647;\n  #od := #d + 1;\n  #r := 32767.0;\n  #oreal := #r + 1.0;\nEND_FUNCTION\n',
+    });
+    const r = s.callBlock("Fx_Wrap", {});
+    expect(r.outputs).toMatchObject({ OI: -32768, OSI: 127, OUS: 255, OW: 1, OD: -2147483648, OREAL: 32768 });
+  });
+
   it("runs an FC with CASE and returns outputs", () => {
     const s = sim();
     expect(s.callBlock("Fx_Valve", { Enable: true, Mode: 1 }).outputs.OPEN).toBe(true);

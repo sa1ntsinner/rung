@@ -1,0 +1,13 @@
+name = "Structured Text"
+grammar = "scl"
+path_suffixes = ["st"]
+line_comments = ["// "]
+block_comment = ["(* ", " *)"]
+autoclose_before = ";:.,=)]"
+brackets = [
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "[", end = "]", close = true, newline = false },
+  { start = "'", end = "'", close = true, newline = false, not_in = ["string", "comment"] },
+]
+tab_size = 4
+word_characters = ["_"]

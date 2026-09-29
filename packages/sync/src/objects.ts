@@ -30,6 +30,7 @@ export function isReadOnlyEntry(e: ObjectEntry): boolean {
 /** Why rung never sends an edit of this object to TIA Portal, or undefined. */
 export function readOnlyReason(e: ObjectEntry): string | undefined {
   if (e.libraryType) return `an instance of the library type ${e.libraryType}; change the type in TIA Portal's library (Edit type)`;
+  if (e.kind === "forcetable") return "a force table: forcing stays in TIA Portal";
   if (e.knowHowProtected) return "know-how protected";
   if (e.isFailsafe) return "part of the safety program, which stays in TIA Portal";
   if (e.isSystem) return "a system object";

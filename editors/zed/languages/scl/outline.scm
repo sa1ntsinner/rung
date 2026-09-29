@@ -8,3 +8,7 @@
 (var_section kind: _ @name) @item
 (var_declaration name: (_) @name) @item
 (region header: (region_header) @name) @item
+(program "PROGRAM" @context name: (_) @name) @item
+(method "METHOD" @context name: (_) @name) @item
+(property "PROPERTY" @context name: (_) @name) @item
+(interface "INTERFACE" @context name: (_) @name) @item

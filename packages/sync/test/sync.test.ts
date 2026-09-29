@@ -25,10 +25,6 @@ class TiaFake extends FakeBridge {
     this.imports.push({ address, expected, text });
     if (this.hangImport) throw new BridgeError("OUTCOME_UNKNOWN", "timed out");
     if (this.killed === "before") throw new Error("killed");
-    if (this.killed === "after") {
-      this.add(address, { form, content: this.canon(text) });
-      throw new Error("killed");
-    }
     const code = this.failImport.get(address);
     if (code) throw new BridgeError(code, "import refused: " + code);
     const o = this.objects.get(address);
@@ -42,6 +38,7 @@ class TiaFake extends FakeBridge {
       for (const [suffix, content] of Object.entries(o.files)) if (suffix !== "." + form) files[suffix] = content;
       this.edit(address, files);
     }
+    if (this.killed === "after") throw new Error("killed"); // TIA Portal has it; rung never heard back
     const dir = mkdtempSync(join(tmpdir(), "rung-bridge-out-"));
     return this.exportObject(address, "auto", dir);
   }
@@ -529,6 +526,16 @@ describe("syncOnce", () => {
     );
   });
 
+  it("a force table is mirrored for reading; an edit never reaches TIA Portal", async () => {
+    const F = "plc:PLC_1/force/Force table";
+    const t = setup((b) => b.add(F, { kind: "forcetable", form: "xml", content: "<Force/>\n" }));
+    await t.sync();
+    t.write("plc/PLC_1/force/Force table.xml", "<Force>mine</Force>\n");
+    const r = await t.sync();
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.diagnostics.find((d) => d.code === "READ_ONLY_EDIT")?.message).toMatch(/^Read-only in rung: a force table: forcing stays in TIA Portal\./);
+  });
+
   it("a read-only file stays read-only when TIA Portal's change is written into it", async () => {
     const t = setup();
     await t.sync();
@@ -590,6 +597,33 @@ describe("syncOnce", () => {
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 5;");
   });
 
+  it("an update Ctrl+C interrupted after TIA Portal took it, then edited again: the newer edit goes in, no conflict", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    t.bridge.edit(A, { ".scl": t.bridge.objects.get(A)!.files[".scl"]!.replace("#z := 3;", "#z := 30;") }); // someone in TIA Portal
+    t.write(pA, srcA.replace("#x := 1;", "#x := 6;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 6;");
+    expect(t.read(pA)).toContain("#z := 30;");
+  });
+
+  it("an interrupted update TIA Portal never got stays a conflict when TIA Portal changed the same line", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    t.bridge.killed = "before";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    t.bridge.edit(A, { ".scl": srcA.replace("#x := 1;", "#x := 7;") });
+    const r = await t.sync();
+    expect(r.conflicts).toBe(1); // neither 5 nor 7 is dropped silently
+  });
+
   it("creates again what an interrupted pass never got into TIA Portal, and pull meanwhile keeps the file", async () => {
     const t = setup(() => {});
     await t.sync();
@@ -602,6 +636,16 @@ describe("syncOnce", () => {
     const r = await t.sync();
     expect(r.created).toBe(1);
     expect(t.bridge.objects.has(A)).toBe(true);
+  });
+
+  it("an empty new file creates nothing until it has content", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, "");
+    const r = await t.sync();
+    expect([r.created, r.warnings.length, r.diagnostics.length, t.bridge.imports.length]).toEqual([0, 0, 0, 0]);
+    t.write(pA, srcA);
+    expect((await t.sync()).created).toBe(1);
   });
 
   it("a refused create leaves just a new file behind", async () => {

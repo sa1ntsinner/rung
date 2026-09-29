@@ -20,6 +20,8 @@ export type WorkspaceErrorCode =
   | "CONFLICT_MARKERS"
   /** rung watch is starting and has no bridge yet */
   | "NOT_READY"
+  /** an FB to monitor has no single instance DB: the person names the instance */
+  | "NO_INSTANCE"
   | "NOT_A_WORKSPACE"
   | "READ_ONLY";
 

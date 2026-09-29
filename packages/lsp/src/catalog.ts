@@ -7,6 +7,8 @@ export interface CatalogParam {
   name: string;
   type: string;
   dir: "in" | "out" | "inout";
+  /** What the parameter does, for hover. */
+  note?: string;
 }
 
 export interface CatalogEntry {
@@ -19,11 +21,12 @@ export interface CatalogEntry {
   methods?: string[];
 }
 
-const p = (name: string, type: string, dir: CatalogParam["dir"] = "in"): CatalogParam => ({ name, type, dir });
+const p = (name: string, type: string, dir: CatalogParam["dir"] = "in", note?: string): CatalogParam => ({ name, type, dir, ...(note ? { note } : {}) });
 const fn = (name: string, params: CatalogParam[], returns: string, doc: string): CatalogEntry => ({ name, kind: "function", params, returns, doc });
 const fb = (name: string, params: CatalogParam[], doc: string): CatalogEntry => ({ name, kind: "functionBlock", params, doc });
 
-const timer = (name: string, t: string, doc: string) => fb(name, [p("IN", "Bool"), p("PT", t), p("Q", "Bool", "out"), p("ET", t, "out")], doc);
+const timer = (name: string, t: string, doc: string) =>
+  fb(name, [p("IN", "Bool", "in", "start input"), p("PT", t, "in", "preset time"), p("Q", "Bool", "out", "timer output"), p("ET", t, "out", "elapsed time")], doc);
 
 export const STANDARD: CatalogEntry[] = [
   timer("TON", "Time", "On-delay timer: Q becomes TRUE when IN has been TRUE for PT."),
@@ -35,11 +38,11 @@ export const STANDARD: CatalogEntry[] = [
   timer("TON_LTIME", "LTime", "On-delay timer (LTIME)."),
   timer("TOF_LTIME", "LTime", "Off-delay timer (LTIME)."),
   timer("TP_LTIME", "LTime", "Pulse timer (LTIME)."),
-  fb("CTU", [p("CU", "Bool"), p("R", "Bool"), p("PV", "Int"), p("Q", "Bool", "out"), p("CV", "Int", "out")], "Up counter: CV counts rising edges of CU; Q = CV >= PV."),
-  fb("CTD", [p("CD", "Bool"), p("LD", "Bool"), p("PV", "Int"), p("Q", "Bool", "out"), p("CV", "Int", "out")], "Down counter: LD loads PV; Q = CV <= 0."),
+  fb("CTU", [p("CU", "Bool", "in", "count up on a rising edge"), p("R", "Bool", "in", "reset CV to 0"), p("PV", "Int", "in", "preset value"), p("Q", "Bool", "out", "CV >= PV"), p("CV", "Int", "out", "current count")], "Up counter: CV counts rising edges of CU; Q = CV >= PV."),
+  fb("CTD", [p("CD", "Bool", "in", "count down on a rising edge"), p("LD", "Bool", "in", "load PV into CV"), p("PV", "Int", "in", "preset value"), p("Q", "Bool", "out", "CV <= 0"), p("CV", "Int", "out", "current count")], "Down counter: LD loads PV; Q = CV <= 0."),
   fb("CTUD", [p("CU", "Bool"), p("CD", "Bool"), p("R", "Bool"), p("LD", "Bool"), p("PV", "Int"), p("QU", "Bool", "out"), p("QD", "Bool", "out"), p("CV", "Int", "out")], "Up/down counter."),
-  fb("R_TRIG", [p("CLK", "Bool"), p("Q", "Bool", "out")], "Rising edge: Q is TRUE for one call when CLK goes from FALSE to TRUE."),
-  fb("F_TRIG", [p("CLK", "Bool"), p("Q", "Bool", "out")], "Falling edge: Q is TRUE for one call when CLK goes from TRUE to FALSE."),
+  fb("R_TRIG", [p("CLK", "Bool", "in", "signal to watch"), p("Q", "Bool", "out", "TRUE for one call")], "Rising edge: Q is TRUE for one call when CLK goes from FALSE to TRUE."),
+  fb("F_TRIG", [p("CLK", "Bool", "in", "signal to watch"), p("Q", "Bool", "out", "TRUE for one call")], "Falling edge: Q is TRUE for one call when CLK goes from TRUE to FALSE."),
   fb("SR", [p("S1", "Bool"), p("R", "Bool"), p("Q1", "Bool", "out")], "Set-dominant bistable."),
   fb("RS", [p("S", "Bool"), p("R1", "Bool"), p("Q1", "Bool", "out")], "Reset-dominant bistable."),
   fn("ABS", [p("IN", "ANY_NUM")], "ANY_NUM", "Absolute value."),
@@ -129,6 +132,43 @@ export const SYSTEM_TYPES = new Map<string, SystemTypeMember[]>([
 ]);
 
 export const STANDARD_BY_NAME = new Map(STANDARD.map((e) => [e.name.toUpperCase(), e]));
+
+/** Size and range of the elementary data types of S7-1200/1500 (and IEC 61131-3), for hover. */
+export const TYPE_INFO: Record<string, string> = {
+  BOOL: "1 bit: FALSE or TRUE",
+  BYTE: "8-bit bit string: 16#00 to 16#FF",
+  WORD: "16-bit bit string: 16#0000 to 16#FFFF",
+  DWORD: "32-bit bit string: 16#0000_0000 to 16#FFFF_FFFF",
+  LWORD: "64-bit bit string",
+  SINT: "8-bit signed integer: -128 to 127",
+  INT: "16-bit signed integer: -32768 to 32767",
+  DINT: "32-bit signed integer: -2147483648 to 2147483647",
+  LINT: "64-bit signed integer: -9223372036854775808 to 9223372036854775807",
+  USINT: "8-bit unsigned integer: 0 to 255",
+  UINT: "16-bit unsigned integer: 0 to 65535",
+  UDINT: "32-bit unsigned integer: 0 to 4294967295",
+  ULINT: "64-bit unsigned integer: 0 to 18446744073709551615",
+  REAL: "32-bit floating point (IEEE 754): about ±3.4e38, 6 to 7 significant digits",
+  LREAL: "64-bit floating point (IEEE 754): about ±1.8e308, 15 to 16 significant digits",
+  TIME: "32-bit duration in milliseconds: T#-24d20h31m23s648ms to T#+24d20h31m23s647ms",
+  LTIME: "64-bit duration in nanoseconds: about ±106751 days",
+  S5TIME: "16-bit S5 duration (time base and BCD value): S5T#0ms to S5T#2h46m30s",
+  DATE: "16-bit date: D#1990-01-01 to D#2168-12-31",
+  TIME_OF_DAY: "32-bit time of day in milliseconds: TOD#00:00:00.000 to TOD#23:59:59.999",
+  TOD: "32-bit time of day in milliseconds: TOD#00:00:00.000 to TOD#23:59:59.999",
+  LTIME_OF_DAY: "64-bit time of day in nanoseconds",
+  LTOD: "64-bit time of day in nanoseconds",
+  DATE_AND_TIME: "8 bytes, BCD: DT#1990-01-01-00:00:00.000 to DT#2089-12-31-23:59:59.999",
+  DT: "8 bytes, BCD: DT#1990-01-01-00:00:00.000 to DT#2089-12-31-23:59:59.999",
+  LDT: "64-bit date and time in nanoseconds since 1970-01-01, up to LDT#2262-04-11-23:47:16.854775807",
+  DTL: "12-byte date and time structure: YEAR, MONTH, DAY, WEEKDAY, HOUR, MINUTE, SECOND, NANOSECOND",
+  CHAR: "one 8-bit character",
+  WCHAR: "one 16-bit (Unicode) character",
+  STRING: "up to 254 characters of 8 bits (String[n] for fewer)",
+  WSTRING: "up to 16382 characters of 16 bits (WString[n] for fewer)",
+  VARIANT: "a pointer to a variable of any type (parameters only)",
+  VOID: "no value (a function without a return value)",
+};
 
 export const ELEMENTARY_TYPES = [
   "Bool", "Byte", "Word", "DWord", "LWord", "SInt", "Int", "DInt", "LInt", "USInt", "UInt", "UDInt", "ULInt",

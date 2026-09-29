@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { Args, describeDownload, downloadArgs, effectiveDownload, parseCompileOutput, parseInterfaces, parseNeedsAllow, parseOnlineState, parseRefused, type DownloadOptions, parseCompare, parseRenamed } from "../src/core/args";
+import { Args, describeDownload, downloadArgs, effectiveDownload, parseCompileOutput, parseInterfaces, parseNeedsAllow, parseOnlineState, parseRefused, type DownloadOptions, parseCompare, parseRenamed, parseCheck } from "../src/core/args";
 import { DOWNLOAD_DEFAULTS } from "../src/core/rungToml";
 
 const base: DownloadOptions = { device: "PLC_1", hardware: "rungToml", software: true, allBlocks: false, startAfter: true, allow: [] };
@@ -116,5 +116,13 @@ describe("Args", () => {
     expect(parseCompare(out)).toEqual({ identical: 14, items: [{ path: "Program blocks/M [FB2]", name: "M [FB2]", state: "Different", file: "plc/PLC_1/blocks/M.scl" }] });
     expect(parseCompare("rung: ONLINE_FAILED: nope")).toBeUndefined();
     expect(parseRenamed("renamed M to Motor: plc/A/blocks/M.scl → plc/A/blocks/Motor.scl\nupdated where it is used: x\n")).toBe("plc/A/blocks/Motor.scl");
+  });
+});
+
+describe("parseCheck", () => {
+  it("reads rung check --json after progress lines, and nothing from other output", () => {
+    const json = '[{"id":"tia","group":"plc","name":"TIA Portal (STEP 7)","status":"ok","detail":"V20"},{"id":"whitelist","group":"plc","name":"rung bridge in the Openness whitelist","status":"warn","fix":"rung setup openness"}]';
+    expect(parseCheck(`checking…\n${json}\n`)?.map((i) => `${i.id}:${i.status}`)).toEqual(["tia:ok", "whitelist:warn"]);
+    expect(parseCheck("rung: NOT_A_WORKSPACE: x")).toBeUndefined();
   });
 });

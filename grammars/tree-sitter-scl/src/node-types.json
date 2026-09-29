@@ -34,6 +34,10 @@
             "named": true
           },
           {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
             "type": "global_name",
             "named": true
           },
@@ -94,6 +98,10 @@
         },
         {
           "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "deref_expression",
           "named": true
         },
         {
@@ -164,6 +172,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "global_name",
           "named": true
         },
@@ -227,6 +239,10 @@
           "named": true
         },
         {
+          "type": "pointer_type",
+          "named": true
+        },
+        {
           "type": "range",
           "named": true
         },
@@ -254,6 +270,10 @@
             "named": true
           },
           {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
             "type": "global_name",
             "named": true
           },
@@ -271,6 +291,28 @@
           },
           {
             "type": "member_expression",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": ":=",
+            "named": false
+          },
+          {
+            "type": "?=",
+            "named": false
+          },
+          {
+            "type": "ref_bind",
+            "named": true
+          },
+          {
+            "type": "set_reset",
             "named": true
           }
         ]
@@ -293,6 +335,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -361,6 +407,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -493,6 +543,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -748,6 +802,10 @@
           "named": true
         },
         {
+          "type": "member_expression",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -784,6 +842,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -925,6 +987,78 @@
     }
   },
   {
+    "type": "deref_expression",
+    "named": true,
+    "fields": {
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "absolute_address",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "local_variable",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "typed_literal",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "else_clause",
     "named": true,
     "fields": {},
@@ -1032,6 +1166,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "empty_statement",
           "named": true
         },
@@ -1120,9 +1258,136 @@
     "fields": {}
   },
   {
+    "type": "enum_type",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "enum_value",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "enum_value",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "absolute_address",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "local_variable",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "typed_literal",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "exit_statement",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "extends",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "global_name",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "for_statement",
@@ -1134,6 +1399,10 @@
         "types": [
           {
             "type": "absolute_address",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -1193,6 +1462,10 @@
         },
         {
           "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deref_expression",
           "named": true
         },
         {
@@ -1313,6 +1586,10 @@
             "named": true
           },
           {
+            "type": "pointer_type",
+            "named": true
+          },
+          {
             "type": "string_type",
             "named": true
           },
@@ -1382,7 +1659,15 @@
           "named": true
         },
         {
+          "type": "extends",
+          "named": true
+        },
+        {
           "type": "header_attribute",
+          "named": true
+        },
+        {
+          "type": "implements",
           "named": true
         },
         {
@@ -1446,6 +1731,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -1563,6 +1852,25 @@
     }
   },
   {
+    "type": "implements",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "global_name",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "index_expression",
     "named": true,
     "fields": {
@@ -1584,6 +1892,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -1650,6 +1962,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "global_name",
           "named": true
         },
@@ -1687,6 +2003,44 @@
         },
         {
           "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "interface",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "extends",
+          "named": true
+        },
+        {
+          "type": "method",
+          "named": true
+        },
+        {
+          "type": "property",
           "named": true
         }
       ]
@@ -1755,6 +2109,10 @@
             "named": true
           },
           {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
             "type": "global_name",
             "named": true
           },
@@ -1796,6 +2154,86 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "method",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "return_type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "array_type",
+            "named": true
+          },
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pointer_type",
+            "named": true
+          },
+          {
+            "type": "string_type",
+            "named": true
+          },
+          {
+            "type": "struct_type",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        },
+        {
+          "type": "header_attribute",
+          "named": true
+        },
+        {
+          "type": "pragma",
+          "named": true
+        },
+        {
+          "type": "title",
+          "named": true
+        },
+        {
+          "type": "var_section",
+          "named": true
+        },
+        {
+          "type": "version",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1873,6 +2311,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "global_name",
           "named": true
         },
@@ -1916,6 +2358,155 @@
     }
   },
   {
+    "type": "pointer_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "array_type",
+          "named": true
+        },
+        {
+          "type": "global_name",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "pointer_type",
+          "named": true
+        },
+        {
+          "type": "string_type",
+          "named": true
+        },
+        {
+          "type": "struct_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "program",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        },
+        {
+          "type": "header_attribute",
+          "named": true
+        },
+        {
+          "type": "pragma",
+          "named": true
+        },
+        {
+          "type": "title",
+          "named": true
+        },
+        {
+          "type": "var_section",
+          "named": true
+        },
+        {
+          "type": "version",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "property",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "array_type",
+            "named": true
+          },
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pointer_type",
+            "named": true
+          },
+          {
+            "type": "string_type",
+            "named": true
+          },
+          {
+            "type": "struct_type",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        },
+        {
+          "type": "var_section",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "range",
     "named": true,
     "fields": {},
@@ -1937,6 +2528,10 @@
         },
         {
           "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "deref_expression",
           "named": true
         },
         {
@@ -2101,6 +2696,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "empty_statement",
           "named": true
         },
@@ -2210,6 +2809,14 @@
           "named": true
         },
         {
+          "type": "interface",
+          "named": true
+        },
+        {
+          "type": "method",
+          "named": true
+        },
+        {
           "type": "organization_block",
           "named": true
         },
@@ -2218,7 +2825,19 @@
           "named": true
         },
         {
+          "type": "program",
+          "named": true
+        },
+        {
+          "type": "property",
+          "named": true
+        },
+        {
           "type": "type_definition",
+          "named": true
+        },
+        {
+          "type": "var_section",
           "named": true
         }
       ]
@@ -2246,6 +2865,10 @@
         },
         {
           "type": "call_expression",
+          "named": true
+        },
+        {
+          "type": "deref_expression",
           "named": true
         },
         {
@@ -2328,6 +2951,76 @@
             "named": true
           }
         ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "absolute_address",
+            "named": true
+          },
+          {
+            "type": "array_initializer",
+            "named": true
+          },
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
+            "named": true
+          },
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index_expression",
+            "named": true
+          },
+          {
+            "type": "local_variable",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "typed_literal",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -2335,11 +3028,39 @@
       "required": true,
       "types": [
         {
+          "type": "array_type",
+          "named": true
+        },
+        {
+          "type": "enum_type",
+          "named": true
+        },
+        {
+          "type": "extends",
+          "named": true
+        },
+        {
+          "type": "global_name",
+          "named": true
+        },
+        {
           "type": "header_attribute",
           "named": true
         },
         {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "pointer_type",
+          "named": true
+        },
+        {
           "type": "pragma",
+          "named": true
+        },
+        {
+          "type": "string_type",
           "named": true
         },
         {
@@ -2401,6 +3122,10 @@
           "named": true
         },
         {
+          "type": "deref_expression",
+          "named": true
+        },
+        {
           "type": "global_name",
           "named": true
         },
@@ -2448,7 +3173,7 @@
     "named": true,
     "fields": {
       "name": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
           {
@@ -2475,6 +3200,10 @@
           },
           {
             "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pointer_type",
             "named": true
           },
           {
@@ -2509,6 +3238,10 @@
           },
           {
             "type": "call_expression",
+            "named": true
+          },
+          {
+            "type": "deref_expression",
             "named": true
           },
           {
@@ -2559,6 +3292,10 @@
       "required": false,
       "types": [
         {
+          "type": "absolute_address",
+          "named": true
+        },
+        {
           "type": "identifier",
           "named": true
         },
@@ -2582,7 +3319,23 @@
             "named": false
           },
           {
+            "type": "VAR_CONFIG",
+            "named": false
+          },
+          {
+            "type": "VAR_EXTERNAL",
+            "named": false
+          },
+          {
+            "type": "VAR_GLOBAL",
+            "named": false
+          },
+          {
             "type": "VAR_INPUT",
+            "named": false
+          },
+          {
+            "type": "VAR_INST",
             "named": false
           },
           {
@@ -2658,6 +3411,10 @@
         },
         {
           "type": "continue_statement",
+          "named": true
+        },
+        {
+          "type": "deref_expression",
           "named": true
         },
         {
@@ -2828,6 +3585,14 @@
     "named": false
   },
   {
+    "type": "?=",
+    "named": false
+  },
+  {
+    "type": "ABSTRACT",
+    "named": false
+  },
+  {
     "type": "AND",
     "named": false
   },
@@ -2908,7 +3673,23 @@
     "named": false
   },
   {
+    "type": "END_INTERFACE",
+    "named": false
+  },
+  {
+    "type": "END_METHOD",
+    "named": false
+  },
+  {
     "type": "END_ORGANIZATION_BLOCK",
+    "named": false
+  },
+  {
+    "type": "END_PROGRAM",
+    "named": false
+  },
+  {
+    "type": "END_PROPERTY",
     "named": false
   },
   {
@@ -2940,11 +3721,19 @@
     "named": false
   },
   {
+    "type": "EXTENDS",
+    "named": false
+  },
+  {
     "type": "FALSE",
     "named": false
   },
   {
     "type": "FAMILY",
+    "named": false
+  },
+  {
+    "type": "FINAL",
     "named": false
   },
   {
@@ -2968,7 +3757,23 @@
     "named": false
   },
   {
+    "type": "IMPLEMENTS",
+    "named": false
+  },
+  {
+    "type": "INTERFACE",
+    "named": false
+  },
+  {
+    "type": "INTERNAL",
+    "named": false
+  },
+  {
     "type": "KNOW_HOW_PROTECT",
+    "named": false
+  },
+  {
+    "type": "METHOD",
     "named": false
   },
   {
@@ -3000,7 +3805,43 @@
     "named": false
   },
   {
+    "type": "PERSISTENT",
+    "named": false
+  },
+  {
+    "type": "POINTER",
+    "named": false
+  },
+  {
+    "type": "PRIVATE",
+    "named": false
+  },
+  {
+    "type": "PROGRAM",
+    "named": false
+  },
+  {
+    "type": "PROPERTY",
+    "named": false
+  },
+  {
+    "type": "PROTECTED",
+    "named": false
+  },
+  {
+    "type": "PUBLIC",
+    "named": false
+  },
+  {
     "type": "READ_ONLY",
+    "named": false
+  },
+  {
+    "type": "REFERENCE",
+    "named": false
+  },
+  {
+    "type": "REF_TO",
     "named": false
   },
   {
@@ -3056,7 +3897,23 @@
     "named": false
   },
   {
+    "type": "VAR_CONFIG",
+    "named": false
+  },
+  {
+    "type": "VAR_EXTERNAL",
+    "named": false
+  },
+  {
+    "type": "VAR_GLOBAL",
+    "named": false
+  },
+  {
     "type": "VAR_INPUT",
+    "named": false
+  },
+  {
+    "type": "VAR_INST",
     "named": false
   },
   {
@@ -3100,6 +3957,10 @@
     "named": false
   },
   {
+    "type": "^",
+    "named": false
+  },
+  {
     "type": "absolute_address",
     "named": true
   },
@@ -3134,7 +3995,15 @@
     "named": true
   },
   {
+    "type": "ref_bind",
+    "named": true
+  },
+  {
     "type": "region_header",
+    "named": true
+  },
+  {
+    "type": "set_reset",
     "named": true
   },
   {

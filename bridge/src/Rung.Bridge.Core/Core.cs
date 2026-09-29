@@ -139,6 +139,7 @@ namespace Rung.Bridge.Core
         public static string ReadOnlyReason(ObjectEntry e)
         {
             if (e.LibraryType != null) return "an instance of the library type " + e.LibraryType + "; change the type in TIA Portal's library (Edit type)";
+            if (e.Kind == "forcetable") return "a force table: forcing stays in TIA Portal";
             if (e.KnowHowProtected) return "know-how protected";
             if (e.IsFailsafe) return "part of the safety program";
             if (e.IsSystem) return "a system object";

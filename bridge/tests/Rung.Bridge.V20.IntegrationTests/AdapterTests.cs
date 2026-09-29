@@ -210,6 +210,31 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
     readonly FixtureSession _fx;
     public TwoWayAdapterTests(FixtureSession fx) { _fx = fx; }
 
+    [Fact] public void WatchTableIsEditableAsXmlAndNoticesChangesInTia()
+    {
+        const string address = "plc:PLC_1/watch/Fx_Watch";
+        if (!_fx.Session.ListObjects("PLC_1").Any(o => o.Address == address)) { Console.WriteLine("fixture without Fx_Watch (regenerate it): skipped"); return; }
+        var cur = _fx.Session.Export(address, "auto", Tmp());
+        Assert.Equal("xml", cur.Form);
+        Assert.StartsWith("xh:", cur.Fingerprint);
+        Assert.Equal(cur.Fingerprint, _fx.Session.Export(address, "auto", Tmp()).Fingerprint); // byte-stable
+        // what a person does: the same table imported back is accepted, a stale revision is refused
+        var same = Path.Combine(Tmp(), "obj.xml");
+        File.Copy(cur.Files[0].Path, same);
+        var r = _fx.Session.Import(address, "xml", same, cur.Fingerprint, Guid.NewGuid().ToString());
+        Assert.Equal("xml", r.Form);
+        Assert.Equal("STALE_REVISION", Assert.Throws<RpcException>(() => _fx.Session.Import(address, "xml", same, "xh:0000000000000000", Guid.NewGuid().ToString())).Code);
+        // a force table stays read-only
+        var force = _fx.Session.ListObjects("PLC_1").FirstOrDefault(o => o.Kind == "forcetable");
+        if (force != null)
+        {
+            var f = _fx.Session.Export(force.Address, "auto", Tmp());
+            Assert.Equal("READ_ONLY", Assert.Throws<RpcException>(() => _fx.Session.Import(force.Address, "xml", f.Files[0].Path, f.Fingerprint, Guid.NewGuid().ToString())).Code);
+        }
+    }
+
+    static string Tmp() => Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName;
+
     [Fact] public void CreatesANewBlockInANewFolderAndCompilesIt()
     {
         var name = "Fx_New_" + Guid.NewGuid().ToString("N").Substring(0, 6);

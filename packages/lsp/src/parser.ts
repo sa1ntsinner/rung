@@ -64,6 +64,9 @@ export interface BlockModel {
   lad?: string;
   /** LAD elements the translation does not cover; the simulator refuses the block with this list. */
   ladUnsupported?: string[];
+  /** IEC enumeration type: its values in order, and the default when it is not the first. */
+  enumValues?: { name: string; value: number }[];
+  enumDefault?: string;
 }
 
 export interface ParseDiagnostic {
@@ -429,8 +432,27 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       if (iec && h.kind === "UDT" && x.text === "(") {
-        // enumeration: TYPE E_X : (A, B := 2) END_TYPE
-        while (peek().kind !== "eof" && !isKw(peek(), h.end)) next();
+        // enumeration: TYPE E_X : (A, B := 2, C) INT := A; END_TYPE; values count on from the last given one
+        next();
+        const values: { name: string; value: number }[] = [];
+        let n = 0;
+        while (peek().kind === "ident") {
+          const id = next();
+          if (peek().text === ":=") {
+            next();
+            const neg = peek().text === "-" ? (next(), -1) : 1;
+            const lit = next().text.replace(/_/g, "");
+            const based = /^(2|8|16)#(.+)$/.exec(lit.replace(/^[A-Za-z]+#/, ""));
+            n = neg * (based ? parseInt(based[2]!, Number(based[1])) : Number(lit.replace(/^[A-Za-z]+#/, "")));
+          }
+          values.push({ name: id.text, value: n++ });
+          if (peek().text === ",") next();
+        }
+        block.enumValues = values;
+        while (peek().kind !== "eof" && !isKw(peek(), h.end)) {
+          // a default after the base type: (A, B) INT := B;
+          if (next().text === ":=" && peek().kind === "ident") block.enumDefault = next().text;
+        }
         continue;
       }
       if (isKw(x, "STRUCT") && (h.kind === "UDT" || h.kind === "DB")) {

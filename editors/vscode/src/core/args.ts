@@ -224,3 +224,28 @@ export function parseCompare(output: string): { identical: number; items: Compar
 export function parseRenamed(output: string): string | undefined {
   return /^renamed .* → (\S.*)$/m.exec(output)?.[1]?.trim();
 }
+
+/** One line of `rung check --json`. */
+export interface CheckItem {
+  id: string;
+  group: string;
+  name: string;
+  status: "ok" | "warn" | "missing";
+  detail?: string;
+  enables?: string;
+  fix?: string;
+  link?: string;
+}
+
+/** The JSON array `rung check --json` prints (progress lines may come before it). */
+export function parseCheck(output: string): CheckItem[] | undefined {
+  const start = output.indexOf("[");
+  const end = output.lastIndexOf("]");
+  if (start < 0 || end < start) return undefined;
+  try {
+    const items = JSON.parse(output.slice(start, end + 1)) as CheckItem[];
+    return Array.isArray(items) ? items : undefined;
+  } catch {
+    return undefined;
+  }
+}

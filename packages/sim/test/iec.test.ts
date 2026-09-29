@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { WorkspaceIndex } from "@rung/lsp";
-import { runTestFile, Simulator } from "../src/index.js";
+import { WorkspaceIndex, diagnostics } from "@rung/lsp";
+import { runTestFile, Simulator, type Instance } from "../src/index.js";
 
 const BLINK = `FUNCTION_BLOCK FB_Blink
 VAR_INPUT
@@ -101,6 +101,78 @@ cases:
     expect(i.mem.BLATCH).toBe(true);
     s.callBlock(i, { bReset: true });
     expect(i.mem.BLATCH).toBe(false);
+  });
+
+  it("runs a state machine on an enumeration: qualified, typed and bare values, defaults, CASE labels", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/E_State.st", "TYPE E_State :\n(\n  Idle := 0,\n  Running := 10,\n  Stopping,\n  Fault := 16#FF\n) INT := Idle;\nEND_TYPE\n", 0);
+    idx.set("file:///w/E_Mode.st", "TYPE E_Mode : (Auto, Manual) := Manual;\nEND_TYPE\n", 0);
+    idx.set(
+      "file:///w/FB_Seq.st",
+      "FUNCTION_BLOCK FB_Seq\nVAR_INPUT\n  bStart : BOOL;\n  bStop : BOOL;\nEND_VAR\nVAR\n  eState : E_State;\n  eMode : E_Mode;\n  nState : INT;\nEND_VAR\nCASE eState OF\n  E_State.Idle: IF bStart THEN eState := E_State#Running; END_IF\n  E_State.Running: IF bStop THEN eState := Stopping; END_IF\n  E_State.Stopping: eState := E_State.Idle;\nEND_CASE\nnState := eState;\nEND_FUNCTION_BLOCK\n",
+      0,
+    );
+    const s = new Simulator(idx);
+    const i = s.newInstance("FB_Seq");
+    expect([i.mem.ESTATE, i.mem.EMODE]).toEqual([0, 1]);
+    s.callBlock(i, { bStart: true });
+    expect(i.mem.NSTATE).toBe(10);
+    s.callBlock(i, { bStart: false, bStop: true });
+    expect(i.mem.NSTATE).toBe(11);
+    s.callBlock(i, { bStop: false });
+    expect(i.mem.NSTATE).toBe(0);
+  });
+
+  it("runs METHODs with THIS^, pointers and references", () => {
+    const idx = new WorkspaceIndex();
+    idx.set(
+      "file:///w/FB_Axis.st",
+      [
+        "FUNCTION_BLOCK FB_Axis",
+        "VAR_OUTPUT",
+        "  nMoves : INT;",
+        "  fPos : REAL;",
+        "END_VAR",
+        "VAR",
+        "  nCount : INT;",
+        "  pCount : POINTER TO INT;",
+        "  rPos : REFERENCE TO REAL;",
+        "  bBound : BOOL;",
+        "END_VAR",
+        "pCount := ADR(nCount);",
+        "pCount^ := pCount^ + 1;",
+        "rPos REF= fPos;",
+        "bBound := __ISVALIDREF(rPos);",
+        "END_FUNCTION_BLOCK",
+        "METHOD MoveTo : BOOL",
+        "VAR_INPUT",
+        "  fTarget : REAL;",
+        "END_VAR",
+        "VAR",
+        "  nCount : INT; // a local that hides the FB's nCount",
+        "END_VAR",
+        "nCount := 100;",
+        "THIS^.nMoves := THIS^.nMoves + 1;",
+        "rPos := fTarget;",
+        "MoveTo := Home() OR fTarget > 0;",
+        "END_METHOD",
+        "METHOD Home : BOOL",
+        "Home := nMoves > 1;",
+        "END_METHOD",
+        "",
+      ].join("\n"),
+      0,
+    );
+    idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  fbAxis : FB_Axis;\n  bOk : BOOL;\nEND_VAR\nfbAxis();\nbOk := fbAxis.MoveTo(fTarget := 12.5);\nEND_PROGRAM\n", 0);
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_Main");
+    s.runInstance(main);
+    const axis = (main.mem.FBAXIS as Instance).mem;
+    expect([axis.NCOUNT, axis.NMOVES, axis.FPOS, axis.BBOUND, main.mem.BOK]).toEqual([1, 1, 12.5, true, true]);
+    s.runInstance(main);
+    expect([axis.NCOUNT, axis.NMOVES, axis.FPOS]).toEqual([2, 2, 12.5]);
+    const text = idx.docs.get("file:///w/FB_Axis.st")!.text;
+    expect(diagnostics(idx, "file:///w/FB_Axis.st").map((d) => `${d.code}: ${text.slice(d.start, d.end)}`)).toEqual([]);
   });
 
   it("calls functions from TwinCAT .TcPOU files", () => {

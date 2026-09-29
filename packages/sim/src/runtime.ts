@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Offline SCL simulator: executes FB/FC bodies with virtual time for unit tests.
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
-// (no integer overflow wrap-around, no system instructions beyond the IEC standard set).
+// (integers wrap around like on an S7-1500; no system instructions beyond the IEC standard set).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { parseBody, SclSyntaxError, type Expr, type LRef, type Stmt } from "./ast.js";
 
-export type Value = boolean | number | string | Struct | ArrayValue | Instance | undefined;
+export type Value = boolean | number | string | Struct | ArrayValue | Instance | Pointer | undefined;
+/** ADR(x) (a POINTER TO), or with `ref` a bound REFERENCE TO: where the value lives. */
+export interface Pointer {
+  __ptr: { obj: Struct | Value[]; key: string | number };
+  ref?: true;
+}
+const isPointer = (v: Value): v is Pointer => typeof v === "object" && v !== null && "__ptr" in v;
 export interface Struct {
   [upperName: string]: Value;
 }
@@ -48,6 +54,8 @@ interface Frame {
   /** Instance memory (FB) or call memory (FC). */
   mem: Struct;
   temps: Struct;
+  /** The FB instance an FB body or one of its METHODs runs on (THIS). */
+  inst?: Instance;
 }
 
 class Exit {}
@@ -109,6 +117,34 @@ function sliceSet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }
   return Number((v & ~mask) | nv);
 }
 
+/** The declaration of what a POINTER TO / REFERENCE TO points at. */
+function targetDecl(d: Decl, prefix: RegExp): Decl {
+  const t = d.typeRef ?? d.type;
+  if (!prefix.test(t) && !prefix.test(d.type)) return d;
+  const inner = (d.type.replace(prefix, "") || t.replace(prefix, "")).trim();
+  return { type: inner, typeRef: inner, isArray: /^array\b/i.test(inner) };
+}
+
+const INT_WIDTH: Record<string, [bits: number, signed: boolean]> = {
+  SINT: [8, true], INT: [16, true], DINT: [32, true], LINT: [64, true],
+  USINT: [8, false], UINT: [16, false], UDINT: [32, false], ULINT: [64, false],
+  BYTE: [8, false], WORD: [16, false], DWORD: [32, false], LWORD: [64, false],
+};
+
+/** An S7-1500 integer that overflows wraps around (32767 + 1 = -32768 in an Int), as on the PLC. */
+function wrapInteger(v: number, d: Decl | undefined): number {
+  if (!d || d.isArray || !Number.isInteger(v)) return v;
+  const w = INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()];
+  if (!w) return v;
+  const [bits, signed] = w;
+  if (bits === 64 && !Number.isSafeInteger(v)) return v; // beyond a double's integers: no exact wrap
+  const size = 2n ** BigInt(bits);
+  let x = BigInt(v) % size;
+  if (x < 0n) x += size;
+  if (signed && x >= size / 2n) x -= size;
+  return Number(x);
+}
+
 const combine = (a: Kind, b: Kind): Kind => (a === "real" || b === "real" ? "real" : a === "int" && b === "int" ? "int" : "unknown");
 
 function kindOfType(d: Decl | undefined): Kind {
@@ -145,7 +181,7 @@ export class Simulator {
   }
 
   private body(b: BlockModel): Stmt[] {
-    const key = `${b.kind}:${b.name.toUpperCase()}`;
+    const key = `${b.kind}:${b.owner ? b.owner.toUpperCase() + "." : ""}${b.name.toUpperCase()}`;
     let s = this.bodies.get(key);
     if (!s) {
       if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
@@ -252,7 +288,10 @@ export class Simulator {
     else {
       const g = this.index.global(t);
       const sys = SYSTEM_TYPES.get(t.toUpperCase());
-      if (g?.block?.kind === "UDT") v = this.structOf(g.block.vars, g.block);
+      if (g?.block?.enumValues) {
+        const def = g.block.enumDefault?.toUpperCase();
+        v = (g.block.enumValues.find((e) => e.name.toUpperCase() === def) ?? g.block.enumValues[0])?.value ?? 0;
+      } else if (g?.block?.kind === "UDT") v = this.structOf(g.block.vars, g.block);
       else if (g?.block?.kind === "FB") v = this.newInstance(g.block.name);
       else if (STANDARD_BY_NAME.get(t.toUpperCase())?.kind === "functionBlock") v = this.newInstance(t);
       else if (sys) v = Object.fromEntries(sys.map((m) => [m.name.toUpperCase(), this.defaultValue({ type: m.type, typeRef: m.typeRef ?? m.type, isArray: !!m.isArray })]));
@@ -327,11 +366,27 @@ export class Simulator {
 
   // ------------------------------------------------------------------ references
 
-  private locate(ref: LRef, frame: Frame | null): { obj: Struct | Value[]; key: string | number } {
+  /** Where a reference lives. A bound REFERENCE TO is followed to its target unless `raw` (REF= rebinds the variable itself). */
+  private locate(ref: LRef, frame: Frame | null, raw = false): { obj: Struct | Value[]; key: string | number } {
     let obj: Struct | Value[];
     let key: string | number;
+    let path = ref.path;
     const root = ref.root.name.toUpperCase();
-    if (ref.root.kind === "global") ({ obj, key } = this.global(ref.root.name));
+    const follow = () => {
+      for (let v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number]; isPointer(v) && v.ref; v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number])
+        ({ obj, key } = v.__ptr);
+    };
+    const first = path[0];
+    const second = path[1];
+    if (root === "THIS" && ref.root.kind === "ident" && first && "deref" in first) {
+      // THIS^.x: the variable x of the instance the FB or METHOD runs on, even where a local has the same name
+      if (!frame?.inst) throw new SimError("THIS^ outside a function block", frame?.block.name, ref.start);
+      if (!second || !("member" in second)) throw new SimError("THIS^ needs a member, e.g. THIS^.nCount", frame.block.name, ref.start);
+      obj = frame.inst.mem;
+      key = second.member.toUpperCase();
+      if (!(key in obj)) throw new SimError(`${second.member} is not a variable of ${frame.inst.__fb}`, frame.block.name, ref.start);
+      path = path.slice(2);
+    } else if (ref.root.kind === "global") ({ obj, key } = this.global(ref.root.name));
     else {
       if (!frame) throw new SimError(`#${ref.root.name} used outside a block`);
       if (root in frame.temps) obj = frame.temps;
@@ -342,8 +397,15 @@ export class Simulator {
       else throw new SimError(`#${ref.root.name} is not declared in ${frame.block.name}`, frame.block.name, ref.start);
       key = root;
     }
-    for (const seg of ref.path) {
-      let cur = (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
+    for (const seg of path) {
+      follow();
+      let cur: Value = (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
+      if ("deref" in seg) {
+        // p^: the value p points to (ADR(x))
+        if (!isPointer(cur)) throw new SimError(cur === 0 || cur === undefined ? "^ on a pointer that points nowhere (0)" : "^ on a value that is not a pointer", frame?.block.name, ref.start);
+        ({ obj, key } = cur.__ptr);
+        continue;
+      }
       if (isInstance(cur)) cur = cur.mem;
       if ("member" in seg) {
         if (typeof cur !== "object" || cur === null || isArray(cur)) throw new SimError(`${seg.member}: not a structure`, frame?.block.name, ref.start);
@@ -362,10 +424,35 @@ export class Simulator {
         }
       } else throw new SimError("slice access (.%X, .%B, .%W, .%D) must come last", frame?.block.name, ref.start);
     }
+    if (!raw) follow();
     return { obj, key };
   }
 
+  /** An enumeration value (E_State.Idle, E_State#Idle, or a bare Idle in IEC code) where no variable has the name. */
+  private enumConst(ref: LRef, frame: Frame | null): number | undefined {
+    if (ref.root.kind !== "ident") return undefined;
+    const root = ref.root.name.toUpperCase();
+    if (frame && (root in frame.temps || root in frame.mem)) return undefined;
+    const seg = ref.path[0];
+    if (ref.path.length === 1 && seg && "member" in seg) {
+      const u = seg.member.toUpperCase();
+      return this.index.global(ref.root.name)?.block?.enumValues?.find((e) => e.name.toUpperCase() === u)?.value;
+    }
+    if (ref.path.length || this.isIecGlobal(ref.root.name)) return undefined;
+    if (!this.bareEnums) {
+      // an enumerator two types share is ambiguous without its type: left out
+      const seen = new Map<string, number | null>();
+      for (const g of this.index.allGlobals())
+        for (const e of g.block?.enumValues ?? []) seen.set(e.name.toUpperCase(), seen.has(e.name.toUpperCase()) ? null : e.value);
+      this.bareEnums = new Map([...seen].filter((x): x is [string, number] => x[1] !== null));
+    }
+    return this.bareEnums.get(root);
+  }
+  private bareEnums?: Map<string, number>;
+
   read(ref: LRef, frame: Frame | null): Value {
+    const en = this.enumConst(ref, frame);
+    if (en !== undefined) return en;
     const last = ref.path[ref.path.length - 1];
     if (last && "slice" in last) return sliceGet(this.read({ ...ref, path: ref.path.slice(0, -1) }, frame), last);
     const { obj, key } = this.locate(ref, frame);
@@ -380,7 +467,7 @@ export class Simulator {
       return;
     }
     const { obj, key } = this.locate(ref, frame);
-    (obj as Record<string | number, Value>)[key] = value;
+    (obj as Record<string | number, Value>)[key] = typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : value;
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -389,20 +476,32 @@ export class Simulator {
   private declOf(ref: LRef, frame: Frame | null): Decl | undefined {
     let d: Decl | undefined;
     const name = ref.root.name.toUpperCase();
-    if (ref.root.kind !== "global" && frame) {
+    let path = ref.path;
+    const fbVar = (n: string) => (frame?.inst ? this.index.global(frame.inst.__fb)?.block?.vars.find((x) => x.name.toUpperCase() === n) : undefined);
+    const [p0, p1] = path;
+    if (name === "THIS" && p0 && "deref" in p0 && p1 && "member" in p1) {
+      d = fbVar(p1.member.toUpperCase());
+      path = path.slice(2);
+    } else if (ref.root.kind !== "global" && frame) {
       const b = frame.block;
       d = b.vars.find((x) => x.name.toUpperCase() === name);
       if (!d && name === b.name.toUpperCase() && b.returnType) d = { type: b.returnType, typeRef: b.returnType, isArray: false };
       if (!d && b.kind === "DB" && b.dbOf) d = this.index.membersOfType(b.dbOf).find((m) => m.name.toUpperCase() === name);
+      if (!d && b.owner) d = fbVar(name); // a METHOD sees the variables of its FB
     }
-    if (!d) {
+    if (!d && name !== "THIS") {
       const g = this.index.global(ref.root.name);
       if (g?.gvar) d = g.gvar.decl;
       else if (g?.tag) d = { type: g.tag.dataType, typeRef: g.tag.dataType, isArray: false };
       else if (g?.block && (g.block.kind === "DB" || g.block.kind === "GVL" || g.block.kind === "PRG")) d = { type: g.name, typeRef: g.name, isArray: false };
     }
-    for (const seg of ref.path) {
+    for (const seg of path) {
       if (!d) return undefined;
+      d = targetDecl(d, /^REFERENCE\s+TO\s+/i);
+      if ("deref" in seg) {
+        d = targetDecl(d, /^POINTER\s+TO\s+/i);
+        continue;
+      }
       if ("member" in seg) {
         const u = seg.member.toUpperCase();
         d = this.index.membersOf(d as Member).find((m) => m.name.toUpperCase() === u);
@@ -412,7 +511,7 @@ export class Simulator {
         d = { type: shape.element, typeRef: d.typeRef, isArray: /^array\b/i.test(shape.element), members: d.members };
       } else d = { type: seg.slice === "X" ? "Bool" : "DWord", isArray: false };
     }
-    return d;
+    return d && targetDecl(d, /^REFERENCE\s+TO\s+/i);
   }
 
   private kindOf(e: Expr, frame: Frame | null): Kind {
@@ -516,6 +615,34 @@ export class Simulator {
   private call(c: Extract<Expr, { k: "call" }>, frame: Frame | null): Value {
     const name = c.callee.root.name;
     const upper = name.toUpperCase();
+    const path = c.callee.path;
+    // METHODs: fb.M(...), and inside the FB or one of its methods M(...) or THIS^.M(...)
+    if (c.callee.root.kind === "ident") {
+      const [p0, p1] = path;
+      if (upper === "THIS" && p0 && "deref" in p0 && p1 && "member" in p1 && path.length === 2 && frame?.inst) {
+        const m = this.methodOf(frame.inst.__fb, p1.member);
+        if (!m) throw new SimError(`${frame.inst.__fb} has no METHOD ${p1.member}`, frame.block.name, c.callee.start);
+        return this.callMethod(frame.inst, m, c, frame);
+      }
+      if (!path.length && frame?.inst && !(upper in frame.temps) && !(upper in frame.mem)) {
+        const m = this.methodOf(frame.inst.__fb, name);
+        if (m) return this.callMethod(frame.inst, m, c, frame);
+      }
+      if (!path.length && (upper === "ADR" || upper === "REF") && c.args.length === 1 && c.args[0]!.value.k === "ref") return { __ptr: this.locate(c.args[0]!.value.ref, frame) };
+      if (!path.length && upper === "__ISVALIDREF" && c.args[0]?.value.k === "ref") {
+        const at = this.locate(c.args[0].value.ref, frame, true);
+        const v = (at.obj as Struct)[at.key as string] ?? (at.obj as Value[])[at.key as number];
+        return isPointer(v) && !!v.ref;
+      }
+    }
+    const lastSeg = path[path.length - 1];
+    if (lastSeg && "member" in lastSeg) {
+      const base = this.read({ ...c.callee, path: path.slice(0, -1) }, frame);
+      if (isInstance(base) && !base.std) {
+        const m = this.methodOf(base.__fb, lastSeg.member);
+        if (m) return this.callMethod(base, m, c, frame);
+      }
+    }
     // FB instance call: #inst(...), "Inst_DB"(...), #inst.sub(...)
     if (c.callee.root.kind !== "ident" || c.callee.path.length || (frame && (upper in frame.mem || upper in frame.temps))) {
       const target = c.callee.root.kind === "global" && !c.callee.path.length ? this.index.global(name) : undefined;
@@ -700,9 +827,32 @@ export class Simulator {
       this.bindInputs(inst.mem, b, args, caller);
       const temps = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
       Object.assign(temps, this.constants(b));
-      this.runBody(b, { block: b, mem: inst.mem, temps });
+      this.runBody(b, { block: b, mem: inst.mem, temps, inst });
       this.bindOutputs(inst.mem, b, args, caller);
     });
+  }
+
+  /** A METHOD of a user FB: its own inputs, outputs and locals for each call; the instance's variables shared. */
+  private callMethod(inst: Instance, m: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null): Value {
+    return this.enter(m, () => {
+      const own = this.structOf(m.vars, m);
+      Object.assign(own, this.constants(m));
+      this.bindInputs(own, m, c.args, caller);
+      own[m.name.toUpperCase()] = m.returnType && !/^void$/i.test(m.returnType) ? this.defaultValue({ type: m.returnType, typeRef: m.returnType, isArray: false }, m) : undefined;
+      this.runBody(m, { block: m, mem: inst.mem, temps: own, inst });
+      this.bindOutputs(own, m, c.args, caller);
+      return own[m.name.toUpperCase()];
+    });
+  }
+
+  private methods?: Map<string, BlockModel>;
+  /** METHOD `name` of the function block `fb`. */
+  private methodOf(fb: string, name: string): BlockModel | undefined {
+    if (!this.methods) {
+      this.methods = new Map();
+      for (const g of this.index.allGlobals()) if (g.block?.owner) this.methods.set(`${g.block.owner}.${g.block.name}`.toUpperCase(), g.block);
+    }
+    return this.methods.get(`${fb}.${name}`.toUpperCase());
   }
 
   /** One step of a standard FB; `method` is the instruction called on IEC_TIMER/IEC_COUNTER data. */
@@ -821,6 +971,11 @@ export class Simulator {
           return;
         case "assign":
           return this.write(s.target, this.eval(s.value, f), f);
+        case "bind": {
+          const at = this.locate(s.target, f, true);
+          (at.obj as Record<string | number, Value>)[at.key] = { __ptr: this.locate(s.source, f), ref: true };
+          return;
+        }
         case "call":
           this.call(s.call, f);
           return;

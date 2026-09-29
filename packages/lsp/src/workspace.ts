@@ -183,7 +183,19 @@ export class WorkspaceIndex {
       }
     }
     this.globals = g;
+    const en = new Map<string, GlobalSymbol[]>();
+    for (const list of g.values())
+      for (const s of list) for (const e of s.block?.enumValues ?? []) en.set(e.name.toUpperCase(), [...(en.get(e.name.toUpperCase()) ?? []), s]);
+    this.enumerators = en;
     this.dirty = false;
+  }
+
+  private enumerators = new Map<string, GlobalSymbol[]>();
+
+  /** Enumeration types with a value of this name (IEC code may use the value without its type). */
+  enumTypesWith(name: string): GlobalSymbol[] {
+    this.rebuild();
+    return this.enumerators.get(name.toUpperCase()) ?? [];
   }
 
   global(name: string): GlobalSymbol | undefined {

@@ -181,8 +181,8 @@ rung_test          rung_live_read
       <h2>Careful by default</h2>
       <ul>
         <li>It talks to TIA Portal only through Siemens' Openness API and never opens project files itself.</li>
-        <li>It never downloads to a PLC. Live values come from the S7-1500 Web API, read only.</li>
-        <li>Failsafe, know-how protected, system and GRAPH blocks are exported for reading and never imported.</li>
+        <li>It never downloads by itself. A person starts every download, types the PLC name and allows each risky question TIA asks by name. Agents never download. Live values come from the S7-1500 Web API, read only.</li>
+        <li>Failsafe, know-how protected, system and GRAPH blocks and instances of library types are exported for reading and never imported.</li>
         <li>Imports run inside a TIA transaction and check the block's revision first. If someone changed it in the meantime, rung stops.</li>
         <li>Deleting a file never deletes a block. You confirm that yourself with <code>rung confirm-delete</code>.</li>
       </ul>

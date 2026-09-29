@@ -49,6 +49,8 @@ Usage:
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
+  rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
+                                       monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
@@ -208,7 +210,7 @@ const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   "confirm-delete": { options: ["dir"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter"], positionals: 1 },
-  live: { options: ["dir"], positionals: Infinity },
+  live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
   mcp: { options: [], positionals: 1 },
@@ -290,6 +292,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         mode: { type: "string" },
         number: { type: "string" },
         target: { type: "string" },
+        instance: { type: "string" },
+        interval: { type: "string" },
       },
     });
   } catch (e) {
@@ -352,7 +356,12 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
         return failed ? 2 : total ? 0 : 1;
       }
       case "live":
-        return await cmdLive(dir, target, positionals.slice(2), io);
+        return await cmdLive(dir, target, positionals.slice(2), io, {
+          ...(v.file ? { file: (v.file as string[])[0]! } : {}),
+          ...(v.instance ? { instance: String(v.instance) } : {}),
+          json: !!v.json,
+          ...(v.interval ? { intervalMs: Number(String(v.interval).replace(/ms$/i, "")) } : {}),
+        });
       case "views": {
         const ws = await findWorkspace(dir);
         const tags = await writeTagViews(ws);

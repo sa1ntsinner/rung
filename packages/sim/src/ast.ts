@@ -11,8 +11,8 @@ export type Expr =
 
 export interface LRef {
   root: { kind: "local" | "global" | "ident"; name: string };
-  /** `.%X3`, `.%B0`, `.%W1`, `.%D0`: bit/byte/word/dword slice of a bit string or integer (always last). */
-  path: ({ member: string } | { index: Expr[] } | { slice: "X" | "B" | "W" | "D"; n: number })[];
+  /** `.%X3`, `.%B0`, `.%W1`, `.%D0`: bit/byte/word/dword slice of a bit string or integer (always last); `^`: a dereference (THIS^, p^). */
+  path: ({ member: string } | { index: Expr[] } | { slice: "X" | "B" | "W" | "D"; n: number } | { deref: true })[];
   start: number;
 }
 
@@ -24,6 +24,8 @@ export interface Arg {
 
 export type Stmt =
   | { k: "assign"; target: LRef; value: Expr; at: number }
+  /** IEC `r REF= x;`: the REFERENCE TO variable r now stands for x */
+  | { k: "bind"; target: LRef; source: LRef; at: number }
   | { k: "call"; call: Extract<Expr, { k: "call" }>; at: number }
   | { k: "if"; branches: { cond: Expr; body: Stmt[] }[]; else?: Stmt[]; at: number }
   | { k: "case"; sel: Expr; items: { labels: { lo: Expr; hi?: Expr }[]; body: Stmt[] }[]; else?: Stmt[]; at: number }
@@ -126,6 +128,9 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
       } else if (peek().text === "." && ["ident", "global", "local"].includes(peek(1).kind)) {
         next();
         r.path.push({ member: next().text.replace(/^#/, "").replace(/^"|"$/g, "") });
+      } else if (peek().text === "^") {
+        next();
+        r.path.push({ deref: true });
       } else if (peek().text === "[") {
         next();
         const idx = [expr()];
@@ -158,7 +163,12 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
 
   function primary(): Expr {
     const t = next();
-    if (t.kind === "number") return literal(t);
+    if (t.kind === "number") {
+      // E_State#Idle: an enumeration value, looked up like E_State.Idle
+      const en = /^([A-Za-z_]\w*)#([A-Za-z_]\w*)$/.exec(t.text);
+      if (en && !/^BOOL$/i.test(en[1]!)) return { k: "ref", ref: { root: { kind: "ident", name: en[1]! }, path: [{ member: en[2]! }], start: t.start } };
+      return literal(t);
+    }
     if (t.kind === "string") return { k: "lit", value: t.text.slice(t.text.indexOf("'") + 1, -1).replace(/''/g, "'").replace(/\$(.)/g, (_, c: string) => (c === "N" || c === "L" ? "\n" : c === "T" ? "\t" : c)), type: "string" };
     if (kw(t, "TRUE", "FALSE")) return { k: "lit", value: t.upper === "TRUE", type: "bool" };
     if (t.text === "(") {
@@ -344,6 +354,16 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
         const value = expr();
         semicolon();
         return { k: "assign", target, value: { k: "bin", op, l: { k: "ref", ref: target }, r: value }, at };
+      }
+      // IEC reference binding: r REF= x;
+      if (peek().kind === "ident" && peek().upper === "REF" && peek(1).text === "=" && peek(1).start === peek().end) {
+        next();
+        next();
+        const src = next();
+        if (!["local", "global", "ident"].includes(src.kind)) throw new SclSyntaxError(`REF= needs a variable, found '${src.text}'`, src.start);
+        const source = lref(src);
+        semicolon();
+        return { k: "bind", target, source, at };
       }
       // IEC set/reset assignment: x S= cond; x R= cond;
       if (peek().kind === "ident" && (peek().upper === "S" || peek().upper === "R") && peek(1).text === "=" && peek(1).start === peek().end) {

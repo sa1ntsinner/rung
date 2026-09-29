@@ -191,10 +191,10 @@ namespace Rung.Bridge.V20
                     WalkWatch(plc, device, plc.WatchAndForceTableGroup, new List<string>(), refs);
                     break;
                 }
-                catch (EngineeringObjectDisposedException) when (attempt < 3)
+                catch (Exception e) when (attempt < 3 && (e is EngineeringObjectDisposedException || e is InvalidOperationException))
                 {
-                    // someone deleted or replaced an object while rung listed them (an edit in TIA, another
-                    // Openness client): list again
+                    // someone deleted, replaced or added an object while rung listed them (an edit in TIA, another
+                    // Openness client): "access to a disposed object", "collection was modified". List again.
                     plc = Plc(device);
                 }
             }
@@ -389,7 +389,28 @@ namespace Rung.Bridge.V20
                 case PlcBlock b: return Fingerprint(b, b.IsConsistent, () => Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate));
                 case PlcType t: return Fingerprint(t, t.IsConsistent, () => Dates(t.ModifiedDate, t.InterfaceModifiedDate));
                 case PlcTagTable tt: return Dates(tt.ModifiedTimeStamp);
+                case PlcWatchTable w: return ContentRevision(f => w.Export(f, ExportOptions.None, DocumentInfoOptions.None));
                 default: return "none";
+            }
+        }
+
+        /// <summary>
+        /// A revision from the exported bytes, for objects without dates or fingerprints (watch tables): an import
+        /// then notices a change made in TIA Portal meanwhile.
+        /// </summary>
+        static string ContentRevision(Action<FileInfo> export)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "rung-rev-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var f = new FileInfo(Path.Combine(dir, "obj.xml"));
+                export(f);
+                return "xh:" + Bundle.Sha256(File.ReadAllBytes(f.FullName)).Substring(0, 16);
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
         }
 
@@ -408,11 +429,14 @@ namespace Rung.Bridge.V20
                 var warnings = new List<string>();
                 try
                 {
-                    before = Revision(r);
+                    // a watch table's revision is its exported bytes (ContentRevision): taken from this export
+                    var fromContent = r.Obj is PlcWatchTable;
+                    before = fromContent ? null : Revision(r);
                     foreach (var f in Directory.GetFiles(targetDir, Stem + ".*")) File.Delete(f);
                     if (r.Entry.IsConsistent == false) warnings.Add(WarningCodes.Inconsistent);
                     actualForm = ExportInto(r, form, targetDir, warnings);
-                    if (Revision(r) != before) continue; // changed while exporting; bytes may be torn
+                    if (fromContent) before = "xh:" + Bundle.Sha256(File.ReadAllBytes(Path.Combine(targetDir, Stem + "." + actualForm))).Substring(0, 16);
+                    else if (Revision(r) != before) continue; // changed while exporting; bytes may be torn
                 }
                 catch (EngineeringObjectDisposedException)
                 {
@@ -540,6 +564,9 @@ namespace Rung.Bridge.V20
             if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
             var name = r.Entry.Address;
             IList<string> imported;
+            // An import replaces a tag or watch table wholesale, and TIA does not always undo a failed one (seen
+            // live: a watch table left empty after its entries were refused). A copy is kept to put back.
+            var backup = !isNew && (r.Obj is PlcTagTable || r.Obj is PlcWatchTable) ? BackupTable(r, operationId) : null;
             _inImport = true;
             var guard = new PasswordPromptGuard(_tiaPid);
             try
@@ -559,9 +586,12 @@ namespace Rung.Bridge.V20
                     tx.CommitOnDispose();
                 }
             }
-            catch (EngineeringException e)
+            catch (Exception e) when (e is EngineeringException || e is RpcException)
             {
-                throw new RpcException(ErrorCodes.ImportFailed, e.Message);
+                var restored = backup != null && RestoreTable(address, backup);
+                var note = restored ? " TIA Portal had changed the table anyway; rung put the previous version back." : "";
+                if (e is RpcException rpc) throw new RpcException(rpc.Code, rpc.Message + note);
+                throw new RpcException(ErrorCodes.ImportFailed, e.Message + note);
             }
             finally
             {
@@ -592,6 +622,46 @@ namespace Rung.Bridge.V20
             return result;
         }
 
+        /// <summary>The table as TIA Portal exports it now, to put back if an import fails half-way.</summary>
+        string BackupTable(ObjectRef r, string operationId)
+        {
+            var dir = WorkDir(operationId, "backup");
+            Directory.CreateDirectory(dir);
+            var f = new FileInfo(Path.Combine(dir, "table.xml"));
+            if (r.Obj is PlcTagTable tt) tt.Export(f, ExportOptions.None, DocumentInfoOptions.None);
+            else ((PlcWatchTable)r.Obj).Export(f, ExportOptions.None, DocumentInfoOptions.None);
+            return f.FullName;
+        }
+
+        /// <summary>After a failed import: if the table is no longer what the backup holds, imports the backup. True when it did.</summary>
+        bool RestoreTable(string address, string backupFile)
+        {
+            _index.Clear();
+            ObjectRef cur = null;
+            try { cur = Resolve(address); } catch (RpcException) { /* gone */ }
+            var before = File.ReadAllText(backupFile);
+            if (cur != null)
+            {
+                var probe = new FileInfo(Path.Combine(Path.GetDirectoryName(backupFile), "now.xml"));
+                if (cur.Obj is PlcTagTable ct) ct.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
+                else if (cur.Obj is PlcWatchTable cw) cw.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
+                if (File.ReadAllText(probe.FullName) == before) return false;
+            }
+            var parts = AddressFormat.Parse(address);
+            var plc = Plc(parts.Device);
+            using (var access = _portal.ExclusiveAccess("rung: restoring " + parts.Name))
+            using (var tx = access.Transaction(_project, "rung restore " + parts.Name))
+            {
+                var holder = new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind }, Plc = plc };
+                var group = EnsureGroup(holder);
+                if (group is PlcTagTableGroup tg) tg.TagTables.Import(new FileInfo(backupFile), ImportOptions.Override);
+                else if (group is PlcWatchAndForceTableGroup wg) wg.WatchTables.Import(new FileInfo(backupFile), ImportOptions.Override);
+                tx.CommitOnDispose();
+            }
+            _index.Clear();
+            return true;
+        }
+
         /// <summary>Target for an object that does not exist yet; its folder is created inside the import transaction.</summary>
         ObjectRef NewObjectRef(string address, string form)
         {
@@ -610,7 +680,8 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.NameTaken, "\"" + parts.Name + "\" already exists at " + clash.Entry.Address + "; TIA Portal names are unique per PLC. To move a block to another folder, move it in TIA Portal and rung follows.");
             var allowed = parts.Kind == "block" ? new[] { "scl", "awl", "db", "s7dcl", "xml" }
                 : parts.Kind == "type" ? new[] { "udt", "s7dcl", "xml" }
-                : parts.Kind == "tagtable" ? new[] { "tags.xml" } : new string[0];
+                : parts.Kind == "tagtable" ? new[] { "tags.xml" }
+                : parts.Kind == "watchtable" ? new[] { "xml" } : new string[0];
             if (Array.IndexOf(allowed, form) < 0) throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create a " + parts.Kind + " from form " + form);
             return new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind, Fingerprint = "absent" }, Plc = Plc(parts.Device) };
         }
@@ -636,6 +707,12 @@ namespace Rung.Bridge.V20
                 case "tagtable":
                 {
                     PlcTagTableGroup g = r.Plc.TagTableGroup;
+                    foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
+                    return g;
+                }
+                case "watchtable":
+                {
+                    PlcWatchAndForceTableGroup g = r.Plc.WatchAndForceTableGroup;
                     foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
                     return g;
                 }
@@ -1034,6 +1111,9 @@ namespace Rung.Bridge.V20
                     if (r.ParentGroup is PlcTagTableGroup tt) return tt.TagTables.Import(new FileInfo(path), ImportOptions.Override).Select(t => t.Name).ToList();
                     break;
             }
+            // watch tables are SimaticML too; force tables stay read-only (FormPolicy)
+            if (form == "xml" && r.Entry.Kind == "watchtable" && r.ParentGroup is PlcWatchAndForceTableGroup wg)
+                return wg.WatchTables.Import(new FileInfo(path), ImportOptions.Override).Select(t => t.Name).ToList();
             throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot import form " + form + " for " + r.Entry.Address);
         }
 

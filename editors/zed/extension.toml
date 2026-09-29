@@ -9,7 +9,7 @@ snippets = ["./snippets/scl.json"]
 
 [language_servers.rung]
 name = "rung"
-languages = ["SCL"]
+languages = ["SCL", "Structured Text"]
 
 [context_servers.rung]
 

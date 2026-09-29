@@ -185,6 +185,12 @@ try {
         $manifest.addresses += "plc:PLC_1/tags/$($t.n)"
     }
 
+    # --- a watch table (its entries come in through rung, as XML)
+    try {
+        $null = $plc.WatchAndForceTableGroup.WatchTables.Create('Fx_Watch')
+        $manifest.addresses += 'plc:PLC_1/watch/Fx_Watch'
+    } catch { $manifest.skipped += "watch table: $($_.Exception.Message)" }
+
     # --- software unit with a namespaced block (V20 support varies; best effort)
     try {
         $units = Get-Service2 $plc ([Siemens.Engineering.SW.Units.PlcUnitProvider])

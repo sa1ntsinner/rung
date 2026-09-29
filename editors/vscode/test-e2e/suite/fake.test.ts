@@ -3,7 +3,7 @@
 // status bar, CodeLens, every command, compile → Problems, watch, online / connect, download, the LSP.
 import * as assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { RungExtensionApi } from "../../src/extension";
@@ -269,6 +269,74 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.ok(labels.some((l) => /^#?running$/i.test(l)), `completion: ${labels.slice(0, 30).join(", ")}`);
     });
 
+    it("quick fix: an FB called without an instance gets its instance DB, like TIA Portal's call options", async () => {
+      const ed = await openDoc(PUMP);
+      await ed.edit((e) => e.insert(positionOf(ed.document, "END_FUNCTION_BLOCK"), '\t"Fx_Motor"();\n'));
+      const db = file("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Motor_DB.db");
+      try {
+        const at = positionOf(ed.document, '"Fx_Motor"()', 2);
+        const actions = await waitFor(
+          "quick fixes from the language server",
+          async () => {
+            const all = await vscode.commands.executeCommand<vscode.CodeAction[]>("vscode.executeCodeActionProvider", ed.document.uri, new vscode.Range(at, at), vscode.CodeActionKind.QuickFix.value);
+            const a = all?.filter((x) => /instance/i.test(x.title)); // VS Code adds its own "Fix" / "Explain"
+            return a?.length ? a : undefined;
+          },
+          30_000,
+          500,
+        );
+        assert.deepEqual(
+          actions.map((a) => a.title),
+          ['Create the instance DB "Fx_Motor_DB" and call "Fx_Motor" through it', 'Call "Fx_Motor" as the multi-instance #Fx_Motor_Instance of Fx_Pump'],
+        );
+        // what VS Code does when the quick fix is chosen: the edit, then the action's command
+        const fix = actions[0]!;
+        assert.ok(await vscode.workspace.applyEdit(fix.edit!));
+        await vscode.commands.executeCommand(fix.command!.command, ...(fix.command!.arguments ?? []));
+        const text = await waitFor("the instance DB file", () => (existsSync(db.fsPath) && readFileSync(db.fsPath, "utf8")) || undefined, 10_000);
+        assert.match(text, /^DATA_BLOCK "Fx_Motor_DB"\n[\s\S]*\n"Fx_Motor"\n/);
+        assert.match(ed.document.getText(), /\t"Fx_Motor_DB"\(\);/);
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+        await vscode.workspace.fs.delete(db).then(undefined, () => {});
+        writeFileSync(file(PUMP).fsPath, readFileSync(file(PUMP).fsPath, "utf8").replace('\t"Fx_Motor_DB"();\n', "").replace('\t"Fx_Motor"();\n', ""));
+      }
+    });
+
+    it("monitoring: the values of the open FB at the end of its lines, through its instance DB, from a virtual PLC", async () => {
+      const db = file("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Pump_DB.db");
+      writeFileSync(db.fsPath, 'DATA_BLOCK "Fx_Pump_DB"\nVERSION : 0.1\nNON_RETAIN\n"Fx_Pump"\n\nBEGIN\n\nEND_DATA_BLOCK\n');
+      const tomlPath = join(root(), "rung.toml");
+      const toml = readFileSync(tomlPath, "utf8");
+      const inv = api.cli.invocation(["simulate", "--address", "127.0.0.1", "--port", "0", "--cycle", "20"]);
+      const sim = spawn(inv.file, inv.args, { cwd: root(), windowsHide: true, windowsVerbatimArguments: inv.shell });
+      let simOut = "";
+      sim.stdout.on("data", (d: Buffer) => (simOut += d.toString()));
+      sim.stderr.on("data", (d: Buffer) => (simOut += d.toString()));
+      try {
+        const url = await waitFor("rung simulate to listen", () => /virtual PLC at (http:\/\/\S+)/.exec(simOut)?.[1], 30_000);
+        writeFileSync(tomlPath, `${toml}\n[live.webapi]\nurl = "${url}"\nuser = "any"\n`);
+        process.env.RUNG_WEBAPI_PASSWORD = "x";
+        const ed = await openDoc(PUMP);
+        void api.monitor.toggle(ed.document.uri);
+        await waitFor("two reads", () => api.monitor.reads >= 2 || undefined, 30_000, 200);
+        const plan = api.monitor.plan!;
+        assert.equal(plan.instance, '"Fx_Pump_DB"');
+        const line = String(positionOf(ed.document, "#running := #start").line);
+        assert.deepEqual(plan.lines[line], ["#running", "#start"]);
+        assert.equal(api.monitor.values["#start"], true); // Main calls "Fx_Pump_DB"(start := TRUE)
+        assert.equal(api.monitor.values["#running"], true);
+        await vscode.commands.executeCommand("rung.monitor.stop");
+        assert.equal(api.monitor.monitoring, undefined);
+      } finally {
+        await api.monitor.stop();
+        delete process.env.RUNG_WEBAPI_PASSWORD;
+        writeFileSync(tomlPath, toml);
+        sim.kill();
+        await vscode.workspace.fs.delete(db).then(undefined, () => {});
+      }
+    });
+
     it("reports parser diagnostics while typing", async () => {
       const ed = await openDoc(PUMP);
       await ed.edit((e) => e.insert(positionOf(ed.document, "END_FUNCTION_BLOCK"), "\tIF #start THEN\n"));
@@ -285,6 +353,19 @@ describe("rung extension on a fake-bridge workspace", function () {
       } finally {
         await vscode.commands.executeCommand("workbench.action.files.revert");
       }
+    });
+  });
+
+  describe("environment", () => {
+    it("lists what rung check finds on this PC, grouped, with what is missing and how to get it", async () => {
+      await api.environment.refresh();
+      const items = api.environment.items ?? [];
+      assert.ok(items.some((i) => i.id === "node" && i.status === "ok"), items.map((i) => `${i.id}:${i.status}`).join(", "));
+      const groups = api.environment.getChildren().map((n) => api.environment.getTreeItem(n).label);
+      assert.ok(groups.includes("Basics") && groups.includes("PLC platforms"), groups.join(", "));
+      const node = api.environment.getChildren().find((n) => api.environment.getTreeItem(n).label === "Basics")!;
+      const labels = api.environment.getChildren(node).map((n) => api.environment.getTreeItem(n).label);
+      assert.ok(labels.includes("Node.js"), labels.join(", "));
     });
   });
 

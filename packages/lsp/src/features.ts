@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
-import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME } from "./catalog.js";
+import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import type { BlockModel, Ref, VarDecl } from "./parser.js";
 import type { Member, WorkspaceIndex } from "./workspace.js";
 
@@ -48,7 +48,12 @@ function localDecl(block: BlockModel, name: string): VarDecl | undefined {
  * A variable visible without qualification in `block`: its own declarations, the FB's variables for an IEC
  * METHOD, and for an instance/typed DB (`DATA_BLOCK "X" "Fb"`) the interface of that FB or UDT.
  */
-function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string): Member | undefined {
+/** `"FB"(...)`: TIA Portal needs an instance for every FB call (an instance DB or a multi-instance). */
+export function calledWithoutInstance(index: WorkspaceIndex, ref: Ref): boolean {
+  return ref.kind === "global" && ref.access === "call" && !ref.members.length && index.global(ref.name)?.block?.kind === "FB";
+}
+
+export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string): Member | undefined {
   const own = localDecl(block, name);
   if (own) return { ...own, uri };
   const u = name.toUpperCase();
@@ -98,8 +103,12 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
           continue;
         }
       }
+      if (/\.scl$/i.test(uri) && calledWithoutInstance(index, ref)) {
+        out.push({ start: ref.start, end: ref.end, severity: "error", message: `"${ref.name}" is a function block: call it through an instance, a new instance DB or a multi-instance (quick fix)`, code: "NO_INSTANCE" });
+        continue;
+      }
       // "Device~Module" names are hardware identifiers (system constants): exports never contain them
-      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~")) {
+      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length) {
         out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored)`, code: "UNKNOWN_GLOBAL" });
         continue;
       }
@@ -222,7 +231,7 @@ const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section]
 
 export function hover(index: WorkspaceIndex, uri: string, offset: number): { markdown: string; start: number; end: number } | undefined {
   const hit = refAt(index, uri, offset);
-  if (!hit) return undefined;
+  if (!hit) return typeHover(index, uri, offset);
   const { block, ref, member } = hit;
   if (member >= 0) {
     const m = index.resolveChain(rootMembers(index, block, ref, uri), ref.members.slice(0, member + 1))[member];
@@ -236,7 +245,7 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
   }
   if (ref.kind === "call") {
     const std = STANDARD_BY_NAME.get(ref.name.toUpperCase());
-    if (std) return { markdown: `**${std.name}**(${std.params.map((p) => `${p.name} : ${p.type}`).join(", ")})${std.returns ? ` : ${std.returns}` : ""}\n\n${std.doc}`, start: ref.start, end: ref.end };
+    if (std) return { markdown: describeStandard(std), start: ref.start, end: ref.end };
     if (CONVERSION.test(ref.name.toUpperCase())) return { markdown: `**${ref.name}** — type conversion`, start: ref.start, end: ref.end };
     return undefined;
   }
@@ -248,6 +257,41 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
   if (!b) return { markdown: `**${g.name}** (graphical or protected object)`, start: ref.start, end: ref.end };
   const iface = b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut").map((v) => `- ${SECTION_LABEL[v.section]} ${v.name} : ${v.type}`);
   return { markdown: `**${b.kind} ${b.name}**${b.dbOf ? ` (of "${b.dbOf}")` : ""}${b.comment ? `\n\n${b.comment}` : ""}${iface.length ? `\n\n${iface.join("\n")}` : ""}`, start: ref.start, end: ref.end };
+}
+
+/** An instruction as TIA Portal's help shows it: signature, what it does, each parameter. */
+export function describeStandard(std: CatalogEntry): string {
+  const head =
+    std.kind === "functionBlock"
+      ? `**${std.name}** (function block: call it through an instance)`
+      : `**${std.name}**(${std.params.map((p) => `${p.name} : ${p.type}`).join(", ")})${std.returns ? ` : ${std.returns}` : ""}`;
+  const dir = { in: "Input", out: "Output", inout: "InOut" } as const;
+  const rows = std.params.map((p) => `| ${p.name} | ${dir[p.dir]} | ${p.type} | ${p.note ?? ""} |`);
+  const methods = std.methods?.length ? `\n\nCalled on the instance data: ${std.methods.map((m) => `\`#i.${m}(...)\``).join(", ")}` : "";
+  return `${head}\n\n${std.doc}\n\n| Parameter | | Type | |\n|---|---|---|---|\n${rows.join("\n")}${methods}`;
+}
+
+/** Hover on a type name, where no reference is: `t : TON;`, `x : Int;`, `d : "UDT_Motor";`. */
+function typeHover(index: WorkspaceIndex, uri: string, offset: number): { markdown: string; start: number; end: number } | undefined {
+  const text = index.docs.get(uri)?.text;
+  if (!text) return undefined;
+  let start = offset;
+  let end = offset;
+  while (start > 0 && /[\p{L}\p{N}_"]/u.test(text[start - 1]!)) start--;
+  while (end < text.length && /[\p{L}\p{N}_"]/u.test(text[end]!)) end++;
+  const raw = text.slice(start, end);
+  const word = raw.replace(/^"|"$/g, "");
+  if (!word) return undefined;
+  const upper = word.toUpperCase();
+  const std = STANDARD_BY_NAME.get(upper);
+  if (std && !raw.startsWith('"')) return { markdown: describeStandard(std), start, end };
+  if (TYPE_INFO[upper] && !raw.startsWith('"')) return { markdown: `**${word}**: ${TYPE_INFO[upper]}`, start, end };
+  const sys = SYSTEM_TYPES.get(upper);
+  if (sys) return { markdown: `**${word}** (system data type)\n\n${sys.map((m) => `- ${m.name} : ${m.type}`).join("\n")}`, start, end };
+  const b = raw.startsWith('"') ? index.global(word)?.block : undefined;
+  if (b?.kind === "UDT") return { markdown: `**PLC data type ${b.name}**${b.comment ? `\n\n${b.comment}` : ""}\n\n${b.vars.map((v) => `- ${v.name} : ${v.type}`).join("\n")}`, start, end };
+  if (b?.kind === "FB") return { markdown: `**FB ${b.name}**${b.comment ? `\n\n${b.comment}` : ""}`, start, end };
+  return undefined;
 }
 
 /** Completions for the text before the cursor. */
