@@ -362,6 +362,10 @@ namespace Rung.Bridge.V20
         public ExportResult Export(string address, string form, string targetDir)
         {
             Alive();
+            // Openness exports nothing in online mode ("This function is not supported in online mode"). A pull
+            // exports object after object, so rung leaves online mode here and stays offline; compare and download
+            // go online again by themselves.
+            LeaveOnline(AddressFormat.Parse(address).Device);
             var r = Resolve(address);
             if (form == "auto") form = FormPolicy.Choose(r.Entry, Caps);
             Directory.CreateDirectory(targetDir);
@@ -782,10 +786,7 @@ namespace Rung.Bridge.V20
         {
             Alive();
             var plc = Plc(device);
-            if (!_index.Values.Any(v => v.Plc == plc)) ListObjects(device);
-            var byName = _index.Values.Where(v => v.Plc == plc)
-                .GroupBy(v => AddressFormat.Parse(v.Entry.Address).Name, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
+            var byName = AddressesByName(device);
             var messages = new List<CompileMessage>();
             using (OfflineFor(device))
             try
@@ -809,6 +810,16 @@ namespace Rung.Bridge.V20
             }
             catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
             return messages;
+        }
+
+        /// <summary>Object name → address for the device's mirrored objects; null where a name is ambiguous.</summary>
+        Dictionary<string, string> AddressesByName(string device)
+        {
+            var plc = Plc(device);
+            if (!_index.Values.Any(v => plc.Equals(v.Plc))) ListObjects(device);
+            return _index.Values.Where(v => plc.Equals(v.Plc))
+                .GroupBy(v => AddressFormat.Parse(v.Entry.Address).Name, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
         }
 
         static void Flatten(CompilerResultMessageComposition list, string address, Dictionary<string, string> byName, List<CompileMessage> into)

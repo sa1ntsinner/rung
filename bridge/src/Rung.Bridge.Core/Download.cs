@@ -21,6 +21,44 @@ namespace Rung.Bridge.Core
         public string State;             // Offline | Connecting | Online | Incompatible | NotReachable | Protected | Disconnecting
     }
 
+    /// <summary>Offline project against the PLC, like TIA's online/offline comparison (left = project, right = PLC).</summary>
+    public sealed class CompareOutcome
+    {
+        public string Device;
+        public string State;             // state of the root element
+        public int Identical;            // objects that are the same on both sides
+        public List<CompareItem> Items = new List<CompareItem>();
+    }
+
+    public sealed class CompareItem
+    {
+        public string Path;              // TIA's tree path, e.g. "Program blocks/Drives/FB_Pump"
+        public string Name;
+        public string State;             // Different | OnlyInProject | OnlyOnPlc
+        public string Detail;
+        public string Address;           // workspace address when the object is mirrored
+
+        /// <summary>The object name in a compare element: TIA writes "FB100_Pump [FB100]".</summary>
+        public static string ObjectName(string element)
+        {
+            if (string.IsNullOrEmpty(element)) return element;
+            var bracket = element.LastIndexOf(" [", StringComparison.Ordinal);
+            return bracket > 0 && element.EndsWith("]", StringComparison.Ordinal) ? element.Substring(0, bracket) : element;
+        }
+
+        /// <summary>Openness compare states that describe an object (folders report their own states).</summary>
+        public static string Kind(string state)
+        {
+            switch (state)
+            {
+                case "ObjectsDifferent": return "Different";
+                case "RightMissing": return "OnlyInProject";
+                case "LeftMissing": return "OnlyOnPlc";
+                default: return null;
+            }
+        }
+    }
+
     public sealed class ConnectionOptions
     {
         public string Device;
@@ -173,6 +211,10 @@ namespace Rung.Bridge.Core
                 return new Decision { Name = name, Choice = choices.FirstOrDefault(c => c != "NoAction" && c != "NoChange") ?? choices.FirstOrDefault(), Allowed = true, Blocks = false };
             return new Decision { Name = name, Choice = SafestOf(choices), Allowed = false, Blocks = true };
         }
+
+        /// <summary>The --allow name of a question, e.g. DataBlockReinitialization → reinit-db.</summary>
+        public static string NameOf(string kind) =>
+            kind == "StartModules" || kind == "StartBackupModules" ? "start-cpu" : Risky.TryGetValue(kind, out var rule) ? rule.Name : Kebab(kind);
 
         /// <summary>Yes/no confirmations (DownloadCheckConfiguration): checked only when allowed by name.</summary>
         public static Decision DecideCheck(string kind, IEnumerable<string> allow)

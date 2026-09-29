@@ -14,7 +14,7 @@ namespace Rung.Bridge.V20
             var version = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
             var caps = args.AllowImport ? new[] { "export", "import", "compile" } : args.AllowFixtureImport ? new[] { "export", "fixture-import", "compile" } : new[] { "export", "compile" };
             OpennessSession session = null;
-            using (var owner = new OwnerThread())
+            using (var owner = new OwnerThread(System.Threading.ApartmentState.STA))
             {
                 var dispatcher = new RpcDispatcher(
                     () => session = OpennessSession.Attach(args, io.Emit),

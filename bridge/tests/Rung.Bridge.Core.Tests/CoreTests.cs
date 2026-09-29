@@ -332,6 +332,28 @@ public class PlcActionRouteTests
         Assert.Equal("BAD_REQUEST", Call("{\"id\":3,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"reboot\"}}").GetProperty("error").GetProperty("code").GetString());
     }
 
+    [Fact] public void CompareReportsDifferingObjectsWithTheirAddress()
+    {
+        var r = Call("{\"id\":1,\"method\":\"plc.compare\",\"params\":{\"device\":\"PLC_1\"}}").GetProperty("result");
+        Assert.Equal(3, r.GetProperty("identical").GetInt32());
+        var item = r.GetProperty("items")[0];
+        Assert.Equal("Different", item.GetProperty("state").GetString());
+        Assert.Equal("plc:PLC_1/blocks/Fx_Motor", item.GetProperty("address").GetString());
+        Assert.Equal("BAD_REQUEST", Call("{\"id\":2,\"method\":\"plc.compare\",\"params\":{}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact] public void CompareStatesMapToWhereTheObjectIs()
+    {
+        Assert.Equal("Different", CompareItem.Kind("ObjectsDifferent"));
+        Assert.Equal("OnlyInProject", CompareItem.Kind("RightMissing"));
+        Assert.Equal("OnlyOnPlc", CompareItem.Kind("LeftMissing"));
+        Assert.Null(CompareItem.Kind("FolderContentsDifferent"));
+        Assert.Null(CompareItem.Kind("ObjectsIdentical"));
+        Assert.Equal("FB100_MainBattery", CompareItem.ObjectName("FB100_MainBattery [FB100]"));
+        Assert.Equal("Motor [1] x", CompareItem.ObjectName("Motor [1] x"));
+        Assert.Equal("Main", CompareItem.ObjectName("Main"));
+    }
+
     [Fact] public void DownloadRequestIsParsedAndDefaultsAreSafe()
     {
         var r = Call("{\"id\":1,\"method\":\"plc.download\",\"params\":{\"request\":{\"device\":\"PLC_1\",\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"PLCSIM\",\"pcInterfaceNumber\":1}}}}").GetProperty("result");

@@ -75,6 +75,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       save(db);
       return reply({ device: p.device, state: db.online });
     }
+    case "plc.compare": {
+      // db.compare: items to report; default: one mirrored block differs
+      db.compareTarget = p.target ?? null;
+      save(db);
+      const first = db.objects[0];
+      const items = db.compare ?? (first ? [{ path: `Program blocks/${first.address.split("/").pop()} [FB1]`, name: first.address.split("/").pop(), state: "Different", detail: "Objects are different. ", address: first.address }] : []);
+      return reply({ device: p.device, state: items.length ? "FolderContentsDifferent" : "FolderContentsIdentical", identical: 7, items });
+    }
     case "plc.connections": {
       // db.reach: [{ pc, address }] = what each PG/PC interface can see; default: the PLC at its project address on "Ethernet"
       const reach = db.reach ?? [{ pc: "Ethernet", address: "192.168.0.1" }];

@@ -101,6 +101,13 @@ try {
         $cpuItem.SetAttribute('CommunicationMode', [uint32]0)
     } catch { $manifest.skipped += "CPU security settings: $($_.Exception.Message)" }
 
+    # --- the first PROFINET interface on a subnet, as in real projects: TIA takes the target address from it
+    try {
+        $subnet = $project.Subnets.Create('System:Subnet.Ethernet', 'PN/IE_1')
+        $x1 = $cpuItem.DeviceItems | Where-Object { $n = Get-Service2 $_ ([Siemens.Engineering.HW.Features.NetworkInterface]); $n -and "$($n.InterfaceType)" -eq 'Ethernet' } | Select-Object -First 1
+        (Get-Service2 $x1 ([Siemens.Engineering.HW.Features.NetworkInterface])).Nodes[0].ConnectToSubnet($subnet)
+    } catch { $manifest.skipped += "subnet: $($_.Exception.Message)" }
+
     # --- folders
     $drives = $plc.BlockGroup.Groups.Create('10_Drives')
     $motors = $drives.Groups.Create('Motors')

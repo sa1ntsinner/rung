@@ -9,6 +9,7 @@ using Rung.Bridge.Core;
 using Rung.Bridge.Core.Model;
 using Rung.Bridge.Core.Protocol;
 using Siemens.Engineering;
+using Siemens.Engineering.Compare;
 using Siemens.Engineering.Compiler;
 using Siemens.Engineering.Connection;
 using Siemens.Engineering.Download;
@@ -91,6 +92,13 @@ namespace Rung.Bridge.V20
             return new OnlineStatus { Device = device, State = reached ?? provider.State.ToString() };
         }
 
+        void LeaveOnline(string device)
+        {
+            try { var p = CpuItem(device).GetService<OnlineProvider>(); if (p != null) GoOfflineQuietly(p); }
+            catch (RpcException) { }
+            catch (EngineeringException) { }
+        }
+
         static void GoOfflineQuietly(OnlineProvider provider)
         {
             if (provider.State == OnlineState.Offline) return;
@@ -127,6 +135,59 @@ namespace Rung.Bridge.V20
             {
                 if (!_restore) return;
                 try { _provider.GoOnline(); } catch (EngineeringException) { }
+            }
+        }
+
+        public CompareOutcome Compare(string device, ConnectionTarget target)
+        {
+            Alive();
+            var plc = Plc(device);
+            var provider = CpuItem(device).GetService<OnlineProvider>();
+            if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
+            var byName = AddressesByName(device);
+            var wentOnline = false;
+            try
+            {
+                // CompareToOnline needs online mode; go online for it and leave again when rung went online itself
+                if (provider.State != OnlineState.Online)
+                {
+                    GoOfflineQuietly(provider);
+                    if (target != null && !string.IsNullOrEmpty(target.Mode))
+                        provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
+                    else if (!provider.Configuration.IsConfigured)
+                        throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
+                    wentOnline = true;
+                    provider.GoOnline();
+                    if (provider.State != OnlineState.Online)
+                        throw new RpcException(ErrorCodes.OnlineFailed, device + " is " + provider.State + "; the comparison needs an online connection");
+                }
+                var result = plc.CompareToOnline();
+                // TIA fills the result lazily over the online connection: read all of it before going offline,
+                // afterwards every PLC-side object reads as "Does not exist"
+                var outcome = new CompareOutcome { Device = device, State = result.RootElement.ComparisonResult.ToString() };
+                Walk(result.RootElement, "", byName, outcome);
+                return outcome;
+            }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
+            finally { if (wentOnline) GoOfflineQuietly(provider); }
+        }
+
+        static void Walk(CompareResultElement parent, string path, Dictionary<string, string> byName, CompareOutcome into)
+        {
+            foreach (CompareResultElement e in parent.Elements)
+            {
+                var state = e.ComparisonResult.ToString();
+                var name = (state == "LeftMissing" ? e.RightName : e.LeftName) ?? "";
+                var here = path.Length == 0 ? name : path + "/" + name;
+                var kind = CompareItem.Kind(state);
+                if (kind != null)
+                {
+                    byName.TryGetValue(CompareItem.ObjectName(name), out var address);
+                    into.Items.Add(new CompareItem { Path = here, Name = name, State = kind, Detail = string.IsNullOrEmpty(e.DetailedInformation) ? null : e.DetailedInformation, Address = address });
+                    continue; // the details below a differing object are TIA's, not separate objects
+                }
+                if (state == "ObjectsIdentical") { into.Identical++; continue; }
+                Walk(e, here, byName, into);
             }
         }
 
@@ -217,7 +278,24 @@ namespace Rung.Bridge.V20
 
         // ------------------------------------------------------------------ helpers
 
+        /// <summary>Never throws: an exception escaping the delegate makes TIA fail the download without saying why.</summary>
         static void Answer(DownloadConfiguration c, string phase, DownloadRequest request, DownloadOutcome outcome)
+        {
+            try { AnswerCore(c, phase, request, outcome); }
+            catch (Exception e)
+            {
+                var inner = e is System.Reflection.TargetInvocationException t && t.InnerException != null ? t.InnerException : e;
+                string message = null;
+                try { message = c.Message; } catch (Exception) { }
+                outcome.Decisions.Add(new DownloadDecision
+                {
+                    Phase = phase, Kind = c.GetType().Name, Name = DownloadPolicy.NameOf(c.GetType().Name), Choice = "unanswered", Blocks = true,
+                    Message = (message ?? "") + " (rung could not answer: " + inner.Message.Split('\n')[0].Trim() + ")",
+                });
+            }
+        }
+
+        static void AnswerCore(DownloadConfiguration c, string phase, DownloadRequest request, DownloadOutcome outcome)
         {
             var kind = c.GetType().Name;
             var d = new DownloadDecision { Phase = phase, Kind = kind, Message = c.Message };
@@ -252,8 +330,14 @@ namespace Rung.Bridge.V20
                 if (prop != null && prop.PropertyType.IsEnum && prop.CanWrite)
                 {
                     var dec = DownloadPolicy.Decide(kind, Enum.GetNames(prop.PropertyType), request.Allow, request.StartAfter);
-                    prop.SetValue(c, Enum.Parse(prop.PropertyType, dec.Choice));
                     d.Name = dec.Name; d.Choice = dec.Choice; d.Allowed = dec.Allowed; d.Blocks = dec.Blocks;
+                    try { prop.SetValue(c, Enum.Parse(prop.PropertyType, dec.Choice)); }
+                    catch (System.Reflection.TargetInvocationException) when (dec.Blocks)
+                    {
+                        // TIA accepts no "don't" here (DataBlockReinitialization only takes StopPlcAndReinitialize);
+                        // leaving the question unanswered cancels the download, which is what rung wants
+                        d.Choice = "unanswered";
+                    }
                 }
                 else
                 {
@@ -277,6 +361,10 @@ namespace Rung.Bridge.V20
 
         static ConfigurationTargetInterface ResolveTarget(ConnectionConfiguration cfg, ConnectionTarget t, string device)
         {
+            // an S7-PLCSIM instance has no PLC certificate, so the secure PG/PC channel TIA V20 uses by default fails
+            // with "Connect to module failed"; TIA Portal's own "Start simulation" talks to it the legacy way
+            if (string.Equals(t.PcInterface, "PLCSIM", StringComparison.OrdinalIgnoreCase) && !cfg.EnableLegacyCommunication)
+                cfg.EnableLegacyCommunication = true;
             var mode = cfg.Modes.Find(t.Mode) ?? throw new RpcException(ErrorCodes.NoTarget, "No connection mode \"" + t.Mode + "\" for " + device + "; run rung interfaces");
             var pc = mode.PcInterfaces.Find(t.PcInterface, t.PcInterfaceNumber <= 0 ? 1 : t.PcInterfaceNumber)
                 ?? throw new RpcException(ErrorCodes.NoTarget, "No PG/PC interface \"" + t.PcInterface + "\" (" + t.PcInterfaceNumber + ") in mode " + t.Mode + "; run rung interfaces");

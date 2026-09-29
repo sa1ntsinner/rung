@@ -88,6 +88,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
     online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
     connections: async (p) => tools().connections(String(p.device), !!p.scan),
+    compare: async (p) => tools().compare(String(p.device), p.target as never),
     download: async (p) => tools().download(p.request as never),
     show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {

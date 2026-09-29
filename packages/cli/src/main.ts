@@ -23,7 +23,7 @@ import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { WorkspaceIndex } from "@rung/lsp";
 import { cmdConfirmDelete, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
-import { cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
+import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { cmdCheck } from "./check.js";
@@ -58,6 +58,7 @@ Usage:
 PLC:
   rung compile [dir] [--file <f>]... [--hw] [--plc <name>]   compile in TIA Portal; errors point at file lines
   rung online [dir] [--off|--state] [--plc <name>]          go online / offline, or show the online state
+  rung compare [dir] [--json] [--plc <name>]                 the project against the PLC (read-only); exit 2 if they differ
   rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
@@ -349,6 +350,8 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
         return await cmdCompile(dir, v, io);
       case "online":
         return await cmdOnline(dir, v, io);
+      case "compare":
+        return await cmdCompare(dir, v, io);
       case "connect":
         return await cmdConnect(dir, v, io);
       case "interfaces":
@@ -399,5 +402,7 @@ ${total - failed}/${total} passed (offline SCL simulation — not a PLCSIM run)
       return 1;
     }
     throw e;
+  } finally {
+    await closePlcLinks();
   }
 }

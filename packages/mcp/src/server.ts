@@ -12,6 +12,7 @@ import { WorkspaceIndex, diagnostics as parseDiagnostics, uriOf } from "@rung/ls
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient } from "@rung/live";
 import { runTests } from "@rung/sim";
+import type { CompareOutcome, ConnectionTarget } from "@rung/bridge-client";
 import { handover } from "./handover.js";
 
 export interface McpContext {
@@ -19,7 +20,9 @@ export interface McpContext {
   /** Environment for secrets such as RUNG_WEBAPI_PASSWORD (defaults to process.env). */
   env?: Record<string, string | undefined>;
   /** Starts a bridge for one-off operations when no `rung watch` owner is running. */
-  bridgeFactory?: () => Promise<SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown> }>;
+  bridgeFactory?: () => Promise<
+    SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown>; compare?(device: string, target?: ConnectionTarget): Promise<CompareOutcome> }
+  >;
   /** Whether the bridge is in the Openness whitelist (the CLI knows where the bridge is). */
   bridgeWhitelisted?: () => Promise<"ok" | "missing" | "stale" | "unknown">;
 }
@@ -153,6 +156,34 @@ export function createMcpServer(ctx: McpContext): McpServer {
       await b.close();
     }
   });
+
+  server.registerTool(
+    "rung_compare",
+    {
+      description:
+        "Compare the TIA project with what runs on the PLC, like TIA Portal's online/offline comparison (read-only: goes online, compares, goes offline). Lists objects that differ, exist only in the project or only on the PLC. Uses the connection in rung.toml [plc.<device>]; if there is none, ask the person to run `rung connect` once.",
+      inputSchema: { device: z.string().optional() },
+    },
+    async ({ device }) => {
+      const config = await loadConfig(ctx.root).catch(() => undefined);
+      const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
+      const target = config?.plc[dev];
+      const withFiles = async (r: CompareOutcome) => {
+        const states = await stateSnapshot(ctx.root);
+        return { ...r, items: r.items.map((i) => ({ ...i, file: i.address ? states.find((s) => s.address === i.address)?.path : undefined })) };
+      };
+      const viaOwner = await withOwner((o) => o.request<CompareOutcome>("compare", { device: dev, ...(target ? { target } : {}) }));
+      if (viaOwner !== undefined) return json(await withFiles(viaOwner));
+      if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is available.");
+      const b = await ctx.bridgeFactory();
+      try {
+        if (!b.compare) return fail("This bridge cannot compare with the PLC.");
+        return json(await withFiles(await b.compare(dev, target)));
+      } finally {
+        await b.close();
+      }
+    },
+  );
 
   server.registerTool("rung_find_usages", { description: "Every block that calls, instantiates, reads or writes a block, DB, UDT or tag (with the members touched).", inputSchema: { name: z.string().describe("object name, e.g. Fx_Global, or a workspace path") } }, async ({ name }) => {
     const { graph } = await model();

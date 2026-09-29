@@ -11,6 +11,7 @@ import {
   type DownloadOutcome,
   type DownloadRequest,
   type OnlineStatus,
+  type CompareOutcome,
   type XRefEntry,
   type DescribeNode,
   type ExportResult,
@@ -162,6 +163,11 @@ export class BridgeClient {
 
   online(device: string, action: "state" | "online" | "offline", target?: ConnectionTarget): Promise<OnlineStatus> {
     return this.request("plc.online", { device, action, ...(target ? { target } : {}) }, 120_000) as Promise<OnlineStatus>;
+  }
+
+  /** Read-only; comparing a large program with the PLC takes a while. */
+  compare(device: string, target?: ConnectionTarget): Promise<CompareOutcome> {
+    return this.request("plc.compare", { device, ...(target ? { target } : {}) }, 600_000) as Promise<CompareOutcome>;
   }
 
   connections(device: string, scan = false): Promise<ConnectionOptions> {

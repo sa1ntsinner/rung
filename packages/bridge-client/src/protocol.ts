@@ -147,6 +147,26 @@ export interface OnlineStatus {
   state: "Offline" | "Connecting" | "Online" | "Incompatible" | "NotReachable" | "Protected" | "Disconnecting" | string;
 }
 
+/** The project against the PLC, like TIA's online/offline comparison. */
+export interface CompareOutcome {
+  device: string;
+  /** Openness state of the root, e.g. FolderContentsIdentical */
+  state: string;
+  /** objects that are the same in the project and on the PLC */
+  identical: number;
+  items: CompareItem[];
+}
+
+export interface CompareItem {
+  /** TIA's tree path, e.g. "Program blocks/Drives/FB_Pump" */
+  path: string;
+  name: string;
+  state: "Different" | "OnlyInProject" | "OnlyOnPlc" | string;
+  detail?: string | null;
+  /** workspace address when rung mirrors the object */
+  address?: string | null;
+}
+
 export interface AccessibleDevice {
   name: string;
   address: string;

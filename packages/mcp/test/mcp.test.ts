@@ -47,7 +47,7 @@ beforeAll(async () => {
 describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["rung_check", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test"]);
+    expect(tools).toEqual(["rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test"]);
     expect(client.getInstructions()).toMatch(/Never download to a PLC/);
   });
 
@@ -81,6 +81,23 @@ describe("rung mcp", () => {
     const d = await call("rung_diff", { path: "plc/PLC_1/blocks/Fx_Motor.scl" });
     expect(d.text).toContain("-  #nope := 1;");
     expect(d.text).toContain("+  #Start := TRUE;");
+  });
+
+  it("compares with the PLC through a bridge and names the workspace file of what differs", async () => {
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    let asked: unknown;
+    const compare = async (device: string, target?: unknown) => {
+      asked = { device, target };
+      return { device, state: "FolderContentsDifferent", identical: 2, items: [{ path: "Program blocks/Fx_Motor [FB1]", name: "Fx_Motor [FB1]", state: "Different", address: "plc:PLC_1/blocks/Fx_Motor" }] };
+    };
+    await createMcpServer({ root, bridgeFactory: async () => ({ compare, close: async () => {} }) as never }).connect(a);
+    const c = new Client({ name: "test", version: "1" });
+    await c.connect(b);
+    const r = (await c.callTool({ name: "rung_compare", arguments: {} })) as { content: { text: string }[] };
+    const data = JSON.parse(r.content[0]!.text) as { identical: number; items: { file?: string; state: string }[] };
+    expect(data.identical).toBe(2);
+    expect(data.items[0]).toMatchObject({ state: "Different", file: "plc/PLC_1/blocks/Fx_Motor.scl" });
+    expect(asked).toMatchObject({ device: "PLC_1" });
   });
 
   it("refuses to sync or compile without an owner or bridge, and never downloads", async () => {

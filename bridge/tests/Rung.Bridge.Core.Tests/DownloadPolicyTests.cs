@@ -86,4 +86,11 @@ public class DownloadPolicyTests
     [InlineData("PlcMasterSecretPassword", "plc-master-secret-password")]
     [InlineData("ABCThing", "abc-thing")]
     public void KebabNames(string kind, string name) => Assert.Equal(name, DownloadPolicy.Kebab(kind));
+
+    [Theory]
+    [InlineData("DataBlockReinitialization", "reinit-db")]
+    [InlineData("StopModules", "stop-cpu")]
+    [InlineData("StartModules", "start-cpu")]
+    [InlineData("SomethingNew", "something-new")]
+    public void AllowNamesOfQuestions(string kind, string name) => Assert.Equal(name, DownloadPolicy.NameOf(kind));
 }

@@ -2,6 +2,10 @@
 
 rung talks to the PLC through TIA Portal Openness, the same way TIA Portal does: `rung online`, `rung compile`, `rung download`. A download changes a running machine, so the rules are strict.
 
+## What runs on the PLC
+
+`rung compare` is TIA's online/offline comparison: it goes online, compares the project with the PLC, goes offline and lists what differs, what exists only in the project and what only on the PLC, with the workspace file of each. It changes nothing on the PLC; the MCP tool `rung_compare` does the same for agents. The exit code is 0 when the PLC runs the project and 2 when it does not, so a script can check it.
+
 ## Who downloads
 
 A person does. `rung download` runs from a terminal, the VS Code button (with a confirmation) or a Zed task, and asks you to type the PLC name unless you pass `--yes`. The MCP server never downloads; `rung_download_request` only writes a request for a person to run. The language server never downloads either.

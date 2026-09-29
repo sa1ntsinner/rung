@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
 import { WorkspaceError, loadConfig, type RungConfig } from "@rung/core";
-import type { BridgeClient, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus } from "@rung/bridge-client";
+import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages } from "@rung/sync";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
 
@@ -22,22 +22,43 @@ async function snapshot(ws: string): Promise<{ address: string; path: string }[]
   }
 }
 
-/** Calls the running rung watch when there is one (it owns the bridge), else starts a bridge for this call. */
-async function viaOwnerOrBridge<T>(dir: string, config: RungConfig, io: Io, method: string, params: Record<string, unknown>, direct: (b: BridgeClient) => Promise<T>): Promise<T> {
-  const owner = await OwnerClient.connect(dir);
-  if (owner) {
-    try {
-      return await owner.request<T>(method, params);
-    } finally {
-      owner.close();
-    }
+/**
+ * How one command talks to TIA Portal: through the running rung watch when there is one (it owns the bridge),
+ * else through a single bridge started on first use and kept for the whole command, so a download that scans,
+ * compiles and downloads starts TIA Portal once.
+ */
+class PlcLink {
+  static readonly open = new Set<PlcLink>();
+  private owner: OwnerClient | null | undefined;
+  private bridge: Promise<BridgeClient> | undefined;
+
+  constructor(
+    private readonly ws: string,
+    private readonly config: RungConfig,
+    private readonly io: Io,
+  ) {
+    PlcLink.open.add(this);
   }
-  const b = await bridgeFor(config, io);
-  try {
-    return await direct(b);
-  } finally {
-    await b.close();
+
+  async call<T>(method: string, params: Record<string, unknown>, direct: (b: BridgeClient) => Promise<T>): Promise<T> {
+    if (this.owner === undefined) this.owner = await OwnerClient.connect(this.ws);
+    if (this.owner) return this.owner.request<T>(method, params);
+    this.bridge ??= bridgeFor(this.config, this.io);
+    return direct(await this.bridge);
   }
+
+  async close(): Promise<void> {
+    PlcLink.open.delete(this);
+    this.owner?.close();
+    const b = this.bridge;
+    this.bridge = undefined;
+    if (b) await (await b.catch(() => undefined))?.close();
+  }
+}
+
+/** Ends the TIA connections the PLC commands opened; main calls it after every command. */
+export async function closePlcLinks(): Promise<void> {
+  await Promise.all([...PlcLink.open].map((l) => l.close()));
 }
 
 async function deviceOf(config: RungConfig, v: Record<string, unknown>): Promise<string> {
@@ -56,15 +77,15 @@ const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
  * PLC found on the network by its project address, which is then saved to rung.toml. Returns undefined when
  * TIA Portal's own remembered connection applies.
  */
-async function ensureTarget(ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "download", force = false): Promise<ConnectionTarget | undefined> {
+async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "download", force = false): Promise<ConnectionTarget | undefined> {
   const saved = targetOf(config, device);
   if (saved && !force) return saved;
   if (purpose === "online" && !force) {
-    const quick = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: false }, (b) => b.connections(device, false));
+    const quick = await link.call<ConnectionOptions>("connections", { device, scan: false }, (b) => b.connections(device, false));
     if (quick.configured) return undefined;
   }
   io.stderr(`rung: looking for ${device} on the network (up to half a minute)…\n`);
-  const options = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: true }, (b) => b.connections(device, true));
+  const options = await link.call<ConnectionOptions>("connections", { device, scan: true }, (b) => b.connections(device, true));
   const all = candidates(options);
   const matches = all.filter((c) => c.reason === "address-match");
   const sims = all.filter((c) => c.reason === "simulation");
@@ -86,7 +107,7 @@ async function ensureTarget(ws: string, config: RungConfig, io: Io, device: stri
 
 /** rung connect: find the PLC (or pick among what answers) and remember it; --json lists the choices for editors. */
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v);
   if (v.use) {
     const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1), ...(v.target ? { targetInterface: String(v.target) } : {}) };
@@ -95,18 +116,19 @@ export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io
     return 0;
   }
   if (v.json) {
-    const options = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan: true }, (b) => b.connections(device, true));
+    const options = await link.call<ConnectionOptions>("connections", { device, scan: true }, (b) => b.connections(device, true));
     const all = candidates(options);
     io.stdout(JSON.stringify({ device, saved: targetOf(config, device) ?? null, configuredInTia: options.configured, plcAddresses: options.plcAddresses, candidates: all.map((c) => ({ ...c, label: describe(c) })), reachable: reachable(options).map((c) => ({ ...c, label: describe(c) })), notFound: all.length ? null : notFoundMessage(device, options) }, null, 2) + "\n");
     return 0;
   }
-  await ensureTarget(ws, config, io, device, "download", !!v.pick || !!targetOf(config, device));
+  await ensureTarget(link, ws, config, io, device, "download", !!v.pick || !!targetOf(config, device));
   return 0;
 }
 
-async function workspace(dir: string) {
+async function workspace(dir: string, io: Io) {
   const ws = await findWorkspace(dir);
-  return { ws, config: await loadConfig(ws) };
+  const config = await loadConfig(ws);
+  return { ws, config, link: new PlcLink(ws, config, io) };
 }
 
 async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[]): Promise<number> {
@@ -123,10 +145,10 @@ async function printCompile(ws: string, _config: RungConfig, io: Io, raw: Compil
 }
 
 export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v);
   if (v.hw) {
-    const msgs = await viaOwnerOrBridge<CompileMessage[]>(ws, config, io, "compileHardware", { device }, (b) => b.compileHardware(device));
+    const msgs = await link.call<CompileMessage[]>("compileHardware", { device }, (b) => b.compileHardware(device));
     return printCompile(ws, config, io, msgs);
   }
   const files = ((v.file as string[] | undefined) ?? []).map((f) => relative(ws, resolve(io.cwd, f)).split(sep).join("/"));
@@ -139,25 +161,51 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
       return s.address;
     });
   }
-  const msgs = await viaOwnerOrBridge<CompileMessage[]>(ws, config, io, "compile", { device, addresses }, (b) => b.compile(device, addresses));
+  const msgs = await link.call<CompileMessage[]>("compile", { device, addresses }, (b) => b.compile(device, addresses));
   return printCompile(ws, config, io, msgs);
 }
 
 export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v);
   const action = v.off ? "offline" : v.state ? "state" : "online";
-  const target = action === "online" ? await ensureTarget(ws, config, io, device, "online") : targetOf(config, device);
-  const s = await viaOwnerOrBridge<OnlineStatus>(ws, config, io, "online", { device, action, ...(target ? { target } : {}) }, (b) => b.online(device, action, target));
+  const target = action === "online" ? await ensureTarget(link, ws, config, io, device, "online") : targetOf(config, device);
+  const s = await link.call<OnlineStatus>("online", { device, action, ...(target ? { target } : {}) }, (b) => b.online(device, action, target));
   io.stdout(`${s.device}: ${s.state}\n`);
   return action === "online" && s.state !== "Online" ? 2 : 0;
 }
 
+const COMPARE_LABEL: Record<string, string> = { Different: "differs", OnlyInProject: "only in project", OnlyOnPlc: "only on PLC" };
+
+/** rung compare: the project against the PLC, read-only. Exit 0 when they match, 2 when they differ. */
+export async function cmdCompare(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  const { ws, config, link } = await workspace(dir, io);
+  const device = await deviceOf(config, v);
+  const target = await ensureTarget(link, ws, config, io, device, "online");
+  const r = await link.call<CompareOutcome>("compare", { device, ...(target ? { target } : {}) }, (b) => b.compare(device, target));
+  const objects = await snapshot(ws);
+  const items = r.items.map((i) => ({ ...i, file: i.address ? objects.find((o) => o.address === i.address)?.path : undefined }));
+  if (v.json) {
+    io.stdout(JSON.stringify({ ...r, items }, null, 2) + "\n");
+    return items.length ? 2 : 0;
+  }
+  if (!items.length) {
+    io.stdout(`${device}: the PLC runs what the project has (${r.identical} objects compared)\n`);
+    return 0;
+  }
+  const count = (s: string) => items.filter((i) => i.state === s).length;
+  io.stdout(`${device}: ${count("Different")} differ, ${count("OnlyInProject")} only in the project, ${count("OnlyOnPlc")} only on the PLC; ${r.identical} identical\n\n`);
+  // TIA's generic "Objects are different." adds nothing to the label
+  const detail = (d?: string | null) => (d && !/^Objects are (different|identical)\.?\s*$/i.test(d) ? ` — ${d.trim()}` : "");
+  for (const i of items) io.stdout(`  ${(COMPARE_LABEL[i.state] ?? i.state).padEnd(16)} ${i.file ?? i.path}${detail(i.detail)}\n`);
+  return 2;
+}
+
 export async function cmdInterfaces(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v);
   const scan = !!v.scan;
-  const c = await viaOwnerOrBridge<ConnectionOptions>(ws, config, io, "connections", { device, scan }, (b) => b.connections(device, scan));
+  const c = await link.call<ConnectionOptions>("connections", { device, scan }, (b) => b.connections(device, scan));
   io.stdout(`${c.device}: ${c.configured ? "a connection is configured in TIA Portal" : "no connection configured in TIA Portal yet"}\n`);
   for (const m of c.modes) {
     io.stdout(`\nmode "${m.name}"\n`);
@@ -166,7 +214,9 @@ export async function cmdInterfaces(dir: string, v: Record<string, unknown>, io:
       for (const d of p.accessible ?? []) io.stdout(`      reachable: ${d.name} ${d.address} ${d.deviceSeries}\n`);
     }
   }
-  const first = c.modes.flatMap((m) => m.pcInterfaces.map((p) => ({ m, p }))).find(({ p }) => p.targetInterfaces.length);
+  // suggest an interface that reaches a PLC, else Ethernet, else whatever there is
+  const all = c.modes.flatMap((m) => m.pcInterfaces.map((p) => ({ m, p }))).filter(({ p }) => p.targetInterfaces.length);
+  const first = all.find(({ p }) => p.accessible?.length) ?? all.find(({ m }) => m.name === "PN/IE") ?? all[0];
   if (first) {
     io.stdout(`\nPut the one you use into rung.toml, for example:\n\n[plc.${device}]\nmode = "${first.m.name}"\npc_interface = "${first.p.name}"\npc_interface_number = ${first.p.number}\ntarget_interface = "${first.p.targetInterfaces[0]}"\n`);
   }
@@ -185,10 +235,10 @@ async function ask(io: Io, question: string): Promise<string> {
 }
 
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
   const device = await deviceOf(config, v);
-  const target = await ensureTarget(ws, config, io, device, "download");
+  const target = await ensureTarget(link, ws, config, io, device, "download");
   if (!target) throw new WorkspaceError("NO_TARGET", `no connection for ${device}: run rung connect`);
   const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
   const software = !v["no-sw"];
@@ -197,7 +247,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   const startAfter = v["no-start"] ? false : config.download.startAfter;
 
   if (config.download.compileFirst && software) {
-    const msgs = await viaOwnerOrBridge<CompileMessage[]>(ws, config, io, "compile", { device, addresses: [] }, (b) => b.compile(device, []));
+    const msgs = await link.call<CompileMessage[]>("compile", { device, addresses: [] }, (b) => b.compile(device, []));
     if ((await printCompile(ws, config, io, msgs)) !== 0) {
       io.stderr("rung download: the program has compile errors; nothing was downloaded\n");
       return 2;
@@ -217,12 +267,13 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   }
 
   const request = { device, hardware, software, onlyChanges, allow, startAfter, target };
-  const r = await viaOwnerOrBridge<DownloadOutcome>(ws, config, io, "download", { request }, (b) => b.download(request));
+  const r = await link.call<DownloadOutcome>("download", { request }, (b) => b.download(request));
   for (const d of r.decisions) {
     const mark = d.blocks ? "✗" : "✓";
     io.stdout(`  ${mark} ${d.phase.padEnd(4)} ${d.name.padEnd(26)} ${d.choice}${d.message ? `  (${d.message.replace(/\s*\n\s*/g, " ")})` : ""}\n`);
   }
-  for (const m of r.messages) io.stdout(`  ${m.replace(/\s*\n\s*/g, " ")}\n`);
+  // on a cancel TIA adds "Download configuration '…' was unhandled"; the decisions above already say what happened
+  for (const m of r.messages) if (!(r.state === "Cancelled" && /was unhandled/.test(m))) io.stdout(`  ${m.replace(/\s*\n\s*/g, " ")}\n`);
   if (r.state === "Cancelled") {
     io.stdout(`\nTIA Portal cancelled the download: it asked questions rung may not answer on its own.\nIf that is what you want, run again with --allow ${r.needsAllow.join(",")}\n`);
     return 3;
@@ -232,11 +283,11 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 }
 
 export async function cmdOpen(dir: string, file: string, io: Io): Promise<number> {
-  const { ws, config } = await workspace(dir);
+  const { ws, config, link } = await workspace(dir, io);
   const rel = relative(ws, resolve(io.cwd, file)).split(sep).join("/");
   const s = (await snapshot(ws)).find((x) => x.path === rel);
   if (!s) throw new WorkspaceError("NOT_MIRRORED", `${rel} is not a mirrored object`);
-  await viaOwnerOrBridge(ws, config, io, "show", { address: s.address }, (b) => b.show(s.address));
+  await link.call("show", { address: s.address }, (b) => b.show(s.address));
   io.stdout(`opened ${s.address} in TIA Portal\n`);
   return 0;
 }

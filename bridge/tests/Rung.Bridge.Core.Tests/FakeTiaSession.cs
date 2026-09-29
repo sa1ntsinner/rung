@@ -19,6 +19,13 @@ public sealed class FakeTiaSession : ITiaSession
         else if (action != "state") throw new RpcException(ErrorCodes.BadRequest, "action");
         return new OnlineStatus { Device = device, State = OnlineState };
     }
+    public CompareOutcome Compare(string device, ConnectionTarget target) => new CompareOutcome
+    {
+        Device = device,
+        State = "FolderContentsDifferent",
+        Identical = 3,
+        Items = { new CompareItem { Path = "Program blocks/Fx_Motor", Name = "Fx_Motor", State = "Different", Address = "plc:PLC_1/blocks/Fx_Motor" } },
+    };
     public ConnectionOptions Connections(string device, bool scan) => new ConnectionOptions
     {
         Device = device,

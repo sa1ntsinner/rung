@@ -9,7 +9,7 @@ You prepare; a person downloads and tests on the machine. Your job is to make th
 
 ## Before the person downloads
 
-1. `rung_status`: no conflicts, no pending deletes, no compile errors (`rung_diagnostics`).
+1. `rung_status`: no conflicts, no pending deletes, no compile errors (`rung_diagnostics`). `rung_compare` shows what the PLC runs now; the download changes exactly the objects it lists plus your edits.
 2. List what the download changes: blocks, DBs and instances whose structure changed (they get reinitialised, see `plc-data-design`), hardware configuration if touched.
 3. Predict TIA's questions and say what they mean: a changed interface or DB layout usually needs the CPU in STOP ("stop-cpu") and may reinitialise data ("reinit-db"). `rung download` cancels unless the person allows each one; tell them which to expect and why, never how to get around them.
 4. Write the machine test: preconditions (machine in manual, area clear, e-stop tested), the steps, the expected reaction, what to watch (`"DB".member` names for `rung live read`), and how to roll back (the previous version is in git; download it the same way).
@@ -17,6 +17,7 @@ You prepare; a person downloads and tests on the machine. Your job is to make th
 
 ## Diagnosing a running machine (read-only)
 
+- First `rung_compare` (or `rung compare`): does the PLC run what the files say? A block that differs means the machine runs other code than the one you are reading; say which, and read the differing blocks with that in mind.
 - `rung online --state` and `rung live read '"DB".member' ...` read values from the PLC's Web API; `rung live diag` reads the diagnostic buffer. Start from the symptom: which output is (not) set, then walk back through the logic to the input or state that decides it.
 - Compare what the code expects with what the values say, one condition at a time; quote the values you read in your explanation.
 - Never write values, force, or change operating mode. If the fix needs a change, make it in the files and go back to the steps above.

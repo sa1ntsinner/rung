@@ -101,6 +101,8 @@ namespace Rung.Bridge.Core.Protocol
                     return Bool(p, "hardware") ? Session.CompileHardware(Str(p, "device")) : Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
                 case "plc.online":
                     return Session.Online(Str(p, "device"), Str(p, "action"), Obj<ConnectionTarget>(p, "target"));
+                case "plc.compare":
+                    return Session.Compare(Str(p, "device"), Obj<ConnectionTarget>(p, "target"));
                 case "plc.connections":
                     return Session.Connections(Str(p, "device"), Bool(p, "scan"));
                 case "plc.download":

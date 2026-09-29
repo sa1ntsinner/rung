@@ -50,6 +50,6 @@ try {
 finally {
     $tia.Dispose()
     # Dispose only detaches from a TIA Portal with user interface; this host started it, so it ends it
-    if ($WithUserInterface -and $proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    if ($WithUserInterface -and $proc) { & taskkill.exe /PID $proc.Id /T /F 2>&1 | Out-Null }
     Remove-Item $stopFile, $readyFile -ErrorAction SilentlyContinue
 }

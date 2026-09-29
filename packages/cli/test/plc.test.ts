@@ -29,6 +29,34 @@ function setup(answers: string[] = []) {
   return { dir, run, out, err, db, questions, toml, patch };
 }
 
+describe("rung compare", () => {
+  it("lists what differs from the PLC with the workspace file, and exits 2", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    appendFileSync(t.toml, TARGET);
+    t.out.length = 0;
+    expect(await t.run(["compare"])).toBe(2);
+    const out = t.out.join("");
+    expect(out).toMatch(/PLC_1: 1 differ, 0 only in the project, 0 only on the PLC; 7 identical/);
+    expect(out).toMatch(/differs\s+plc\/PLC_1\/blocks\/Fx_Motor\.scl\n/); // no generic "Objects are different."
+    expect((t.db() as { compareTarget?: Record<string, unknown> }).compareTarget).toMatchObject({ mode: "PN/IE", pcInterface: "PLCSIM", targetInterface: "1 X1" });
+  });
+
+  it("says so when the PLC runs the project, and exits 0; --json for tools", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.patch({ compare: [] });
+    t.out.length = 0;
+    expect(await t.run(["compare"])).toBe(0);
+    expect(t.out.join("")).toMatch(/the PLC runs what the project has \(7 objects compared\)/);
+    t.out.length = 0;
+    expect(await t.run(["compare", "--json"])).toBe(0);
+    expect(JSON.parse(t.out.join(""))).toMatchObject({ identical: 7, items: [] });
+  });
+});
+
 describe("PLC commands", () => {
   it("download asks for the PLC name and does nothing on a wrong answer", async () => {
     const t = setup(["PLC_2"]);
