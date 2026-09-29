@@ -314,10 +314,21 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         var address = "plc:PLC_1/blocks/30_New/" + name;
         var src = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
         File.WriteAllText(src, "FUNCTION \"" + name + "\" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION\n");
-        var r = _fx.Session.Import(address, "scl", src, "absent", Guid.NewGuid().ToString());
-        Assert.Equal("scl", r.Form);
-        Assert.Contains(_fx.Session.ListObjects("PLC_1"), o => o.Address == address);
-        Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
+        // blocks earlier runs left behind go first, then this run's own: the fixture stays as generated
+        foreach (var old in _fx.Session.ListObjects("PLC_1").Where(o => o.Address.StartsWith("plc:PLC_1/blocks/30_New/Fx_New_", StringComparison.Ordinal)).ToList())
+            _fx.Session.Delete(old.Address, old.Fingerprint, Guid.NewGuid().ToString());
+        try
+        {
+            var r = _fx.Session.Import(address, "scl", src, "absent", Guid.NewGuid().ToString());
+            Assert.Equal("scl", r.Form);
+            Assert.Contains(_fx.Session.ListObjects("PLC_1"), o => o.Address == address);
+            Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
+        }
+        finally
+        {
+            var created = _fx.Session.ListObjects("PLC_1").FirstOrDefault(o => o.Address == address);
+            if (created != null) _fx.Session.Delete(address, created.Fingerprint, Guid.NewGuid().ToString());
+        }
     }
 
     [Fact] public void RepeatedInventoriesReuseFingerprintsButSeeChanges()
@@ -332,10 +343,14 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         var address = "plc:PLC_1/blocks/20_Valves/Fx_Valve";
         var export = _fx.Session.Export(address, "auto", Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N")));
         var edited = Path.Combine(Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName, "obj.scl");
-        File.WriteAllText(edited, File.ReadAllText(export.Files[0].Path).Replace("#Open := FALSE;", "#Open := FALSE; // cache probe " + Guid.NewGuid().ToString("N").Substring(0, 6)));
-        _fx.Session.Import(address, "scl", edited, export.Fingerprint, Guid.NewGuid().ToString());
+        var original = File.ReadAllText(export.Files[0].Path);
+        File.WriteAllText(edited, original.Replace("#Open := FALSE;", "#Open := FALSE; // cache probe " + Guid.NewGuid().ToString("N").Substring(0, 6)));
+        var changed = _fx.Session.Import(address, "scl", edited, export.Fingerprint, Guid.NewGuid().ToString());
         var after = _fx.Session.ListObjects("PLC_1").ToDictionary(o => o.Address, o => o.Fingerprint);
         Assert.NotEqual(first[address], after[address]);
+        // put the block back as it was
+        File.WriteAllText(edited, original);
+        _fx.Session.Import(address, "scl", edited, changed.Fingerprint, Guid.NewGuid().ToString());
     }
 
     [Fact] public void ListsConnectionModesAndReportsOffline()

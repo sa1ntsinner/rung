@@ -39,7 +39,7 @@ rung talks to TIA Portal only through Siemens' Openness API. It never opens proj
 
 ## Requirements
 
-Windows with TIA Portal V20 and the Openness option, or with CODESYS V3.5 (tested with SP22; see [CODESYS](docs/codesys.md)), and Node.js 22 or newer. TwinCAT projects are files already: rung's language server and simulator read them as they are.
+Windows with TIA Portal V20 and the Openness option (from Linux or macOS: a Windows PC with it, over ssh, see [Linux and macOS](docs/remote.md)), or with CODESYS V3.5 (tested with SP22; see [CODESYS](docs/codesys.md)), and Node.js 22 or newer. TwinCAT projects are files already: rung's language server and simulator read them as they are.
 
 <details>
 <summary>Working on rung</summary>

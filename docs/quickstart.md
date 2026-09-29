@@ -4,7 +4,7 @@ rung turns a Siemens TIA Portal project into a folder of text files that stays i
 
 ## 1. Install and check
 
-- Windows with **TIA Portal V20** and the Openness option (installed with TIA Portal), Node.js 22 or newer.
+- Windows with **TIA Portal V20** and the Openness option (installed with TIA Portal), Node.js 22 or newer. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
 - Unzip `rung-<version>-win-x64.zip` and add the folder to `PATH`.
 - Run `rung check`. It lists what is installed (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS, editors, agents) and says how to get what is missing:
 

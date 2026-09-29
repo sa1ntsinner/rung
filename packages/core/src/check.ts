@@ -78,7 +78,7 @@ export async function runChecks(p: Probes): Promise<CheckItem[]> {
 
   // ---------------------------------------------------------------- PLC platforms
   if (p.platform !== "win32") {
-    out.push({ id: "tia", group: "plc", name: "TIA Portal + Openness", status: "na", detail: `not available on ${p.platform}`, enables: "two-way sync, compile, online and download for Siemens PLCs", fix: "TIA Portal runs on Windows only. On this OS rung still gives you the editor, language server, tests and git; sync runs on a Windows PC or VM with TIA Portal." });
+    out.push({ id: "tia", group: "plc", name: "TIA Portal + Openness", status: "na", detail: `not available on ${p.platform}`, enables: "two-way sync, compile, online and download for Siemens PLCs", fix: "TIA Portal runs on Windows only. From here rung works with the TIA Portal of a Windows PC or VM over ssh: rung init --host <user@windows-pc> --project <project path there> (that PC needs OpenSSH Server and rung). The editor, language server and tests work here as they are." });
   } else {
     const tia = find(win, /Totally Integrated Automation Portal V\d+(?!.*(Update|Upd))/i).filter((x) => /STEP 7|Portal V\d+ *$|Portal V\d+ -/.test(x.name));
     const openness = win?.opennessApis ?? [];

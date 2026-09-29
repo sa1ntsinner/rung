@@ -16,7 +16,7 @@ Failsafe (F-) blocks, know-how-protected blocks, system blocks, GRAPH blocks and
 SCL, STL and data blocks/UDTs as sources; LAD as SIMATIC SD text (`.s7dcl`); other graphical blocks as SimaticML XML; tag tables as text with one tag per line (`.tags.st`), watch tables as XML; the network settings (IP addresses, PROFINET device names) as YAML. The rest of the hardware, HMI, technology objects and the project library appear as read-only YAML views.
 
 **Does it work without TIA Portal?**
-The language server, `rung test` and `rung views --offline` work on any OS with an existing workspace (for example in CI). Syncing needs Windows with TIA Portal running.
+The language server, `rung test` and `rung views --offline` work on any OS with an existing workspace (for example in CI). On Linux and macOS, rung syncs with the TIA Portal of a Windows PC or VM over ssh ([Linux and macOS](remote.md)).
 
 **Which TIA Portal versions?**
 V20 today. A V21 build exists but is not verified yet.
