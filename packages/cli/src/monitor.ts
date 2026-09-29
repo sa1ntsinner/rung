@@ -2,7 +2,7 @@
 // rung live watch: TIA Portal's "monitoring on" for one block. rung works out which variables the block shows
 // on which line, and through which instance DB an FB is watched; then it reads them from the PLC's Web API
 // (read-only) every interval and prints one JSON line per read, for editors.
-import type { BlockModel, Member, VarDecl, WorkspaceIndex } from "@rung/lsp";
+import { deviceOfUri, scopedTo, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { WorkspaceError } from "@rung/core";
 
 export interface MonitorPlan {
@@ -25,7 +25,11 @@ const elementary = (m: Pick<Member, "type" | "isArray"> | undefined) => !!m && !
 const seg = (n: string) => (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(n) ? n : `"${n}"`);
 const quoted = (n: string) => (n.startsWith('"') ? n : `"${n}"`);
 
+/** Both files of one PLC (or not in a rung layout, where there is one program). */
+const samePlc = (a: string, b: string) => deviceOfUri(a) === deviceOfUri(b);
+
 export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: string): MonitorPlan {
+  index = scopedTo(index, uri); // the block's own PLC: another may have DBs and tags of the same names
   const doc = index.docs.get(uri);
   const block: BlockModel | undefined = doc?.parsed?.blocks[0];
   if (!doc || !block) throw new WorkspaceError("BAD_ARGUMENT", "this file holds no block rung can monitor");
@@ -42,7 +46,7 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
   if (block.kind === "FB") {
     const dbs = index
       .allGlobals()
-      .filter((g) => g.block?.kind === "DB" && g.block.dbOf?.toUpperCase() === block.name.toUpperCase())
+      .filter((g) => samePlc(g.uri, uri) && g.block?.kind === "DB" && g.block.dbOf?.toUpperCase() === block.name.toUpperCase())
       .map((g) => g.name);
     inst = instance ? (/^"/.test(instance.trim()) ? instance.trim() : quoted(instance.trim())) : dbs.length === 1 ? quoted(dbs[0]!) : undefined;
     if (!inst)
@@ -93,6 +97,7 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
  * (PLC_PRG.fbCount.nCount), found by itself when there is one; its METHODs show the FB's variables.
  */
 export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: string): MonitorPlan {
+  index = scopedTo(index, uri);
   const doc = index.docs.get(uri);
   const block: BlockModel | undefined = doc?.parsed?.blocks[0];
   if (!doc || !block) throw new WorkspaceError("BAD_ARGUMENT", "this file holds no POU rung can monitor");
@@ -108,7 +113,7 @@ export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: st
   else if (block.kind === "FB") {
     const uses = index
       .allGlobals()
-      .filter((g) => g.block?.kind === "PRG")
+      .filter((g) => samePlc(g.uri, uri) && g.block?.kind === "PRG")
       .flatMap((g) => g.block!.vars.filter((v) => !v.isArray && (v.typeRef ?? v.type).toUpperCase() === block.name.toUpperCase()).map((v) => `${g.name}.${v.name}`));
     base = instance?.trim() || (uses.length === 1 ? uses[0] : undefined);
     if (!base)

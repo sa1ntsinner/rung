@@ -617,30 +617,38 @@ namespace Rung.Bridge.V20
             var name = r.Entry.Address;
             IList<string> imported;
             // An import replaces a tag or watch table wholesale, and TIA does not always undo a failed one (seen
-            // live: a watch table left empty after its entries were refused). A copy is kept to put back.
-            var backup = !isNew && (r.Obj is PlcTagTable || r.Obj is PlcWatchTable) ? BackupTable(r, operationId) : null;
+            // live: a watch table left empty after its entries were refused). A copy is kept to put back, taken
+            // under exclusive access after the revision check, so it is exactly what the import replaces.
+            string backup = null;
+            var attempted = false;
             _inImport = true;
             var guard = new PasswordPromptGuard(_tiaPid);
             try
             {
                 using (var access = _portal.ExclusiveAccess("rung: importing " + AddressFormat.Parse(address).Name))
-                using (var tx = access.Transaction(_project, "rung import " + operationId))
                 {
-                    if (isNew) r.ParentGroup = EnsureGroup(r);
-                    else if (Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
-                    imported = ImportForm(r, form, path, operationId);
-                    var parts = AddressFormat.Parse(address);
-                    var want = Identity(parts.Name, parts.Namespace);
-                    if (imported.Count == 0)
-                        throw new RpcException(ErrorCodes.ImportFailed, "The file declares no block or type (empty, or only comments); it must declare \"" + want + "\". Nothing was changed");
-                    if (imported.Count != 1 || imported[0] != want)
-                        throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
-                    tx.CommitOnDispose();
+                    if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+                    if (!isNew && (r.Obj is PlcTagTable || r.Obj is PlcWatchTable)) backup = BackupTable(r, operationId);
+                    using (var tx = access.Transaction(_project, "rung import " + operationId))
+                    {
+                        if (isNew) r.ParentGroup = EnsureGroup(r);
+                        attempted = true;
+                        imported = ImportForm(r, form, path, operationId);
+                        var parts = AddressFormat.Parse(address);
+                        var want = Identity(parts.Name, parts.Namespace);
+                        if (imported.Count == 0)
+                            throw new RpcException(ErrorCodes.ImportFailed, "The file declares no block or type (empty, or only comments); it must declare \"" + want + "\". Nothing was changed");
+                        if (imported.Count != 1 || imported[0] != want)
+                            throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
+                        tx.CommitOnDispose();
+                    }
                 }
             }
             catch (Exception e) when (e is EngineeringException || e is RpcException)
             {
-                var restored = backup != null && RestoreTable(address, backup);
+                // only what this import may have changed is put back: a refusal before it (a stale revision) leaves
+                // the table, and whoever changed it, alone
+                var restored = attempted && backup != null && RestoreTable(address, backup);
                 var note = restored ? " TIA Portal had changed the table anyway; rung put the previous version back." : "";
                 if (e is RpcException rpc) throw new RpcException(rpc.Code, rpc.Message + note);
                 throw new RpcException(ErrorCodes.ImportFailed, e.Message + note);

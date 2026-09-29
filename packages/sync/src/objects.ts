@@ -92,8 +92,9 @@ export async function mapStaged(root: string, result: ExportResult, stageDir: st
     const suffix = name.startsWith(STAGED_STEM) ? name.slice(STAGED_STEM.length) : "";
     if (!SAFE_SUFFIX.test(suffix) || (f.role === "primary") !== (suffix === "." + result.form))
       throw new BridgeError("EXPORT_FAILED", `unexpected staged file ${JSON.stringify(name)} (${f.role})`);
-    if (stageDir && !(await isContained(stageDir, f.path))) throw new BridgeError("EXPORT_FAILED", `staged file outside staging dir: ${f.path}`);
-    const text = normalizeText((await readFile(f.path)).toString("utf8"));
+    // a bridge on another machine sends the text itself (content); a local one leaves the file in stageDir
+    if (f.content === undefined && stageDir && !(await isContained(stageDir, f.path))) throw new BridgeError("EXPORT_FAILED", `staged file outside staging dir: ${f.path}`);
+    const text = normalizeText(f.content ?? (await readFile(f.path)).toString("utf8"));
     const rel = stem + suffix;
     if (!(await isContained(root, rel2abs(root, rel)))) throw new WorkspaceError("PATH_ESCAPE", `${rel} resolves outside the workspace`);
     files.push({ path: rel, role: f.role, hash: await blobs.put(text) });

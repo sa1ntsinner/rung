@@ -232,23 +232,36 @@ HEADER = re.compile(r"^[ \t]*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|ACTION|INTE
 
 
 def split_units(text):
-    """Top-level units of a POU file: [(keyword, text without its END line)]."""
+    """Top-level units of a POU file: [(keyword, text without its END line)]. What stands above a header
+    (attribute pragmas, comments) belongs to that unit's declaration, as CODESYS keeps it there."""
     text = text.replace("\r\n", "\n")
     starts = [m for m in HEADER.finditer(text)]
     units = []
+    after = 0  # where the previous unit's END line ended
     for i, m in enumerate(starts):
-        end = starts[i + 1].start() if i + 1 < len(starts) else len(text)
-        body = text[m.start():end]
+        nxt = starts[i + 1].start() if i + 1 < len(starts) else len(text)
         kw = m.group(1).upper()
-        body = re.sub(r"\n?[ \t]*" + END[kw] + r"\s*;?\s*$", "\n", body.rstrip() + "\n", flags=re.I)
-        units.append((kw, body))
+        ends = list(re.finditer(r"^[ \t]*" + END[kw] + r"\b[^\n]*(\n|$)", text[m.start():nxt], re.I | re.M))
+        stop = m.start() + ends[-1].start() if ends else nxt
+        # blank lines between units are layout, not part of a declaration
+        body = re.sub(r"^(?:[ \t]*\n)+", "", text[after:stop])
+        units.append((kw, body.rstrip() + "\n"))
+        after = m.start() + ends[-1].end() if ends else nxt
     return units
 
 
+def header_line(lines):
+    """Index of the header line: pragmas and comments may stand above it."""
+    for k, line in enumerate(lines):
+        if HEADER.match(line):
+            return k
+    return 0
+
+
 def split_decl_impl(unit):
-    """Declaration = the header and its VAR sections; the code is what follows."""
+    """Declaration = what stands above the header, the header and its VAR sections; the code is what follows."""
     lines = unit.split("\n")
-    i = 1
+    i = header_line(lines) + 1
     while i < len(lines) and re.match(r"^\s*\{", lines[i]):
         i += 1  # attribute pragmas under the header
     while i < len(lines):
@@ -268,12 +281,12 @@ def split_decl_impl(unit):
 
 
 def header_name(unit):
-    m = re.match(r"^\s*(?:PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|ACTION|INTERFACE)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*([A-Za-z_][A-Za-z0-9_]*)", unit, re.I)
+    m = re.search(r"^[ \t]*(?:PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|ACTION|INTERFACE)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*([A-Za-z_][A-Za-z0-9_]*)", unit, re.I | re.M)
     return m.group(1) if m else None
 
 
 def return_type(unit):
-    m = re.match(r"^\s*(?:METHOD|FUNCTION)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([^\n;]+)", unit, re.I)
+    m = re.search(r"^[ \t]*(?:METHOD|FUNCTION)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([^\n;]+)", unit, re.I | re.M)
     return m.group(1).strip() if m else None
 
 
@@ -351,9 +364,12 @@ def import_object(addr, path, expected):
             set_text(child.textual_declaration, d)
             set_text(child.textual_implementation, i)
         elif ukw == "ACTION":
+            head = re.search(r"^[ \t]*ACTION\s+[A-Za-z_][A-Za-z0-9_]*\s*:?[ \t]*\n?", unit, re.I | re.M)
+            # an action has no declaration: a comment above it would have nowhere to go in CODESYS
+            if unit[:head.start()].strip():
+                raise RpcError("IMPORT_FAILED", "the text above ACTION " + uname + " has no place in CODESYS (an action has no declaration); put it inside the action")
             child = child[0] if child else obj.create_action(uname)
-            body = re.sub(r"^\s*ACTION\s+[A-Za-z_][A-Za-z0-9_]*\s*:?\s*\n?", "", unit, flags=re.I)
-            set_text(child.textual_implementation, ensure_nl(body.strip("\n")))
+            set_text(child.textual_implementation, ensure_nl(unit[head.end():].strip("\n")))
     for c in obj.get_children(False):
         if (is_method(c) or is_action(c)) and c.get_name() not in wanted:
             c.remove()
@@ -502,6 +518,18 @@ def plc_download(params):
     oa = online_app(devname, None)
     full_ok = "stop-cpu" in allow
     base = {"device": devname, "errors": 0, "warnings": 0, "messages": [], "decisions": [], "needsAllow": []}
+    # the application's state before: afterwards rung starts it only if it ran (and this download stopped it) or
+    # did not exist yet (a first download); one that was stopped stays stopped
+    before = None  # None: no application on the device yet
+    try:
+        if not oa.is_logged_in:
+            oa.login(OnlineChangeOption.Keep, False)  # Keep: logs in, downloads nothing
+        state = str(oa.application_state).lower()
+        # ApplicationState.none: nothing loaded yet
+        before = "run" if "run" in state else None if "none" in state else "stop"
+        oa.logout()
+    except Exception:
+        before = None
     try:
         oa.login(OnlineChangeOption.Try if full_ok else OnlineChangeOption.Force, "reset-module" in allow)
     except Exception as e:
@@ -516,9 +544,14 @@ def plc_download(params):
         base["decisions"].append({"phase": "pre", "kind": "FullDownload", "name": "stop-cpu", "message": "online change where possible, else a full download", "choice": "allowed", "allowed": True, "blocks": False})
     else:
         base["decisions"].append({"phase": "pre", "kind": "OnlineChange", "name": "online-change", "message": "the running application changed without a stop", "choice": "online change", "allowed": True, "blocks": False})
-    if params.get("startAfter", True) and "run" not in str(oa.application_state).lower():
-        oa.start()
-    base.update({"state": "Success", "messages": ["application " + str(oa.application_state)]})
+    running = "run" in str(oa.application_state).lower()
+    # CODESYS's simulation loads its boot application stopped; there is no machine to keep still, so it runs
+    simulated = str((params.get("target") or {}).get("mode", "")).lower() == "simulation"
+    if params.get("startAfter", True) and (before != "stop" or simulated) and not running:
+        oa.start()  # stopped by this download, loaded for the first time, or the simulation
+    elif not running:
+        base["messages"].append("the application is stopped" + ("; it was stopped before the download, so rung leaves it" if before == "stop" else ""))
+    base.update({"state": "Success", "messages": base["messages"] + ["application " + str(oa.application_state)]})
     return base
 
 

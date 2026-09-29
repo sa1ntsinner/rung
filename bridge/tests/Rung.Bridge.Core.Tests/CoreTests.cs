@@ -391,6 +391,24 @@ public class PlcActionRouteTests
         Assert.Equal("Success", ok.GetProperty("state").GetString());
     }
 
+    [Fact] public void FilesCrossTheConnectionForAClientOnAnotherMachine()
+    {
+        var ex = Call("{\"id\":1,\"method\":\"objects.export\",\"params\":{\"address\":\"plc:PLC_1/blocks/10_Drives/Motors/Fx_Motor\",\"form\":\"auto\",\"inline\":true}}").GetProperty("result");
+        var f = ex.GetProperty("files")[0];
+        Assert.Equal("obj.scl", f.GetProperty("path").GetString());
+        Assert.StartsWith("FUNCTION_BLOCK \"Fx_Motor\"", f.GetProperty("content").GetString());
+
+        _s.Imports = true;
+        var im = Call("{\"id\":2,\"method\":\"objects.import\",\"params\":{\"address\":\"plc:PLC_1/blocks/10_Drives/Motors/Fx_Motor\",\"form\":\"s7dcl\",\"primary\":\"obj.s7dcl\",\"files\":[{\"name\":\"obj.s7dcl\",\"content\":\"NETWORK\"},{\"name\":\"obj.s7res\",\"content\":\"<res/>\"}],\"expectedTiaRevision\":\"fp:1\",\"operationId\":\"op\"}}");
+        Assert.Equal("obj.s7dcl", Path.GetFileName(_s.LastImportPath));
+        Assert.Equal(new Dictionary<string, string> { ["obj.s7dcl"] = "NETWORK", ["obj.s7res"] = "<res/>" }, _s.LastImport);
+        Assert.NotNull(im.GetProperty("result").GetProperty("files")[0].GetProperty("content").GetString());
+        Assert.False(Directory.Exists(Path.GetDirectoryName(_s.LastImportPath))); // the staging folder is gone
+
+        foreach (var bad in new[] { "../obj.scl", "..\\\\obj.scl", "C:\\\\x.scl", "sub/obj.scl" })
+            Assert.Equal("BAD_REQUEST", Call("{\"id\":3,\"method\":\"objects.import\",\"params\":{\"address\":\"plc:PLC_1/blocks/X\",\"form\":\"scl\",\"primary\":\"obj.scl\",\"files\":[{\"name\":\"" + bad + "\",\"content\":\"x\"}],\"expectedTiaRevision\":\"fp:1\",\"operationId\":\"op\"}}").GetProperty("error").GetProperty("code").GetString());
+    }
+
     [Fact] public void UploadTakesTheAddressAndDefaultsToPnIe()
     {
         var r = Call("{\"id\":1,\"method\":\"plc.upload\",\"params\":{\"request\":{\"address\":\"192.168.0.9\"}}}").GetProperty("result");

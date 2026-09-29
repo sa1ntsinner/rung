@@ -37,6 +37,8 @@ namespace Rung.Bridge.Core.Model
         public string Path;          // absolute staged path
         public string Role;          // "primary" or a companion role such as "res:en-US"
         public string Sha256;        // lowercase hex of the (normalized) bytes
+        /// <summary>The text itself, when files cross the connection (inline: a bridge on another machine); Path is then the file name.</summary>
+        public string Content;
     }
 
     public sealed class ExportResult

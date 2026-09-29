@@ -48,6 +48,35 @@ describe("rung CLI from inside a workspace", () => {
   });
 });
 
+describe("TIA Portal on another PC (Linux, macOS): the bridge over ssh", () => {
+  it("init --host, then pull and sync carry the files across the connection", async () => {
+    const log = join(tmpdir(), `ssh-${Date.now()}-${Math.random()}.log`);
+    const ssh = { RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_SSH_LOG: log };
+    const t = setup(ssh);
+    expect(await t.run("init", "--host", "elmir@tia-pc", "--project", PROJECT)).toBe(0);
+    expect(readFileSync(join(t.dir, "rung.toml"), "utf8")).toMatch(/\[bridge\][\s\S]*host = "elmir@tia-pc"/);
+    const first = JSON.parse(readFileSync(log, "utf8").split("\n")[0]!) as string[];
+    expect(first.slice(0, 4)).toEqual(["-T", "-o", "BatchMode=yes", "elmir@tia-pc"]);
+    expect(first[4]).toBe(`rung bridge --project C:\\fx\\RungFixture\\RungFixture.ap20 --open-headless`);
+
+    expect(await t.run("pull")).toBe(0);
+    const motor = join(t.dir, "plc", "PLC_1", "blocks", "10_Drives", "Motors", "Fx_Motor.scl");
+    expect(readFileSync(motor, "utf8")).toContain('FUNCTION_BLOCK "Fx_Motor"');
+    writeFileSync(motor, 'FUNCTION_BLOCK "Fx_Motor"\r\nbegin\r\nEND_FUNCTION_BLOCK\r\n');
+    expect(await t.run("sync")).toBe(0);
+    expect(readFileSync(motor, "utf8")).toContain("BEGIN"); // TIA's form came back across the connection
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.inline).toContain("export");
+    expect(db.inline).toContain("import obj.scl");
+  });
+
+  it("says what to check when nothing answers on the other PC", async () => {
+    const t = setup({ RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify(["-e", "process.exit(255)"]) });
+    expect(await t.run("init", "--host", "elmir@tia-pc", "--project", PROJECT)).toBe(1);
+    expect(t.err.join("")).toMatch(/BRIDGE_UNREACHABLE: no bridge answered on elmir@tia-pc .*ssh elmir@tia-pc.*rung bridge/);
+  });
+});
+
 describe("upload from a PLC (TIA Portal's Upload device as new station)", () => {
   it("rung upload reads the PLC into the bound project as a new station", async () => {
     const t = setup();

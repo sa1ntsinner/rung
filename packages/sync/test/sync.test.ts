@@ -706,6 +706,33 @@ describe("syncOnce", () => {
   });
 });
 
+describe("a table whose form changes in TIA Portal's export (tags.xml → tags.st)", () => {
+  const TT = "plc:PLC_1/tags/IO";
+  it("a local edit of the old form is sent, not a conflict, and the new form replaces the old file", async () => {
+    const t = setup((b) => b.add(TT, { kind: "tagtable", form: "tags.xml", content: "<table v1/>\n", fingerprint: "dt:1" }));
+    await t.sync();
+    expect(t.read("plc/PLC_1/tags/IO.tags.xml")).toBe("<table v1/>\n");
+    // rung now exports the table as text; the table itself did not change in TIA Portal
+    const o = t.bridge.objects.get(TT)!;
+    o.form = "tags.st";
+    o.files = { ".tags.st": "VAR_GLOBAL\nEND_VAR\n" };
+    t.bridge.importObject = async (address: string, form: string, path: string, expected: string) => {
+      t.bridge.imports.push({ address, expected, text: readFileSync(path, "utf8") });
+      o.files = { ".tags.st": "VAR_GLOBAL\n    // v2\nEND_VAR\n" };
+      o.entry.fingerprint = "dt:2";
+      return t.bridge.exportObject(address, "auto", mkdtempSync(join(tmpdir(), "rung-bridge-out-")));
+    };
+    t.write("plc/PLC_1/tags/IO.tags.xml", "<table v2/>\n");
+    const r = await t.sync(2000);
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.imports.map((i) => [i.text, i.expected])).toEqual([["<table v2/>\n", "dt:1"]]);
+    expect(t.read("plc/PLC_1/tags/IO.tags.st")).toBe("VAR_GLOBAL\n    // v2\nEND_VAR\n");
+    expect(existsSync(t.f("plc/PLC_1/tags/IO.tags.xml"))).toBe(false);
+    const quiet = await t.sync(3000);
+    expect(quiet.imported + quiet.exported + quiet.pendingDeletes).toBe(0);
+  });
+});
+
 describe("network settings (plc/<PLC>/hardware/network.yaml)", () => {
   const N = "plc:PLC_1/hardware/network";
   const pN = "plc/PLC_1/hardware/network.yaml";

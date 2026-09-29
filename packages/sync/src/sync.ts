@@ -317,7 +317,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     } else {
       for (const [suffix, text] of staged.texts) await writeFileAtomic(rel2abs(root, stem + suffix + ".tia"), text);
     }
-    state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files }, sending: undefined });
+    state.upsert({
+      ...st,
+      status: "conflicted",
+      conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files, ...(staged.result.form !== st.form ? { tiaForm: staged.result.form } : {}) },
+      sending: undefined,
+    });
     report.conflicts++;
     diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: "Edited in the workspace and in TIA Portal; resolve with rung resolve" });
   };
@@ -432,6 +437,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const base = await baseBundle(root, stemOf(cur), cur.files);
         const tia = Object.fromEntries(staged!.texts);
         if (staged!.result.form !== cur.form) {
+          // TIA Portal exports it in another form now (a tag table: .tags.xml → .tags.st). When only the form
+          // changed, not the object, the edit is sent as it is and TIA's answer brings the new form.
+          if (staged!.result.fingerprint === cur.tiaFingerprint) {
+            queue.push({ address, name, form: cur.form, stem, bundle, expected: cur.tiaFingerprint, captured, kind: "update", rank: rankOf(cur.form, texts), deps: referencedNames(texts, name) });
+            continue;
+          }
           await writeConflict(cur, stem, bundle, staged!, false);
           continue;
         }
@@ -620,7 +631,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     // Canonical rewrite: replace the imported files with TIA's form unless they were edited meanwhile.
     const staged = await mapStaged(root, result, null, job.stem);
     const plan = await planPublication(root, job.captured, staged.files);
-    const next = await buildState(root, job.address, staged, false, now());
+    let next = await buildState(root, job.address, staged, false, now());
+    if (plan.localEdit && next.form !== job.form) {
+      // TIA Portal answered in a new form, but the file changed meanwhile: the state keeps the file's form, with
+      // what was sent as its base, so the next pass sends the newer edit and then takes the new form
+      next = { ...next, path: primaryPath, form: job.form, files: job.captured, fileHash: bundleHash(job.captured) };
+    }
     if (plan.localEdit) warn(job.address, "EDITED_DURING_IMPORT", "the file changed while it was imported; the newer edit is sent on the next pass");
     else if (plan.targets.length || plan.removes.length) {
       const opId = randomUUID();
@@ -716,11 +732,25 @@ export async function resolveConflict(root: string, state: StateStore, path: str
     await state.flush();
     return;
   }
+  // TIA Portal's side came in another form (a tag table that became .tags.st)
+  const tiaForm = st.conflict?.tiaForm;
   if (mode === "theirs") {
     const blobs = new BlobStore(root);
     for (const f of tiaFiles)
       await replaceGuarded(rel2abs(root, f.path), await blobs.get(f.hash), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
-    state.upsert({ ...st, files: tiaFiles, fileHash: bundleHash(tiaFiles), path: tiaFiles.find((f) => f.role === "primary")?.path ?? st.path, tiaFingerprint, status: "synced", conflict: undefined });
+    if (tiaForm)
+      // the files of the old form go to recovery: TIA's version replaces them
+      for (const f of st.files) {
+        const from = rel2abs(root, f.path);
+        if (tiaFiles.some((t) => t.path === f.path) || !existsSync(from)) continue;
+        await mkdir(join(recoveryDir, dirname(f.path)), { recursive: true });
+        await rename(from, join(recoveryDir, f.path));
+      }
+    state.upsert({ ...st, files: tiaFiles, fileHash: bundleHash(tiaFiles), path: tiaFiles.find((f) => f.role === "primary")?.path ?? st.path, ...(tiaForm ? { form: tiaForm } : {}), tiaFingerprint, status: "synced", conflict: undefined });
+  } else if (tiaForm) {
+    // ours / merged across a form change: the person's file (its form) is sent against TIA's current version;
+    // TIA's answer then brings the new form. The .tia helper files show TIA's side meanwhile.
+    state.upsert({ ...st, tiaFingerprint, status: "fileDirty", conflict: undefined });
   } else {
     const markers = /^<<<<<<< file$/m;
     for (const f of tiaFiles) {

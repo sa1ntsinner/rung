@@ -54,7 +54,13 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
     // CODESYS: rung itself relays to its bridge script inside CODESYS (codesys.ts); imports are always allowed
     // there, sync.import decides whether rung sends any
     const b = codesysBridgeCommand(config.project.path);
-    const client = await BridgeClient.spawn({ command: b.command, args: b.args, env: cleanEnv(io.env), requestTimeoutMs: 300_000 });
+    const client = await BridgeClient.spawn({ command: b.command, args: b.args, env: cleanEnv(io.env), requestTimeoutMs: 300_000, closeTimeoutMs: 30_000 }); // the relay gives CODESYS 10 s to close its project
+    client.onEvent((e) => showBridgeEvent(io, e));
+    return client;
+  }
+  const tiaArgs = ["--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
+  if (config.bridge.host) {
+    const client = await remoteBridge(config.bridge.host, config.bridge.command, [...config.bridge.args, ...tiaArgs], config.project.tiaVersion === "V21" ? "V21" : "V20", io);
     client.onEvent((e) => showBridgeEvent(io, e));
     return client;
   }
@@ -65,6 +71,31 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   const client = await BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
+}
+
+/** An argument for cmd.exe, the shell Windows' OpenSSH server runs commands in. */
+export function windowsArg(a: string): string {
+  return /^[A-Za-z0-9_\-.:\\/=@+]+$/.test(a) ? a : `"${a.replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The bridge on the Windows PC that runs TIA Portal, over ssh (Linux, macOS): `rung bridge` there (rung installed on
+ * that PC) or the given command. Key-based login only: BatchMode never waits for a password. Files cross the
+ * connection (BridgeClient remote).
+ */
+export async function remoteBridge(host: string, command: string, args: string[], tia: "V20" | "V21", io: Io): Promise<BridgeClient> {
+  // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
+  const ssh = io.env.RUNG_SSH ?? "ssh";
+  const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
+  const line = [command || "rung bridge", ...(!command && tia === "V21" ? ["--tia", "V21"] : []), ...args.map(windowsArg)].join(" ");
+  try {
+    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", host, line], env: cleanEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
+  } catch (e) {
+    throw new WorkspaceError(
+      "BRIDGE_UNREACHABLE",
+      `no bridge answered on ${host} (${(e as Error).message}). Check that \`ssh ${host}\` logs in without a password and that rung is installed there (\`rung bridge\` on that PC).`,
+    );
+  }
 }
 
 /** TIA Portal's own questions and notifications explain many online and download failures; RUNG_DEBUG=1 shows every bridge event. */

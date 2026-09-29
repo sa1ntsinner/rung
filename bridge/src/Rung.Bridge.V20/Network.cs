@@ -133,32 +133,40 @@ namespace Rung.Bridge.V20
             List<InterfaceSettings> want;
             try { want = NetworkYaml.Parse(File.ReadAllText(path)); }
             catch (NetworkFormatException e) { throw new RpcException(ErrorCodes.ImportFailed, e.Message + ". Nothing was changed"); }
-            var nodes = NetworkNodes((DeviceItem)r.Obj);
-            var byKey = nodes.ToDictionary(n => n.Key, StringComparer.Ordinal);
-            foreach (var w in want)
-                if (!byKey.ContainsKey(w.Key))
-                    throw new RpcException(ErrorCodes.ImportFailed, "line " + w.Line + ": " + device + " has no interface \"" + w.Key + "\" (the file lists the interfaces as rung wrote them). Nothing was changed");
-            // read everything first: a subnet mask or router set on one interface changes the others on the subnet
-            var before = nodes.ToDictionary(n => n.Key, ReadSettings, StringComparer.Ordinal);
-            if (ContentHash(NetworkYaml.Render(device, nodes.Select(n => before[n.Key]))) != expectedTiaRevision)
-                throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+            Dictionary<string, InterfaceSettings> before = null;
+            var attempted = false;
             _inImport = true;
             try
             {
                 using (var access = _portal.ExclusiveAccess("rung: network settings of " + device))
-                using (var tx = access.Transaction(_project, "rung import " + operationId))
                 {
-                    foreach (var w in want) Apply(byKey[w.Key], w, before[w.Key]);
-                    tx.CommitOnDispose();
+                    // read and compare under exclusive access, so the settings changed are the ones checked
+                    var nodes = NetworkNodes((DeviceItem)r.Obj);
+                    var byKey = nodes.ToDictionary(n => n.Key, StringComparer.Ordinal);
+                    foreach (var w in want)
+                        if (!byKey.ContainsKey(w.Key))
+                            throw new RpcException(ErrorCodes.ImportFailed, "line " + w.Line + ": " + device + " has no interface \"" + w.Key + "\" (the file lists the interfaces as rung wrote them). Nothing was changed");
+                    // everything first: a subnet mask or router set on one interface changes the others on the subnet
+                    var now = nodes.ToDictionary(n => n.Key, ReadSettings, StringComparer.Ordinal);
+                    if (ContentHash(NetworkYaml.Render(device, nodes.Select(n => now[n.Key]))) != expectedTiaRevision)
+                        throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
+                    foreach (var w in want) Check(byKey[w.Key], w, now[w.Key]);
+                    before = now;
+                    using (var tx = access.Transaction(_project, "rung import " + operationId))
+                    {
+                        attempted = true;
+                        foreach (var w in want) Apply(byKey[w.Key], w, before[w.Key]);
+                        tx.CommitOnDispose();
+                    }
                 }
             }
             catch (RpcException e)
             {
-                throw new RpcException(e.Code, Sentence(e.Message) + RestoreNetwork((DeviceItem)r.Obj, before));
+                throw new RpcException(e.Code, Sentence(e.Message) + (attempted ? RestoreNetwork((DeviceItem)r.Obj, before) : " Nothing was changed."));
             }
             catch (EngineeringException e)
             {
-                throw new RpcException(ErrorCodes.ImportFailed, Sentence(TiaReason(e)) + RestoreNetwork((DeviceItem)r.Obj, before));
+                throw new RpcException(ErrorCodes.ImportFailed, Sentence(TiaReason(e)) + (attempted ? RestoreNetwork((DeviceItem)r.Obj, before) : " Nothing was changed."));
             }
             finally { _inImport = false; }
             _index.Clear();
@@ -171,6 +179,27 @@ namespace Rung.Bridge.V20
             return result;
         }
 
+
+        /// <summary>
+        /// Refuses, before anything changes, a setting the interface cannot take: TIA Portal would otherwise not have
+        /// it and the file would silently lose it on the way back (a subnet mask while the address comes from DHCP).
+        /// </summary>
+        static void Check(NetNode n, InterfaceSettings want, InterfaceSettings now)
+        {
+            string At(string field) => want.At(field) + n.Key + ": ";
+            var ip = want.Ip ?? now.Ip;
+            if (want.Ip != null && want.Ip != now.Ip && want.Ip != "dhcp" && want.Ip != "other" && !NetworkYaml.IsIpv4(want.Ip))
+                throw new RpcException(ErrorCodes.ImportFailed, At("ip") + "ip \"" + want.Ip + "\" is not an IPv4 address such as 192.168.0.1, dhcp or other");
+            if (!NetworkYaml.IsIpv4(ip ?? ""))
+            {
+                if (want.SubnetMask != null && want.SubnetMask != now.SubnetMask)
+                    throw new RpcException(ErrorCodes.ImportFailed, At("subnetMask") + "the address is " + ip + ", so there is no subnet mask to set; give ip an address first");
+                if (want.Router != null && want.Router != now.Router)
+                    throw new RpcException(ErrorCodes.ImportFailed, At("router") + "the address is " + ip + ", so there is no router to set; give ip an address first");
+            }
+            if (want.DeviceName != null && want.DeviceName != now.DeviceName && now.DeviceName == null)
+                throw new RpcException(ErrorCodes.ImportFailed, At("deviceName") + "this interface has no PROFINET device name");
+        }
 
         /// <summary>Sets what the file changes; a setting it leaves out or keeps stays as it is.</summary>
         static void Apply(NetNode n, InterfaceSettings want, InterfaceSettings now)

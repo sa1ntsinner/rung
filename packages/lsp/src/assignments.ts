@@ -65,10 +65,15 @@ function span(a: Pick<Assignment, "byte" | "bits">): number[] {
 
 export function assignmentList(index: WorkspaceIndex): { items: Assignment[]; overlaps: Overlap[] } {
   const byAddress = new Map<string, Assignment>();
-  const entry = (text: string): Assignment | undefined => {
-    const p = parseAbsolute(text);
+  const entry = (text: string, typeBits?: number): Assignment | undefined => {
+    let p = parseAbsolute(text);
     if (!p) return undefined;
-    const key = `${p.address}${p.peripheral ? ":P" : ""}`;
+    // TIA Portal writes a 64-bit tag at a bit address (%M0.0 : LReal): it takes eight bytes from there
+    if (typeBits === 64 && p.bit === 0) {
+      const { bit: _bit, ...rest } = p;
+      p = { ...rest, bits: 64 };
+    }
+    const key = `${p.address}${p.bits === 64 && p.address.includes(".") ? ":64" : ""}${p.peripheral ? ":P" : ""}`;
     let a = byAddress.get(key);
     if (!a) byAddress.set(key, (a = { ...p, tags: [], uses: [] }));
     return a;
@@ -78,7 +83,7 @@ export function assignmentList(index: WorkspaceIndex): { items: Assignment[]; ov
     // PLC tags, and located variables of IEC global variable lists (CODESYS: x AT %IX0.0 : BOOL)
     const at = g.tag?.address ?? g.gvar?.decl.at;
     if (!at) continue;
-    const a = entry(at);
+    const a = entry(at, TYPE_BITS[(g.tag?.dataType ?? g.gvar!.decl.type).toUpperCase()]);
     if (!a) continue;
     a.tags.push({ name: g.name, table: g.tag?.table ?? g.gvar!.list, dataType: g.tag?.dataType ?? g.gvar!.decl.type });
     tagAddress.set(g.name.toUpperCase(), a);

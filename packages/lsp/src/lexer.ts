@@ -153,6 +153,8 @@ export function lex(src: string, opts: LexOptions = {}): { tokens: Token[]; erro
       while (i < n && /[A-Za-z0-9_.]/.test(src[i]!)) i++;
       // IEC wildcard addresses: x AT %I* : BOOL;
       if (src[i] === "*" && /^%[A-Za-z]+$/.test(src.slice(start, i))) i++;
+      // peripheral access, straight to the module: %IW256:P (not a ':' and a P)
+      else if (src[i] === ":" && /^[Pp]$/.test(src[i + 1] ?? "") && !/[A-Za-z0-9_]/.test(src[i + 2] ?? "")) i += 2;
       push("absolute", start, i);
       continue;
     }

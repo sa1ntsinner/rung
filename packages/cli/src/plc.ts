@@ -281,7 +281,8 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   }
 
   const request = { device, hardware, software, onlyChanges, allow, startAfter, target };
-  const r = await link.call<DownloadOutcome>("download", { request }, (b) => b.download(request));
+  // confirmed: the PLC the person typed (or passed --yes for); rung watch refuses a download without it
+  const r = await link.call<DownloadOutcome>("download", { request, confirmed: device }, (b) => b.download(request));
   for (const d of r.decisions) {
     const mark = d.blocks ? "✗" : "✓";
     io.stdout(`  ${mark} ${d.phase.padEnd(4)} ${d.name.padEnd(26)} ${d.choice}${d.message ? `  (${d.message.replace(/\s*\n\s*/g, " ")})` : ""}\n`);

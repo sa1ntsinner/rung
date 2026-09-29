@@ -216,6 +216,14 @@ public class AdapterTests : IClassFixture<FixtureSession>
             Assert.Equal("IMPORT_FAILED", ex.Code);
             Assert.StartsWith("line 8: PLC_1 / PROFINET interface_1: ", ex.Message);
             Assert.Equal(bad.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
+            // a subnet mask for an address from DHCP: refused with its line, not dropped on the way back
+            var text2 = File.ReadAllText(bad.Files[0].Path).Replace("\r\n", "\n");
+            var at2 = text2.IndexOf("\"PLC_1 / PROFINET interface_2\"", StringComparison.Ordinal);
+            var ip2 = System.Text.RegularExpressions.Regex.Match(text2.Substring(at2), @"\n  ip: (\S+)").Groups[1].Value;
+            var dhcp = text2.Substring(0, at2) + text2.Substring(at2).Replace("  ip: " + ip2 + "\n", "  ip: dhcp\n").Replace("subnetMask: 255.255.255.0", "subnetMask: 255.255.0.0");
+            var ex2 = Assert.Throws<RpcException>(() => _fx.Session.Import(address, "yaml", Write(dhcp), bad.Fingerprint, Guid.NewGuid().ToString()));
+            Assert.Matches(@"^line \d+: PLC_1 / PROFINET interface_2: the address is dhcp, so there is no subnet mask to set; give ip an address first\. Nothing was changed\.$", ex2.Message);
+            Assert.Equal(bad.BundleHash, _fx.Session.Export(address, "auto", Tmp()).BundleHash);
         }
         finally
         {

@@ -94,6 +94,8 @@ export interface ExportFile {
   path: string;
   role: string;
   sha256: string;
+  /** The text, when files cross the connection (a bridge on another machine); `path` is then the file name. */
+  content?: string;
 }
 
 export interface ExportResult {

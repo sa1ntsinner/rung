@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DescribeNode } from "@rung/bridge-client";
@@ -84,5 +84,10 @@ describe("views", () => {
     expect(y).toContain('  - name: "Start & Go"');
     expect(y).toContain('    address: "%I0.0"');
     expect(y).toContain("    comment: start button");
+    // the table became text (.tags.st): readable as it is, and its old view goes
+    writeFileSync(join(root, "plc", "PLC_1", "tags", "Fx_Inputs.tags.st"), "VAR_GLOBAL\nEND_VAR\n");
+    rmSync(join(root, "plc", "PLC_1", "tags", "Fx_Inputs.tags.xml"));
+    expect(await writeTagViews(root)).toEqual([]);
+    expect(existsSync(join(root, "views", "tags", "PLC_1", "Fx_Inputs.yaml"))).toBe(false);
   });
 });

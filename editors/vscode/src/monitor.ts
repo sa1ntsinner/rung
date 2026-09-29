@@ -77,6 +77,12 @@ export class Monitor implements vscode.Disposable {
       void vscode.window.showWarningMessage("Monitoring works on the blocks of a rung workspace.");
       return;
     }
+    // the plan comes from the file on disk: unsaved lines would put values next to the wrong statements
+    const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
+    if (open?.isDirty && !(await open.save())) {
+      void vscode.window.showWarningMessage("Save the block first: monitoring shows the values of the saved block.");
+      return;
+    }
     const password = await this.password();
     if (password === undefined) return;
     const args = ["live", "watch", "--json", "--file", rel, ...(instance ? ["--instance", instance] : [])];

@@ -199,9 +199,16 @@ export class WorkspaceIndex {
     return this.enumerators.get(name.toUpperCase()) ?? [];
   }
 
-  global(name: string): GlobalSymbol | undefined {
+  /**
+   * The object of this name. Seen from a file of plc/<PLC>/ (`from`), the one of that PLC: another PLC's blocks,
+   * DBs and tags are not visible from it, even when they have the same name.
+   */
+  global(name: string, from?: string): GlobalSymbol | undefined {
     this.rebuild();
-    return this.globals.get(name.toUpperCase())?.[0];
+    const all = this.globals.get(name.toUpperCase());
+    const device = from ? deviceOfUri(from) : undefined;
+    if (!all || !device) return all?.[0];
+    return all.find((s) => deviceOfUri(s.uri) === device) ?? all.find((s) => !deviceOfUri(s.uri));
   }
 
   allGlobals(): GlobalSymbol[] {
@@ -290,6 +297,26 @@ async function isRungLayout(root: string): Promise<boolean> {
 }
 
 /** Extracts tags from a SimaticML tag-table export (regex-based; the files are machine-generated). */
+/** The PLC of a rung workspace file (…/plc/<PLC>/…), undefined elsewhere. */
+export function deviceOfUri(uri: string): string | undefined {
+  return /\/plc\/([^/]+)\//.exec(uri)?.[1];
+}
+
+/**
+ * The index as seen from one file: every lookup by name finds that file's PLC's object (WorkspaceIndex.global
+ * with `from`). Entry points of the language server and the simulator wrap the index once with it.
+ */
+export function scopedTo(index: WorkspaceIndex, from: string): WorkspaceIndex {
+  if (!deviceOfUri(from)) return index;
+  return new Proxy(index, {
+    get(target, prop, receiver) {
+      if (prop === "global") return (name: string, other?: string) => target.global(name, other ?? from);
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(receiver) : v;
+    },
+  });
+}
+
 /** A TIA tag table as text (rung `*.tags.st`): an IEC global variable list whose entries are PLC tags. */
 export const TAG_TEXT = /\.tags\.st$/i;
 

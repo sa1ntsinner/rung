@@ -318,11 +318,16 @@ describe("rung extension on a fake-bridge workspace", function () {
         writeFileSync(tomlPath, `${toml}\n[live.webapi]\nurl = "${url}"\nuser = "any"\n`);
         process.env.RUNG_WEBAPI_PASSWORD = "x";
         const ed = await openDoc(PUMP);
+        const saved = readFileSync(file(PUMP).fsPath, "utf8");
+        // an unsaved line above the code: monitoring saves first, so the values stay on their statements
+        await ed.edit((e) => e.insert(new vscode.Position(0, 0), "// monitored\n"));
         void api.monitor.toggle(ed.document.uri);
         await waitFor("two reads", () => api.monitor.reads >= 2 || undefined, 30_000, 200);
+        assert.equal(ed.document.isDirty, false);
         const plan = api.monitor.plan!;
         assert.equal(plan.instance, '"Fx_Pump_DB"');
         const line = String(positionOf(ed.document, "#running := #start").line);
+        writeFileSync(file(PUMP).fsPath, saved);
         assert.deepEqual(plan.lines[line], ["#running", "#start"]);
         assert.equal(api.monitor.values["#start"], true); // Main calls "Fx_Pump_DB"(start := TRUE)
         assert.equal(api.monitor.values["#running"], true);

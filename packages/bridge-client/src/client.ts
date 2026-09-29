@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import {
   BridgeError,
   ErrorCodes,
@@ -31,6 +33,13 @@ export interface BridgeClientOptions {
   requestTimeoutMs?: number;
   /** Frames above this size terminate the bridge. Default 64 MiB. */
   maxLineBytes?: number;
+  /**
+   * The bridge runs on another machine (over SSH): exports and imports carry the file contents instead of paths,
+   * so callers keep using local folders.
+   */
+  remote?: boolean;
+  /** How long close() waits for the bridge to end by itself before killing it. Default 5 s. */
+  closeTimeoutMs?: number;
 }
 
 interface Pending {
@@ -59,7 +68,7 @@ export class BridgeClient {
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
-    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "maxLineBytes">>,
+    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "maxLineBytes">> & { remote: boolean; closeTimeoutMs: number },
   ) {
     this.exitPromise = new Promise((resolve) => {
       const done = () => {
@@ -91,6 +100,8 @@ export class BridgeClient {
     const client = new BridgeClient(child, {
       requestTimeoutMs: opts.requestTimeoutMs ?? 120_000,
       maxLineBytes: opts.maxLineBytes ?? 64 * 1024 * 1024,
+      remote: !!opts.remote,
+      closeTimeoutMs: opts.closeTimeoutMs ?? 5_000,
     });
     try {
       const hello = (await client.request("bridge.hello", {})) as HelloResult;
@@ -136,11 +147,25 @@ export class BridgeClient {
   listObjects(device: string): Promise<ObjectEntry[]> {
     return this.request("objects.list", { device }) as Promise<ObjectEntry[]>;
   }
-  exportObject(address: string, form: string, dir: string): Promise<ExportResult> {
-    return this.request("objects.export", { address, form, dir }) as Promise<ExportResult>;
+  async exportObject(address: string, form: string, dir: string): Promise<ExportResult> {
+    if (!this.opts.remote) return this.request("objects.export", { address, form, dir }) as Promise<ExportResult>;
+    // the bridge stages on its machine and sends the texts; they land in the caller's folder as usual
+    const r = (await this.request("objects.export", { address, form, inline: true })) as ExportResult;
+    for (const f of r.files) {
+      const local = join(dir, basename(f.path));
+      await writeFile(local, f.content ?? "", "utf8");
+      f.path = local;
+    }
+    return r;
   }
-  importObject(address: string, form: string, path: string, expectedTiaRevision: string, operationId: string): Promise<ExportResult> {
-    return this.request("objects.import", { address, form, path, expectedTiaRevision, operationId }) as Promise<ExportResult>;
+  async importObject(address: string, form: string, path: string, expectedTiaRevision: string, operationId: string): Promise<ExportResult> {
+    if (!this.opts.remote) return this.request("objects.import", { address, form, path, expectedTiaRevision, operationId }) as Promise<ExportResult>;
+    // the file and its companions (same stem: obj.s7dcl, obj.s7res) go along; the result comes back as texts
+    const primary = basename(path);
+    const stem = primary.slice(0, primary.length - form.length - 1);
+    const names = (await readdir(dirname(path))).filter((n) => n === primary || (n.startsWith(stem + ".") && n !== primary));
+    const files = await Promise.all(names.map(async (name) => ({ name, content: await readFile(join(dirname(path), name), "utf8") })));
+    return this.request("objects.import", { address, form, primary, files, expectedTiaRevision, operationId }) as Promise<ExportResult>;
   }
 
   deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
@@ -203,7 +228,7 @@ export class BridgeClient {
   async close(): Promise<void> {
     if (!this.exited) {
       this.child.stdin.end();
-      const killer = setTimeout(() => this.child.kill(), 5_000);
+      const killer = setTimeout(() => this.child.kill(), this.opts.closeTimeoutMs);
       await this.exitPromise;
       clearTimeout(killer);
     }

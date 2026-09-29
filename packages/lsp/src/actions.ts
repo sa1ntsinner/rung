@@ -4,7 +4,7 @@
 import { escapeSegment } from "@rung/core";
 import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
-import { tagTableFor, type WorkspaceIndex } from "./workspace.js";
+import { scopedTo, tagTableFor, type WorkspaceIndex } from "./workspace.js";
 import { TYPE_BITS, assignmentList } from "./assignments.js";
 import { calledWithoutInstance, scopeDecl } from "./features.js";
 import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
@@ -27,6 +27,7 @@ export interface QuickFix {
 }
 
 export function codeActions(index: WorkspaceIndex, uri: string, start: number, end: number): QuickFix[] {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc?.parsed || !/\.scl$/i.test(uri)) return [];
   const out: QuickFix[] = [];
@@ -110,6 +111,7 @@ function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: Block
   const bits = TYPE_BITS[type.toUpperCase()];
   if (!bits) return []; // a String or a PLC data type needs its size chosen in TIA Portal
   const address = freeMemory(index, bits);
+  if (!address) return []; // bit memory holds a tag whose size rung cannot tell: TIA Portal's Define tag chooses
   const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(ref.name) ? ref.name : `"${ref.name}"`;
   // before the END_VAR of the tags (VAR_GLOBAL, not the constants)
   const section = /^[ \t]*VAR_GLOBAL[ \t]*(\r?\n|$)/m.exec(tableText);
@@ -120,8 +122,13 @@ function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: Block
   return [{ title: `Create the PLC tag "${ref.name}" : ${type} at ${address} in ${table.name}`, code: "UNKNOWN_GLOBAL", edits: [edit], preferred: true }];
 }
 
-/** Bit memory after the highest byte in use (never one a tag or the code uses); bits share the last byte of bits. */
-function freeMemory(index: WorkspaceIndex, bits: number): string {
+/**
+ * Bit memory after the highest byte in use (never one a tag or the code uses); bits share the last byte of bits.
+ * None when a bit memory tag has a type of unknown size (a PLC data type, a String): its end cannot be known.
+ */
+function freeMemory(index: WorkspaceIndex, bits: number): string | undefined {
+  for (const g of index.allGlobals())
+    if (g.tag?.address && /^%M/i.test(g.tag.address) && !TYPE_BITS[g.tag.dataType.toUpperCase()]) return undefined;
   const used = assignmentList(index).items.filter((a) => a.area === "M");
   let top = -1;
   for (const a of used) top = Math.max(top, a.byte + Math.max(1, a.bits / 8) - 1);

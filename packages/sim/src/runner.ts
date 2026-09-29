@@ -3,7 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { WorkspaceIndex } from "@rung/lsp";
+import { scopedTo, type WorkspaceIndex } from "@rung/lsp";
 import { Simulator, SimError, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 
 /*
@@ -107,7 +107,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   const results: CaseResult[] = [];
   for (const [ci, c] of (spec.cases ?? []).entries()) {
     const t0 = Date.now();
-    const sim = new Simulator(index);
+    // what the block calls and uses is its own PLC's (another PLC may have objects of the same names)
+    const sim = new Simulator(scopedTo(index, g.uri));
     const failures: TestFailure[] = [];
     const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     const inOuts = g.block.vars.filter((v) => v.section === "InOut");

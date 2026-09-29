@@ -22,6 +22,7 @@ export type WorkspaceErrorCode =
   | "NOT_READY"
   /** an FB to monitor has no single instance DB: the person names the instance */
   | "NO_INSTANCE"
+  | "BRIDGE_UNREACHABLE"
   | "NOT_A_WORKSPACE"
   | "READ_ONLY";
 

@@ -89,6 +89,7 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
     let stopWatch!: () => void;
     const watchOut: string[] = [];
     const watching = main(["watch"], { ...io, stdout: (s) => watchOut.push(s), stderr: (s) => watchOut.push(s), stopSignal: new Promise<void>((r) => (stopWatch = r)) });
+    let dlText = "";
     try {
       // a download through the watch (until its bridge is up it answers NOT_READY)
       for (let i = 0; i < 60 && !existsSync(file(".rung/owner.json")); i++) await sleep(500);
@@ -97,6 +98,7 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
         await sleep(2000);
         dl = await run("download", "--yes");
       }
+      dlText = dl.text;
       expect(dl.text).toMatch(/download: Success/);
       const lines: string[] = [];
       let stopLive!: () => void;
@@ -114,7 +116,7 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
       expect(counts.at(-1)!).toBeGreaterThan(counts[0]!); // it runs
       expect(reads.at(-1)!.values!.bOn).toBe(true);
     } catch (e) {
-      console.log(`rung watch said:\n${watchOut.join("")}`);
+      console.log(`rung download said:\n${dlText}\nrung watch said:\n${watchOut.join("")}`);
       throw e;
     } finally {
       stopWatch();

@@ -10,7 +10,11 @@ export interface RungConfig {
   /** tiaVersion "CODESYS": a CODESYS project (.project) through rung's CODESYS bridge */
   project: { path: string; tiaVersion: EngineeringVersion };
   /** command "" = the bridge that comes with rung, found at run time (an absolute path would pin one install) */
-  bridge: { command: string; args: string[] };
+  /**
+   * host: the Windows PC that runs TIA Portal, as ssh reaches it ("elmir@tia-pc"); rung then starts the bridge there
+   * (command, default `rung bridge`) and files cross the connection. For Linux and macOS.
+   */
+  bridge: { command: string; args: string[]; host?: string };
   /** PLC aliases (TIA device names) mirrored into plc/<alias>/. Empty = all PLCs of the project. */
   devices: string[];
   sync: {
@@ -95,6 +99,7 @@ export function parseConfig(text: string): RungConfig {
   if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V20, V21 or CODESYS");
   const bridge = (raw.bridge ?? {}) as Record<string, unknown>;
   if (bridge.command !== undefined && typeof bridge.command !== "string") fail("bridge.command must be a path");
+  if (bridge.host !== undefined && (typeof bridge.host !== "string" || !/^[^\s"']+$/.test(bridge.host))) fail("bridge.host must be an ssh destination such as elmir@tia-pc");
   const base = defaultConfig(project.path, project.tiaVersion as EngineeringVersion, (bridge.command as string | undefined) ?? "");
   const sync = { ...base.sync, ...((raw.sync as object) ?? {}) } as RungConfig["sync"];
   if (!(sync.pollMs >= 250)) fail("sync.pollMs must be >= 250");
@@ -140,7 +145,7 @@ export function parseConfig(text: string): RungConfig {
   }
   return {
     ...base,
-    bridge: { command: (bridge.command as string | undefined) ?? "", args: Array.isArray(bridge.args) ? bridge.args.map(String) : [] },
+    bridge: { command: (bridge.command as string | undefined) ?? "", args: Array.isArray(bridge.args) ? bridge.args.map(String) : [], ...(bridge.host ? { host: bridge.host as string } : {}) },
     devices: devices as string[],
     sync,
     tia,
@@ -157,7 +162,7 @@ export function formatConfig(c: RungConfig): string {
       format: c.format,
       devices: c.devices,
       project: c.project,
-      ...(c.bridge.command || c.bridge.args.length ? { bridge: c.bridge } : {}),
+      ...(c.bridge.command || c.bridge.args.length || c.bridge.host ? { bridge: c.bridge } : {}),
       sync: c.sync,
       readOnly: c.readOnly,
       tia: c.tia,

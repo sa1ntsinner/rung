@@ -7,6 +7,19 @@ const tags = (name: string, rows: [string, string, string][]) =>
   rows.map(([n, t, a], i) => `<SW.Tags.PlcTag ID="${i + 1}" CompositionName="Tags"><AttributeList><DataTypeName>${t}</DataTypeName><LogicalAddress>${a}</LogicalAddress><Name>${n}</Name></AttributeList></SW.Tags.PlcTag>\n`).join("") +
   `</ObjectList>\n</SW.Tags.PlcTagTable>\n</Document>\n`;
 
+describe("assignment list: sizes TIA Portal does not write in the address", () => {
+  it("a 64-bit tag at a bit address takes eight bytes; peripheral access in code stays peripheral", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/tags/Default%20tag%20table.tags.st", "VAR_GLOBAL\n    Wide AT %M0.0 : LReal;\nEND_VAR\n", 0);
+    idx.set("file:///w/plc/P/blocks/Fx_A.scl", 'FUNCTION "Fx_A" : Void\nBEGIN\n\t%MD4 := %IW256:P;\n\t"Flag" := TRUE;\nEND_FUNCTION\n', 0);
+    const r = assignmentList(idx);
+    const wide = r.items.find((a) => a.tags.some((t) => t.name === "Wide"))!;
+    expect([wide.address, wide.bits]).toEqual(["%M0.0", 64]);
+    expect(r.overlaps).toContainEqual({ a: "%M0.0", b: "%MD4", bytes: [4, 5, 6, 7], nested: true });
+    expect(r.items.find((a) => a.address === "%IW256")).toMatchObject({ peripheral: true });
+  });
+});
+
 describe("assignment list", () => {
   it("reads absolute addresses like TIA Portal, German mnemonics and peripheral access too", () => {
     expect(parseAbsolute("%I0.3")).toMatchObject({ address: "%I0.3", area: "I", byte: 0, bit: 3, bits: 1 });

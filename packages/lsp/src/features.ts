@@ -2,7 +2,7 @@
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import type { BlockModel, Ref, VarDecl } from "./parser.js";
-import { TAG_TEXT, tagTableFor, type Member, type WorkspaceIndex } from "./workspace.js";
+import { TAG_TEXT, scopedTo, tagTableFor, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, unknownArgs } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
 
@@ -56,6 +56,7 @@ export function calledWithoutInstance(index: WorkspaceIndex, ref: Ref): boolean 
 }
 
 export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string): Member | undefined {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const own = localDecl(block, name);
   if (own) return { ...own, uri };
   const u = name.toUpperCase();
@@ -98,6 +99,7 @@ function suggestAddress(a: { area: string; byte: number }, bits: number): string
 }
 
 export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnostic[] {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
@@ -183,6 +185,7 @@ export function outline(index: WorkspaceIndex, uri: string): OutlineSymbol[] {
 }
 
 export function definition(index: WorkspaceIndex, uri: string, offset: number): Location | undefined {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   if (!hit) return undefined;
   const { block, ref, member } = hit;
@@ -228,6 +231,7 @@ function memberReferences(index: WorkspaceIndex, target: Location, includeDeclar
 }
 
 export function references(index: WorkspaceIndex, uri: string, offset: number, includeDeclaration = true): Location[] {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   const out: Location[] = [];
   // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), or a declaration in a DB/UDT/FB
@@ -263,6 +267,7 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
 const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section] ?? m.section} ` : ""}**${m.name}** : \`${m.type}\`${m.comment ? ` — ${m.comment}` : ""}`;
 
 export function hover(index: WorkspaceIndex, uri: string, offset: number): { markdown: string; start: number; end: number } | undefined {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   if (!hit) return typeHover(index, uri, offset);
   const { block, ref, member } = hit;
@@ -329,6 +334,7 @@ function typeHover(index: WorkspaceIndex, uri: string, offset: number): { markdo
 
 /** Completions for the text before the cursor. */
 export function complete(index: WorkspaceIndex, uri: string, offset: number): Completion[] {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc) return [];
   const line = doc.text.slice(doc.text.lastIndexOf("\n", offset - 1) + 1, offset);
@@ -382,6 +388,7 @@ export interface TextEdit {
 
 /** Renames a block-local variable (declaration and every #reference). Other renames are refused. */
 export function rename(index: WorkspaceIndex, uri: string, offset: number, newName: string): TextEdit[] | { error: string } {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   if (!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(newName)) return { error: `${newName} is not a valid SCL identifier` };
   const block = index.blockAt(uri, offset);
   if (!block) return { error: "Nothing to rename here" };

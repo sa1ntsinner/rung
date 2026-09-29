@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { parseArgs } from "node:util";
+import { spawn } from "node:child_process";
 import { readFile, writeFile, appendFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,7 @@ import {
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
-import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
+import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
@@ -45,6 +46,7 @@ Usage:
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>]
+  rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
                                        a new project from a running PLC (TIA's "Upload device as new station")
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
@@ -97,6 +99,25 @@ async function agentsTemplate(project: string): Promise<string> {
   }
 }
 
+/** `rung bridge [--tia V21] <bridge arguments>`: runs the bridge that comes with rung on this PC, on stdin/stdout. */
+async function runBridge(args: string[], io: Io): Promise<number> {
+  let tia: "V20" | "V21" = "V20";
+  if (args[0] === "--tia") {
+    tia = args[1] === "V21" ? "V21" : "V20";
+    args = args.slice(2);
+  }
+  const own = defaultBridge(io.env);
+  const exe = io.env.RUNG_BRIDGE ? own.command : bridgeExecutable(io.env, tia);
+  const child = spawn(exe, [...own.args, ...args], { stdio: "inherit", windowsHide: true, env: io.env as NodeJS.ProcessEnv });
+  return await new Promise<number>((done) => {
+    child.on("exit", (code) => done(code ?? 1));
+    child.on("error", (e) => {
+      io.stderr(`rung bridge: ${e.message}\n`);
+      done(1);
+    });
+  });
+}
+
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const cfgPath = join(dir, CONFIG_FILE);
   if ((await exists(cfgPath)) && !v.rebind) {
@@ -112,7 +133,12 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   if (fromPlc && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --from-plc needs --project <folder>/<name>/<name>.ap20, where the new TIA Portal project goes");
   const create = fromPlc ? ["--create-project", "--allow-import"] : [];
   const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless", ...create] : [])];
-  const client = await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string> });
+  // --host: TIA Portal runs on another PC (this one is Linux or macOS); the bridge starts there over ssh
+  const host = v.host as string | undefined;
+  if (host && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --host needs --project <path of the project on that PC>");
+  const client = host
+    ? await remoteBridge(host, "", args.slice(bridge.args.length), v.tia === "V21" ? "V21" : "V20", io)
+    : await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string>, ...(codesys ? { closeTimeoutMs: 30_000 } : {}) });
   try {
     let info = await client.projectInfo();
     if (fromPlc) {
@@ -131,7 +157,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const config = previous
       ? { ...previous, project: { path: info.path, tiaVersion: tia as EngineeringVersion }, devices }
       : // the bridge that comes with rung is found at run time; only an explicit RUNG_BRIDGE is written down
-        { ...defaultConfig(info.path, tia as EngineeringVersion, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
+        { ...defaultConfig(info.path, tia as EngineeringVersion, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: host ? { command: "", args: [], host } : io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
     // Take the state lock before touching rung.toml so config and state never disagree about the binding.
     // devices = [] means "all PLCs" and is stored as such, so adding a PLC later does not break the binding.
     const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices }, { rebind: !!v.rebind });
@@ -221,7 +247,7 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
 const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
-  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number"], positionals: 1 },
+  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host"], positionals: 1 },
   pull: { options: ["force"], positionals: 1 },
   sync: { options: [], positionals: 1 },
   watch: { options: [], positionals: 1 },
@@ -264,6 +290,8 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
 }
 
 export async function main(argv: string[], io: Io): Promise<number> {
+  // the Windows end of a workspace on Linux or macOS (rung over ssh): the bridge itself, its arguments untouched
+  if (argv[0] === "bridge") return runBridge(argv.slice(1), io);
   let parsed;
   try {
     parsed = parseArgs({
@@ -319,6 +347,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         interval: { type: "string" },
         ip: { type: "string" },
         "from-plc": { type: "string" },
+        host: { type: "string" },
       },
     });
   } catch (e) {

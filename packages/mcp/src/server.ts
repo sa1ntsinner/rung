@@ -36,7 +36,7 @@ const fail = (t: string): Text => ({ content: [{ type: "text", text: t }], isErr
 export const SAFETY_RULES = `rung safety rules for agents
 1. Edit the mirrored files under plc/ directly; changes reach TIA Portal through rung sync / rung watch.
 2. Never edit read-only objects: *.protected.yaml (know-how protected), failsafe (F_*) blocks, system blocks, GRAPH blocks. rung refuses to import them.
-3. Never download to a PLC. rung has no download command; ask the human to download from TIA Portal after reviewing the change.
+3. Never download to a PLC, never run rung download or change a PLC's operating mode. Prepare the download with rung_download_request; the person downloads after reviewing the change (rung download asks them to type the PLC name).
 4. Resolve conflicts only with rung_resolve (keep the file, take TIA's version, or save a merged file first).
 5. Run rung_find_usages before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected.
 6. After a sync, read rung_diagnostics; compile errors come from TIA Portal itself.`;

@@ -94,6 +94,12 @@ export async function cmdCodesysBridge(v: Record<string, unknown>, io: Io): Prom
   });
   let exited = false;
   child.on("exit", () => (exited = true));
+  // CODESYS never outlives the relay (an error, Ctrl+C); only a hard kill of the relay escapes this, so the
+  // client waits long enough for the orderly way (BridgeClient closeTimeoutMs)
+  process.on("exit", () => {
+    if (!exited) child.kill();
+  });
+  process.on("SIGINT", () => process.exit(130));
   child.stdout.on("data", (d: Buffer) => io.stderr(d.toString()));
   child.stderr.on("data", (d: Buffer) => io.stderr(d.toString()));
   // stdin arrives before CODESYS listens (it takes ~12 s to start): keep it until the socket is up

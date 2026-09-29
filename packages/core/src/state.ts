@@ -45,7 +45,8 @@ export interface ObjectState {
   verifiedAt?: number;
   /** Set while status is "conflicted": the TIA revision and files the conflict was computed against. */
   /** deletedInTia: the object is gone from TIA Portal while the file was edited (resolve --ours recreates it). */
-  conflict?: { tiaFingerprint: string; tiaFiles: StateFile[]; deletedInTia?: true };
+  /** tiaForm: the form TIA Portal's side came in, when it is not the file's (a tag table that became .tags.st). */
+  conflict?: { tiaFingerprint: string; tiaFiles: StateFile[]; tiaForm?: string; deletedInTia?: true };
   /**
    * Set while an import runs: the files rung sent (blob hashes). A pass that was interrupted leaves it behind,
    * and the next pass tells from it whether TIA Portal already has the edit.

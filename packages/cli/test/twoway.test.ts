@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { main } from "../src/main.js";
+import { OwnerClient } from "@rung/sync";
 
 const fakeScript = fileURLToPath(new URL("./fake-bridge.mjs", import.meta.url));
 const PROJECT = "C:\\fx\\RungFixture\\RungFixture.ap20";
@@ -19,7 +20,7 @@ function setup() {
   const err: string[] = [];
   const env = { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: objects };
   const run = (args: string[], extra: Partial<Parameters<typeof main>[1]> = {}) => main(args, { cwd: dir, stdout: (s) => out.push(s), stderr: (s) => err.push(s), env, ...extra });
-  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { objects: { address: string; content: string }[] };
+  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { objects: { address: string; content: string }[]; downloads?: unknown[] };
   const file = (...p: string[]) => join(dir, ...p);
   return { dir, run, out, err, db, file, objects };
 }
@@ -116,6 +117,14 @@ describe("two-way CLI", () => {
     t.err.length = 0;
     expect(await t.run(["compile", "--file", join(...motorFile)])).toBe(0);
     expect(t.err.join("")).not.toMatch(/STATE_LOCKED/);
+    // another client with the owner's token cannot download without the PLC a person confirmed
+    const owner = (await OwnerClient.connect(t.dir))!;
+    try {
+      await expect(owner.request("download", { request: { device: "PLC_1", allow: ["stop-cpu"] } })).rejects.toThrow(/names the PLC a person confirmed/);
+      expect(t.db().downloads).toBeUndefined();
+    } finally {
+      owner.close();
+    }
     stop();
     expect(await watching).toBe(0);
     expect(existsSync(t.file(".rung", "owner.json"))).toBe(false);

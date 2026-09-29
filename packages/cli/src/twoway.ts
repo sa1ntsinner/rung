@@ -103,7 +103,14 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     compare: async (p) => tools().compare(String(p.device), p.target as never),
     projectInfo: async () => tools().projectInfo(),
     read: async (p) => tools().read(String(p.device), (p.expressions as string[]) ?? []),
-    download: async (p) => tools().download(p.request as never),
+    download: async (p) => {
+      // rung download's own checks, applied here too: whatever else reaches the owner cannot skip them
+      if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
+      const request = p.request as { device?: string } | undefined;
+      if (!request?.device || p.confirmed !== request.device)
+        throw new WorkspaceError("BAD_ARGUMENT", "a download names the PLC a person confirmed it for; run rung download, which asks for it");
+      return tools().download(request as never);
+    },
     show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;

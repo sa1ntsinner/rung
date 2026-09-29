@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Generic;
+using Rung.Bridge.Core.Model;
 
 namespace Rung.Bridge.Core.Protocol
 {
@@ -87,8 +89,11 @@ namespace Rung.Bridge.Core.Protocol
                 case "objects.list":
                     return Session.ListObjects(Str(p, "device"));
                 case "objects.export":
+                    if (Bool(p, "inline")) return InTempDir(dir => Inline(Session.Export(Str(p, "address"), Str(p, "form"), dir)));
                     return Session.Export(Str(p, "address"), Str(p, "form"), Str(p, "dir"));
                 case "objects.import":
+                    if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("files", out var sent))
+                        return InTempDir(dir => Inline(Session.Import(Str(p, "address"), Str(p, "form"), WriteSent(dir, sent, Str(p, "primary")), Str(p, "expectedTiaRevision"), Str(p, "operationId"))));
                     return Session.Import(Str(p, "address"), Str(p, "form"), Str(p, "path"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
                 case "objects.delete":
                     Session.Delete(Str(p, "address"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
@@ -125,6 +130,50 @@ namespace Rung.Bridge.Core.Protocol
                 default:
                     throw new RpcException(ErrorCodes.BadRequest, "Unknown method: " + method);
             }
+        }
+
+        // ---- files across the connection (a client on another machine, e.g. Linux over SSH): the bridge stages them itself
+
+        static T InTempDir<T>(Func<string, T> work)
+        {
+            var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rung-inline", Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            try { return work(dir); }
+            finally
+            {
+                try { System.IO.Directory.Delete(dir, true); } catch (System.IO.IOException) { } catch (UnauthorizedAccessException) { }
+            }
+        }
+
+        /// <summary>The result's files as text, named instead of located.</summary>
+        static ExportResult Inline(ExportResult r)
+        {
+            foreach (var f in r.Files ?? new ExportFile[0])
+            {
+                f.Content = System.IO.File.ReadAllText(f.Path, new System.Text.UTF8Encoding(false));
+                f.Path = System.IO.Path.GetFileName(f.Path);
+            }
+            return r;
+        }
+
+        static readonly System.Text.RegularExpressions.Regex SentName = new System.Text.RegularExpressions.Regex(@"^[A-Za-z0-9_.%~ -]{1,200}$");
+
+        /// <summary>Writes the sent bundle ([{name, content}]) into dir; returns the path of the primary file.</summary>
+        static string WriteSent(string dir, JsonElement files, string primary)
+        {
+            if (files.ValueKind != JsonValueKind.Array) throw new RpcException(ErrorCodes.BadRequest, "files must be an array");
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files.EnumerateArray())
+            {
+                var name = f.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+                var content = f.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                // plain file names only: nothing may land outside the staging folder
+                if (name == null || content == null || !SentName.IsMatch(name) || name.Trim('.').Length == 0 || name.Contains("..") || !names.Add(name))
+                    throw new RpcException(ErrorCodes.BadRequest, "Invalid file in files: " + (name ?? "(no name)"));
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, name), content, new System.Text.UTF8Encoding(false));
+            }
+            if (!names.Contains(primary)) throw new RpcException(ErrorCodes.BadRequest, "primary " + primary + " is not among the files");
+            return System.IO.Path.Combine(dir, primary);
         }
 
         static string Str(JsonElement p, string name)

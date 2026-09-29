@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Rung.Bridge.Core;
 using Rung.Bridge.Core.Model;
@@ -109,6 +110,17 @@ public sealed class FakeTiaSession : ITiaSession
         Objects.Remove(e);
     }
 
-    public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId) =>
-        throw new RpcException(ErrorCodes.UnsupportedCapability, "fake session does not import");
+    /// <summary>When set, Import takes the file (kept in LastImport with its folder's other files) and returns an export.</summary>
+    public bool Imports;
+    public Dictionary<string, string> LastImport;
+    public string LastImportPath;
+
+    public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId)
+    {
+        if (!Imports) throw new RpcException(ErrorCodes.UnsupportedCapability, "fake session does not import");
+        LastImportPath = path;
+        LastImport = Directory.GetFiles(Path.GetDirectoryName(path)).ToDictionary(Path.GetFileName, f => File.ReadAllText(f));
+        var outDir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-fake-out", Guid.NewGuid().ToString("N"))).FullName;
+        return Export(address, form, outDir);
+    }
 }

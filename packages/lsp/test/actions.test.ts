@@ -75,6 +75,16 @@ describe("define a PLC tag, like TIA Portal's Define tag", () => {
     // a call is a block, not a tag
     expect(codeActions(idx, FB, src.indexOf('"Fx_Missing"') + 1, src.indexOf('"Fx_Missing"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL")).toEqual([]);
   });
+
+  it("goes past a 64-bit tag at a bit address, and chooses nothing where a tag's size is unknown", () => {
+    const idx = new WorkspaceIndex();
+    idx.set(TABLE, "VAR_GLOBAL\n    Wide AT %M0.0 : LReal;\nEND_VAR\n", 0);
+    idx.set(FB, src, 0);
+    const on = codeActions(idx, FB, src.indexOf('"Pump_On"') + 1, src.indexOf('"Pump_On"') + 1).find((f) => f.code === "UNKNOWN_GLOBAL")!;
+    expect(on.title).toBe('Create the PLC tag "Pump_On" : Bool at %M8.0 in Default tag table');
+    idx.set(TABLE, 'VAR_GLOBAL\n    Recipe AT %M20.0 : "UDT_Recipe";\nEND_VAR\n', 1);
+    expect(codeActions(idx, FB, src.indexOf('"Pump_On"') + 1, src.indexOf('"Pump_On"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL")).toEqual([]);
+  });
 });
 
 describe("help on hover", () => {

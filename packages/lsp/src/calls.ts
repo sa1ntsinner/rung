@@ -4,7 +4,7 @@
 import { STANDARD_BY_NAME } from "./catalog.js";
 import type { Token } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
-import type { WorkspaceIndex } from "./workspace.js";
+import { scopedTo, type WorkspaceIndex } from "./workspace.js";
 
 export interface CallParam {
   name: string;
@@ -101,6 +101,7 @@ function argsAfter(tokens: Token[], from: number): { close: number; args: CallAr
 }
 
 export function callSites(index: WorkspaceIndex, uri: string, decl: (block: BlockModel, name: string) => { type: string; typeRef?: string } | undefined): CallSite[] {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc?.parsed || !/\.scl$/i.test(uri)) return [];
   const tokens = doc.parsed.tokens.filter((t) => t.kind !== "comment" && t.kind !== "pragma");

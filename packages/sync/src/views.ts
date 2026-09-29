@@ -59,9 +59,13 @@ async function prune(dir: string, keep: Set<string>) {
   }
 }
 
-/** Tag-table views from the mirrored SimaticML (works offline, no bridge needed). */
+/**
+ * Tag-table views from the mirrored SimaticML (works offline, no bridge needed). A table kept as text (.tags.st)
+ * is readable as it is and gets none; views of tables that are gone or became text are removed.
+ */
 export async function writeTagViews(root: string): Promise<string[]> {
   const written: string[] = [];
+  const keep = new Set<string>();
   const walk = async (dir: string): Promise<void> => {
     let entries;
     try {
@@ -79,11 +83,13 @@ export async function writeTagViews(root: string): Promise<string[]> {
         const table = e.name.slice(0, -".tags.xml".length);
         const out = join(root, "views", "tags", device!, `${table}.yaml`);
         await writeFileAtomic(out, toYaml({ table: decodeURIComponent(table.replace(/%(?=[0-9A-F]{2})/g, "%")), source: `plc/${rel}`, tags: parseTagRows(xml) }, VIEW_HEADER));
+        keep.add(out);
         written.push(relative(root, out).split(sep).join("/"));
       }
     }
   };
   await walk(join(root, "plc"));
+  await prune(join(root, "views", "tags"), keep);
   return written;
 }
 

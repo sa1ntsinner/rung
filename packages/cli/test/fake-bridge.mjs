@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const argv = process.argv.slice(2);
 const projectArg = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : null;
@@ -22,6 +22,9 @@ function exportTo(o, dir) {
   writeFileSync(path, o.content);
   return { address: o.address, form: form(o), files: [{ path, role: "primary", sha256: sha(o.content) }], warnings: [], fingerprint: fp(o), bundleHash: "x" };
 }
+
+/** Files named and carried, as the bridge answers a client on another machine. */
+const inline = (r) => ({ ...r, files: r.files.map((f) => ({ ...f, content: readFileSync(f.path, "utf8"), path: basename(f.path) })) });
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   const req = JSON.parse(line);
@@ -42,11 +45,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "objects.export": {
       const o = db.objects.find((x) => x.address === p.address);
       if (!o) return fail("NOT_FOUND", p.address);
+      if (p.inline) {
+        db.inline = [...(db.inline ?? []), "export"];
+        save(db);
+        return reply(inline(exportTo(o, mkdtempSync(join(tmpdir(), "fake-bridge-")))));
+      }
       return reply(exportTo(o, p.dir));
     }
     case "objects.import": {
       if (!allowImport) return fail("READ_ONLY", "imports need --allow-import");
-      const text = readFileSync(p.path, "utf8");
+      // a client on another machine sends the files (inline); a local one names a path
+      const sent = p.files ? p.files.find((f) => f.name === p.primary) : undefined;
+      if (p.files) db.inline = [...(db.inline ?? []), "import " + p.files.map((f) => f.name).join(",")];
+      const text = sent ? sent.content : readFileSync(p.path, "utf8");
       let o = db.objects.find((x) => x.address === p.address);
       if (p.expectedTiaRevision === "absent") {
         if (o) return fail("STALE_REVISION", "exists");
@@ -58,7 +69,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         o.content = text.replace(/\bbegin\b/g, "BEGIN"); // TIA canonicalizes keyword casing
       }
       save(db);
-      return reply(exportTo(o, mkdtempSync(join(tmpdir(), "fake-bridge-"))));
+      const out = exportTo(o, mkdtempSync(join(tmpdir(), "fake-bridge-")));
+      return reply(p.files ? inline(out) : out);
     }
     case "objects.delete": {
       if (!allowImport) return fail("READ_ONLY", "deletes need --allow-import");
