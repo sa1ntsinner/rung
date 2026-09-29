@@ -136,6 +136,7 @@ async function printCompile(ws: string, _config: RungConfig, io: Io, raw: Compil
   const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => objects.find((o) => o.address === a)?.path, raw, (f) => readFile(f, "utf8"));
   let errors = 0;
   for (const m of msgs) {
+    if (m.severity === "info" && /^No block was compiled/i.test(m.description)) continue;
     if (m.severity === "error" && !/^Compiling finished/.test(m.description)) errors++;
     const where = m.file ? `${m.file}${m.line ? `:${m.line}` : ""}` : m.address ?? "";
     io.stdout(`  ${m.severity.padEnd(8)} ${where}${where ? " — " : ""}${m.description.replace(/\s*\n\s*/g, " ")}\n`);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,20 @@ function setup(env: Record<string, string> = {}) {
     });
   return { dir, run, out, err, objects };
 }
+
+describe("rung CLI from inside a workspace", () => {
+  it("pull, status and sync find rung.toml in a parent folder", async () => {
+    const t = setup();
+    expect(await t.run("init")).toBe(0);
+    const sub = join(t.dir, "plc");
+    mkdirSync(sub, { recursive: true });
+    const io = { cwd: sub, stdout: (s: string) => t.out.push(s), stderr: (s: string) => t.err.push(s), env: { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: t.objects } };
+    expect(await main(["pull"], io)).toBe(0);
+    expect(existsSync(join(t.dir, "plc", "PLC_1", "blocks", "10_Drives", "Motors", "Fx_Motor.scl"))).toBe(true);
+    expect(existsSync(join(sub, "rung.toml"))).toBe(false);
+    expect(await main(["status"], io)).toBe(0);
+  });
+});
 
 describe("rung CLI", () => {
   it("prints help and version", async () => {

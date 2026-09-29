@@ -160,6 +160,24 @@ function rankOf(form: string, texts: string[]): number {
  * Writes this pass's diagnostics. Compile messages of earlier passes stay while their object was not
  * compiled again and still has the TIA revision they were produced for: a broken block stays red.
  */
+/**
+ * The imported objects plus every mirrored object that names one of them: instance DBs of a changed FB and
+ * the blocks that call it are inconsistent in TIA until they are compiled too.
+ */
+async function withUsers(root: string, state: StateStore, imported: string[]): Promise<string[]> {
+  const out = new Set(imported);
+  const devices = new Set(imported.map((a) => parseAddress(a).device));
+  const texts = new Map<string, string>();
+  const candidates = state.all().filter((s) => !s.readOnly && s.files[0] && devices.has(parseAddress(s.address).device));
+  for (const s of candidates) texts.set(s.address, await readFile(join(root, s.files[0]!.path), "utf8").catch(() => ""));
+  const usersOf = (names: string[]) => candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n}"`)));
+  const first = usersOf(imported.map((a) => parseAddress(a).name));
+  for (const s of first) out.add(s.address);
+  // a call goes through the instance DB ("FB_Pump_DB"()), so the blocks that use those DBs follow too
+  for (const s of usersOf(first.filter((s) => s.form === "db").map((s) => parseAddress(s.address).name))) out.add(s.address);
+  return [...out];
+}
+
 async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Diagnostic) => boolean = () => false): Promise<number> {
   const file = join(root, ".rung", "diagnostics.json");
   let seq = 0;
@@ -488,9 +506,11 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
     }
     for (const [device, addrs] of byDevice) {
       try {
-        const raw = await bridge.compile(device, cfg.sync.compile === "all" ? [] : addrs);
+        const raw = await bridge.compile(device, cfg.sync.compile === "all" ? [] : await withUsers(root, state, addrs));
         const msgs = await placeCompileMessages(root, (a) => state.get(a)?.path, raw, (f) => readFile(f, "utf8"));
         for (const m of msgs) {
+          // "No block was compiled. All blocks are up-to-date." says nothing about any file
+          if (m.severity === "info" && /^No block was compiled/i.test(m.description)) continue;
           const target = m.address ?? "";
           const path = (target && state.get(target)?.path) || "";
           const revision = target ? state.get(target)?.tiaFingerprint : undefined;

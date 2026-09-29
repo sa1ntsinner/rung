@@ -295,6 +295,27 @@ describe("syncOnce", () => {
     expect(saved.seq).toBeGreaterThan(0);
   });
 
+  it("compiles the instance DBs and callers of an imported block too, and hides 'No block was compiled'", async () => {
+    const FB = "plc:PLC_1/blocks/FB_Pump";
+    const IDB = "plc:PLC_1/blocks/FB_Pump_DB";
+    const OB = "plc:PLC_1/blocks/Main";
+    const t = setup((b) => {
+      b.add(FB, { content: 'FUNCTION_BLOCK "FB_Pump"\nBEGIN\n  #x := 1;\nEND_FUNCTION_BLOCK\n', blockType: "FB" });
+      b.add(IDB, { form: "db", content: 'DATA_BLOCK "FB_Pump_DB"\n"FB_Pump"\nBEGIN\nEND_DATA_BLOCK\n', blockType: "InstanceDB" });
+      b.add(OB, { content: 'ORGANIZATION_BLOCK "Main"\nBEGIN\n  "FB_Pump_DB"();\nEND_ORGANIZATION_BLOCK\n', blockType: "OB" });
+      b.add("plc:PLC_1/blocks/Other", { content: 'FUNCTION "Other" : Void\nBEGIN\nEND_FUNCTION\n' });
+    });
+    await t.sync();
+    t.write("plc/PLC_1/blocks/FB_Pump.scl", t.read("plc/PLC_1/blocks/FB_Pump.scl").replace("#x := 1;", "#x := 2;"));
+    t.bridge.compile = async (_d: string, addresses: string[] = []) => {
+      t.bridge.compileCalls.push(addresses);
+      return [{ severity: "info", description: "No block was compiled. All blocks are up-to-date." }];
+    };
+    const r = await t.sync();
+    expect(t.bridge.compileCalls.at(-1)!.sort()).toEqual([FB, IDB, OB]);
+    expect(r.diagnostics).toEqual([]);
+  });
+
   it("keeps compile errors of a still-broken block across quiet passes, and drops them once it compiles", async () => {
     const t = setup();
     await t.sync();

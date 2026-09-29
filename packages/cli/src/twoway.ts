@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, loadConfig, parseAddress } from "@rung/core";
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type RenameReport, type SyncReport } from "@rung/sync";
 import { readFile } from "node:fs/promises";
-import { bridgeFor, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
+import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 
 function printReport(io: Io, r: SyncReport) {
   io.stdout(
@@ -14,7 +14,7 @@ function printReport(io: Io, r: SyncReport) {
   for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${d.path || d.address}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
 }
 
-const exitCode = (r: SyncReport) => (r.conflicts || r.diagnostics.some((d) => d.severity === "error") ? 2 : r.warnings.length ? 2 : 0);
+const exitCode = (r: SyncReport) => (r.conflicts || r.diagnostics.some((d) => d.severity === "error") ? 2 : r.warnings.some((w) => !isNotice(w.code)) ? 2 : 0);
 
 export async function cmdSync(dir: string, io: Io): Promise<number> {
   const owner = await OwnerClient.connect(dir);
@@ -183,7 +183,9 @@ export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged
   return 0;
 }
 
-export async function cmdConfirmDelete(dir: string, address: string, io: Io): Promise<number> {
+export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io): Promise<number> {
+  const dir = await findWorkspace(workspaceDir);
+  const address = await addressOf(dir, what, io.cwd);
   const owner = await OwnerClient.connect(dir);
   if (owner) {
     try {

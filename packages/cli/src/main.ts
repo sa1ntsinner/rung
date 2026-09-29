@@ -14,7 +14,7 @@ import {
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
-import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, openState, printWarnings, type Io } from "./common.js";
+import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
@@ -45,7 +45,7 @@ Usage:
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
-  rung confirm-delete <address> [--dir <workspace>]
+  rung confirm-delete <file|address> [--dir <workspace>]
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
@@ -154,7 +154,7 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
       );
       printWarnings(io, report.warnings);
       await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
-      return report.warnings.length ? 2 : 0;
+      return report.warnings.some((w) => !isNotice(w.code)) ? 2 : 0;
     } finally {
       await state.close();
     }
@@ -368,15 +368,15 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
       case "init":
         return await cmdInit(dir, v, io);
       case "pull":
-        return await cmdPull(dir, v, io);
+        return await cmdPull(await findWorkspace(dir), v, io);
       case "status":
-        return await cmdStatus(dir, io);
+        return await cmdStatus(await findWorkspace(dir), io);
       case "doctor":
-        return await cmdDoctor(dir, v, io);
+        return await cmdDoctor(await findWorkspace(dir), v, io);
       case "sync":
-        return await cmdSync(dir, io);
+        return await cmdSync(await findWorkspace(dir), io);
       case "watch":
-        return await cmdWatch(dir, io);
+        return await cmdWatch(await findWorkspace(dir), io);
       case "resolve": {
         const mode = v.ours ? "ours" : v.theirs ? "theirs" : v.merged ? "merged" : null;
         if (!target || !mode) {
@@ -395,7 +395,7 @@ ${total - failed}/${total} passed (offline simulation — not a PLCSIM run)
       }
       case "confirm-delete":
         if (!target) {
-          io.stderr("rung: usage: rung confirm-delete <address> [--dir <workspace>]\n");
+          io.stderr("rung: usage: rung confirm-delete <file|address> [--dir <workspace>]\n");
           return 1;
         }
         return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
