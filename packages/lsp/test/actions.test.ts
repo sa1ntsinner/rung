@@ -18,6 +18,41 @@ const apply = (text: string, f: QuickFix, uri = FB) =>
     .reduce((t, e) => t.slice(0, e.start) + e.newText + t.slice(e.end), text);
 const at = (idx: WorkspaceIndex, needle: string) => idx.docs.get(FB)!.text.indexOf(needle) + 1;
 
+describe("update block calls, like TIA Portal", () => {
+  const SCALE = 'FUNCTION "Fx_Scale" : Real\n   VAR_INPUT \n      Raw : Int;\n      Gain : Real;\n   END_VAR\n   VAR_IN_OUT \n      Stats : "UDT_Stats";\n   END_VAR\n\nBEGIN\n\t#Fx_Scale := #Raw * #Gain;\nEND_FUNCTION\n';
+  const USER = 'FUNCTION_BLOCK "Fx_User"\n   VAR \n      t : TON;\n      v : Real;\n   END_VAR\n\nBEGIN\n\t#v := "Fx_Scale"(Raw := 3, Offset := 1);\n\t#t(IN := TRUE, PT := T#1s, PTT := T#2s);\n\t"Fx_Motor_DB"(Start := TRUE, Old := FALSE);\nEND_FUNCTION_BLOCK\n';
+  const setup = () => {
+    const idx = workspace(USER);
+    idx.set("file:///w/plc/P/blocks/Fx_Scale.scl", SCALE, 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Motor_DB.db", 'DATA_BLOCK "Fx_Motor_DB"\n"Fx_Motor"\nBEGIN\nEND_DATA_BLOCK\n', 0);
+    return idx;
+  };
+
+  it("flags arguments the callee no longer has and FC parameters a call leaves out", () => {
+    const idx = setup();
+    const d = diagnostics(idx, FB).filter((x) => x.code === "UNKNOWN_PARAMETER" || x.code === "MISSING_PARAMETER");
+    expect(d.map((x) => `${x.code}: ${USER.slice(x.start, x.end)}: ${x.message}`)).toEqual([
+      "UNKNOWN_PARAMETER: Offset: Offset is not a parameter of Fx_Scale (quick fix: remove it)",
+      'MISSING_PARAMETER: "Fx_Scale": This call of Fx_Scale leaves out Gain, Stats: an FC gets every input and in/out (quick fix: add them)',
+      "UNKNOWN_PARAMETER: PTT: PTT is not a parameter of TON (quick fix: remove it)",
+      "UNKNOWN_PARAMETER: Old: Old is not a parameter of Fx_Motor (quick fix: remove it)",
+    ]);
+  });
+
+  it("removes a stale argument with its comma, and adds the missing parameters with values that compile", () => {
+    const idx = setup();
+    const at = (needle: string) => USER.indexOf(needle) + 1;
+    const [remove] = codeActions(idx, FB, at("Offset"), at("Offset"));
+    expect(remove!.title).toBe("Remove the argument Offset (Fx_Scale has no such parameter)");
+    expect(apply(USER, remove!)).toContain('#v := "Fx_Scale"(Raw := 3);');
+    const add = codeActions(idx, FB, at('"Fx_Scale"'), at('"Fx_Scale"')).find((f) => f.code === "MISSING_PARAMETER")!;
+    expect(add.title).toBe("Add the missing parameters of Fx_Scale: Gain, Stats");
+    expect(apply(USER, add)).toContain('#v := "Fx_Scale"(Raw := 3, Offset := 1, Gain := 0.0, Stats := #Stats);');
+    const [ptt] = codeActions(idx, FB, at("PTT"), at("PTT"));
+    expect(apply(USER, ptt!)).toContain("#t(IN := TRUE, PT := T#1s);");
+  });
+});
+
 describe("help on hover", () => {
   it("describes types in declarations: instructions with their parameters, data types with their range, PLC data types", () => {
     const idx = new WorkspaceIndex();

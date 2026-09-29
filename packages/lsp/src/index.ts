@@ -6,6 +6,7 @@ export * from "./workspace.js";
 export * from "./features.js";
 export * from "./actions.js";
 export * from "./assignments.js";
+export * from "./calls.js";
 export { startServer, type ServerHandle } from "./server.js";
 export * from "./twincat.js";
 export * from "./simaticml.js";

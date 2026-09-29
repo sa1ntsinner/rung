@@ -6,6 +6,7 @@ import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
 import type { WorkspaceIndex } from "./workspace.js";
 import { calledWithoutInstance, scopeDecl } from "./features.js";
+import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
 
 export interface EditAt {
   uri: string;
@@ -17,7 +18,7 @@ export interface EditAt {
 export interface QuickFix {
   title: string;
   /** Diagnostic code the fix answers. */
-  code: "UNDECLARED" | "NO_INSTANCE";
+  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER";
   edits: EditAt[];
   /** A new file (an instance DB); rung sync creates it in TIA Portal. */
   create?: { uri: string; text: string };
@@ -34,6 +35,22 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
       if (ref.end < start || ref.start > end) continue;
       if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
       if (calledWithoutInstance(index, ref)) out.push(...instanceFixes(index, doc.text, uri, block, ref));
+    }
+  }
+  // TIA Portal's "Update block call": arguments the callee no longer has, parameters an FC call leaves out
+  for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n))) {
+    site.args.forEach((a, i) => {
+      if (!unknownArgs(site).includes(a) || a.nameEnd! < start || a.nameStart! > end) return;
+      // with its comma: the one after it, or for the last argument the one before
+      const next = site.args[i + 1];
+      const prev = site.args[i - 1];
+      const range = next ? { start: a.start, end: next.start } : prev ? { start: prev.end, end: a.end } : { start: a.start, end: a.end };
+      out.push({ title: `Remove the argument ${a.name} (${site.callee.name} has no such parameter)`, code: "UNKNOWN_PARAMETER", edits: [{ uri, ...range, newText: "" }], preferred: true });
+    });
+    const missing = missingParams(site);
+    if (missing.length && site.ref.end >= start && site.ref.start <= end) {
+      const text = (site.args.length ? ", " : "") + missing.map((p) => `${p.name} := ${defaultArgument(p)}`).join(", ");
+      out.push({ title: `Add the missing parameters of ${site.callee.name}: ${missing.map((p) => p.name).join(", ")}`, code: "MISSING_PARAMETER", edits: [{ uri, start: site.close, end: site.close, newText: text }], preferred: true });
     }
   }
   return out.filter((f, i) => out.findIndex((g) => g.title === f.title) === i);

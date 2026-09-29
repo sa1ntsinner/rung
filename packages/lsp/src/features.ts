@@ -3,6 +3,7 @@
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import type { BlockModel, Ref, VarDecl } from "./parser.js";
 import type { Member, WorkspaceIndex } from "./workspace.js";
+import { callSites, missingParams, unknownArgs } from "./calls.js";
 
 export interface Location {
   uri: string;
@@ -94,6 +95,14 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
+  // calls against the interface they call (TIA Portal's "Update block call")
+  for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n))) {
+    for (const a of unknownArgs(site))
+      out.push({ start: a.nameStart!, end: a.nameEnd!, severity: "error", message: `${a.name} is not a parameter of ${site.callee.name} (quick fix: remove it)`, code: "UNKNOWN_PARAMETER" });
+    const missing = missingParams(site);
+    if (missing.length)
+      out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input and in/out (quick fix: add them)`, code: "MISSING_PARAMETER" });
+  }
   for (const block of doc.parsed.blocks) {
     for (const ref of block.refs) {
       if (ref.kind === "local") {
