@@ -197,7 +197,31 @@ async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Dia
   return seq + 1;
 }
 
+/**
+ * One two-way sync. Importing a UDT or an FB changes the TIA revision of the DBs and blocks that use it, so a
+ * change to both in the same pass would have to wait for the next one (STALE_REVISION): that pass runs right away.
+ */
 export async function syncOnce(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions): Promise<SyncReport> {
+  const first = await syncPass(root, bridge, state, opts);
+  if (first.imported + first.created === 0 || !first.warnings.some((w) => w.code === "STALE_REVISION")) return first;
+  const second = await syncPass(root, bridge, state, opts);
+  const key = (x: { address: string; code: string; message?: string }) => `${x.address}\u0000${x.code}\u0000${x.message ?? ""}`;
+  const unique = <T extends { address: string; code: string; message?: string }>(list: T[]) => [...new Map(list.map((x) => [key(x), x])).values()];
+  return {
+    exported: first.exported + second.exported,
+    imported: first.imported + second.imported,
+    created: first.created + second.created,
+    merged: first.merged + second.merged,
+    unchanged: second.unchanged,
+    conflicts: second.conflicts,
+    removed: first.removed + second.removed,
+    pendingDeletes: second.pendingDeletes,
+    warnings: unique([...first.warnings.filter((w) => w.code !== "STALE_REVISION"), ...second.warnings]),
+    diagnostics: unique([...first.diagnostics, ...second.diagnostics]),
+  };
+}
+
+async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions): Promise<SyncReport> {
   const now = opts.now ?? Date.now;
   const cfg = opts.config;
   const report: SyncReport = { exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] };

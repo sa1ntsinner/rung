@@ -295,6 +295,28 @@ describe("syncOnce", () => {
     expect(saved.seq).toBeGreaterThan(0);
   });
 
+  it("a UDT and the DB that uses it, edited together, both go to TIA in one rung sync", async () => {
+    const DBG = "plc:PLC_1/blocks/Fx_G";
+    const t = setup((b) => {
+      b.add(T, { form: "udt", kind: "type", content: 'TYPE "Fx_T"\n   STRUCT\n      a : Bool;\n   END_STRUCT;\nEND_TYPE\n' });
+      b.add(DBG, { form: "db", blockType: "GlobalDB", content: 'DATA_BLOCK "Fx_G"\n   VAR\n      s : "Fx_T";\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n' });
+    });
+    await t.sync();
+    // like TIA: importing the UDT gives the DB that uses it a new revision
+    const importObject = t.bridge.importObject.bind(t.bridge);
+    t.bridge.importObject = async (address, form, path, expected, op) => {
+      const r = await importObject(address, form, path, expected, op);
+      if (address === T) t.bridge.objects.get(DBG)!.entry.fingerprint = "fp:regenerated";
+      return r;
+    };
+    t.write("plc/PLC_1/types/Fx_T.udt", t.read("plc/PLC_1/types/Fx_T.udt").replace("a : Bool;", "a : Bool;\n      b : Int;"));
+    t.write("plc/PLC_1/blocks/Fx_G.db", t.read("plc/PLC_1/blocks/Fx_G.db").replace('s : "Fx_T";', 's : "Fx_T";\n      n : Int;'));
+    const r = await t.sync();
+    expect(r.imported).toBe(2);
+    expect(r.warnings.filter((w) => w.code === "STALE_REVISION")).toEqual([]);
+    expect(t.bridge.objects.get(DBG)!.files[".db"]).toContain("n : Int;");
+  });
+
   it("compiles the instance DBs and callers of an imported block too, and hides 'No block was compiled'", async () => {
     const FB = "plc:PLC_1/blocks/FB_Pump";
     const IDB = "plc:PLC_1/blocks/FB_Pump_DB";
