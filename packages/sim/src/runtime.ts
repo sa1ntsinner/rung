@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Offline SCL simulator: executes FB/FC bodies with virtual time for unit tests.
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
-// (integers wrap around like on an S7-1500; no system instructions beyond the IEC standard set).
+// (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
-import { parseBody, SclSyntaxError, type Expr, type LRef, type Stmt } from "./ast.js";
+import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
+import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, valStrg, type TimeKind } from "./system.js";
 
 export type Value = boolean | number | string | Struct | ArrayValue | Instance | Pointer | undefined;
 /** ADR(x) (a POINTER TO), or with `ref` a bound REFERENCE TO: where the value lives. */
@@ -45,6 +46,21 @@ const isArray = (v: Value): v is ArrayValue => typeof v === "object" && v !== nu
 const isInstance = (v: Value): v is Instance => typeof v === "object" && v !== null && typeof (v as Instance).__fb === "string";
 /** Nesting of FB/FC calls before the simulator reports endless recursion. */
 const MAX_CALL_DEPTH = 100;
+
+/** The system instructions the simulator runs (systemCall); docs/testing.md lists them. */
+const SYSTEM_FUNCTIONS = new Set([
+  "SWAP", "RD_SYS_T", "RD_LOC_T", "RUNTIME", "T_DIFF", "T_ADD", "T_SUB", "IS_ARRAY", "COUNTOFELEMENTS", "LOWER_BOUND", "UPPER_BOUND",
+  "MOVE_BLK", "UMOVE_BLK", "FILL_BLK", "UFILL_BLK", "VAL_STRG", "DELETE", "INSERT", "REPLACE",
+]);
+/** What an instruction outside that list is, for its message. */
+const NOT_SIMULATED = "communication, motion, diagnostics, data logging and the other system instructions are not part of the offline simulator (docs/testing.md lists the ones it runs)";
+
+/** A copy of a value, as the PLC copies one: a structure or array element by element (an FB instance is not copied). */
+function copyValue(v: Value): Value {
+  if (isArray(v)) return { __array: true, lo: v.lo, items: v.items.map(copyValue) };
+  if (v && typeof v === "object" && !isInstance(v) && !isPointer(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, copyValue(x as Value)]));
+  return v;
+}
 
 type Decl = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members" | "init">;
 type Kind = "real" | "int" | "unknown";
@@ -186,6 +202,8 @@ function kindOfType(d: Decl | undefined): Kind {
 export class Simulator {
   /** Virtual time in milliseconds. */
   time = 0;
+  /** The date and time the virtual clock starts at (RD_SYS_T, RD_LOC_T), in milliseconds since 1970. */
+  clockStart = CLOCK_START;
   readonly globals: Struct = {};
   // by the block object, not its name: two PLCs, or two FBs' properties, can have blocks of one name
   private readonly bodies = new WeakMap<BlockModel, Map<string, Stmt[]>>();
@@ -620,7 +638,8 @@ export class Simulator {
         const upper = e.callee.root.name.toUpperCase();
         if (/_TO_/.test(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
         if (/^(SQRT|SQR|LN|LOG|EXP|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
-        if (/^(LEN|FIND)$/.test(upper)) return "int";
+        if (/^(LEN|FIND|SWAP|COUNTOFELEMENTS|LOWER_BOUND|UPPER_BOUND|T_DIFF)$/.test(upper)) return "int";
+        if (upper === "RUNTIME") return "real";
         if (/^(ABS|MIN|MAX|LIMIT|SEL|MUX)$/.test(upper)) {
           const values = e.args.filter((a, i) => !(upper === "SEL" && (a.name?.toUpperCase() === "G" || (!a.name && i === 0))) && !(upper === "MUX" && (a.name?.toUpperCase() === "K" || (!a.name && i === 0))));
           return values.map((a) => this.kindOf(a.value, frame)).reduce(combine, values.length ? "int" : "unknown");
@@ -757,7 +776,7 @@ export class Simulator {
       if (!isInstance(inst)) {
         const d = this.declOf(c.callee, frame);
         const type = (d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
-        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: system and technology instructions are not part of the offline simulator`, frame?.block.name, c.callee.start);
+        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
         throw new SimError(`${name} is not a function block instance`, frame?.block.name, c.callee.start);
       }
       this.runInstance(inst, c.args, frame);
@@ -828,8 +847,11 @@ export class Simulator {
           return n(named("VALUE", 1)) * (n(named("MAX", 2)) - n(named("MIN", 0))) + n(named("MIN", 0));
         case "LEN":
           return String(args[0]).length;
-        case "CONCAT":
-          return args.map(String).join("");
+        case "CONCAT": {
+          // IN1, IN2, ... in the order of their numbers, however the call lists them
+          const order = c.args.map((a, i) => ({ i, k: Number(/^IN(\d+)$/i.exec(a.name ?? "")?.[1] ?? i + 1) }));
+          return order.sort((x, y) => x.k - y.k).map((x) => String(args[x.i])).join("");
+        }
         case "LEFT":
           return String(named("IN", 0)).slice(0, Math.max(0, n(named("L", 1))));
         case "RIGHT": {
@@ -863,7 +885,170 @@ export class Simulator {
     }
     const g = this.index.global(name);
     if (g?.block?.kind === "FC") return this.callFc(g.block, c, frame);
-    throw new SimError(`${name} is not a known function (system instructions are not simulated)`, frame?.block.name, c.callee.start);
+    if (SYSTEM_FUNCTIONS.has(upper)) {
+      try {
+        return this.systemCall(upper, c, frame);
+      } catch (e) {
+        if (e instanceof Unsupported) throw new SimError(`${upper}: ${e.message}`, frame?.block.name, c.callee.start);
+        throw e;
+      }
+    }
+    throw new SimError(`${name} is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
+  }
+
+  /**
+   * A system instruction the simulator runs (SYSTEM_FUNCTIONS), as the TIA Portal help describes it for the
+   * S7-1200/1500. What it does not model the way the PLC would stops the call with an Unsupported message.
+   */
+  private systemCall(upper: string, c: Extract<Expr, { k: "call" }>, frame: Frame | null): Value {
+    // SCL names every argument or none: then they follow the order of the parameters
+    const named = c.args.some((a) => a.name);
+    const argOf = (param: string, pos: number): Arg => {
+      const a = named ? c.args.find((x) => x.name?.toUpperCase() === param) : c.args[pos];
+      if (!a) throw new Unsupported(`${param} is missing`);
+      return a;
+    };
+    const input = (param: string, pos: number) => this.eval(argOf(param, pos).value, frame);
+    const number = (param: string, pos: number) => Number(input(param, pos));
+    const variable = (param: string, pos: number): LRef => {
+      const a = argOf(param, pos);
+      if (a.value.k !== "ref") throw new Unsupported(`${param} must be a variable`);
+      return a.value.ref;
+    };
+    const typeOf = (e: Expr) => {
+      const d = e.k === "ref" ? this.declOf(e.ref, frame) : this.staticDecl(e, frame);
+      return (d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "").toUpperCase();
+    };
+    /** The kind and value (ms) of a time argument: a DTL by its members, the others by their declared type. */
+    const timeOf = (param: string, pos: number): { kind: TimeKind | undefined; ms: number } => {
+      const e = argOf(param, pos).value;
+      const v = this.eval(e, frame);
+      if (v && typeof v === "object" && !isArray(v) && "YEAR" in v) return { kind: "DTL", ms: msOfDtl(v as Struct, param) };
+      return { kind: timeKindOfType(typeOf(e)), ms: Number(v) };
+    };
+    /** The element an IN or OUT of MOVE_BLK / FILL_BLK names (#a[2]): its array and position there. */
+    const element = (param: string, pos: number) => {
+      const at = this.locate(variable(param, pos), frame);
+      if (!Array.isArray(at.obj)) throw new Unsupported(`${param} must be an element of an array, such as #buffer[0]`);
+      return { items: at.obj, from: at.key as number };
+    };
+    switch (upper) {
+      case "SWAP": {
+        // a WORD, DWORD or LWORD; an integer of that width is converted implicitly, bit for bit (an Int tag of a CAN frame)
+        const e = argOf("IN", 0).value;
+        const last = e.k === "ref" ? e.ref.path[e.ref.path.length - 1] : undefined;
+        const bits = last && "slice" in last ? SLICE_WIDTH[last.slice] : INT_WIDTH[typeOf(e) ?? ""]?.[0];
+        if (!bits || bits < 16) throw new Unsupported(`IN must be 16, 32 or 64 bits wide (a WORD, DWORD, LWORD or an integer of that width)${typeOf(e) ? `; it is ${typeOf(e)}` : "; its type is not known here: assign it to one first"}`);
+        return swapBytes(Number(this.eval(e, frame)), bits);
+      }
+      case "COUNTOFELEMENTS": {
+        // every element of every dimension; an ARRAY of BOOL also counts the fill bits of its last byte, which rung does not model
+        const v = input("OPERAND", 0);
+        if (!isArray(v)) throw new Unsupported("OPERAND is not an array");
+        const count = (a: ArrayValue): number => (a.items.length && isArray(a.items[0]!) ? a.items.length * count(a.items[0] as ArrayValue) : a.items.length);
+        const leaf = (a: Value): Value => (isArray(a) ? leaf(a.items[0]) : a);
+        if (typeof leaf(v) === "boolean") throw new Unsupported("an ARRAY of BOOL is counted with its fill bits on the PLC; that is not simulated");
+        return count(v);
+      }
+      case "RD_SYS_T":
+      case "RD_LOC_T": {
+        // rung's clock has no time zone and no daylight saving time: system and local time are the same
+        const out = variable("OUT", 0);
+        const now = this.clockStart + this.time;
+        const kind = timeKindOfType(typeOf({ k: "ref", ref: out }));
+        if (kind === "DTL") this.write(out, { ...dtlOf(now) }, frame);
+        else if (kind === "DT" || kind === "LDT") this.write(out, now, frame);
+        else throw new Unsupported("OUT must be a DTL, DT or LDT variable");
+        return 0;
+      }
+      case "RUNTIME": {
+        // seconds of virtual time since the last call with this MEM; code runs in no time, so 0 within one cycle
+        const mem = variable("MEM", 0);
+        const before = Number(this.read(mem, frame) ?? 0);
+        this.write(mem, this.time / 1000, frame);
+        return (this.time - before * 1000) / 1000; // in milliseconds first: 0.35 - 0.1 is not 0.25 in floating point
+      }
+      case "T_DIFF": {
+        const a = timeOf("IN1", 0);
+        const b = timeOf("IN2", 1);
+        if (!a.kind || a.kind !== b.kind) throw new Unsupported(`IN1 and IN2 must be variables of one kind (DTL, DT, LDT, TOD or LTOD)${a.kind || b.kind ? `: they are ${a.kind ?? "?"} and ${b.kind ?? "?"}` : ""}`);
+        return timeDiff(a.kind, a.ms, b.ms);
+      }
+      case "T_ADD":
+      case "T_SUB": {
+        const a = timeOf("IN1", 0);
+        const by = argOf("IN2", 1).value;
+        const byKind = timeKindOfType(typeOf(by));
+        if (byKind && byKind !== "TIME" && byKind !== "LTIME") throw new Unsupported(`IN2 is ${byKind}: it must be a duration (TIME or LTIME)`);
+        if (!a.kind) throw new Unsupported("IN1 must be a variable of a time type (TIME, LTIME, TOD, LTOD, DT, LDT or DTL)");
+        const r = timeShift(a.kind, a.ms, Number(this.eval(by, frame)), upper === "T_SUB");
+        return a.kind === "DTL" ? { ...dtlOf(r) } : r;
+      }
+      case "IS_ARRAY":
+        return isArray(input("OPERAND", 0));
+      case "LOWER_BOUND":
+      case "UPPER_BOUND": {
+        let arr = input("ARR", 0);
+        const dim = number("DIM", 1);
+        if (!isArray(arr)) throw new Unsupported("ARR is not an array");
+        if (!Number.isInteger(dim) || dim < 1) throw new Unsupported(`DIM ${dim} is not a dimension (1 is the first)`);
+        for (let d = 1; d < dim; d++) {
+          const inner: Value = arr.items[0];
+          if (!isArray(inner)) throw new Unsupported(`DIM ${dim}: the array has ${d} dimension${d > 1 ? "s" : ""}`);
+          arr = inner;
+        }
+        return upper === "LOWER_BOUND" ? arr.lo : arr.lo + arr.items.length - 1;
+      }
+      case "MOVE_BLK":
+      case "UMOVE_BLK":
+      case "FILL_BLK":
+      case "UFILL_BLK": {
+        const count = number("COUNT", 1);
+        if (!Number.isInteger(count) || count < 0) throw new Unsupported(`COUNT ${count} is not a number of elements`);
+        const to = element("OUT", 2);
+        const past = (p: string, at: { items: Value[]; from: number }) => {
+          if (at.from + count > at.items.length) throw new Unsupported(`COUNT ${count} from ${p} runs past the end of its array (${at.items.length - at.from} elements from there)`);
+        };
+        past("OUT", to);
+        let values: Value[];
+        if (upper.endsWith("FILL_BLK")) {
+          const v = input("IN", 0);
+          values = Array.from({ length: count }, () => copyValue(v));
+        } else {
+          const from = element("IN", 0);
+          past("IN", from);
+          if (from.items === to.items && from.from < to.from + count && to.from < from.from + count && count) throw new Unsupported("IN and OUT overlap in one array: an overlapping copy is not simulated");
+          values = from.items.slice(from.from, from.from + count).map(copyValue);
+        }
+        values.forEach((v, k) => (to.items[to.from + k] = v));
+        return undefined;
+      }
+      case "VAL_STRG": {
+        const e = argOf("IN", 0).value;
+        const kind = this.kindOf(e, frame);
+        if (kind === "unknown") throw new Unsupported("IN must be a variable of an integer or floating-point type");
+        const raw = Number(this.eval(e, frame));
+        // a REAL is single precision on the PLC: 12.345 is 12.3450003 there, and rounds up
+        const text = valStrg(typeOf(e) === "REAL" ? Math.fround(raw) : raw, kind === "int", number("SIZE", 1), number("PREC", 2), number("FORMAT", 3));
+        const p = number("P", 4);
+        const out = variable("OUT", 5);
+        const old = String(this.read(out, frame) ?? "");
+        // the text goes into OUT from position P; what is already at P and after is not modelled
+        if (!Number.isInteger(p) || p < 1 || old.length !== p - 1)
+          throw new Unsupported(old.length > p - 1 ? `OUT already has characters at P ${p} and after: clear it first (writing into the middle of a string is not simulated)` : `P ${p} is past the end of OUT (${old.length} characters)`);
+        const max = Number(/\[\s*(\d+)\s*\]/.exec(this.declOf(out, frame)?.type ?? "")?.[1] ?? 254);
+        if ((old + text).length > max) throw new Unsupported(`the result '${old + text}' does not fit OUT (${max} characters)`);
+        this.write(out, old + text, frame);
+        return undefined;
+      }
+      case "DELETE":
+        return deleteChars(String(input("IN", 0)), number("L", 1), number("P", 2));
+      case "INSERT":
+        return insertChars(String(input("IN1", 0)), String(input("IN2", 1)), number("P", 2));
+      case "REPLACE":
+        return replaceChars(String(input("IN1", 0)), String(input("IN2", 1)), number("L", 2), number("P", 3));
+    }
+    throw new SimError(`${upper} is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
   }
 
   /** Guards against endless recursion; JS would otherwise die with a RangeError. */

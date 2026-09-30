@@ -36,13 +36,20 @@ cases:
 
 ## What the simulator covers
 
-- SCL statements: assignment, IF/ELSIF/ELSE, CASE (lists, ranges), FOR/WHILE/REPEAT with EXIT/CONTINUE, RETURN, REGION.
+- SCL statements: assignment (also `a := b := 0;`), IF/ELSIF/ELSE, CASE (lists, ranges), FOR/WHILE/REPEAT with EXIT/CONTINUE, RETURN, REGION, GOTO to a label.
 - Expressions with SCL precedence, integer vs. real division, typed literals (`16#FF`, `T#1s`, `DINT#5`); integers wrap around on overflow like on an S7-1500 (32767 + 1 = -32768 in an Int).
 - TwinCAT / CODESYS structured text: PROGRAMs, FBs with METHODs and `THIS^`, PROPERTYs (GET and SET, each with its own locals), ACTIONs, enumerations (`E_State.Idle`, `E_State#Idle`, bare `Idle`), `POINTER TO` with `ADR` and `^`, `REFERENCE TO` with `REF=`.
 - User FBs (single and multi-instance), FCs, global DBs (including UDT members and start values), PLC tags.
-- IEC standard FBs with virtual time: TON/TOF/TP (and `_TIME`/`_LTIME`), CTU/CTD/CTUD, R_TRIG/F_TRIG, SR/RS; standard functions (LIMIT, MIN/MAX, SEL, MUX, math, strings, shifts, `*_TO_*` conversions).
+- IEC standard FBs with virtual time: TON/TOF/TP (and `_TIME`/`_LTIME`), CTU/CTD/CTUD, R_TRIG/F_TRIG, SR/RS; standard functions (LIMIT, MIN/MAX, SEL, MUX, math, shifts, `*_TO_*` conversions; strings: CONCAT, LEN, LEFT, RIGHT, MID, FIND, DELETE, INSERT, REPLACE).
+- System instructions, as the TIA Portal help describes them:
+  - `SWAP` of a WORD, DWORD or LWORD (an integer of that width bit for bit).
+  - `RD_SYS_T` and `RD_LOC_T` into a DTL, DT or LDT. The virtual clock starts at 2024-01-01 00:00:00 (a Monday) and runs with the virtual time; it has no time zone, so both read the same. `RUNTIME`: the virtual seconds since the last call with the same MEM (code takes no time, so 0 within one cycle).
+  - `T_DIFF` of two DTL, DT, LDT, TOD or LTOD; `T_ADD` and `T_SUB` of a TIME to a TIME, LTIME, TOD, LTOD, DT, LDT or DTL. A DTL nobody set is DTL#1970-01-01-00:00:00.
+  - `IS_ARRAY`, `CountOfElements`, `LOWER_BOUND`, `UPPER_BOUND`; `MOVE_BLK`, `UMOVE_BLK`, `FILL_BLK`, `UFILL_BLK` element by element (structures are copied).
+  - `VAL_STRG` in decimal notation: right-aligned in SIZE characters (SIZE 0: as many as needed), PREC decimals (an integer gets its decimal point PREC places from the right), FORMAT's separator and sign bits.
+  - Where the PLC's result is not modelled, the test stops and says why instead of guessing: a TIME beyond ±24 days, a TOD past midnight, overlapping or too long block moves, VAL_STRG into the middle of a string or wider than SIZE, an ARRAY of BOOL for CountOfElements.
 - LAD blocks mirrored as SIMATIC SD (`.s7dcl`): contacts, negated contacts, coils, set/reset coils, parallel branches, IEC timer/counter/trigger boxes, comparisons, MOVE, ADD/SUB/MUL/DIV/MOD and calls of FBs and FCs. A block with anything else (edge contacts, for example) is refused with the list of what is missing.
 
 ## What it does not do
 
-It is a logic simulator, not an emulation of the S7-1500 runtime: no system instructions (communication, motion, diagnostics), no FBD, GRAPH or STL blocks, no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS), and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.
+It is a logic simulator, not an emulation of the S7-1500 runtime: no other system instructions (communication such as TSEND, TRCV, MB_CLIENT; motion and technology objects; diagnostics such as RDREC, WRREC; data logging; `TypeOf`, `TypeOfElements`, `MOVE_BLK_VARIANT`; `S_CONV`, `STRG_VAL`, `T_CONV`, `T_COMBINE` and VAL_STRG in exponential notation), which stop the test with their name; no FBD, GRAPH or STL blocks, no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS), and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.
