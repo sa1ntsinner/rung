@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Statement/expression parser for SCL block bodies, producing an AST the simulator executes.
 import { lex, type Token } from "@rung/lsp";
+import { ELEMENTARY_TYPE, typeTag } from "./system.js";
 
 export type Expr =
   | { k: "lit"; value: boolean | number | string; type: "bool" | "int" | "real" | "time" | "string"; typeName?: string }
@@ -94,6 +95,18 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
   }
   const clean = text.replace(/_/g, "");
   return { k: "lit", value: Number(clean), type: /[.eE]/.test(clean) ? "real" : "int" };
+}
+
+/** TypeOf(...) or TypeOfElements(...): its value is a data type. */
+function isTypeQuery(e: Expr): boolean {
+  return e.k === "call" && !e.callee.path.length && /^(TYPEOF|TYPEOFELEMENTS)$/i.test(e.callee.root.name);
+}
+
+/** A data type named in an expression (Int, "UDT_X") as the value TypeOf gives for it; anything else stays as it is. */
+function asType(e: Expr): Expr {
+  if (e.k !== "ref" || e.ref.path.length || e.ref.root.kind === "local") return e;
+  if (e.ref.root.kind === "ident" && !ELEMENTARY_TYPE.test(e.ref.root.name)) return e;
+  return { k: "lit", value: typeTag(e.ref.root.name), type: "string" };
 }
 
 const BINARY: [string[], number][] = [
@@ -223,7 +236,12 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
       const p = PREC.get(op)!;
       if (p < minPrec) break;
       next();
-      const right = expr(op === "**" ? p : p + 1);
+      let right = expr(op === "**" ? p : p + 1);
+      // TypeOf(#in) = Int, TypeOfElements(#a) <> "UDT_X": the other side names a data type
+      if (op === "=" || op === "<>") {
+        if (isTypeQuery(left)) right = asType(right);
+        else if (isTypeQuery(right)) left = asType(left);
+      }
       left = { k: "bin", op, l: left, r: right };
     }
     return left;
@@ -301,7 +319,8 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
       while (!kw(peek(), "END_CASE", "ELSE") && peek().kind !== "eof") {
         const labels: { lo: Expr; hi?: Expr }[] = [];
         for (;;) {
-          const lo = expr();
+          // CASE TypeOf(#in) OF Int: ... : the labels name data types
+          const lo = isTypeQuery(sel) ? asType(expr()) : expr();
           if (peek().text === "..") {
             next();
             labels.push({ lo, hi: expr() });

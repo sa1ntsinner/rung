@@ -4,13 +4,15 @@
 // (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
-import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, valStrg, type TimeKind } from "./system.js";
+import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
 export type Value = boolean | number | string | Struct | ArrayValue | Instance | Pointer | undefined;
 /** ADR(x) (a POINTER TO), or with `ref` a bound REFERENCE TO: where the value lives. */
 export interface Pointer {
   __ptr: { obj: Struct | Value[]; key: string | number };
   ref?: true;
+  /** A VARIANT or ARRAY[*] parameter bound to the caller's variable, with that variable's declared type when known. */
+  variant?: { decl?: Pick<VarDecl, "type" | "typeRef" | "isArray" | "members"> };
 }
 const isPointer = (v: Value): v is Pointer => typeof v === "object" && v !== null && "__ptr" in v;
 export interface Struct {
@@ -51,6 +53,7 @@ const MAX_CALL_DEPTH = 100;
 const SYSTEM_FUNCTIONS = new Set([
   "SWAP", "RD_SYS_T", "RD_LOC_T", "RUNTIME", "T_DIFF", "T_ADD", "T_SUB", "IS_ARRAY", "COUNTOFELEMENTS", "LOWER_BOUND", "UPPER_BOUND",
   "MOVE_BLK", "UMOVE_BLK", "FILL_BLK", "UFILL_BLK", "VAL_STRG", "DELETE", "INSERT", "REPLACE",
+  "TYPEOF", "TYPEOFELEMENTS", "VARIANTGET", "VARIANTPUT", "MOVE_BLK_VARIANT", "IS_NULL", "NOT_NULL",
 ]);
 /** What an instruction outside that list is, for its message. */
 const NOT_SIMULATED = "communication, motion, diagnostics, data logging and the other system instructions are not part of the offline simulator (docs/testing.md lists the ones it runs)";
@@ -643,7 +646,7 @@ export class Simulator {
         const upper = e.callee.root.name.toUpperCase();
         if (/_TO_/.test(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
         if (/^(SQRT|SQR|LN|LOG|EXP|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
-        if (/^(LEN|FIND|SWAP|COUNTOFELEMENTS|LOWER_BOUND|UPPER_BOUND|T_DIFF)$/.test(upper)) return "int";
+        if (/^(LEN|FIND|SWAP|COUNTOFELEMENTS|LOWER_BOUND|UPPER_BOUND|T_DIFF|MOVE_BLK_VARIANT)$/.test(upper)) return "int";
         if (upper === "RUNTIME") return "real";
         if (/^(ABS|MIN|MAX|LIMIT|SEL|MUX)$/.test(upper)) {
           const values = e.args.filter((a, i) => !(upper === "SEL" && (a.name?.toUpperCase() === "G" || (!a.name && i === 0))) && !(upper === "MUX" && (a.name?.toUpperCase() === "K" || (!a.name && i === 0))));
@@ -931,6 +934,28 @@ export class Simulator {
       if (v && typeof v === "object" && !isArray(v) && "YEAR" in v) return { kind: "DTL", ms: msOfDtl(v as Struct, param) };
       return { kind: timeKindOfType(typeOf(e)), ms: Number(v) };
     };
+    type Place = { obj: Struct | Value[]; key: string | number };
+    type Declared = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members">;
+    const get = (at: Place): Value => (at.obj as Record<string | number, Value>)[at.key];
+    // as write() stores a value, into a place that a VARIANT names
+    const put = (at: Place, v: Value, d: Declared | undefined) =>
+      void ((at.obj as Record<string | number, Value>)[at.key] = typeof v === "number" ? wrapInteger(v, d) : typeof v === "string" ? fitString(v, d) : copyValue(v));
+    /** Where an operand is and its declared type; for a VARIANT parameter, the caller's variable it is bound to. */
+    const bound = (param: string, pos: number): { at: Place; decl: Declared | undefined } => {
+      const e = argOf(param, pos).value;
+      if (e.k !== "ref") return { at: { obj: [this.eval(e, frame)], key: 0 }, decl: this.staticDecl(e, frame) };
+      const raw = this.locate(e.ref, frame, true);
+      const v = get(raw);
+      if (isPointer(v) && v.variant) return { at: v.__ptr, decl: v.variant.decl };
+      const decl = this.declOf(e.ref, frame);
+      if (decl && /^variant$/i.test(decl.type.trim())) throw new Unsupported(`${param} is a VARIANT that points nowhere (the call gave it no variable)`);
+      return { at: this.locate(e.ref, frame), decl };
+    };
+    /** VariantGet, VariantPut and MOVE_BLK_VARIANT copy between one data type only. */
+    const sameType = (a: Declared | undefined, b: Declared | undefined, what: [string, string]) => {
+      if (!a || !b) throw new Unsupported(`the data type of ${!a ? what[0] : what[1]} is not known here`);
+      if (typeTag(a.type) !== typeTag(b.type)) throw new Unsupported(`${what[0]} is ${a.type} and ${what[1]} is ${b.type}: it copies between one data type only`);
+    };
     /** The element an IN or OUT of MOVE_BLK / FILL_BLK names (#a[2]): its array and position there. */
     const element = (param: string, pos: number) => {
       const at = this.locate(variable(param, pos), frame);
@@ -1046,6 +1071,69 @@ export class Simulator {
         this.write(out, old + text, frame);
         return undefined;
       }
+      case "TYPEOF": {
+        const { decl } = bound("OPERAND", 0);
+        if (!decl) throw new Unsupported("the data type of OPERAND is not known here");
+        if (decl.isArray) throw new Unsupported("OPERAND is an ARRAY: TypeOfElements gives the data type of its elements");
+        return typeTag(decl.type);
+      }
+      case "TYPEOFELEMENTS": {
+        const { decl } = bound("OPERAND", 0);
+        const shape = decl?.isArray ? splitArrayType(decl.type) : undefined;
+        if (!shape) throw new Unsupported(decl ? `OPERAND is not an ARRAY (it is ${decl.type})` : "the data type of OPERAND is not known here");
+        return typeTag(shape.element);
+      }
+      case "VARIANTGET": {
+        // the value of the variable SRC points to, into DST
+        const src = bound("SRC", 0);
+        const dst = variable("DST", 1);
+        sameType(src.decl, this.declOf(dst, frame), ["SRC", "DST"]);
+        this.write(dst, get(src.at), frame);
+        return undefined;
+      }
+      case "VARIANTPUT": {
+        // SRC into the variable DST points to
+        const e = argOf("SRC", 0).value;
+        const dst = bound("DST", 1);
+        sameType(e.k === "ref" ? this.declOf(e.ref, frame) : this.staticDecl(e, frame), dst.decl, ["SRC", "DST"]);
+        put(dst.at, this.eval(e, frame), dst.decl);
+        return undefined;
+      }
+      case "MOVE_BLK_VARIANT": {
+        // SRC_INDEX and DEST_INDEX count from 0, whatever the arrays' low bounds; a variable that is no array is one element
+        const count = number("COUNT", 1);
+        const si = number("SRC_INDEX", 2);
+        const di = number("DEST_INDEX", 3);
+        const elements = (b: { at: Place; decl: Declared | undefined }, p: string) => {
+          const v = get(b.at);
+          if (!isArray(v)) return { items: [v], decl: b.decl, array: false };
+          if (v.items.length && isArray(v.items[0]!)) throw new Unsupported(`${p} is a multi-dimensional ARRAY: not simulated`);
+          const shape = b.decl ? splitArrayType(b.decl.type) : undefined;
+          return { items: v.items, decl: shape ? { type: shape.element, isArray: false } : undefined, array: true };
+        };
+        const src = elements(bound("SRC", 0), "SRC");
+        const target = bound("DEST", 4);
+        const dst = elements(target, "DEST");
+        sameType(src.decl, dst.decl, ["an element of SRC", "an element of DEST"]);
+        for (const [p, n] of [["COUNT", count], ["SRC_INDEX", si], ["DEST_INDEX", di]] as const)
+          if (!Number.isInteger(n) || n < 0) throw new Unsupported(`${p} ${n} is not a whole number of 0 or more`);
+        if (si + count > src.items.length) throw new Unsupported(`SRC_INDEX ${si} and COUNT ${count} run past SRC (${src.items.length} element${src.items.length === 1 ? "" : "s"})`);
+        if (di + count > dst.items.length) throw new Unsupported(`DEST_INDEX ${di} and COUNT ${count} run past DEST (${dst.items.length} element${dst.items.length === 1 ? "" : "s"})`);
+        if (src.items === dst.items && si < di + count && di < si + count && count) throw new Unsupported("SRC and DEST overlap in one array: an overlapping copy is not simulated");
+        const values = src.items.slice(si, si + count).map(copyValue);
+        if (dst.array) values.forEach((v, k) => (dst.items[di + k] = v));
+        else if (count) put(target.at, values[0], target.decl);
+        return 0;
+      }
+      case "IS_NULL":
+      case "NOT_NULL": {
+        // a REF_TO or VARIANT that points nowhere: a REF_TO nobody assigned, a VARIANT the call gave no variable
+        const e = argOf("OPERAND", 0).value;
+        const d = e.k === "ref" ? this.declOf(e.ref, frame) : undefined;
+        if (e.k !== "ref" || !d || !/^(variant$|ref_to\b)/i.test(d.type.trim())) throw new Unsupported("OPERAND must be a REF_TO or VARIANT variable");
+        const none = !isPointer(get(this.locate(e.ref, frame, true)));
+        return upper === "IS_NULL" ? none : !none;
+      }
       case "DELETE":
         return deleteChars(String(input("IN", 0)), number("L", 1), number("P", 2));
       case "INSERT":
@@ -1099,10 +1187,23 @@ export class Simulator {
   private bindInputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
     const params = b ? b.vars.filter((v) => v.section === "Input" || v.section === "InOut") : [];
     args.forEach((a, i) => {
-      if (a.out) return;
+      // a VARIANT or ARRAY[*] parameter, an output one too, is bound to the caller's variable before the call
+      const byRef = (k: string | undefined) => {
+        const d = k ? b?.vars.find((v) => v.name.toUpperCase() === k) : undefined;
+        return !!d && (/^variant$/i.test(d.type.trim()) || !!splitArrayType(d.type)?.dims.some((x) => x.trim() === "*"));
+      };
+      if (a.out) {
+        const k = a.name?.toUpperCase();
+        if (byRef(k)) mem[k!] = this.bindReference(a.value, caller);
+        return;
+      }
       const key = (a.name ?? params[i]?.name)?.toUpperCase();
       if (!key) throw new SimError("positional argument without matching parameter", caller?.block.name);
       if (!(key in mem)) throw new SimError(`${a.name ?? key} is not an input of ${b?.name ?? "the block"}`, caller?.block.name);
+      if (byRef(key)) {
+        mem[key] = this.bindReference(a.value, caller);
+        return;
+      }
       // an input gets a copy; an IN_OUT is the caller's variable itself (by reference)
       const inOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       const value = this.eval(a.value, caller);
@@ -1110,11 +1211,29 @@ export class Simulator {
     });
   }
 
+  /**
+   * What a VARIANT or ARRAY[*] parameter holds: where the caller's variable is and its declared type (TypeOf reads
+   * it). A parameter of the caller passed on is passed as it is; a constant or expression gets a place of its own.
+   */
+  private bindReference(e: Expr, caller: Frame | null): Pointer {
+    if (e.k === "ref") {
+      const at = this.locate(e.ref, caller, true);
+      const raw = (at.obj as Struct)[at.key as string] ?? (at.obj as Value[])[at.key as number];
+      if (isPointer(raw) && raw.variant) return raw;
+      const decl = this.declOf(e.ref, caller);
+      return { __ptr: this.locate(e.ref, caller), ref: true, variant: decl ? { decl } : {} };
+    }
+    const decl = this.staticDecl(e, caller);
+    return { __ptr: { obj: [this.eval(e, caller)], key: 0 }, ref: true, variant: decl ? { decl } : {} };
+  }
+
   private bindOutputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
     const params = b ? b.vars.filter((v) => v.section === "Input" || v.section === "InOut") : [];
     args.forEach((a, i) => {
       const key = (a.name ?? (a.out ? undefined : params[i]?.name))?.toUpperCase();
       if (!key) return;
+      const bound = mem[key];
+      if (isPointer(bound) && bound.variant) return; // a VARIANT or ARRAY[*] wrote into the caller's variable itself
       const isInOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       if ((a.out || isInOut) && a.value.k === "ref") this.write(a.value.ref, mem[key], caller);
     });

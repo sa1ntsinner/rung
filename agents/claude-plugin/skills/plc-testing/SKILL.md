@@ -41,7 +41,7 @@ For every behaviour you change, one case for the normal path and at least one pe
 
 ## Limits of the simulator
 
-A few system instructions run offline (SWAP, RD_SYS_T/RD_LOC_T on a virtual clock that starts 2024-01-01, RUNTIME, T_DIFF/T_ADD/T_SUB, MOVE_BLK/FILL_BLK, IS_ARRAY/CountOfElements/LOWER_BOUND/UPPER_BOUND, VAL_STRG; docs/testing.md has the details). Other system instructions and technology objects fail with "not simulated"; wrap such calls behind an FB interface so the logic around them can still be tested. Report which parts of the change could not be simulated.
+A few system instructions run offline (SWAP, RD_SYS_T/RD_LOC_T on a virtual clock that starts 2024-01-01, RUNTIME, T_DIFF/T_ADD/T_SUB, MOVE_BLK/FILL_BLK, IS_ARRAY/CountOfElements/LOWER_BOUND/UPPER_BOUND, VAL_STRG, and on VARIANT parameters TypeOf/TypeOfElements, VariantGet/VariantPut, MOVE_BLK_VARIANT; docs/testing.md has the details). Other system instructions and technology objects fail with "not simulated"; wrap such calls behind an FB interface so the logic around them can still be tested. Report which parts of the change could not be simulated.
 
 ## Live values without a machine
 

@@ -8,6 +8,21 @@ export const CLOCK_START = Date.UTC(2024, 0, 1); // DTL#2024-01-01-00:00:00, a M
 /** Something the simulator does not model the way the PLC does: the call stops with this message. */
 export class Unsupported extends Error {}
 
+/** The elementary data types a TypeOf comparison can name without quotes (TypeOf(#in) = Int). */
+export const ELEMENTARY_TYPE =
+  /^(BOOL|BYTE|WORD|DWORD|LWORD|SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|REAL|LREAL|TIME|LTIME|S5TIME|DATE|TOD|TIME_OF_DAY|LTOD|LTIME_OF_DAY|DT|DATE_AND_TIME|LDT|DTL|CHAR|WCHAR|STRING|WSTRING)$/i;
+
+const TYPE_ALIAS: Record<string, string> = { TIME_OF_DAY: "TOD", LTIME_OF_DAY: "LTOD", DATE_AND_TIME: "DT" };
+
+/**
+ * The value TypeOf and TypeOfElements give for a data type, and a type name in a comparison with them: one text per
+ * type, whatever its spelling (Int, INT; "UDT_X", udt_x; String[20] is a String; Time_Of_Day is TOD).
+ */
+export function typeTag(type: string): string {
+  const t = type.trim().replace(/^"|"$/g, "").replace(/^(W?STRING)\s*\[.*\]$/i, "$1").toUpperCase();
+  return `\u0000type ${TYPE_ALIAS[t] ?? t}`;
+}
+
 export type DtlValue = { YEAR: number; MONTH: number; DAY: number; WEEKDAY: number; HOUR: number; MINUTE: number; SECOND: number; NANOSECOND: number };
 
 /** DTL#1970-01-01-00:00:00 to DTL#2262-04-11-23:47:16.854775807 (LDT has the same range). */
