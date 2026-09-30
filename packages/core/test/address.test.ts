@@ -63,6 +63,10 @@ describe("addresses", () => {
     expect(ignoredSourceReason("plc/P/blocks/Fx.s7res")).toBeUndefined(); // a companion
     expect(ignoredSourceReason("plc/P/blocks/notes.txt")).toBeUndefined();
     expect(ignoredSourceReason("plc/P/tags/T.scl")).toBe(".scl files are not read in tags/ (.tags.st, .tags.xml, .st)");
+    // an extension in capitals (as some tools write it) is not read either: rung writes them in lower case
+    expect(ignoredSourceReason("plc/P/blocks/Motor.SCL")).toBe("rung spells this file plc/P/blocks/Motor.scl; rename it");
+    expect(ignoredSourceReason("plc/P/tags/IO.Tags.St")).toBe("rung spells this file plc/P/tags/IO.tags.st; rename it");
+    expect(ignoredSourceReason("plc/P/tags/IO.SCL")).toBe(".scl files are not read in tags/ (.tags.st, .tags.xml, .st)");
     expect(ignoredSourceReason("plc/P/stuff/X.scl")).toMatch(/^not in a folder rung mirrors \(plc\/<PLC>\/blocks\|types\|tags/);
   });
   it("rejects a form that does not fit the kind", () => {

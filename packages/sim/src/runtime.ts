@@ -145,6 +145,26 @@ function wrapInteger(v: number, d: Decl | undefined): number {
   return Number(x);
 }
 
+/** A string cut to what its type holds, as the PLC stores it: String[5] keeps five characters, a String 254, a Char one. */
+function fitString(v: string, d: Decl | undefined): string {
+  if (!d || d.isArray) return v;
+  const t = d.type.trim();
+  if (/^W?CHAR$/i.test(t)) return v.slice(0, 1);
+  const m = /^W?STRING\s*(?:\[\s*(\d+)\s*\])?$/i.exec(t);
+  return m ? v.slice(0, m[1] !== undefined ? Number(m[1]) : 254) : v;
+}
+
+/**
+ * AND, OR, XOR of integers and bit strings, exact at every width: JavaScript's & | ^ work on 32-bit signed
+ * numbers, which turns a DWORD with its top bit set negative (16#FFFF0000 AND 16#FFFF0000 would be -65536).
+ */
+function bitwise(op: string, l: number, r: number): number {
+  if (!Number.isSafeInteger(l) || !Number.isSafeInteger(r)) return op === "XOR" ? l ^ r : op === "OR" ? l | r : l & r;
+  const a = BigInt(l);
+  const b = BigInt(r);
+  return Number(op === "XOR" ? a ^ b : op === "OR" ? a | b : a & b);
+}
+
 const combine = (a: Kind, b: Kind): Kind => (a === "real" || b === "real" ? "real" : a === "int" && b === "int" ? "int" : "unknown");
 
 function kindOfType(d: Decl | undefined): Kind {
@@ -476,7 +496,8 @@ export class Simulator {
       return;
     }
     const { obj, key } = this.locate(ref, frame);
-    (obj as Record<string | number, Value>)[key] = typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : value;
+    (obj as Record<string | number, Value>)[key] =
+      typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : value;
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -562,22 +583,26 @@ export class Simulator {
         return this.read(e.ref, frame);
       case "un": {
         const v = this.eval(e.e, frame);
-        return e.op === "NOT" ? (typeof v === "number" ? ~v : !v) : e.op === "-" ? -Number(v) : Number(v);
+        if (e.op !== "NOT") return e.op === "-" ? -Number(v) : Number(v);
+        if (typeof v !== "number") return !v;
+        // in the width of the operand's type: NOT 16#00FF of a Word is 16#FF00
+        const inverted = Number.isSafeInteger(v) ? Number(~BigInt(v)) : ~v;
+        return e.e.k === "ref" ? wrapInteger(inverted, this.declOf(e.e.ref, frame)) : inverted;
       }
       case "bin": {
         const l = this.eval(e.l, frame);
         if (e.op === "AND" || e.op === "&") {
           const r = this.eval(e.r, frame);
-          return typeof l === "number" ? (l as number) & (r as number) : !!l && !!r;
+          return typeof l === "number" ? bitwise("AND", l, r as number) : !!l && !!r;
         }
         if (e.op === "OR") {
           const r = this.eval(e.r, frame);
-          return typeof l === "number" ? (l as number) | (r as number) : !!l || !!r;
+          return typeof l === "number" ? bitwise("OR", l, r as number) : !!l || !!r;
         }
         const r = this.eval(e.r, frame);
         switch (e.op) {
           case "XOR":
-            return typeof l === "number" ? (l as number) ^ (r as number) : !!l !== !!r;
+            return typeof l === "number" ? bitwise("XOR", l, r as number) : !!l !== !!r;
           case "=":
             return l === r;
           case "<>":
@@ -720,8 +745,16 @@ export class Simulator {
           return Math.min(Math.max(n(named("IN", 1)), n(named("MN", 0))), n(named("MX", 2)));
         case "SEL":
           return named("G", 0) ? named("IN1", 2) : named("IN0", 1);
-        case "MUX":
-          return args[1 + n(named("K", 0))];
+        case "MUX": {
+          // IN<K> by name (in any order) or the K-th after K; INELSE when K selects none
+          const k = n(named("K", 0));
+          const byName = c.args.some((a) => a.name);
+          const inputs = byName ? c.args.filter((a) => /^IN\d+$/i.test(a.name ?? "")).length : c.args.length - 1;
+          const at = byName ? c.args.findIndex((a) => a.name?.toUpperCase() === `IN${k}`) : Number.isInteger(k) && k >= 0 && k < inputs ? 1 + k : -1;
+          const other = c.args.findIndex((a) => a.name?.toUpperCase() === "INELSE");
+          if (at >= 0 || other >= 0) return args[at >= 0 ? at : other];
+          throw new SimError(`MUX: K = ${k} selects no input (IN0..IN${inputs - 1}) and there is no INELSE`, frame?.block.name, c.callee.start);
+        }
         case "TRUNC":
           return Math.trunc(n(args[0]));
         case "ROUND":
@@ -739,23 +772,34 @@ export class Simulator {
         case "CONCAT":
           return args.map(String).join("");
         case "LEFT":
-          return String(named("IN", 0)).slice(0, n(named("L", 1)));
-        case "RIGHT":
-          return String(named("IN", 0)).slice(-n(named("L", 1)) || undefined);
+          return String(named("IN", 0)).slice(0, Math.max(0, n(named("L", 1))));
+        case "RIGHT": {
+          const l = n(named("L", 1));
+          return l > 0 ? String(named("IN", 0)).slice(-l) : "";
+        }
         case "MID":
           return String(named("IN", 0)).substr(n(named("P", 2)) - 1, n(named("L", 1)));
         case "FIND":
           return String(named("IN1", 0)).indexOf(String(named("IN2", 1))) + 1;
         case "SHL":
-          return n(args[0]) << n(args[1]);
-        case "SHR":
-          return n(args[0]) >>> n(args[1]);
+        case "SHR": {
+          // in the width of IN's type (JavaScript shifts 32 bits and takes the count modulo 32)
+          const v = n(named("IN", 0));
+          const by = n(named("N", 1));
+          if (!Number.isInteger(v) || !Number.isInteger(by) || by < 0) throw new SimError(`${upper}: IN and N must be integers (N at least 0)`, frame?.block.name, c.callee.start);
+          const count = BigInt(Math.min(by, 64)); // every bit is gone after 64, whatever the width
+          const shifted = Number(upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count);
+          const input = c.args.find((a) => a.name?.toUpperCase() === "IN") ?? c.args.find((a) => !a.name);
+          return input?.value.k === "ref" ? wrapInteger(shifted, this.declOf(input.value.ref, frame)) : shifted;
+        }
       }
       const to = upper.split("_TO_")[1] ?? "";
       if (/^(BOOL)$/.test(to)) return !!args[0] && args[0] !== 0;
       if (REAL_TYPES.test(to)) return Number(args[0]);
       if (STRING_TYPES.test(to)) return String(args[0]);
-      if (INT_TYPES.test(to) || TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0]));
+      // the value of the target type: WORD_TO_INT(16#FFFF) is -1 also inside an expression
+      if (INT_TYPES.test(to)) return wrapInteger(typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0])), { type: to, isArray: false });
+      if (TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0]));
       throw new SimError(`function ${name} is not supported by the simulator`, frame?.block.name, c.callee.start);
     }
     const g = this.index.global(name);

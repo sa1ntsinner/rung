@@ -43,6 +43,15 @@ describe("rung compare", () => {
     expect((t.db() as { compareTarget?: Record<string, unknown> }).compareTarget).toMatchObject({ mode: "PN/IE", pcInterface: "PLCSIM", targetInterface: "1 X1" });
   });
 
+  it("--json prints JSON only, also when it first finds the PLC and saves the connection", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.out.length = 0;
+    expect(await t.run(["compare", "--json"])).toBe(2);
+    expect(JSON.parse(t.out.join(""))).toMatchObject({ items: [{ address: "plc:PLC_1/blocks/Fx_Motor", state: "Different" }] });
+    expect(t.err.join("")).toMatch(/PLC_1: .*; saved as \[plc\.PLC_1\] in rung\.toml/);
+  });
+
   it("says so when the PLC runs the project, and exits 0; --json for tools", async () => {
     const t = setup();
     await t.run(["init"]);
@@ -58,6 +67,31 @@ describe("rung compare", () => {
 });
 
 describe("PLC commands", () => {
+  it("stops at options that leave nothing to do, before looking for the PLC", async () => {
+    const t = setup(["1"]);
+    await t.run(["init"]);
+    expect(await t.run(["download", "--no-sw", "--yes"])).toBe(1);
+    expect(t.err.join("")).toMatch(/rung: BAD_ARGUMENT: --no-sw leaves nothing to download: add --hw to download the hardware configuration/);
+    expect([t.db().downloads, t.db().scans]).toEqual([undefined, undefined]);
+    t.err.length = 0;
+    expect(await t.run(["compile", "--hw", "--file", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(1);
+    expect(t.err.join("")).toMatch(/--hw and --file exclude each other/);
+    t.err.length = 0;
+    expect(await t.run(["live", "watch", "--file", "plc/PLC_1/blocks/Fx_Motor.scl", "--interval", "1s"])).toBe(1);
+    expect(t.err.join("")).toMatch(/rung: BAD_ARGUMENT: --interval is a number of milliseconds \(--interval 500\); got 1s/);
+  });
+
+  it("a PG/PC interface number that is no number never reaches rung.toml", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    const before = readFileSync(t.toml, "utf8");
+    expect(await t.run(["connect", "--use", "PLCSIM", "--number", "one"])).toBe(1);
+    expect(t.err.join("")).toMatch(/rung: BAD_ARGUMENT: --number is the number of the PG\/PC interface \(1 or more; rung interfaces lists them\), not one/);
+    expect(readFileSync(t.toml, "utf8")).toBe(before);
+    expect(await t.run(["upload", "--ip", "192.168.0.1", "--use", "PLCSIM", "--number", "0"])).toBe(1);
+    expect(await t.run(["status"])).toBe(0);
+  });
+
   it("download never picks the PLC by itself: it asks, even when one device answers at the project address", async () => {
     const t = setup([""]);
     await t.run(["init"]);

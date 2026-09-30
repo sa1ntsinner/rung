@@ -81,7 +81,9 @@ const canPrompt = (io: Io) => !!io.prompt || !!process.stdin.isTTY;
  * PLC found on the network by its project address, which is then saved to rung.toml. Returns undefined when
  * TIA Portal's own remembered connection applies.
  */
-async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "connect" | "download", force = false): Promise<ConnectionTarget | undefined> {
+async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: Io, device: string, purpose: "online" | "connect" | "download", force = false, json = false): Promise<ConnectionTarget | undefined> {
+  // a command's --json output is JSON only: what finding the PLC has to say goes to stderr
+  const say = json ? io.stderr : io.stdout;
   const saved = targetOf(config, device);
   if (saved && !force) return saved;
   if (purpose === "online" && !force) {
@@ -107,23 +109,30 @@ async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: I
           ? `${choices.length} ways to reach ${device}: ${choices.map(describe).join("; ")}. Choose one with rung connect --pick (or rung connect --json for editors).`
           : `rung never picks a PLC to download to by itself, and ${device} has no saved connection. Found: ${choices.map(describe).join("; ")}. Choose it with rung connect --pick (it is saved in rung.toml), then download.`,
       );
-    io.stdout(auto ? `Where is ${device}?\n` : `Which PLC should ${device} be downloaded to? Check name and address; rung never picks one by itself.\n`);
-    choices.forEach((c, i) => io.stdout(`  ${i + 1}) ${describe(c)}\n`));
+    say(auto ? `Where is ${device}?\n` : `Which PLC should ${device} be downloaded to? Check name and address; rung never picks one by itself.\n`);
+    choices.forEach((c, i) => say(`  ${i + 1}) ${describe(c)}\n`));
     const answer = Number((await ask(io, `Number (1-${choices.length}): `)).trim());
     pick = choices[answer - 1];
     if (!pick) throw new WorkspaceError("NO_TARGET", "no connection chosen");
   }
   await saveTarget(ws, device, pick.target);
-  io.stdout(`${device}: ${describe(pick)}; saved as [plc.${device}] in rung.toml\n`);
+  say(`${device}: ${describe(pick)}; saved as [plc.${device}] in rung.toml\n`);
   return pick.target;
 }
 
 /** rung connect: find the PLC (or pick among what answers) and remember it; --json lists the choices for editors. */
+/** --number: which of several PG/PC interfaces of one name. Not a number would be written into rung.toml as NaN, which no TOML reader takes. */
+function interfaceNumber(v: Record<string, unknown>): number {
+  const n = Number(v.number ?? 1);
+  if (!Number.isInteger(n) || n < 1) throw new WorkspaceError("BAD_ARGUMENT", `--number is the number of the PG/PC interface (1 or more; rung interfaces lists them), not ${String(v.number)}`);
+  return n;
+}
+
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v, ws, link);
   if (v.use) {
-    const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1), ...(v.target ? { targetInterface: String(v.target) } : {}) };
+    const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v), ...(v.target ? { targetInterface: String(v.target) } : {}) };
     await saveTarget(ws, device, t);
     io.stdout(`${device}: ${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}; saved as [plc.${device}] in rung.toml\n`);
     return 0;
@@ -195,7 +204,7 @@ const COMPARE_LABEL: Record<string, string> = { Different: "differs", OnlyInProj
 export async function cmdCompare(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v, ws, link);
-  const target = await ensureTarget(link, ws, config, io, device, "online");
+  const target = await ensureTarget(link, ws, config, io, device, "online", false, !!v.json);
   const r = await link.call<CompareOutcome>("compare", { device, ...(target ? { target } : {}) }, (b) => b.compare(device, target));
   const objects = await snapshot(ws);
   const items = r.items.map((i) => ({ ...i, file: i.address ? objects.find((o) => o.address === i.address)?.path : undefined }));
@@ -251,11 +260,13 @@ async function ask(io: Io, question: string): Promise<string> {
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
+  const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
+  const software = !v["no-sw"];
+  // before the PLC is looked for on the network
+  if (!hardware && !software) throw new WorkspaceError("BAD_ARGUMENT", "--no-sw leaves nothing to download: add --hw to download the hardware configuration");
   const device = await deviceOf(config, v, ws, link);
   const target = await ensureTarget(link, ws, config, io, device, "download");
   if (!target) throw new WorkspaceError("NO_TARGET", `no connection for ${device}: run rung connect`);
-  const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
-  const software = !v["no-sw"];
   const onlyChanges = v["all-blocks"] ? false : config.download.onlyChanges;
   const allow = [...config.download.allow, ...((v.allow as string[] | undefined) ?? []).flatMap((a) => a.split(","))].map((a) => a.trim()).filter(Boolean);
   const startAfter = v["no-start"] ? false : config.download.startAfter;
@@ -310,7 +321,7 @@ export async function cmdOpen(dir: string, file: string, io: Io): Promise<number
 /** --use/--mode/--number of rung connect name the PG/PC interface; without --use the bridge takes the only one. */
 export function uploadRequest(address: string, v: Record<string, unknown>): UploadRequest {
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) throw new WorkspaceError("BAD_ARGUMENT", `${address} is not an IP address such as 192.168.0.1`);
-  return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: Number(v.number ?? 1) } : {}) };
+  return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v) } : {}) };
 }
 
 /** Prints what an upload brought; exit 3 when no station came. */

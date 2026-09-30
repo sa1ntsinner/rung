@@ -46,7 +46,7 @@ describe.runIf(enabled)("e2e: pull against the fixture project", () => {
     expect1("plc/PLC_1/blocks/Fx_Global.db");
     expect1("plc/PLC_1/blocks/Fx_Stl.awl");
     expect1("plc/PLC_1/types/Fx_Types.udt");
-    expect1("plc/PLC_1/tags/Fx_Inputs.tags.xml");
+    expect1("plc/PLC_1/tags/Fx_Inputs.tags.st"); // tag tables as text
     if (manifest.addresses.includes("plc:PLC_1/blocks/Fx_Secret")) expect1("plc/PLC_1/blocks/Fx_Secret.protected.yaml");
     if (manifest.addresses.includes("plc:PLC_1/blocks/20_Valves/Fx_LadInterlock"))
       expect(files.some((f) => f.startsWith("plc/PLC_1/blocks/20_Valves/Fx_LadInterlock."))).toBe(true);

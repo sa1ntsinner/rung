@@ -79,7 +79,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   };
   server = await OwnerServer.start(dir, {
     status: async () => statusOf(state, watcher),
-    syncNow: async () => watcher.syncNow(),
+    syncNow: async () => watcher.syncNow(true), // asked for: refused imports are tried again
     diagnostics: async () => watcher.lastReport?.diagnostics ?? [],
     resolve: async (p) => {
       await resolveConflict(dir, state, String(p.path), p.mode as "ours" | "theirs" | "merged");

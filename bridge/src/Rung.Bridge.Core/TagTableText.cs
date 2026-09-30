@@ -15,7 +15,9 @@ namespace Rung.Bridge.Core
 {
     public sealed class TagTableTextException : Exception
     {
-        public TagTableTextException(string message) : base(message) { }
+        /// <summary>The line of the text the error is on.</summary>
+        public readonly int Line;
+        public TagTableTextException(string message, int line = 0) : base(message) { Line = line; }
     }
 
     public sealed class TagTableTextResult
@@ -33,8 +35,12 @@ namespace Rung.Bridge.Core
         static readonly HashSet<string> TagAttributes = new HashSet<string>(new[] { "Name", "DataTypeName", "LogicalAddress" }.Concat(External), StringComparer.Ordinal);
         static readonly HashSet<string> ConstantAttributes = new HashSet<string>(new[] { "Name", "DataTypeName", "Value" }, StringComparer.Ordinal);
         static readonly Regex Identifier = new Regex(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
+        static readonly Regex Word = new Regex(@"^[\p{L}_][\p{L}\p{Nd}_]*$", RegexOptions.CultureInvariant);
         static readonly Regex Address = new Regex(@"^%[A-Za-z]{1,3}\d+(\.\d+)?$", RegexOptions.CultureInvariant);
-        static readonly HashSet<string> Reserved = new HashSet<string>(new[] { "VAR_GLOBAL", "END_VAR", "VAR", "CONSTANT", "AT", "TRUE", "FALSE", "RETAIN" }, StringComparer.OrdinalIgnoreCase);
+        // names an ST reader takes for a keyword in a declaration list (a section's end or modifier) go in quotes
+        static readonly HashSet<string> Reserved = new HashSet<string>(new[] {
+            "VAR_GLOBAL", "END_VAR", "VAR", "CONSTANT", "AT", "TRUE", "FALSE", "RETAIN", "NON_RETAIN", "PERSISTENT", "DB_SPECIFIC", "BEGIN",
+            "END_STRUCT", "END_TYPE", "END_FUNCTION", "END_FUNCTION_BLOCK", "END_ORGANIZATION_BLOCK", "END_DATA_BLOCK", "END_PROGRAM" }, StringComparer.OrdinalIgnoreCase);
 
         const string Tags = "SW.Tags.PlcTag";
         const string Constants = "SW.Tags.PlcUserConstant";
@@ -55,12 +61,14 @@ namespace Rung.Bridge.Core
             if (table.Elements().Any(e => e.Name.LocalName != "AttributeList" && e.Name.LocalName != "ObjectList")) return Lossy("the table holds more than tags and constants");
 
             string culture = null;
-            var tagLines = new List<string>();
-            var constantLines = new List<string>();
+            var tagLines = new List<(Entry Entry, string Line)>();
+            var constantLines = new List<(Entry Entry, string Line)>();
             foreach (var o in table.Element("ObjectList")?.Elements() ?? Enumerable.Empty<XElement>())
             {
                 var kind = o.Name.LocalName;
                 if (kind != Tags && kind != Constants) return Lossy("the table holds " + kind);
+                var part = o.Elements().FirstOrDefault(e => e.Name.LocalName != "AttributeList" && e.Name.LocalName != "ObjectList");
+                if (part != null) return Lossy((o.Element("AttributeList")?.Element("Name")?.Value ?? "an entry") + " holds " + part.Name.LocalName);
                 var list = o.Element("AttributeList")?.Elements().ToList() ?? new List<XElement>();
                 var allowed = kind == Tags ? TagAttributes : ConstantAttributes;
                 var attrs = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -80,9 +88,10 @@ namespace Rung.Bridge.Core
                 foreach (var child in o.Element("ObjectList")?.Elements() ?? Enumerable.Empty<XElement>())
                 {
                     if (child.Name.LocalName != "MultilingualText" || (string)child.Attribute("CompositionName") != "Comment") return Lossy(tagName + " holds " + child.Name.LocalName);
+                    if (child.Elements().Any(e => e.Name.LocalName != "ObjectList")) return Lossy(tagName + " has a comment the text form cannot hold");
                     foreach (var item in child.Element("ObjectList")?.Elements() ?? Enumerable.Empty<XElement>())
                     {
-                        if (item.Name.LocalName != "MultilingualTextItem") return Lossy(tagName + " has a comment the text form cannot hold");
+                        if (item.Name.LocalName != "MultilingualTextItem" || item.Elements().Any(e => e.Name.LocalName != "AttributeList")) return Lossy(tagName + " has a comment the text form cannot hold");
                         var itemAttrs = item.Element("AttributeList")?.Elements().ToList() ?? new List<XElement>();
                         if (itemAttrs.Any(a => a.Name.LocalName != "Culture" && a.Name.LocalName != "Text")) return Lossy(tagName + " has a comment the text form cannot hold");
                         // spaces at the ends of a comment are not kept (they carry nothing and are common in real projects)
@@ -96,36 +105,61 @@ namespace Rung.Bridge.Core
                     }
                 }
                 var tail = comment == null ? "" : "  // " + comment;
+                var entry = new Entry { Name = tagName, Type = type, Comment = comment, Constant = kind == Constants };
                 if (kind == Tags)
                 {
                     if (!attrs.TryGetValue("LogicalAddress", out var address) || !Address.IsMatch(address)) return Lossy(tagName + " has the address \"" + (address ?? "") + "\"");
                     var flags = External.Where(attrs.ContainsKey).Select(k => k + " := '" + attrs[k] + "'").ToList();
                     if (External.Any(k => attrs.ContainsKey(k) && attrs[k] != "true" && attrs[k] != "false")) return Lossy(tagName + " has an HMI setting the text form cannot hold");
-                    tagLines.Add("    " + NameText(tagName) + (flags.Count > 0 ? " {" + string.Join("; ", flags) + "}" : "") + " AT " + address + " : " + type + ";" + tail);
+                    foreach (var k in External.Where(attrs.ContainsKey)) entry.Flags[k] = attrs[k];
+                    entry.Address = address;
+                    tagLines.Add((entry, "    " + NameText(tagName) + (flags.Count > 0 ? " {" + string.Join("; ", flags) + "}" : "") + " AT " + address + " : " + type + ";" + tail));
                 }
                 else
                 {
                     var value = attrs.TryGetValue("Value", out var v) ? v : "";
                     if (value.Length == 0 || value.Any(char.IsControl)) return Lossy("the constant " + tagName + " has the value \"" + value + "\"");
-                    constantLines.Add("    " + NameText(tagName) + " : " + type + " := " + value + ";" + tail);
+                    entry.Value = value;
+                    constantLines.Add((entry, "    " + NameText(tagName) + " : " + type + " := " + value + ";" + tail));
                 }
             }
 
             var sb = new StringBuilder();
-            sb.Append("// PLC tag table ").Append(name).Append(" in TIA Portal; rung sync writes changes to TIA Portal.\n");
-            sb.Append("// A tag: Name AT %address : Type;  // comment        A constant: Name : Type := value;\n");
-            sb.Append("// {ExternalAccessible := 'false'} hides a tag from HMI and OPC UA; ExternalVisible and ExternalWritable likewise.\n");
-            sb.Append("VAR_GLOBAL\n");
-            foreach (var l in tagLines) sb.Append(l).Append('\n');
-            sb.Append("END_VAR\n");
+            var lineCount = 0;
+            void Add(string line, Entry e = null)
+            {
+                sb.Append(line).Append('\n');
+                if (e != null) e.Line = lineCount + 1;
+                lineCount++;
+            }
+            Add("// PLC tag table " + name + " in TIA Portal; rung sync writes changes to TIA Portal.");
+            Add("// A tag: Name AT %address : Type;  // comment        A constant: Name : Type := value;");
+            Add("// {ExternalAccessible := 'false'} hides a tag from HMI and OPC UA; ExternalVisible and ExternalWritable likewise.");
+            Add("VAR_GLOBAL");
+            foreach (var (e, l) in tagLines) Add(l, e);
+            Add("END_VAR");
             if (constantLines.Count > 0)
             {
-                sb.Append("\nVAR_GLOBAL CONSTANT\n");
-                foreach (var l in constantLines) sb.Append(l).Append('\n');
-                sb.Append("END_VAR\n");
+                Add("");
+                Add("VAR_GLOBAL CONSTANT");
+                foreach (var (e, l) in constantLines) Add(l, e);
+                Add("END_VAR");
             }
-            return new TagTableTextResult { Text = sb.ToString(), Culture = culture };
+            // the text goes back to TIA Portal on the next import: what it reads back must be what TIA Portal holds
+            // (a value or type with a quote or // of its own would come back changed, or not at all)
+            var output = sb.ToString();
+            var written = tagLines.Concat(constantLines).Select(x => x.Entry).ToList();
+            List<Entry> back;
+            try { back = Parse(output); }
+            catch (TagTableTextException e) { return Lossy("the text form does not read " + (written.FirstOrDefault(x => x.Line == e.Line)?.Name ?? "the table") + " back the same (" + e.Message + ")"); }
+            var changed = written.Where((x, i) => i >= back.Count || !Same(x, back[i])).FirstOrDefault();
+            if (changed != null || back.Count != written.Count) return Lossy("the text form does not read " + (changed?.Name ?? "the table") + " back the same");
+            return new TagTableTextResult { Text = output, Culture = culture };
         }
+
+        static bool Same(Entry a, Entry b) =>
+            a.Name == b.Name && a.Type == b.Type && a.Address == b.Address && a.Value == b.Value && a.Comment == b.Comment && a.Constant == b.Constant &&
+            a.Flags.Count == b.Flags.Count && a.Flags.All(f => b.Flags.TryGetValue(f.Key, out var v) && v == f.Value);
 
         static string NameText(string name) => Identifier.IsMatch(name) && !Reserved.Contains(name) ? name : "\"" + name + "\"";
 
@@ -182,7 +216,7 @@ namespace Rung.Bridge.Core
             var entries = new List<Entry>();
             var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             string section = null; // "tags" | "constants"
-            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var lines = text.TrimStart('\uFEFF').Replace("\r\n", "\n").Split('\n');
             for (var n = 1; n <= lines.Length; n++)
             {
                 var (code, comment) = SplitComment(lines[n - 1], n);
@@ -200,6 +234,7 @@ namespace Rung.Bridge.Core
                     section = null;
                     continue;
                 }
+                if (section == null && word.StartsWith("VAR", StringComparison.Ordinal)) throw Error(n, code + ": a tag table has the sections VAR_GLOBAL and VAR_GLOBAL CONSTANT");
                 if (section == null) throw Error(n, "a tag belongs between VAR_GLOBAL and END_VAR");
                 var e = Declaration(code, n, section == "constants");
                 e.Comment = comment;
@@ -211,7 +246,7 @@ namespace Rung.Bridge.Core
             return entries;
         }
 
-        static TagTableTextException Error(int line, string message) => new TagTableTextException("line " + line + ": " + message);
+        static TagTableTextException Error(int line, string message) => new TagTableTextException("line " + line + ": " + message, line);
 
         /// <summary>Code and the text of a trailing // comment; quotes ('…', "…") are respected.</summary>
         static (string Code, string Comment) SplitComment(string line, int n)
@@ -238,6 +273,10 @@ namespace Rung.Bridge.Core
             var e = new Entry { Line = n, Constant = constant };
             if (!code.EndsWith(";", StringComparison.Ordinal)) throw Error(n, "missing ';' (one tag per line)");
             var s = code.Substring(0, code.Length - 1).TrimEnd();
+            // a second declaration on the line would otherwise end up in the data type or value of the first
+            var semicolon = IndexOutsideQuotes(s, ";");
+            if (semicolon >= 0 && s.Substring(semicolon + 1).Trim().Length == 0) throw Error(n, "one ';' too many");
+            if (semicolon >= 0) throw Error(n, "one tag per line: " + s.Substring(semicolon + 1).Trim() + "; goes on a line of its own");
             var i = 0;
             if (s.StartsWith("\"", StringComparison.Ordinal))
             {
@@ -250,7 +289,8 @@ namespace Rung.Bridge.Core
             {
                 while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_')) i++;
                 e.Name = s.Substring(0, i);
-                if (!Identifier.IsMatch(e.Name)) throw Error(n, "expected a tag name (a name with spaces or other characters goes in double quotes)");
+                // letters of any language, as the language server reads names (the text writes those in quotes)
+                if (!Word.IsMatch(e.Name)) throw Error(n, "expected a tag name (a name with spaces or other characters goes in double quotes)");
             }
             var rest = s.Substring(i).TrimStart();
             if (rest.StartsWith("{", StringComparison.Ordinal))
@@ -268,7 +308,9 @@ namespace Rung.Bridge.Core
                 }
                 rest = rest.Substring(close + 1).TrimStart();
             }
-            var at = Regex.Match(rest, @"^AT\s+(\S+)\s*", RegexOptions.IgnoreCase);
+            // the address ends where the ':' of the type starts (AT %M0.0: Bool), as the language server reads it;
+            // a ':P' right after it is peripheral access, which a tag table has not
+            var at = Regex.Match(rest, @"^AT(?![A-Za-z0-9_])\s*([^\s:]+(?::[Pp](?![A-Za-z0-9_]))?)\s*", RegexOptions.IgnoreCase);
             if (at.Success)
             {
                 if (constant) throw Error(n, "a constant has no address");
@@ -296,14 +338,16 @@ namespace Rung.Bridge.Core
             return e;
         }
 
+        /// <summary>Where `what` is outside '…', "…" and the {…} of HMI settings, or -1.</summary>
         static int IndexOutsideQuotes(string s, string what)
         {
             char quote = '\0';
             for (var i = 0; i + what.Length <= s.Length; i++)
             {
                 var c = s[i];
-                if (quote != '\0') { if (c == quote) quote = '\0'; continue; }
+                if (quote != '\0') { if (c == quote) quote = '\0'; else if (c == '$' && quote == '\'') i++; continue; }
                 if (c == '\'' || c == '"') quote = c;
+                else if (c == '{') quote = '}';
                 else if (string.CompareOrdinal(s, i, what, 0, what.Length) == 0) return i;
             }
             return -1;

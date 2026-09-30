@@ -34,6 +34,35 @@ public class NetworkYamlTests
         Assert.Null(back.Single().DeviceName);
     }
 
+    /// <summary>A byte order mark, CRLF, tabs and comments as editors and people write them read like the file rung writes.</summary>
+    [Fact] public void ReadsTheFileAsEditorsWriteIt()
+    {
+        var canonical = NetworkYaml.Render("PLC_1", NetworkYaml.Parse("\"PLC_1 / X1\":\n  ip: 10.0.0.5\n  subnetMask: 255.255.255.0\n  deviceName: \"a: b\"\n"));
+        var edited = NetworkYaml.Parse("\uFEFF# settings\r\n\"PLC_1 / X1\":\t# the PLC\r\n\tip:\t10.0.0.5\r\n\tsubnetMask: 255.255.255.0 # /24\r\n\tdeviceName:\t\"a: b\"\r\n");
+        Assert.Equal(canonical, NetworkYaml.Render("PLC_1", edited));
+    }
+
+    /// <summary>Module names and device names with quotes, colons, # and backslashes come back as they were.</summary>
+    [Fact] public void OddNamesRoundTrip()
+    {
+        var random = new System.Random(7);
+        const string alphabet = "aZ09 _-./()\":#\\'{}[]&*!|>%@`,?ü→";
+        string Word() => new string(Enumerable.Range(0, random.Next(1, 12)).Select(_ => alphabet[random.Next(alphabet.Length)]).ToArray());
+        for (var round = 0; round < 500; round++)
+        {
+            var wrote = new[] { new InterfaceSettings { Key = Word(), DeviceName = Word() }, new InterfaceSettings { Key = Word() + "!", Ip = "10.0.0.1", Router = "none", DeviceName = "auto", GeneratedName = Word() } };
+            var back = NetworkYaml.Parse(NetworkYaml.Render("PLC_1", wrote));
+            Assert.Equal(wrote.Select(w => w.Key + "|" + w.DeviceName + "|" + w.Ip), back.Select(b => b.Key + "|" + b.DeviceName + "|" + b.Ip));
+        }
+    }
+
+    /// <summary>Every choice TIA Portal names (its enumeration, first letter lowered) reads back from the file.</summary>
+    [Fact] public void ReadsBackEveryChoiceItWrites()
+    {
+        var text = NetworkYaml.Render("PLC_1", new[] { new InterfaceSettings { Key = "A", Ip = "viaIoController" }, new InterfaceSettings { Key = "B", Ip = "dhcp_v2" }, new InterfaceSettings { Key = "C", Ip = "mode2" } });
+        Assert.Equal(new[] { "viaIoController", "dhcp_v2", "mode2" }, NetworkYaml.Parse(text).Select(s => s.Ip));
+    }
+
     [Theory]
     [InlineData("\"A\":\n  ip: 192.168.0.300\n", "line 2: ip \"192.168.0.300\" is not an IPv4 address such as 192.168.0.1, dhcp or other")]
     [InlineData("\"A\":\n  subnetMask: 255.0.255.0\n", "line 2: 255.0.255.0 is not a subnet mask (the ones must be contiguous, as in 255.255.255.0)")]

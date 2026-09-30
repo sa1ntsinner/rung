@@ -134,6 +134,32 @@ describe("Watcher", () => {
     expect(reports.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("sends a refused edit once per change, not every poll; a person asking for a sync retries it", async () => {
+    const root = ws();
+    const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");
+    config.sync.pollMs = 60_000; // passes are driven by hand below
+    const state = await StateStore.open(root, { projectPath: config.project.path, tiaVersion: "V20", devices: [] });
+    let imports = 0;
+    class Refusing extends ClosableFake {
+      override async importObject(): Promise<never> {
+        imports++;
+        throw new BridgeError("IMPORT_FAILED", "syntax error in line 3");
+      }
+    }
+    const w = new Watcher(root, state, {
+      config,
+      bridgeFactory: async () => new Refusing().add("plc:PLC_1/blocks/Fx_A", { content: "a\n" }) as Refusing,
+    });
+    await w.syncNow();
+    writeFileSync(join(root, "plc/PLC_1/blocks/Fx_A.scl"), "a +\n");
+    for (let i = 0; i < 3; i++) expect((await w.syncNow())!.diagnostics.map((d) => d.message)).toEqual(["syntax error in line 3"]);
+    expect(imports).toBe(1);
+    await w.syncNow(true);
+    expect(imports).toBe(2);
+    await w.stop();
+    await state.close();
+  });
+
   it("polls at most every other pass length and never queues ticks behind a running pass", async () => {
     const root = ws();
     const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");

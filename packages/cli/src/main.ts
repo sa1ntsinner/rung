@@ -300,7 +300,8 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
   if (stray.length) return `rung ${cmd} has no ${stray.map((s) => "--" + s).join(", ")}`;
   const extra = positionals.slice(1 + spec.positionals);
   if (extra.length) return `rung ${cmd} takes ${spec.positionals === 0 ? "no arguments" : spec.positionals === 1 ? "one argument" : `${spec.positionals} arguments`}; unexpected: ${extra.join(" ")}`;
-  const exclusive = [["ours", "theirs", "merged"], ["hw", "no-hw"], ["off", "state"]].map((g) => g.filter((k) => v[k]));
+  // compile --hw compiles the hardware only: the files it was given would be left out without a word
+  const exclusive = [["ours", "theirs", "merged"], ["hw", "no-hw"], ["off", "state"], ["hw", "file"]].map((g) => g.filter((k) => v[k]));
   const both = exclusive.find((g) => g.length > 1);
   if (both) return `${both.map((s) => "--" + s).join(" and ")} exclude each other`;
   return undefined;
@@ -426,7 +427,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           ...(v.file ? { file: (v.file as string[])[0]! } : {}),
           ...(v.instance ? { instance: String(v.instance) } : {}),
           json: !!v.json,
-          ...(v.interval ? { intervalMs: Number(String(v.interval).replace(/ms$/i, "")) } : {}),
+          ...(v.interval ? { intervalMs: Number(String(v.interval).replace(/ms$/i, "")), intervalText: String(v.interval) } : {}),
         });
       case "views": {
         const ws = await findWorkspace(dir);
@@ -509,9 +510,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return r.overlaps.some((o) => !o.nested) ? 2 : 0;
         }
         const heading: Record<string, string> = { I: "Inputs", Q: "Outputs", M: "Bit memory" };
+        // every PLC has its own inputs, outputs and bit memory: with several, each heading names its PLC
+        const several = new Set(r.items.map((a) => a.device)).size > 1;
+        const of = (device: string | undefined) => (several && device !== undefined ? ` of ${device}` : "");
         let area = "";
         for (const a of r.items) {
-          if (a.area !== area) io.stdout(`${area ? "\n" : ""}${heading[(area = a.area)]}\n`);
+          const next = a.area + of(a.device);
+          if (next !== area) io.stdout(`${area ? "\n" : ""}${heading[a.area]}${of(a.device)}\n`);
+          area = next;
           const tag = a.tags.map((t) => `${t.name} : ${t.dataType} (${t.table})`).join(", ") || "(no tag)";
           const uses = a.uses.length ? `  used in ${a.uses.slice(0, 3).map(where).join(", ")}${a.uses.length > 3 ? ` and ${a.uses.length - 3} more` : ""}` : "";
           io.stdout(`  ${(a.address + (a.peripheral ? ":P" : "")).padEnd(10)} ${tag}${uses}\n`);
@@ -521,7 +527,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const nested = r.overlaps.length - crossing.length;
         if (crossing.length) {
           io.stdout(`\nOverlaps that cross (two accesses share only part of their bytes; usually a mistake):\n`);
-          for (const o of crossing) io.stdout(`  ${o.a} and ${o.b} share byte${o.bytes.length > 1 ? "s" : ""} ${o.bytes.join(", ")}\n`);
+          for (const o of crossing) io.stdout(`  ${o.a} and ${o.b}${of(o.device)} share byte${o.bytes.length > 1 ? "s" : ""} ${o.bytes.join(", ")}\n`);
         }
         if (nested) io.stdout(`\n${nested} address${nested > 1 ? "es are" : " is"} also used as part of a larger one (a byte and its bits, a word and its bytes); --json lists them.\n`);
         return crossing.length ? 2 : 0;

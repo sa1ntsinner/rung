@@ -156,6 +156,15 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     const c = comments.find((c) => c.start >= offset && c.start < lineEnd);
     return c ? c.text.replace(/^\/\/\s?|^\(\*\s?|\s?\*\)$|^\/\*\s?|\s?\*\/$/g, "").trim() : undefined;
   };
+  /**
+   * The keyword at peek(k) is the name of a declaration (`Begin AT %M0.0 : Bool;`, `Retain : Bool;`): what follows
+   * it, after attributes, is its ':' or AT. TIA tag names are free text, and a tag table as text holds them unquoted.
+   */
+  const declared = (k = 0) => {
+    let j = k + 1;
+    while (peek(j).kind === "pragma") j++;
+    return peek(j).text === ":" || isKw(peek(j), "AT");
+  };
   /** Skips tokens up to and including the next ';' (or until a stop keyword). */
   const skipStatement = (...stop: string[]) => {
     while (peek().kind !== "eof" && !(peek().kind === "op" && peek().text === ";") && !isKw(peek(), ...stop)) next();
@@ -214,14 +223,14 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
   function parseDecls(section: Section, ...stop: string[]): VarDecl[] {
     const vars: VarDecl[] = [];
     let local = section;
-    while (peek().kind !== "eof" && !isKw(peek(), ...stop, "END_VAR", "BEGIN", ...Object.values(HEADERS).map((h) => h.end))) {
+    while (peek().kind !== "eof" && !(isKw(peek(), ...stop, "END_VAR", "BEGIN", ...Object.values(HEADERS).map((h) => h.end)) && !declared())) {
       const t = peek();
-      if (isKw(t, "CONSTANT")) {
+      if (isKw(t, "CONSTANT") && !declared()) {
         next();
         local = "Constant";
         continue;
       }
-      if (isKw(t, "RETAIN", "NON_RETAIN", "DB_SPECIFIC")) {
+      if (isKw(t, "RETAIN", "NON_RETAIN", "DB_SPECIFIC") && !declared()) {
         next();
         continue;
       }
@@ -379,7 +388,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       const existing = blocks.find((b) => b.kind === "GVL" && b.name === name);
       const gvl: BlockModel = existing ?? { kind: "GVL", name, nameStart: t.start, nameEnd: t.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
       let section: Section = "Static";
-      while (peek().kind !== "eof" && isKw(peek(), "CONSTANT", "RETAIN", "PERSISTENT")) if (next().upper === "CONSTANT") section = "Constant";
+      while (peek().kind !== "eof" && isKw(peek(), "CONSTANT", "RETAIN", "PERSISTENT") && !declared()) if (next().upper === "CONSTANT") section = "Constant";
       gvl.vars.push(...parseDecls(section));
       if (isKw(peek(), "END_VAR")) gvl.end = next().end;
       if (!existing) blocks.push(gvl);

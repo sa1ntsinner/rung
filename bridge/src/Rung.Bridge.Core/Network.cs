@@ -41,7 +41,8 @@ namespace Rung.Bridge.Core
         public const string Auto = "auto";
         public const string None = "none";
         static readonly string[] Fields = { "ip", "subnetMask", "router", "deviceName" };
-        static readonly Regex Choice = new Regex(@"^[a-z][A-Za-z]*$", RegexOptions.CultureInvariant);
+        // what Render writes for a choice: the name of TIA Portal's enumeration value, its first letter lowered
+        static readonly Regex Choice = new Regex(@"^[a-z][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
         static readonly Regex Plain =new Regex(@"^[A-Za-z0-9_.\-/][A-Za-z0-9_.\- /()]*$", RegexOptions.CultureInvariant);
 
         public static string Render(string plc, IEnumerable<InterfaceSettings> interfaces)
@@ -76,7 +77,7 @@ namespace Rung.Bridge.Core
         {
             var list = new List<InterfaceSettings>();
             InterfaceSettings cur = null;
-            var lines = text.Replace("\r\n", "\n").Split('\n');
+            var lines = text.TrimStart('\uFEFF').Replace("\r\n", "\n").Split('\n');
             for (var n = 1; n <= lines.Length; n++)
             {
                 var line = StripComment(lines[n - 1], n).TrimEnd();
@@ -144,7 +145,7 @@ namespace Rung.Bridge.Core
             {
                 if (line[i] == '\\' && inQuote) { i++; continue; }
                 if (line[i] == '"') inQuote = !inQuote;
-                else if (line[i] == ':' && !inQuote && (i + 1 == line.Length || line[i + 1] == ' ')) return i;
+                else if (line[i] == ':' && !inQuote && (i + 1 == line.Length || line[i + 1] == ' ' || line[i + 1] == '\t')) return i;
             }
             throw new NetworkFormatException("line " + n + ": expected \"name: value\"");
         }

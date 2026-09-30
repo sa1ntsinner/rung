@@ -155,7 +155,11 @@ export async function cmdSimulate(dir: string, v: Record<string, unknown>, io: I
   const ws = await findWorkspace(dir).catch(() => dir);
   const host = (v.address as string | undefined) ?? "127.0.0.2";
   const port = Number(v.port ?? 8080);
-  const cycleMs = Math.max(1, Number(String(v.cycle ?? "10").replace(/ms$/i, "")));
+  const cycle = Number(String(v.cycle ?? "10").replace(/ms$/i, ""));
+  // no number would run the program without a pause and with its time standing at NaN
+  if (!Number.isFinite(cycle)) throw new WorkspaceError("BAD_ARGUMENT", `--cycle is the cycle time in milliseconds (--cycle 10), not ${String(v.cycle)}`);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new WorkspaceError("BAD_ARGUMENT", `--port is a TCP port (0 to 65535), not ${String(v.port)}`);
+  const cycleMs = Math.max(1, cycle);
   const plc = await startVirtualPlc(ws, { host, port, cycleMs, ...(v.block ? { block: String(v.block) } : {}), log: (s) => io.stderr(`rung simulate: ${s}`) });
   io.stdout(
     `rung simulate: virtual PLC at ${plc.url} (cycle ${cycleMs} ms)\n` +

@@ -56,6 +56,14 @@ export function parseTime(text: string): number {
   return neg ? -ms : ms;
 }
 
+/** The characters of a string literal: $' $$ $L $N $P $R $T in either case, and $hh, a character by its hex code. */
+function unescapeString(body: string): string {
+  const named: Record<string, string> = { L: "\n", N: "\n", P: "\f", R: "\r", T: "\t" };
+  return body.replace(/''|\$([0-9A-Fa-f]{2}|.)/g, (all: string, c: string | undefined) =>
+    c === undefined ? "'" : c.length === 2 ? String.fromCharCode(parseInt(c, 16)) : (named[c.toUpperCase()] ?? c),
+  );
+}
+
 function literal(t: Token): Extract<Expr, { k: "lit" }> {
   const text = t.text;
   const hash = text.indexOf("#");
@@ -169,7 +177,7 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
       if (en && !/^BOOL$/i.test(en[1]!)) return { k: "ref", ref: { root: { kind: "ident", name: en[1]! }, path: [{ member: en[2]! }], start: t.start } };
       return literal(t);
     }
-    if (t.kind === "string") return { k: "lit", value: t.text.slice(t.text.indexOf("'") + 1, -1).replace(/''/g, "'").replace(/\$(.)/g, (_, c: string) => (c === "N" || c === "L" ? "\n" : c === "T" ? "\t" : c)), type: "string" };
+    if (t.kind === "string") return { k: "lit", value: unescapeString(t.text.slice(t.text.indexOf("'") + 1, -1)), type: "string" };
     if (kw(t, "TRUE", "FALSE")) return { k: "lit", value: t.upper === "TRUE", type: "bool" };
     if (t.text === "(") {
       const e = expr();

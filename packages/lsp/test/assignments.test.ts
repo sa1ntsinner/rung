@@ -15,8 +15,29 @@ describe("assignment list: sizes TIA Portal does not write in the address", () =
     const r = assignmentList(idx);
     const wide = r.items.find((a) => a.tags.some((t) => t.name === "Wide"))!;
     expect([wide.address, wide.bits]).toEqual(["%M0.0", 64]);
-    expect(r.overlaps).toContainEqual({ a: "%M0.0", b: "%MD4", bytes: [4, 5, 6, 7], nested: true });
+    expect(r.overlaps).toContainEqual({ device: "P", a: "%M0.0", b: "%MD4", bytes: [4, 5, 6, 7], nested: true });
     expect(r.items.find((a) => a.address === "%IW256")).toMatchObject({ peripheral: true });
+  });
+});
+
+describe("assignment list of a workspace with several PLCs", () => {
+  it("keeps each PLC's addresses, tags and uses apart; addresses of two PLCs never overlap", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/PLC_A/tags/IO.tags.st", "VAR_GLOBAL\n    Start AT %I0.0 : Bool;\n    Speed AT %MW10 : Int;\nEND_VAR\n", 0);
+    idx.set("file:///w/plc/PLC_B/tags/IO.tags.st", "VAR_GLOBAL\n    Start AT %I0.0 : Bool;\n    Level AT %MW11 : Int;\nEND_VAR\n", 0);
+    idx.set("file:///w/plc/PLC_A/blocks/Fx_A.scl", 'FUNCTION "Fx_A" : Void\nBEGIN\n\t"Speed" := 1;\n\tIF "Start" THEN\n\t\t%M20.0 := TRUE;\n\tEND_IF;\nEND_FUNCTION\n', 0);
+    idx.set("file:///w/plc/PLC_B/blocks/Fx_B.scl", 'FUNCTION "Fx_B" : Void\nBEGIN\n\tIF "Start" THEN\n\t\t"Level" := 2;\n\tEND_IF;\nEND_FUNCTION\n', 0);
+    const r = assignmentList(idx);
+    const file = (u: string) => u.split("/").slice(-3).join("/");
+    expect(r.items.map((a) => `${a.device} ${a.address} ${a.tags.map((t) => t.name).join(",")} ${a.uses.map((u) => `${file(u.uri)}:${u.line + 1}`).join(",")}`)).toEqual([
+      "PLC_A %I0.0 Start PLC_A/blocks/Fx_A.scl:4",
+      "PLC_A %MW10 Speed PLC_A/blocks/Fx_A.scl:3",
+      "PLC_A %M20.0  PLC_A/blocks/Fx_A.scl:5",
+      "PLC_B %I0.0 Start PLC_B/blocks/Fx_B.scl:3",
+      "PLC_B %MW11 Level PLC_B/blocks/Fx_B.scl:4",
+    ]);
+    expect(r.overlaps).toEqual([]);
+    expect(assignmentList(idx, "PLC_B").items.map((a) => a.address)).toEqual(["%I0.0", "%MW11"]);
   });
 });
 
@@ -45,8 +66,8 @@ describe("assignment list", () => {
       "%M20.0  4",
     ]);
     expect(r.overlaps).toEqual([
-      { a: "%IB2", b: "%I2.1", bytes: [2], nested: true },
-      { a: "%MW10", b: "%MW11", bytes: [11], nested: false },
+      { device: "P", a: "%IB2", b: "%I2.1", bytes: [2], nested: true },
+      { device: "P", a: "%MW10", b: "%MW11", bytes: [11], nested: false },
     ]);
   });
 });

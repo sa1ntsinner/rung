@@ -28,6 +28,8 @@ export interface LiveOptions {
   instance?: string;
   json?: boolean;
   intervalMs?: number;
+  /** --interval as typed, for the message when it is no number. */
+  intervalText?: string;
 }
 
 export async function cmdLive(dir: string, sub: string | undefined, args: string[], io: Io, opts: LiveOptions = {}): Promise<number> {
@@ -35,6 +37,9 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live diag\n');
     return 1;
   }
+  // not a number would read the PLC without any pause between reads
+  if (opts.intervalMs !== undefined && !Number.isFinite(opts.intervalMs))
+    throw new WorkspaceError("BAD_ARGUMENT", `--interval is a number of milliseconds (--interval 500); got ${opts.intervalText ?? opts.intervalMs}`);
   if (sub === "watch") {
     const ws = await findWorkspace(dir);
     if ((await loadConfig(ws)).project.tiaVersion === "CODESYS") return await watchCodesys(ws, io, opts);

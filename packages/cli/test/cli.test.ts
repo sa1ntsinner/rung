@@ -177,6 +177,18 @@ describe("rung CLI", () => {
     expect(t.err.join("")).toMatch(/--ours and --theirs exclude each other/);
   });
 
+  it("assignments lists each PLC of the workspace on its own; two PLCs' addresses never overlap", async () => {
+    const t = setup();
+    await t.run("init");
+    for (const [plc, tag] of [["PLC_1", "Speed AT %MW10 : Int"], ["PLC_2", "Level AT %MW11 : Int"]]) {
+      mkdirSync(join(t.dir, "plc", plc!, "tags"), { recursive: true });
+      writeFileSync(join(t.dir, "plc", plc!, "tags", "IO.tags.st"), `VAR_GLOBAL\n    ${tag};\nEND_VAR\n`);
+    }
+    t.out.length = 0;
+    expect(await t.run("assignments")).toBe(0);
+    expect(t.out.join("")).toBe("Bit memory of PLC_1\n  %MW10      Speed : Int (IO)\n\nBit memory of PLC_2\n  %MW11      Level : Int (IO)\n");
+  });
+
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
     expect(await t.run("test")).toBe(1);

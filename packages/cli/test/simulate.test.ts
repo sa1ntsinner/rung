@@ -94,6 +94,17 @@ describe("rung simulate (virtual S7-1500)", () => {
     }
   });
 
+  it("stops at a cycle or port that is no number, before starting", async () => {
+    const dir = workspace();
+    const err: string[] = [];
+    const io = { cwd: dir, stdout: () => {}, stderr: (s: string) => err.push(s), env: {} };
+    expect(await main(["simulate", "--cycle", "1s"], io)).toBe(1);
+    expect(await main(["simulate", "--port", "http"], io)).toBe(1);
+    expect(err.join("")).toBe(
+      "rung: BAD_ARGUMENT: --cycle is the cycle time in milliseconds (--cycle 10), not 1s\nrung: BAD_ARGUMENT: --port is a TCP port (0 to 65535), not http\n",
+    );
+  });
+
   it("explains when there is nothing it can run", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rung-sim-"));
     mkdirSync(join(dir, "plc", "PLC_1", "blocks"), { recursive: true });

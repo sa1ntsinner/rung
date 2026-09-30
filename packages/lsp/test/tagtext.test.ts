@@ -41,6 +41,51 @@ describe("tag tables as text (.tags.st)", () => {
     expect(diagnostics(idx, TABLE).map((d) => `${d.code}: ${d.message}`)).toEqual(["NO_ADDRESS: Start has no address: a PLC tag is at an address (Start AT %M10.0 : Bool;)"]);
   });
 
+  it("reads tags named like a keyword of a variable list (Begin, Retain, Persistent, END_TYPE)", () => {
+    const table = [
+      "VAR_GLOBAL",
+      "    Persistent AT %M0.0 : Bool;",
+      "    Begin AT %M0.1 : Bool;",
+      "    Retain {ExternalWritable := 'false'} AT %M0.2 : Bool;",
+      "    END_TYPE AT %M0.3 : Bool;",
+      "    NON_RETAIN AT %M0.4 : Bool;",
+      "    Last AT %M0.5 : Bool;",
+      "END_VAR",
+      "VAR_GLOBAL CONSTANT",
+      "    Constant : Int := 1;",
+      "END_VAR",
+      "",
+    ].join("\n");
+    const idx = new WorkspaceIndex();
+    idx.set(TABLE, table, 0);
+    expect(diagnostics(idx, TABLE)).toEqual([]);
+    expect(idx.allGlobals().map((g) => `${g.name} ${g.tag?.address ?? g.tag?.value}`)).toEqual(["Persistent %M0.0", "Begin %M0.1", "Retain %M0.2", "END_TYPE %M0.3", "NON_RETAIN %M0.4", "Last %M0.5", "Constant 1"]);
+  });
+
+  it("flags what the import into TIA Portal refuses: two tags on a line, a name twice, start values, constants without one", () => {
+    const table = [
+      "VAR_GLOBAL",
+      "    A AT %M0.0 : Bool; B AT %M0.1 : Bool;",
+      "    a AT %M0.2 : Bool;",
+      "    C AT %M0.3 : Bool := TRUE;",
+      "    (* old *) D AT %M0.4 : Bool;",
+      "END_VAR",
+      "VAR_GLOBAL CONSTANT",
+      "    K : Int;",
+      "END_VAR",
+      "",
+    ].join("\n");
+    const idx = new WorkspaceIndex();
+    idx.set(TABLE, table, 0);
+    expect(diagnostics(idx, TABLE).map((d) => `${d.code}: ${table.slice(d.start, d.end)}: ${d.message}`)).toEqual([
+      "TAG_LINE: B: one tag per line: B goes on a line of its own",
+      "DUPLICATE_TAG: a: a is declared twice in the table (line 2)",
+      "START_VALUE: C: a PLC tag has no start value in TIA Portal; constants go in VAR_GLOBAL CONSTANT",
+      "TAG_COMMENT: (* old *): use // for a comment, it belongs to the tag on its line",
+      "NO_VALUE: K: a constant needs a value: K : Int := 10;",
+    ]);
+  });
+
   it("flags a type that does not fit its address, which TIA Portal keeps and shows red", () => {
     const { idx } = setup(text.replace("AT %I0.0 : Bool", "AT %IW40 : Bool").replace("AT %MD10 : Real", "AT %MW10 : Real"));
     expect(diagnostics(idx, TABLE).map((d) => `${d.code}: ${d.message}`)).toEqual([

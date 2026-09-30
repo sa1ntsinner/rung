@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, statSync, utimesSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, renameSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
@@ -382,6 +382,63 @@ describe("syncOnce", () => {
     expect(t.bridge.imports).toHaveLength(1);
   });
 
+  describe("rung resolve after an import whose outcome is unknown", () => {
+    const timedOut = async (tiaGotIt: boolean) => {
+      const t = setup();
+      await t.sync();
+      t.write(pA, srcA.replace("#x := 1;", "#x := 11;"));
+      const orig = t.bridge.importObject.bind(t.bridge);
+      t.bridge.importObject = async (...args) => {
+        if (tiaGotIt) await orig(...args);
+        else t.bridge.imports.push({ address: args[0], expected: args[3], text: "" });
+        throw new BridgeError("OUTCOME_UNKNOWN", "timed out");
+      };
+      await expect(t.sync(2000)).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
+      t.bridge.importObject = orig;
+      return t;
+    };
+
+    it("--ours sends the file again when TIA Portal never got it", async () => {
+      const t = await timedOut(false);
+      await t.withState((s) => resolveConflict(t.root, s, pA, "ours"));
+      const r = await t.sync(3000);
+      expect([r.imported, r.conflicts]).toEqual([1, 0]);
+      expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 11;");
+    });
+
+    it("--ours sends nothing twice when TIA Portal has it already", async () => {
+      const t = await timedOut(true);
+      await t.withState((s) => resolveConflict(t.root, s, pA, "ours"));
+      const r = await t.sync(3000);
+      expect([r.imported, r.merged, r.conflicts, t.bridge.imports.length]).toEqual([0, 0, 0, 1]);
+      expect(t.read(pA)).toContain("#x := 11;");
+      const idle = await t.sync(4000);
+      expect(idle.imported + idle.exported + idle.conflicts).toBe(0);
+    });
+
+    it("--theirs takes what TIA Portal has and keeps the file in recovery", async () => {
+      const t = await timedOut(false);
+      await t.withState((s) => resolveConflict(t.root, s, pA, "theirs"));
+      await t.sync(3000);
+      expect(t.read(pA)).toBe(srcA);
+      expect(readdirSync(t.f(".rung/recovery"), { recursive: true }).map(String).some((f) => f.endsWith("Fx_A.scl"))).toBe(true);
+      expect(t.bridge.imports).toHaveLength(1);
+    });
+
+    it("--ours creates a new object again when TIA Portal never got it", async () => {
+      const t = setup(() => {});
+      await t.sync();
+      t.write(pA, srcA);
+      t.bridge.hangImport = true;
+      await expect(t.sync(2000)).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
+      t.bridge.hangImport = false;
+      expect((await t.sync(2500)).warnings.map((w) => w.code)).toContain("RECOVERY_REQUIRED");
+      await t.withState((s) => resolveConflict(t.root, s, pA, "ours"));
+      expect((await t.sync(3000)).created).toBe(1);
+      expect(t.bridge.objects.get(A)!.files[".scl"]).toBe(srcA);
+    });
+  });
+
   it("treats STALE_REVISION during import as a concurrent TIA edit and merges on the next pass", async () => {
     const t = setup();
     await t.sync();
@@ -567,6 +624,21 @@ describe("syncOnce", () => {
     expect(t.bridge.imports).toEqual([]);
   });
 
+  it("says so when files are under a PLC folder the workspace does not sync", async () => {
+    const t = setup(undefined, (c) => (c.devices = ["PLC_1"]));
+    t.bridge.info.devices = ["PLC_1", "PLC_2"];
+    await t.sync();
+    t.write("plc/PLC1/blocks/Fx_New.scl", 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    t.write("plc/PLC1/blocks/Fx_Other.scl", 'FUNCTION "Fx_Other" : Void\nBEGIN\nEND_FUNCTION\n');
+    t.write("plc/PLC_2/blocks/Fx_B.scl", 'FUNCTION "Fx_B" : Void\nBEGIN\nEND_FUNCTION\n');
+    const r = await t.sync(2000);
+    expect(r.warnings.filter((w) => w.code === "IGNORED_FILE").map((w) => `${w.address}: ${w.message}`)).toEqual([
+      "plc/PLC1: the project has no PLC PLC1 (its PLCs: PLC_1, PLC_2); the files under it are not synced",
+      "plc/PLC_2: PLC_2 is not among the devices in rung.toml; the files under it are not synced",
+    ]);
+    expect(t.bridge.imports).toEqual([]);
+  });
+
   it("finishes a create that Ctrl+C interrupted after TIA Portal made the object: no conflict, no second import", async () => {
     const t = setup(() => {});
     t.bridge.canon = (s) => s.replace("begin", "BEGIN");
@@ -648,6 +720,54 @@ describe("syncOnce", () => {
     expect((await t.sync()).created).toBe(1);
   });
 
+  it("rung watch does not send refused content again until the file or TIA Portal changes; rung sync always tries", async () => {
+    const t = setup();
+    const refused = new Map();
+    const watchPass = (now: number) => t.withState((s) => syncOnce(t.root, t.bridge, s, { config: t.config, now: () => now, refused }));
+    await watchPass(1000);
+    t.write(pA, srcA.replace("#x := 1;", "#x := ;"));
+    t.bridge.failImport.set(A, "IMPORT_FAILED");
+    const first = await watchPass(2000);
+    expect(first.diagnostics.map((d) => d.code)).toEqual(["IMPORT_FAILED"]);
+    for (let i = 0; i < 3; i++) expect((await watchPass(3000 + i)).diagnostics.map((d) => `${d.code}: ${d.message}`)).toEqual(["IMPORT_FAILED: import refused: IMPORT_FAILED"]);
+    expect(t.bridge.imports).toHaveLength(1);
+    // a new file TIA Portal refuses is not sent again either
+    const pB = "plc/PLC_1/blocks/Fx_B.scl";
+    t.write(pB, 'FUNCTION "Fx_B" : Void\nBEGIN\n  #a := ;\nEND_FUNCTION\n');
+    t.bridge.failImport.set(B, "IMPORT_FAILED");
+    await watchPass(4000);
+    await watchPass(4001);
+    expect(t.bridge.imports.map((i) => i.address)).toEqual([A, B]);
+    // TIA Portal changed (the missing UDT was added there, say): worth another try
+    t.bridge.add(T, { kind: "type", form: "udt", content: 'TYPE "Fx_T"\nEND_TYPE\n' });
+    await watchPass(5000);
+    expect(t.bridge.imports.map((i) => i.address)).toEqual([A, B, A, B]);
+    // the file changed: sent again
+    t.write(pA, srcA.replace("#x := 1;", "#x := 2;"));
+    t.bridge.failImport.delete(A);
+    expect((await watchPass(6000)).imported).toBe(1);
+    // a one-shot rung sync keeps no memory of refusals
+    await t.sync(7000);
+    await t.sync(7001);
+    expect(t.bridge.imports.map((i) => i.address)).toEqual([A, B, A, B, A, B, B]);
+  });
+
+  it("an emptied file sends nothing (an editor half-way through saving, a sync client): the table in TIA Portal keeps its tags", async () => {
+    const TT = "plc:PLC_1/tags/IO";
+    const pT = "plc/PLC_1/tags/IO.tags.st";
+    const table = "VAR_GLOBAL\n    Start AT %I0.0 : Bool;\nEND_VAR\n";
+    const t = setup((b) => b.add(TT, { kind: "tagtable", form: "tags.st", content: table }));
+    await t.sync();
+    t.write(pT, "");
+    const r = await t.sync(2000);
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.warnings.find((w) => w.code === "EMPTY_FILE")).toEqual({ address: pT, code: "EMPTY_FILE", message: "the file is empty; nothing is sent to TIA Portal (delete the file to delete IO there)" });
+    expect(t.read(pT)).toBe("");
+    t.write(pT, table.replace("Start", "Go"));
+    expect((await t.sync(3000)).imported).toBe(1);
+    expect(t.bridge.objects.get(TT)!.files[".tags.st"]).toContain("Go AT %I0.0");
+  });
+
   it("a refused create leaves just a new file behind", async () => {
     const t = setup(() => {});
     await t.sync();
@@ -695,6 +815,56 @@ describe("syncOnce", () => {
     expect(r.created).toBe(0);
     expect(t.bridge.imports).toEqual([]);
     expect(r.warnings.find((w) => w.code === "PATH_TOO_LONG")?.address).toBe(deep);
+  });
+
+  it("follows a case-only rename in TIA Portal: no conflict, the file follows the new name", async () => {
+    const t = setup();
+    await t.sync();
+    const FX = "plc:PLC_1/blocks/FX_A";
+    t.bridge.objects.delete(A);
+    t.bridge.add(FX, { content: srcA.replace('"Fx_A"', '"FX_A"') });
+    const r = await t.sync(2000);
+    expect([r.conflicts, r.removed]).toEqual([0, 0]);
+    expect(readdirSync(t.f("plc/PLC_1/blocks"))).toEqual(["FX_A.scl"]);
+    expect(t.read("plc/PLC_1/blocks/FX_A.scl")).toContain('FUNCTION "FX_A"');
+    expect(await t.withState(async (s) => s.all().map((x) => `${x.address} ${x.status}`))).toEqual([`${FX} synced`]);
+    const idle = await t.sync(3000);
+    expect(idle.imported + idle.exported + idle.created + idle.conflicts + idle.removed).toBe(0);
+  });
+
+  it("keeps a local edit across a case-only rename in TIA Portal", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#z := 3;", "#z := 30;"));
+    const FX = "plc:PLC_1/blocks/FX_A";
+    t.bridge.objects.delete(A);
+    t.bridge.add(FX, { content: srcA.replace('"Fx_A"', '"FX_A"') });
+    const r = await t.sync(2000);
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.objects.get(FX)!.files[".scl"]).toContain("#z := 30;");
+    expect(t.read("plc/PLC_1/blocks/FX_A.scl")).toContain("#z := 30;");
+    expect(t.bridge.objects.has(A)).toBe(false);
+  });
+
+  it.runIf(process.platform !== "linux")("a file renamed only by letter case is the same object: nothing is created", async () => {
+    const t = setup();
+    await t.sync();
+    renameSync(t.f(pA), t.f("plc/PLC_1/blocks/fx_a.scl"));
+    const r = await t.sync(2000);
+    expect([r.created, r.imported, t.bridge.imports.length]).toEqual([0, 0, 0]);
+    expect([...t.bridge.objects.keys()]).toEqual([A]);
+    expect(r.warnings.find((w) => w.code === "IGNORED_FILE")?.message).toBe("Fx_A is mirrored as plc/PLC_1/blocks/Fx_A.scl; a name that differs only in letter case is the same object (rename it in TIA Portal: rung rename)");
+    // an edit of the renamed file still goes to TIA Portal
+    writeFileSync(t.f("plc/PLC_1/blocks/fx_a.scl"), srcA.replace("#x := 1;", "#x := 11;"));
+    const e = await t.sync(3000);
+    expect(e.imported).toBe(1);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 11;");
+    // so does one of a file whose extension changed case
+    renameSync(t.f("plc/PLC_1/blocks/fx_a.scl"), t.f("plc/PLC_1/blocks/Fx_A.SCL"));
+    writeFileSync(t.f("plc/PLC_1/blocks/Fx_A.SCL"), srcA.replace("#x := 1;", "#x := 12;"));
+    const u = await t.sync(4000);
+    expect([u.imported, u.warnings.map((w) => w.code)]).toEqual([1, ["IGNORED_FILE"]]);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 12;");
   });
 
   it("interoperates with pull state (pull then sync is quiet)", async () => {

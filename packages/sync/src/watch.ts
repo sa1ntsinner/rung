@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { RungConfig, StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
-import { syncOnce, type SyncBridge, type SyncReport } from "./sync.js";
+import { syncOnce, type Refusal, type SyncBridge, type SyncReport } from "./sync.js";
 
 export interface ClosableBridge extends SyncBridge {
   close(): Promise<void>;
@@ -38,6 +38,8 @@ export class Watcher {
   lastPassMs = 0;
   private lastPassEnd = 0;
   lastError: string | null = null;
+  /** Imports TIA Portal refused: not sent again every poll (SyncOptions.refused). */
+  private readonly refused = new Map<string, Refusal>();
 
   constructor(
     private readonly root: string,
@@ -75,10 +77,11 @@ export class Watcher {
 
   /**
    * Runs a pass now, or right after the current one. At most one pass runs and one waits;
-   * callers arriving while one waits join it (events coalesce).
+   * callers arriving while one waits join it (events coalesce). A person asking (rung sync) retries refused imports.
    */
-  syncNow(): Promise<SyncReport | null> {
+  syncNow(retry = false): Promise<SyncReport | null> {
     if (this.stopped) return Promise.resolve(null);
+    if (retry) this.refused.clear();
     if (this.queued) return this.queued;
     const prev = this.running ?? Promise.resolve(null);
     const next = prev
@@ -103,7 +106,7 @@ export class Watcher {
     try {
       this.bridge ??= await this.opts.bridgeFactory();
       const t0 = Date.now();
-      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config }).finally(() => {
+      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, refused: this.refused }).finally(() => {
         this.lastPassMs = Date.now() - t0;
         this.lastPassEnd = (this.opts.now ?? Date.now)();
       });

@@ -61,7 +61,7 @@ export const STANDARD: CatalogEntry[] = [
   fn("MAX", [p("IN1", "ANY"), p("IN2", "ANY")], "ANY", "Largest input."),
   fn("LIMIT", [p("MN", "ANY"), p("IN", "ANY"), p("MX", "ANY")], "ANY", "Clamps IN to the range MN..MX."),
   fn("SEL", [p("G", "Bool"), p("IN0", "ANY"), p("IN1", "ANY")], "ANY", "Selects IN0 when G is FALSE, IN1 when TRUE."),
-  fn("MUX", [p("K", "ANY_INT"), p("IN0", "ANY"), p("IN1", "ANY")], "ANY", "Selects input number K."),
+  fn("MUX", [p("K", "ANY_INT"), p("IN0", "ANY"), p("IN1", "ANY"), p("INELSE", "ANY", "in", "the value when K has no input")], "ANY", "Selects input number K."),
   fn("TRUNC", [p("IN", "ANY_REAL")], "ANY_INT", "Truncates toward zero."),
   fn("ROUND", [p("IN", "ANY_REAL")], "ANY_NUM", "Rounds to the nearest integer."),
   fn("CEIL", [p("IN", "ANY_REAL")], "ANY_NUM", "Rounds up."),

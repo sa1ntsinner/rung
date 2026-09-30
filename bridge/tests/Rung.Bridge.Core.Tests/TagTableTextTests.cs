@@ -76,15 +76,41 @@ public class TagTableTextTests
     [InlineData("setting", "a tag has the setting Retain")]
     [InlineData("system", "the table holds SW.Tags.PlcSystemConstant")]
     [InlineData("lines", "the comment of B has several lines")]
+    [InlineData("link", "A holds LinkList")]
+    [InlineData("comment part", "A has a comment the text form cannot hold")]
+    [InlineData("value", "the text form does not read C back the same (line 8: missing ';' (one tag per line))")]
+    [InlineData("type", "the text form does not read A back the same (line 5: a quote is not closed)")]
     public void StaysXmlWhenTheTextWouldLoseSomething(string what, string reason)
     {
         var xml = what == "two languages" ? Table("T", Tag("1", "A", "Bool", "%M0.0", "hello"), Tag("2", "B", "Bool", "%M0.1", "hallo", "de-DE"))
             : what == "setting" ? Table("T", Tag("1", "A", "Bool", "%M0.0", extra: "<Retain>true</Retain>"))
             : what == "system" ? Table("T", "<SW.Tags.PlcSystemConstant ID=\"1\"><AttributeList><Name>X</Name></AttributeList></SW.Tags.PlcSystemConstant>")
+            // parts of a tag the text has no place for would be gone after the next import
+            : what == "link" ? Table("T", Tag("1", "A", "Bool", "%M0.0").Replace("</AttributeList><ObjectList>", "</AttributeList><LinkList><Target /></LinkList><ObjectList>"))
+            : what == "comment part" ? Table("T", Tag("1", "A", "Bool", "%M0.0", "x").Replace("<ObjectList><MultilingualTextItem", "<AttributeList><Owner>y</Owner></AttributeList><ObjectList><MultilingualTextItem"))
+            // what TIA Portal holds must read back from the text exactly, or stay SimaticML
+            : what == "value" ? Table("T", "<SW.Tags.PlcUserConstant ID=\"9\" CompositionName=\"UserConstants\"><AttributeList><DataTypeName>String</DataTypeName><Name>C</Name><Value>'x' // y</Value></AttributeList></SW.Tags.PlcUserConstant>")
+            : what == "type" ? Table("T", Tag("1", "A", "\"U", "%M0.0"))
             : Table("T", Tag("1", "B", "Bool", "%M0.0", "one\ntwo"));
         var r = TagTableText.FromXml(xml);
         Assert.Null(r.Text);
         Assert.Equal(reason, r.Reason);
+    }
+
+    /// <summary>Names the language server and other ST readers take for a keyword are quoted, like those that are no identifier.</summary>
+    [Fact] public void QuotesNamesThatAreKeywords()
+    {
+        var r = TagTableText.FromXml(Table("T", Tag("1", "Begin", "Bool", "%M0.0"), Tag("2", "Persistent", "Bool", "%M0.1"), Tag("3", "NON_RETAIN", "Bool", "%M0.2"), Tag("4", "End_Type", "Bool", "%M0.3"), Tag("5", "Stop", "Bool", "%M0.4")));
+        Assert.Contains("    \"Begin\" AT %M0.0 : Bool;\n    \"Persistent\" AT %M0.1 : Bool;\n    \"NON_RETAIN\" AT %M0.2 : Bool;\n    \"End_Type\" AT %M0.3 : Bool;\n    Stop AT %M0.4 : Bool;\n", r.Text);
+    }
+
+    /// <summary>A byte order mark, CRLF, tabs and "AT %M0.0: Bool" as editors and people write them read like the canonical text.</summary>
+    [Fact] public void ReadsTheTextAsEditorsWriteIt()
+    {
+        var canonical = TagTableText.ToXml("VAR_GLOBAL\n    A AT %M0.0 : Bool;\n    B AT %M0.1 : Bool;\n    C AT %MW2 : Int;\nEND_VAR\n", "T", "en-US", "V20");
+        Assert.Equal(canonical, TagTableText.ToXml("\uFEFFVAR_GLOBAL\r\n\tA AT %M0.0: Bool;\r\n\tB AT%M0.1 :Bool;\r\n\tC\tAT\t%MW2:Int;\r\nEND_VAR\r\n", "T", "en-US", "V20"));
+        Assert.Equal(TagTableText.ToXml("VAR_GLOBAL\n    \"Motör\" {ExternalVisible := 'false'; ExternalWritable := 'false'} AT %M0.0 : Bool;\nEND_VAR\n", "T", "en-US", "V20"),
+            TagTableText.ToXml("VAR_GLOBAL\n    Motör {ExternalVisible := 'false'; ExternalWritable := 'false'} AT %M0.0 : Bool;\nEND_VAR\n", "T", "en-US", "V20"));
     }
 
     [Theory]
@@ -98,6 +124,11 @@ public class TagTableTextTests
     [InlineData("  A AT %M0.0 : Bool;\n", "line 1: a tag belongs between VAR_GLOBAL and END_VAR")]
     [InlineData("VAR_GLOBAL\n  A AT %M0.0 : Bool;\n", "line 3: END_VAR is missing")]
     [InlineData("VAR_GLOBAL\n  A AT %M0.0 : Bool; (* old *)\nEND_VAR\n", "line 2: use // for a comment, it belongs to the tag on its line")]
+    // the second tag would otherwise become part of the first one's data type
+    [InlineData("VAR_GLOBAL\n  A AT %M0.0 : Bool; B AT %M0.1 : Bool;\nEND_VAR\n", "line 2: one tag per line: B AT %M0.1 : Bool; goes on a line of its own")]
+    [InlineData("VAR_GLOBAL CONSTANT\n  K : String := 'a$';b'; L : Int := 1;\nEND_VAR\n", "line 2: one tag per line: L : Int := 1; goes on a line of its own")]
+    [InlineData("VAR_GLOBAL\n  A AT %IW256:P : Word;\nEND_VAR\n", "line 2: %IW256:P is not an address such as %I0.0, %QW4 or %MD10")]
+    [InlineData("VAR_GLOBAL\n  A AT : Bool;\nEND_VAR\n", "line 2: A has no address: a PLC tag is at an address (A AT %M10.0 : Bool;)")]
     public void RefusesWithTheLine(string text, string message) =>
         Assert.Equal(message, Assert.Throws<TagTableTextException>(() => TagTableText.ToXml(text, "T", "en-US", "V20")).Message);
 }

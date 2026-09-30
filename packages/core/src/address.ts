@@ -120,7 +120,9 @@ export function ignoredSourceReason(p: string): string | undefined {
   if (!p.startsWith("plc/") || pathToAddress(p)) return undefined;
   const parts = p.slice(4).split("/");
   const file = parts[parts.length - 1]!;
-  const forms = FORMS.filter((f) => file.endsWith("." + f));
+  const exact = FORMS.filter((f) => file.endsWith("." + f));
+  // an extension in other letter case (Motor.SCL): rung reads and writes them in lower case only
+  const forms = exact.length ? exact : FORMS.filter((f) => file.toLowerCase().endsWith("." + f));
   if (!forms.length) return undefined;
   const stemOf = (form: TextForm) => [...parts.slice(0, -1), file.slice(0, -(form.length + 1))];
   for (const form of forms) {

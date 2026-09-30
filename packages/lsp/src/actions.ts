@@ -4,7 +4,7 @@
 import { escapeSegment } from "@rung/core";
 import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
-import { scopedTo, tagTableFor, type WorkspaceIndex } from "./workspace.js";
+import { deviceOfUri, scopedTo, tagTableFor, type WorkspaceIndex } from "./workspace.js";
 import { TYPE_BITS, assignmentList } from "./assignments.js";
 import { calledWithoutInstance, scopeDecl } from "./features.js";
 import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
@@ -110,7 +110,7 @@ function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: Block
   const type = guessType(index, text, uri, block, ref);
   const bits = TYPE_BITS[type.toUpperCase()];
   if (!bits) return []; // a String or a PLC data type needs its size chosen in TIA Portal
-  const address = freeMemory(index, bits);
+  const address = freeMemory(index, bits, table.uri);
   if (!address) return []; // bit memory holds a tag whose size rung cannot tell: TIA Portal's Define tag chooses
   const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(ref.name) ? ref.name : `"${ref.name}"`;
   // before the END_VAR of the tags (VAR_GLOBAL, not the constants)
@@ -123,13 +123,15 @@ function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: Block
 }
 
 /**
- * Bit memory after the highest byte in use (never one a tag or the code uses); bits share the last byte of bits.
- * None when a bit memory tag has a type of unknown size (a PLC data type, a String): its end cannot be known.
+ * Bit memory of the table's PLC after the highest byte in use (never one a tag or the code uses); bits share the
+ * last byte of bits. None when a bit memory tag has a type of unknown size (a PLC data type, a String): its end
+ * cannot be known.
  */
-function freeMemory(index: WorkspaceIndex, bits: number): string | undefined {
+function freeMemory(index: WorkspaceIndex, bits: number, tableUri: string): string | undefined {
+  const device = deviceOfUri(tableUri);
   for (const g of index.allGlobals())
-    if (g.tag?.address && /^%M/i.test(g.tag.address) && !TYPE_BITS[g.tag.dataType.toUpperCase()]) return undefined;
-  const used = assignmentList(index).items.filter((a) => a.area === "M");
+    if (deviceOfUri(g.uri) === device && g.tag?.address && /^%M/i.test(g.tag.address) && !TYPE_BITS[g.tag.dataType.toUpperCase()]) return undefined;
+  const used = assignmentList(index, device).items.filter((a) => a.area === "M");
   let top = -1;
   for (const a of used) top = Math.max(top, a.byte + Math.max(1, a.bits / 8) - 1);
   if (bits === 1) {

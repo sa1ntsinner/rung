@@ -39,6 +39,12 @@ describe("update block calls, like TIA Portal", () => {
     ]);
   });
 
+  it("knows the parameters instructions take besides the numbered inputs (MUX's INELSE)", () => {
+    const src = 'FUNCTION "Fx_Pick" : Int\n   VAR_INPUT \n      k : Int;\n   END_VAR\n\nBEGIN\n\t#Fx_Pick := MUX(K := #k, IN0 := 1, IN1 := 2, IN2 := 3, INELSE := 0);\n\t#Fx_Pick := MAX(IN1 := 1, IN2 := 2, IN3 := #k);\nEND_FUNCTION\n';
+    const idx = workspace(src);
+    expect(diagnostics(idx, FB).filter((x) => x.code === "UNKNOWN_PARAMETER")).toEqual([]);
+  });
+
   it("removes a stale argument with its comma, and adds the missing parameters with values that compile", () => {
     const idx = setup();
     const at = (needle: string) => USER.indexOf(needle) + 1;
@@ -74,6 +80,14 @@ describe("define a PLC tag, like TIA Portal's Define tag", () => {
     expect(diagnostics(idx, FB).find((d) => d.code === "UNKNOWN_GLOBAL")!.message).toContain("quick fix: create it as a PLC tag");
     // a call is a block, not a tag
     expect(codeActions(idx, FB, src.indexOf('"Fx_Missing"') + 1, src.indexOf('"Fx_Missing"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL")).toEqual([]);
+  });
+
+  it("takes the next free bit memory of the file's own PLC", () => {
+    const idx = setup();
+    const other = "file:///w/plc/Q/tags/Default%20tag%20table.tags.st";
+    idx.set(other, 'VAR_GLOBAL\n    Far AT %MD100 : DInt;\n    Recipe AT %M200.0 : "UDT_Recipe";\nEND_VAR\n', 0);
+    const on = codeActions(idx, FB, src.indexOf('"Pump_On"') + 1, src.indexOf('"Pump_On"') + 1).filter((f) => f.code === "UNKNOWN_GLOBAL");
+    expect(on.map((f) => f.title)).toEqual(['Create the PLC tag "Pump_On" : Bool at %M10.2 in Default tag table']);
   });
 
   it("goes past a 64-bit tag at a bit address, and chooses nothing where a tag's size is unknown", () => {

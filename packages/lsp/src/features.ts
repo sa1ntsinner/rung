@@ -109,23 +109,40 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
-  // a TIA tag table as text: TIA Portal keeps every PLC tag at an address
-  if (TAG_TEXT.test(uri))
+  // a TIA tag table as text: TIA Portal keeps every PLC tag at an address; what the import refuses shows here first
+  if (TAG_TEXT.test(uri)) {
+    const table: FeatureDiagnostic[] = [];
+    const flag = (at: { start: number; end: number }, code: string, message: string) => table.push({ start: at.start, end: at.end, severity: "error", message, code });
+    const lineOf = (offset: number) => doc.lines.position(offset).line;
+    const seen = new Map<string, number>();
+    let lastLine = -1;
+    for (const c of doc.parsed.tokens) if (c.kind === "comment" && !c.text.startsWith("//")) flag(c, "TAG_COMMENT", "use // for a comment, it belongs to the tag on its line");
     for (const b of doc.parsed.blocks)
       for (const v of b.vars) {
-        if (v.section === "Constant") continue;
-        if (!v.at) out.push({ start: v.start, end: v.end, severity: "error", message: `${v.name} has no address: a PLC tag is at an address (${v.name} AT %M10.0 : ${v.type};)`, code: "NO_ADDRESS" });
-        else if (!/^%[A-Za-z]{1,3}\d+(\.\d+)?$/.test(v.at)) out.push({ start: v.start, end: v.end, severity: "error", message: `${v.at} is not an address such as %I0.0, %QW4 or %MD10`, code: "BAD_ADDRESS" });
+        const line = lineOf(v.start);
+        if (line === lastLine) flag(v, "TAG_LINE", `one tag per line: ${v.name} goes on a line of its own`);
+        lastLine = line;
+        const first = seen.get(v.name.toUpperCase());
+        if (first !== undefined) flag(v, "DUPLICATE_TAG", `${v.name} is declared twice in the table (line ${first + 1})`);
+        else seen.set(v.name.toUpperCase(), line);
+        if (v.section === "Constant") {
+          if (v.init === undefined) flag(v, "NO_VALUE", `a constant needs a value: ${v.name} : ${v.type} := 10;`);
+          continue;
+        }
+        if (v.init !== undefined) flag(v, "START_VALUE", "a PLC tag has no start value in TIA Portal; constants go in VAR_GLOBAL CONSTANT");
+        if (!v.at) flag(v, "NO_ADDRESS", `${v.name} has no address: a PLC tag is at an address (${v.name} AT %M10.0 : ${v.type};)`);
+        else if (!/^%[A-Za-z]{1,3}\d+(\.\d+)?$/.test(v.at)) flag(v, "BAD_ADDRESS", `${v.at} is not an address such as %I0.0, %QW4 or %MD10`);
         else {
           // TIA Portal keeps a tag whose type does not fit its address, and shows it red
           const a = parseAbsolute(v.at);
           const bits = TYPE_BITS[v.type.toUpperCase()];
           // 64-bit tags: TIA Portal has no L size and writes them at a bit address, %I1000.0
           const fits = !a || !bits || a.bits === bits || (bits === 64 && a.bit === 0);
-          if (a && bits && !fits)
-            out.push({ start: v.start, end: v.end, severity: "error", message: `${v.name} is a ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`, code: "ADDRESS_SIZE" });
+          if (a && bits && !fits) flag(v, "ADDRESS_SIZE", `${v.name} is a ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`);
         }
       }
+    out.push(...table.sort((a, b) => a.start - b.start));
+  }
   // calls against the interface they call (TIA Portal's "Update block call")
   for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n))) {
     for (const a of unknownArgs(site))

@@ -317,13 +317,17 @@ export function deviceOfUri(uri: string): string | undefined {
 
 /**
  * The index as seen from one file: every lookup by name finds that file's PLC's object (WorkspaceIndex.global
- * with `from`). Entry points of the language server and the simulator wrap the index once with it.
+ * with `from`), and the list of all objects holds that PLC's only. Entry points of the language server and the
+ * simulator wrap the index once with it.
  */
 export function scopedTo(index: WorkspaceIndex, from: string): WorkspaceIndex {
-  if (!deviceOfUri(from)) return index;
+  const device = deviceOfUri(from);
+  if (!device) return index;
   return new Proxy(index, {
     get(target, prop, receiver) {
       if (prop === "global") return (name: string, other?: string) => target.global(name, other ?? from);
+      // the PLC's own objects, and those outside every PLC folder that no object of the PLC hides
+      if (prop === "allGlobals") return () => target.allGlobals().filter((s) => deviceOfUri(s.uri) === device || (!deviceOfUri(s.uri) && target.global(s.name, from) === s));
       const v = Reflect.get(target, prop, target);
       return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(receiver) : v;
     },
