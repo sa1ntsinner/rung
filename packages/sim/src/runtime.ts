@@ -56,6 +56,8 @@ interface Frame {
   temps: Struct;
   /** The FB instance an FB body or one of its METHODs runs on (THIS). */
   inst?: Instance;
+  /** The accessor of a PROPERTY that runs: its own locals, not the other accessor's. */
+  accessor?: "get" | "set";
 }
 
 class Exit {}
@@ -179,8 +181,10 @@ export class Simulator {
   /** Virtual time in milliseconds. */
   time = 0;
   readonly globals: Struct = {};
-  private readonly bodies = new Map<string, Stmt[]>();
-  private readonly consts = new Map<string, Struct>();
+  // by the block object, not its name: two PLCs, or two FBs' properties, can have blocks of one name
+  private readonly bodies = new WeakMap<BlockModel, Map<string, Stmt[]>>();
+  private readonly consts = new WeakMap<BlockModel, Struct>();
+  private blockUris = new WeakMap<BlockModel, string>();
   private steps = 0;
   private depth = 0;
 
@@ -202,8 +206,11 @@ export class Simulator {
 
   /** The statements of a block, or of one accessor of a PROPERTY. */
   private body(b: BlockModel, accessor?: "get" | "set"): Stmt[] {
-    const key = `${b.kind}:${b.owner ? b.owner.toUpperCase() + "." : ""}${b.name.toUpperCase()}${accessor ? ":" + accessor : ""}`;
-    let s = this.bodies.get(key);
+    const key = accessor ?? "";
+    let cached = this.bodies.get(b);
+    if (!cached) this.bodies.set(b, (cached = new Map()));
+    const bodies = cached;
+    let s = bodies.get(key);
     if (!s) {
       if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
       if (b.xml) throw new SimError(`"${b.name}" is kept as SimaticML XML (FBD, GRAPH, or LAD whose texts SD would lose); it is not simulated`, b.name);
@@ -215,11 +222,10 @@ export class Simulator {
           if (e instanceof SclSyntaxError) throw new SimError(`LAD block ${b.name} could not be translated for the simulator: ${e.message}`, b.name);
           throw e;
         }
-        this.bodies.set(key, s);
+        bodies.set(key, s);
         return s;
       }
-      const g = this.index.global(b.owner ? `${b.owner}.${b.name}` : b.name)!; // a METHOD is known as FB.Name
-      const doc = this.index.docs.get(g.uri)!;
+      const doc = this.index.docs.get(this.uriOf(b))!;
       const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out
       const iec = doc.code !== undefined || /\.st$/i.test(doc.uri);
       const range = accessor ? b.property?.[accessor] : b.bodyStart === undefined ? undefined : { start: b.bodyStart, end: b.end };
@@ -229,9 +235,22 @@ export class Simulator {
         if (e instanceof SclSyntaxError) throw new SimError(`Syntax error in ${b.name} (line ${doc.lines.position(e.offset).line + 1}): ${e.message}`, b.name, e.offset);
         throw e;
       }
-      this.bodies.set(key, s);
+      bodies.set(key, s);
     }
     return s;
+  }
+
+  /** The file a block was read from. */
+  private uriOf(b: BlockModel): string {
+    let uri = this.blockUris.get(b);
+    if (uri === undefined) {
+      // files come and go (rung simulate reloads them): look again
+      this.blockUris = new WeakMap();
+      for (const d of this.index.docs.values()) for (const x of d.parsed?.blocks ?? []) this.blockUris.set(x, d.uri);
+      uri = this.blockUris.get(b);
+    }
+    if (uri === undefined) throw new SimError(`"${b.name}" is not in the workspace`, b.name);
+    return uri;
   }
 
   /** 1-based source line of an offset in a block's file (for error messages). */
@@ -246,11 +265,10 @@ export class Simulator {
   /** Constants of a block (VAR CONSTANT), evaluated once; used for array bounds and initial values. */
   private constants(scope: BlockModel | undefined): Struct {
     if (!scope) return {};
-    const key = `${scope.kind}:${scope.name.toUpperCase()}`;
-    let c = this.consts.get(key);
+    let c = this.consts.get(scope);
     if (!c) {
       c = {};
-      this.consts.set(key, c);
+      this.consts.set(scope, c);
       for (const v of scope.vars) if (v.section === "Constant" && !v.isArray && !v.members?.length) c[v.name.toUpperCase()] = this.defaultValue(v, scope);
     }
     return c;
@@ -514,7 +532,7 @@ export class Simulator {
       path = path.slice(2);
     } else if (ref.root.kind !== "global" && frame) {
       const b = frame.block;
-      d = b.vars.find((x) => x.name.toUpperCase() === name);
+      d = b.vars.find((x) => x.name.toUpperCase() === name && (!x.accessor || x.accessor === frame.accessor));
       if (!d && name === b.name.toUpperCase() && b.returnType) d = { type: b.returnType, typeRef: b.returnType, isArray: false };
       if (!d && b.kind === "DB" && b.dbOf) d = this.index.membersOfType(b.dbOf).find((m) => m.name.toUpperCase() === name);
       if (!d && b.owner) d = fbVar(name); // a METHOD sees the variables of its FB
@@ -940,11 +958,11 @@ export class Simulator {
     if (!prop.property?.[accessor])
       throw new SimError(`${prop.owner}.${prop.name} has no ${accessor.toUpperCase()}: it ${accessor === "set" ? "is read-only" : "can only be written"}`, prop.name);
     return this.enter(prop, () => {
-      const own = this.structOf(prop.vars, prop);
+      const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop);
       Object.assign(own, this.constants(prop));
       const key = prop.name.toUpperCase();
       own[key] = accessor === "set" ? value : this.defaultValue({ type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false }, prop);
-      this.runBody(prop, { block: prop, mem: inst.mem, temps: own, inst }, accessor);
+      this.runBody(prop, { block: prop, mem: inst.mem, temps: own, inst, accessor }, accessor);
       return own[key];
     });
   }

@@ -57,3 +57,35 @@ describe("CodeGraph", () => {
     expect(JSON.stringify(build().toJSON())).toBe(JSON.stringify(build().toJSON()));
   });
 });
+
+describe("CodeGraph with two PLCs", () => {
+  const idx = new WorkspaceIndex();
+  for (const plc of ["PLC_A", "PLC_B"]) {
+    idx.set(`file:///w/plc/${plc}/blocks/Motor.scl`, `FUNCTION_BLOCK "Motor"
+VAR_INPUT
+ On : Bool;
+END_VAR
+BEGIN
+END_FUNCTION_BLOCK
+`, 0);
+    idx.set(`file:///w/plc/${plc}/blocks/Motor_DB.db`, `DATA_BLOCK "Motor_DB"
+"Motor"
+BEGIN
+END_DATA_BLOCK
+`, 0);
+  }
+  idx.set("file:///w/plc/PLC_A/blocks/Main.scl", `ORGANIZATION_BLOCK "Main"
+BEGIN
+  "Motor_DB"(On := TRUE);
+END_ORGANIZATION_BLOCK
+`, 0);
+  const g = CodeGraph.fromIndex(idx);
+
+  it("keeps same-named objects of two PLCs apart, and a block's names mean its own PLC's objects", () => {
+    expect(g.find("Motor").map((n) => [n.id, n.device])).toEqual([["PLC_A/MOTOR", "PLC_A"], ["PLC_B/MOTOR", "PLC_B"]]);
+    expect(g.callers("PLC_A/Motor").map((n) => n.id)).toEqual(["PLC_A/MAIN"]);
+    expect(g.callers("PLC_B/Motor")).toEqual([]);
+    expect(g.outgoing("PLC_B/Motor_DB").map((e) => e.to)).toEqual(["PLC_B/MOTOR"]);
+    expect(g.impact(g.key("Motor", "PLC_B")).map((i) => i.node.id)).toEqual(["PLC_B/MOTOR_DB"]);
+  });
+});

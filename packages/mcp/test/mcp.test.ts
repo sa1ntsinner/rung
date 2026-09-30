@@ -116,3 +116,40 @@ describe("rung mcp", () => {
   });
 });
 
+describe("rung mcp with two PLCs that have objects of the same name", () => {
+  let two: Client;
+  beforeAll(async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rung-mcp2-"));
+    const bridge = new FakeBridge();
+    bridge.info = { ...bridge.info, devices: ["PLC_A", "PLC_B"] };
+    for (const plc of ["PLC_A", "PLC_B"]) {
+      bridge.add(`plc:${plc}/blocks/Motor`, { content: 'FUNCTION_BLOCK "Motor"\nVAR_INPUT\n  On : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n' });
+      bridge.add(`plc:${plc}/blocks/Motor_DB`, { form: "db", content: 'DATA_BLOCK "Motor_DB"\n"Motor"\nBEGIN\nEND_DATA_BLOCK\n' });
+    }
+    bridge.add("plc:PLC_A/blocks/Main", { content: 'ORGANIZATION_BLOCK "Main"\nBEGIN\n  "Motor_DB"(On := TRUE);\nEND_ORGANIZATION_BLOCK\n' });
+    const config = defaultConfig(bridge.info.path, "V20", "fake");
+    await saveConfig(dir, config);
+    const state = await StateStore.open(dir, { projectPath: bridge.info.path, tiaVersion: "V20", devices: [] });
+    await pull(dir, bridge, state, { config });
+    await state.close();
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await createMcpServer({ root: dir }).connect(a);
+    two = new Client({ name: "test", version: "1" });
+    await two.connect(b);
+  });
+  const ask = async (name: string, args: Record<string, unknown>) => {
+    const r = (await two.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+    return { isError: !!r.isError, text: r.content[0]!.text };
+  };
+
+  it("asks which PLC a bare name means, and answers for the one a path or PLC/name names", async () => {
+    const bare = await ask("rung_graph", { query: "callers", name: "Motor" });
+    expect(bare.isError).toBe(true);
+    expect(bare.text).toContain("PLC_A/Motor or PLC_B/Motor");
+    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "PLC_A/Motor" })).text)).toEqual(["PLC_A/Main"]);
+    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "plc/PLC_B/blocks/Motor.scl" })).text)).toEqual([]);
+    const explained = JSON.parse((await ask("rung_explain", { name: "plc/PLC_B/blocks/Motor_DB.db" })).text) as { path: string; usedBy: string[] };
+    expect(explained.path).toBe("plc/PLC_B/blocks/Motor_DB.db");
+  });
+});
+

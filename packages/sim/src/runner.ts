@@ -3,7 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { scopedTo, type WorkspaceIndex } from "@rung/lsp";
+import { deviceOfUri, scopedTo, unscoped, type GlobalSymbol, type WorkspaceIndex } from "@rung/lsp";
 import { Simulator, SimError, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 
 /*
@@ -45,6 +45,8 @@ export interface FileResult {
 
 interface TestFile {
   block?: string;
+  /** The PLC of the block when the workspace has several with one of that name (else tests/<PLC>/ says it). */
+  plc?: string;
   cycle?: string | number;
   cases?: { name?: string; steps?: Record<string, unknown>[] }[];
 }
@@ -92,6 +94,41 @@ function checkKind(name: string, current: Value, value: Value) {
   if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${JSON.stringify(value)}`);
 }
 
+const INT_RANGE: Record<string, [number, number]> = {
+  SINT: [-128, 127], INT: [-32768, 32767], DINT: [-2147483648, 2147483647], LINT: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  USINT: [0, 255], UINT: [0, 65535], UDINT: [0, 4294967295], ULINT: [0, Number.MAX_SAFE_INTEGER],
+  BYTE: [0, 255], WORD: [0, 65535], DWORD: [0, 4294967295], LWORD: [0, Number.MAX_SAFE_INTEGER],
+};
+
+/** Rejects a `set` value the variable's declared type cannot hold (40000 in an Int, 1.5 in a DInt, a number in a Bool). */
+function checkType(name: string, type: string, value: Value) {
+  const t = type.replace(/^"|"$/g, "").toUpperCase();
+  const range = INT_RANGE[t];
+  if (range) {
+    if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${JSON.stringify(value)}`);
+    if (value < range[0] || value > range[1]) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
+  } else if (t === "BOOL" && typeof value !== "boolean") throw new SimError(`${name} expects a BOOL (true/false), got ${JSON.stringify(value)}`);
+  else if ((t === "REAL" || t === "LREAL") && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a number, got ${JSON.stringify(value)}`);
+}
+
+/**
+ * The block a test file means. With several PLCs a name can be in more than one: `plc:` in the test or the folder
+ * tests/<PLC>/ says which; without either an ambiguous name is refused rather than guessed.
+ */
+function blockOf(index: WorkspaceIndex, name: string, plc: string | undefined, file: string): { symbol: GlobalSymbol } | { error: string } {
+  const all = unscoped(index).allGlobals().filter((s) => s.block && s.name.toUpperCase() === name.toUpperCase());
+  const devices = [...new Set(all.map((s) => deviceOfUri(s.uri)).filter((d): d is string => !!d))].sort();
+  const folder = /^tests\/([^/]+)\//.exec(file)?.[1];
+  const want = plc ?? (folder && devices.includes(folder) ? folder : undefined);
+  if (want) {
+    const hit = all.find((s) => deviceOfUri(s.uri) === want);
+    return hit ? { symbol: hit } : { error: `block ${name} is not in PLC ${want}${devices.length ? ` (it is in ${devices.join(", ")})` : ""}` };
+  }
+  if (devices.length > 1) return { error: `block ${name} is in several PLCs (${devices.join(", ")}): add \`plc: ${devices[0]}\` to the test, or put it in tests/${devices[0]}/` };
+  const g = index.global(name);
+  return g?.block ? { symbol: g } : { error: `block ${name} not found (only SCL sources can be simulated)` };
+}
+
 export async function runTestFile(index: WorkspaceIndex, file: string, text: string): Promise<FileResult> {
   let spec: TestFile;
   try {
@@ -101,8 +138,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   }
   const blockName = spec.block;
   if (!blockName) return { file, block: "?", cases: [], error: "missing `block:`" };
-  const g = index.global(blockName);
-  if (!g?.block) return { file, block: blockName, cases: [], error: `block ${blockName} not found (only SCL sources can be simulated)` };
+  const found = blockOf(index, blockName, spec.plc, file);
+  if ("error" in found) return { file, block: blockName, cases: [], error: found.error };
+  const g = found.symbol;
+  if (!g.block) return { file, block: blockName, cases: [], error: `block ${blockName} not found (only SCL sources can be simulated)` };
   const cycleMs = spec.cycle !== undefined ? toMs(spec.cycle) : 10;
   const results: CaseResult[] = [];
   for (const [ci, c] of (spec.cases ?? []).entries()) {
@@ -189,7 +228,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
                 const target = resolve(k);
                 const value = normalizeExpected(v) as Value;
-                checkKind(k, target.get(), value);
+                // a variable of the block itself is checked against its declared type, others against their value
+                const decl = /^[A-Za-z_]\w*$/.test(k) ? g.block.vars.find((x) => x.name.toUpperCase() === k.toUpperCase() && x.section !== "Temp" && !x.isArray && !x.members?.length) : undefined;
+                if (decl) checkType(k, decl.type, value);
+                else checkKind(k, target.get(), value);
                 target.set(value);
               }
               break;

@@ -21,6 +21,23 @@ export interface VarDecl {
   comment?: string;
   /** Address of a located variable (`x AT %I0.0 : Bool`). */
   at?: string;
+  /** A local of one accessor of an IEC PROPERTY: visible only in its GET or its SET. */
+  accessor?: "get" | "set";
+}
+
+/** The accessor of a PROPERTY block whose code holds `offset`, if any. */
+export function accessorAt(block: BlockModel, offset: number): "get" | "set" | undefined {
+  const p = block.property;
+  if (p?.get && offset >= p.get.start && offset <= p.get.end) return "get";
+  if (p?.set && offset >= p.set.start && offset <= p.set.end) return "set";
+  return undefined;
+}
+
+/** The variables of a block that code at `offset` sees (a PROPERTY's accessor sees its own locals, not the other's). */
+export function varsAt(block: BlockModel, offset?: number): VarDecl[] {
+  if (!block.property) return block.vars;
+  const acc = offset === undefined ? undefined : accessorAt(block, offset);
+  return block.vars.filter((v) => !v.accessor || v.accessor === acc || (acc === undefined && offset === undefined));
 }
 
 export interface Ref {
@@ -56,8 +73,10 @@ export interface BlockModel {
   refs: Ref[];
   bodyStart?: number;
   comment?: string;
-  /** IEC METHOD or PROPERTY: the function block it belongs to (its body sees the FB's variables). */
+  /** IEC METHOD, PROPERTY or ACTION: the function block it belongs to (its body sees the FB's variables). */
   owner?: string;
+  /** IEC ACTION: code of its function block, with no declarations of its own. */
+  action?: boolean;
   /** IEC PROPERTY: the code of its GET and SET accessors (offsets); the property's name is its value in both. */
   property?: { get?: { start: number; end: number }; set?: { start: number; end: number } };
   /** STL (.awl) body: not analysed, only the interface is indexed. */
@@ -101,6 +120,7 @@ const HEADERS_IEC: Record<string, { kind: BlockKind; end: string }> = {
   PROGRAM: { kind: "PRG", end: "END_PROGRAM" },
   METHOD: { kind: "FC", end: "END_METHOD" },
   PROPERTY: { kind: "FC", end: "END_PROPERTY" },
+  ACTION: { kind: "FC", end: "END_ACTION" },
   TYPE: { kind: "UDT", end: "END_TYPE" },
 };
 
@@ -396,7 +416,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     }
     const h = t.kind === "ident" ? headers[t.upper] : undefined;
     if (!h) {
-      if (t.kind !== "pragma") err(`Expected ${iec ? "FUNCTION_BLOCK, FUNCTION, PROGRAM, METHOD or TYPE" : "FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE"}, found ${t.text}`, t);
+      if (t.kind !== "pragma") err(`Expected ${iec ? "FUNCTION_BLOCK, FUNCTION, PROGRAM, METHOD, PROPERTY, ACTION or TYPE" : "FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE"}, found ${t.text}`, t);
       // resynchronize at the next header
       while (peek().kind !== "eof" && !(peek().kind === "ident" && (headers[peek().upper] || (iec && peek().upper === "VAR_GLOBAL")))) next();
       continue;
@@ -407,18 +427,23 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     if (nameTok.kind !== "global" && nameTok.kind !== "ident") err("Expected a block name", nameTok);
     const block: BlockModel = { kind: h.kind, name: unquote(nameTok.text), nameStart: nameTok.start, nameEnd: nameTok.end, start: t.start, end: t.end, vars: [], regions: [], refs: [] };
     ownerVars = undefined;
-    if (iec && (t.upper === "METHOD" || t.upper === "PROPERTY")) {
+    if (iec && (t.upper === "METHOD" || t.upper === "PROPERTY" || t.upper === "ACTION")) {
       const owner = [...blocks].reverse().find((b) => (b.kind === "FB" || b.kind === "PRG") && !b.owner);
       if (owner) {
         block.owner = owner.name;
         ownerVars = owner.vars;
       }
       if (t.upper === "PROPERTY") block.property = {};
+      // ACTION Reset: code of the FB, without declarations and without a return value
+      if (t.upper === "ACTION") {
+        block.action = true;
+        if (peek().text === ":") next();
+      }
     }
     const c = lineComment(nameTok.end);
     if (c) block.comment = c;
     if (iec) while (peek().kind === "ident" && /^(ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)$/.test(peek().upper)) next();
-    if (h.kind === "FC" && peek().text === ":") {
+    if (h.kind === "FC" && !block.action && peek().text === ":") {
       next();
       block.returnType = parseType().type;
     }
@@ -501,8 +526,10 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         // an accessor: its own VAR sections, then its code up to END_GET / END_SET
         next();
         const end = x.upper === "GET" ? "END_GET" : "END_SET";
+        const accessor = x.upper === "GET" ? "get" : "set";
         while (peek().kind === "ident" && SECTIONS[peek().upper]) {
-          block.vars.push(...parseDecls(SECTIONS[next().upper]!));
+          // each accessor has locals of its own: GET's tmp is not SET's tmp
+          block.vars.push(...parseDecls(SECTIONS[next().upper]!).map((v) => ({ ...v, accessor }) as VarDecl));
           if (isKw(peek(), "END_VAR")) next();
           else err("Missing END_VAR", peek());
         }

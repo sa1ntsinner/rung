@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
-import { BlobStore, loadConfig, normalizeText, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
+import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
 import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, assignmentList, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
@@ -99,12 +99,25 @@ export function createMcpServer(ctx: McpContext): McpServer {
       o.close();
     }
   };
-  const resolveName = async (nameOrPath: string) => {
+  /**
+   * The graph node an agent means: a workspace path or address names one PLC's object; a bare name is enough in
+   * a workspace with one PLC, else it must say which (PLC_1/Motor or the path).
+   */
+  const resolveNode = async (graph: CodeGraph, nameOrPath: string): Promise<{ ref: string; device?: string; name: string } | { error: string }> => {
     const states = await stateSnapshot(ctx.root);
     const byPath = states.find((s) => s.path === nameOrPath.replace(/\\/g, "/") || s.address === nameOrPath);
-    if (byPath) return byPath.address.split("/").pop()!.split("~").pop()!.replace(/%([0-9A-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
-    return nameOrPath.replace(/^"|"$/g, "");
+    if (byPath) {
+      const a = parseAddress(byPath.address);
+      return { ref: graph.key(a.name, a.device), device: a.device, name: a.name };
+    }
+    const bare = nameOrPath.replace(/^"|"$/g, "");
+    const exact = graph.get(bare);
+    if (exact && exact.id === bare.toUpperCase()) return { ref: exact.id, ...(exact.device ? { device: exact.device } : {}), name: exact.name };
+    const hits = graph.find(bare);
+    if (hits.length > 1) return { error: `${bare} is in several PLCs; name one: ${hits.map((h) => (h.device ? `${h.device}/${h.name}` : h.name)).join(" or ")}, or pass its workspace path` };
+    return { ref: hits[0]?.id ?? bare, ...(hits[0]?.device ? { device: hits[0].device } : {}), name: hits[0]?.name ?? bare };
   };
+  const label = (n: { name: string; device?: string }) => (n.device ? `${n.device}/${n.name}` : n.name);
 
   server.registerTool("rung_status", { description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running." }, async () => {
     const live = await withOwner((o) => o.request("status"));
@@ -206,9 +219,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("rung_find_usages", { description: "Every block that calls, instantiates, reads or writes a block, DB, UDT or tag (with the members touched).", inputSchema: { name: z.string().describe("object name, e.g. Fx_Global, or a workspace path") } }, async ({ name }) => {
     const { graph } = await model();
-    const n = await resolveName(name);
-    if (!graph.get(n)) return fail(`${n} is not in the workspace graph`);
-    return json(graph.usages(n).map((u) => ({ by: u.node.name, kind: u.node.kind, how: u.kind, count: u.count, ...(u.members ? { members: u.members } : {}) })));
+    const r = await resolveNode(graph, name);
+    if ("error" in r) return fail(r.error);
+    if (!graph.get(r.ref)) return fail(`${name} is not in the workspace graph`);
+    return json(graph.usages(r.ref).map((u) => ({ by: label(u.node), kind: u.node.kind, how: u.kind, count: u.count, ...(u.members ? { members: u.members } : {}) })));
   });
 
   server.registerTool(
@@ -216,19 +230,23 @@ export function createMcpServer(ctx: McpContext): McpServer {
     { description: "Dependency queries over the code graph: callers, callees, impact (transitive dependants) or path (from name to `to`).", inputSchema: { query: z.enum(["callers", "callees", "impact", "path"]), name: z.string(), to: z.string().optional() } },
     async ({ query, name, to }) => {
       const { graph } = await model();
-      const n = await resolveName(name);
-      if (!graph.get(n)) return fail(`${n} is not in the workspace graph`);
+      const r = await resolveNode(graph, name);
+      if ("error" in r) return fail(r.error);
+      const n = r.ref;
+      if (!graph.get(n)) return fail(`${name} is not in the workspace graph`);
       switch (query) {
         case "callers":
-          return json(graph.callers(n).map((x) => x.name));
+          return json(graph.callers(n).map(label));
         case "callees":
-          return json(graph.callees(n).map((x) => ({ name: x.name, kind: x.kind })));
+          return json(graph.callees(n).map((x) => ({ name: label(x), kind: x.kind })));
         case "impact":
-          return json(graph.impact(n).map((i) => ({ name: i.node.name, kind: i.node.kind, distance: i.distance, via: i.via })));
+          return json(graph.impact(n).map((i) => ({ name: label(i.node), kind: i.node.kind, distance: i.distance, via: i.via })));
         case "path": {
           if (!to) return fail("path needs `to`");
-          const p = graph.path(n, await resolveName(to));
-          return p ? json(p.map((x) => x.name)) : text("no dependency path");
+          const t = await resolveNode(graph, r.device && !to.includes("/") && graph.find(to).length > 1 ? `${r.device}/${to}` : to);
+          if ("error" in t) return fail(t.error);
+          const p = graph.path(n, t.ref);
+          return p ? json(p.map(label)) : text("no dependency path");
         }
       }
     },
@@ -236,9 +254,11 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool("rung_explain", { description: "What an object is: file, kind, interface (inputs/outputs/statics), read-only flag, sync status and who uses it.", inputSchema: { name: z.string().describe("object name, address or workspace path") } }, async ({ name }) => {
     const { index, graph } = await model();
-    const n = await resolveName(name);
-    const g = index.global(n);
-    if (!g) return fail(`${n} is not in the workspace`);
+    const r = await resolveNode(graph, name);
+    if ("error" in r) return fail(r.error);
+    // seen from a file of that PLC, the name is that PLC's object
+    const g = index.global(r.name, r.device ? uriOf(join(ctx.root, "plc", r.device, "_")) : undefined);
+    if (!g) return fail(`${name} is not in the workspace`);
     const st = (await stateSnapshot(ctx.root)).find((s) => uriOf(join(ctx.root, ...s.path.split("/"))) === g.uri);
     const b = g.block;
     return json({
@@ -250,7 +270,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       status: st?.status,
       ...(g.tag ? { tag: g.tag } : {}),
       ...(b ? { dbOf: b.dbOf, returnType: b.returnType, interface: b.vars.map((v) => ({ section: v.section, name: v.name, type: v.type, ...(v.comment ? { comment: v.comment } : {}) })), regions: b.regions.map((r) => r.name) } : {}),
-      usedBy: graph.usages(g.name).map((u) => `${u.node.name} (${u.kind})`),
+      usedBy: graph.usages(r.ref).map((u) => `${label(u.node)} (${u.kind})`),
     });
   });
 

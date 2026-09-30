@@ -26,7 +26,7 @@ module.exports = grammar({
   rules: {
     source_file: ($) => repeat(choice($._block, $.pragma, $.var_section)),
 
-    _block: ($) => choice($.function_block, $.function, $.organization_block, $.data_block, $.type_definition, $.program, $.method, $.property, $.interface),
+    _block: ($) => choice($.function_block, $.function, $.organization_block, $.data_block, $.type_definition, $.program, $.method, $.property, $.action, $.interface),
 
     // SCL bodies start with BEGIN; IEC POUs start their statements right after the declarations
     _code: ($) => choice($.body, alias($._iec_body, $.body)),
@@ -46,6 +46,8 @@ module.exports = grammar({
     property: ($) =>
       seq(kw("PROPERTY"), repeat($._modifier), field("name", $._name), ":", field("type", $._type), repeat($.var_section), choice(repeat1($.property_accessor), optional($._code)), kw("END_PROPERTY")),
     property_accessor: ($) => seq(field("kind", choice(kw("GET"), kw("SET"))), repeat($.var_section), optional($._code), choice(kw("END_GET"), kw("END_SET"))),
+    // CODESYS: an ACTION is code of its FB, without declarations (rung writes it after the FB, in the same file)
+    action: ($) => seq(kw("ACTION"), field("name", $._name), optional(":"), optional($._code), kw("END_ACTION")),
     interface: ($) => seq(kw("INTERFACE"), field("name", $._name), optional($.extends), repeat(choice($.method, $.property)), kw("END_INTERFACE")),
     organization_block: ($) => seq(kw("ORGANIZATION_BLOCK"), field("name", $._name), repeat($._block_header), repeat($.var_section), optional($.body), kw("END_ORGANIZATION_BLOCK")),
     data_block: ($) =>

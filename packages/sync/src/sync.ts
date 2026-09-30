@@ -11,6 +11,7 @@ import {
   WorkspaceError,
   addressToStem,
   bundleHash,
+  normalizeText,
   escapeSegment,
   formatAddress,
   ignoredSourceReason,
@@ -848,8 +849,12 @@ export async function resolveConflict(root: string, state: StateStore, path: str
         await replaceGuarded(rel2abs(root, f.path), Buffer.from(merged, "utf8"), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
       } else if (markers.test(primary)) {
         throw new WorkspaceError("CONFLICT_MARKERS", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);
-      } else if (mode === "merged" && merged !== null && markers.test(merged) && primary === "") {
-        throw new WorkspaceError("CONFLICT_MARKERS", `${f.path}.conflict still contains conflict markers`);
+      } else if (mode === "merged" && merged !== null && markers.test(merged) && normalizeText(primary) === normalizeText(fileSide(merged))) {
+        // nothing was merged (the file is still only its own side): taken as it is, TIA Portal's side would be lost
+        throw new WorkspaceError(
+          "CONFLICT_MARKERS",
+          `${f.path}.conflict still contains conflict markers: merge it there, or merge into ${f.path} and delete ${f.path}.conflict; rung resolve --ours keeps your file, --theirs takes TIA Portal's`,
+        );
       }
     }
     // Base = the TIA version the conflict saw: the next pass sees "file modified, TIA unchanged" and imports.
@@ -891,6 +896,19 @@ async function resolveUnknownImport(root: string, state: StateStore, st: ObjectS
     state.upsert({ ...st, status: "importing" });
   } else state.upsert({ ...st, status: "fileDirty", tiaFingerprint: `stale:${st.tiaFingerprint}` });
   await state.flush();
+}
+
+/** The workspace's side of a .conflict file: the common lines and the lines between <<<<<<< file and the next marker. */
+function fileSide(conflict: string): string {
+  const out: string[] = [];
+  let part: "common" | "file" | "other" = "common";
+  for (const line of conflict.replace(/\r\n/g, "\n").split("\n")) {
+    if (line === "<<<<<<< file") part = "file";
+    else if ((line === "||||||| base" || line === "=======") && part === "file") part = "other";
+    else if (line === ">>>>>>> tia") part = "common";
+    else if (part !== "other") out.push(line);
+  }
+  return out.join("\n");
 }
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });

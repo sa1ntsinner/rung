@@ -35,7 +35,7 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
     if (end < block.start || start > block.end) continue;
     for (const ref of block.refs) {
       if (ref.end < start || ref.start > end) continue;
-      if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
+      if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name, ref.start) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
       if (calledWithoutInstance(index, ref)) out.push(...instanceFixes(index, doc.text, uri, block, ref));
       if (canBeATag(index, ref)) out.push(...tagFixes(index, doc.text, uri, block, ref));
     }

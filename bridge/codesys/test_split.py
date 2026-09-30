@@ -98,6 +98,16 @@ ACTION Reset:""")
         units = ns["split_units"]("PROGRAM PLC_PRG\nVAR\n    n : INT;\nEND_VAR\nn := n + 1;\nEND_PROGRAM\n")
         self.assertEqual(units, [("PROGRAM", "PROGRAM PLC_PRG\nVAR\n    n : INT;\nEND_VAR\nn := n + 1;\n")])
 
+    def test_words_in_comments_and_code_are_not_headers_or_sections(self):
+        text = "FUNCTION_BLOCK FB_Motor\nVAR\n    variance : REAL;\nEND_VAR\n(* notes:\nProgram flow is simple\nAction required: none *)\nvariance := 0.5;\nEND_FUNCTION_BLOCK\n\nMETHOD Start : BOOL // started\nStart := TRUE;\nEND_METHOD\n"
+        units = ns["split_units"](text)
+        self.assertEqual([k for k, _ in units], ["FUNCTION_BLOCK", "METHOD"])
+        decl, impl = ns["split_decl_impl"](units[0][1])
+        self.assertEqual(decl, "FUNCTION_BLOCK FB_Motor\nVAR\n    variance : REAL;\nEND_VAR\n")
+        self.assertEqual(impl, "(* notes:\nProgram flow is simple\nAction required: none *)\nvariance := 0.5;\n")
+        self.assertEqual(ns["return_type"](units[1][1]), "BOOL")
+        self.assertEqual(ns["header_name"]("(* Program flow *)\nPROGRAM PLC_PRG\n"), "PLC_PRG")
+
     def test_the_header_keyword_past_comments_and_pragmas(self):
         kw = ns["lead_keyword"]
         self.assertEqual(kw("// the motor\nFUNCTION_BLOCK FB_Motor\n"), "FUNCTION_BLOCK")

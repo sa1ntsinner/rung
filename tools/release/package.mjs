@@ -24,6 +24,8 @@ if (!process.argv.includes("--skip-build")) {
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(join(stage, "bridge"), { recursive: true });
 cpSync(join(out, "rung.exe"), join(stage, "rung.exe"));
+// the same CLI for any OS with Node.js 22+: CI runners on Linux run the language server checks and rung test with it
+cpSync(join(out, "rung.cjs"), join(stage, "rung.cjs"));
 const bridgeBin = join(root, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48");
 for (const f of readdirSync(bridgeBin)) if (!f.endsWith(".pdb")) cpSync(join(bridgeBin, f), join(stage, "bridge", f));
 // the CODESYS bridge is a script that runs inside CODESYS (rung codesys-bridge starts it)
@@ -48,7 +50,7 @@ writeFileSync(
 );
 writeFileSync(
   join(stage, "README.txt"),
-  `rung ${version} — PLC-as-code for Siemens TIA Portal\n\n1. Put this folder somewhere permanent and add it to PATH.\n2. Make sure your Windows user is in the group "Siemens TIA Openness".\n3. Open your project in TIA Portal, then in an empty folder: rung init, rung pull, rung watch.\n4. Editors: install editors/rung-scl.vsix in VS Code; Zed and Neovim: see https://github.com/sa1ntsinner/rung/tree/main/docs/editors\n5. Agents: claude mcp add rung -- rung mcp (or the plugin in agents/).\n\nLicence: see LICENSE.txt (core BUSL-1.1 with free use for individuals and teams up to 3 users; editor/grammar parts MIT).\n`,
+  `rung ${version} — PLC projects of TIA Portal and CODESYS as plain text\n\n1. Put this folder somewhere permanent and add it to PATH.\n2. Run rung check: it lists what is installed and what is missing (for TIA Portal: your Windows user in the group "Siemens TIA Openness").\n3. In an empty folder: rung init --project <your project>, rung pull, rung watch.\n4. Editors and agents: rung setup (asks first; rung setup --dry-run shows what it would change).\n\nrung.cjs is the same CLI for any OS with Node.js 22 or newer (node rung.cjs test on a Linux CI runner).\n\nLicence: see LICENSE.txt (core BUSL-1.1, free for individuals and organizations of up to 3 users; editor, grammar and file format MIT).\n`,
 );
 
 // Audit: no Siemens binaries may ever be redistributed.

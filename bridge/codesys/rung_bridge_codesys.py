@@ -273,17 +273,27 @@ def find(addr):
 HEADER = re.compile(r"^[ \t]*(PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|PROPERTY|ACTION|INTERFACE)\b", re.I | re.M)
 
 
+COMMENT = re.compile(r"//[^\n]*|\(\*[\s\S]*?\*\)|/\*[\s\S]*?\*/|'(?:\$.|[^'$\n])*'|\"(?:\$.|[^\"$\n])*\"")
+
+
+def masked(text):
+    """The text with comments and string literals blanked (newlines kept): offsets stay, and a word in a comment,
+    such as 'Program flow' on a line of its own, is not taken for a header."""
+    return COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
 def split_units(text):
     """Top-level units of a POU file: [(keyword, text without its END line)]. What stands above a header
     (attribute pragmas, comments) belongs to that unit's declaration, as CODESYS keeps it there."""
     text = text.replace("\r\n", "\n")
-    starts = [m for m in HEADER.finditer(text)]
+    code = masked(text)
+    starts = [m for m in HEADER.finditer(code)]
     units = []
     after = 0  # where the previous unit's END line ended
     for i, m in enumerate(starts):
         nxt = starts[i + 1].start() if i + 1 < len(starts) else len(text)
         kw = m.group(1).upper()
-        ends = list(re.finditer(r"^[ \t]*" + END[kw] + r"\b[^\n]*(\n|$)", text[m.start():nxt], re.I | re.M))
+        ends = list(re.finditer(r"^[ \t]*" + END[kw] + r"\b[^\n]*(\n|$)", code[m.start():nxt], re.I | re.M))
         stop = m.start() + ends[-1].start() if ends else nxt
         # blank lines between units are layout, not part of a declaration
         body = re.sub(r"^(?:[ \t]*\n)+", "", text[after:stop])
@@ -292,8 +302,13 @@ def split_units(text):
     return units
 
 
+# VAR, VAR_INPUT, VAR RETAIN …: not a word that starts with var (variance := 0.5;)
+VAR_START = re.compile(r"^\s*VAR(_[A-Za-z_]+)?\b", re.I)
+END_VAR_LINE = re.compile(r"^\s*END_VAR\b", re.I)
+
+
 def header_line(lines):
-    """Index of the header line: pragmas and comments may stand above it."""
+    """Index of the header line: pragmas and comments may stand above it (lines of masked text)."""
     for k, line in enumerate(lines):
         if HEADER.match(line):
             return k
@@ -303,17 +318,18 @@ def header_line(lines):
 def split_decl_impl(unit):
     """Declaration = what stands above the header, the header and its VAR sections; the code is what follows."""
     lines = unit.split("\n")
-    i = header_line(lines) + 1
-    while i < len(lines) and re.match(r"^\s*\{", lines[i]):
+    code = masked(unit).split("\n")  # a comment starts neither a section nor the code
+    i = header_line(code) + 1
+    while i < len(lines) and re.match(r"^\s*\{", code[i]):
         i += 1  # attribute pragmas under the header
     while i < len(lines):
-        s = lines[i].strip()
-        if re.match(r"^VAR\w*\b", s, re.I):
-            while i < len(lines) and not re.match(r"^\s*END_VAR\b", lines[i], re.I):
+        s = code[i].strip()
+        if VAR_START.match(s):
+            while i < len(lines) and not END_VAR_LINE.match(code[i]):
                 i += 1
             i += 1
             continue
-        if s == "":
+        if lines[i].strip() == "":  # a comment is not blank: it starts the code
             i += 1
             continue
         break
@@ -328,15 +344,16 @@ ACCESSOR = re.compile(r"^[ \t]*(GET|SET)[ \t]*$", re.I | re.M)
 def accessor_decl_impl(body):
     """An accessor's VAR sections, then its code."""
     lines = body.split("\n")
+    code = masked(body).split("\n")
     i = 0
     while i < len(lines):
-        s = lines[i].strip()
-        if re.match(r"^VAR\w*\b", s, re.I):
-            while i < len(lines) and not re.match(r"^\s*END_VAR\b", lines[i], re.I):
+        s = code[i].strip()
+        if VAR_START.match(s):
+            while i < len(lines) and not END_VAR_LINE.match(code[i]):
                 i += 1
             i += 1
             continue
-        if s == "" and i + 1 < len(lines) and re.match(r"^\s*VAR\w*\b", lines[i + 1], re.I):
+        if lines[i].strip() == "" and i + 1 < len(lines) and VAR_START.match(code[i + 1]):
             i += 1
             continue
         break
@@ -347,13 +364,13 @@ def accessor_decl_impl(body):
 
 def split_property(unit):
     """A PROPERTY unit (without END_PROPERTY): its declaration, and {"GET": (decl, impl), "SET": (decl, impl)}."""
-    first = ACCESSOR.search(unit)
+    first = ACCESSOR.search(masked(unit))
     decl = (unit[:first.start()] if first else unit).rstrip() + "\n"
     accessors = {}
     rest = unit[first.start():] if first else ""
     while rest.strip():
         rest = re.sub(r"^(?:[ \t]*\n)+", "", rest)
-        m = ACCESSOR.match(rest)
+        m = ACCESSOR.match(masked(rest))
         if not m:
             raise RpcError("IMPORT_FAILED", "a PROPERTY holds GET … END_GET and SET … END_SET; found: " + rest.strip().split("\n")[0])
         name = m.group(1).upper()
@@ -368,11 +385,13 @@ def split_property(unit):
 
 
 def header_name(unit):
+    unit = masked(unit)  # a comment line such as "Program flow" is no header
     m = re.search(r"^[ \t]*(?:PROGRAM|FUNCTION_BLOCK|FUNCTION|METHOD|PROPERTY|ACTION|INTERFACE)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*([A-Za-z_][A-Za-z0-9_]*)", unit, re.I | re.M)
     return m.group(1) if m else None
 
 
 def return_type(unit):
+    unit = masked(unit)  # METHOD Start : BOOL // started: the comment is not the type
     m = re.search(r"^[ \t]*(?:METHOD|FUNCTION|PROPERTY)\s+(?:(?:ABSTRACT|FINAL|PUBLIC|PRIVATE|PROTECTED|INTERNAL)\s+)*[A-Za-z_][A-Za-z0-9_]*\s*:\s*([^\n;]+)", unit, re.I | re.M)
     return m.group(1).strip() if m else None
 

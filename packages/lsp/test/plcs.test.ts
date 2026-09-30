@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { WorkspaceIndex, complete, definition, diagnostics, hover } from "../src/index.js";
+import { WorkspaceIndex, complete, definition, diagnostics, hover, references } from "../src/index.js";
 
 // two PLCs of one project with objects of the same name: a name means the object of the file's own PLC
 const A_TAGS = "file:///w/plc/PLC_A/tags/IO.tags.st";
@@ -25,6 +25,16 @@ describe("a workspace with several PLCs", () => {
     const idx = workspace();
     expect(definition(idx, A, srcA.indexOf("On;") + 1)?.uri).toBe("file:///w/plc/PLC_A/blocks/Motor.db");
     expect(hover(idx, B, srcB.indexOf('"Start"') + 1)?.markdown).toBe("PLC tag **Start** : `Bool` at `%I1.0` (table IO)");
+  });
+
+  it("finds the references of the file's own PLC's object only", () => {
+    const idx = workspace();
+    const tag = references(idx, A, srcA.indexOf('"Start"') + 1).map((l) => l.uri);
+    expect(tag).toContain(A);
+    expect(tag).not.toContain(B);
+    const member = references(idx, B, srcB.indexOf("On;") + 1).map((l) => l.uri);
+    expect(member).toContain(B);
+    expect(member).not.toContain(A);
   });
 
   it("offers the names of the file's own PLC", () => {

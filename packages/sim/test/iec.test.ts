@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { WorkspaceIndex, diagnostics } from "@rung/lsp";
+import { WorkspaceIndex, definition, diagnostics, scopedTo } from "@rung/lsp";
 import { runTestFile, Simulator, type Instance } from "../src/index.js";
 
 const BLINK = `FUNCTION_BLOCK FB_Blink
@@ -228,6 +228,41 @@ cases:
     idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  fb : FB_Drive;\nEND_VAR\nfb.MaxSpeed := 5.0;\nEND_PROGRAM\n", 1);
     const s2 = new Simulator(idx);
     expect(() => s2.runInstance(s2.newInstance("PRG_Main"))).toThrow(/FB_Drive.MaxSpeed has no SET: it is read-only/);
+  });
+
+  it("an ACTION in the POU's file (rung's CODESYS form) is the FB's code: no errors, and a call runs it", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/FB_Count.st", "FUNCTION_BLOCK FB_Count\nVAR\n  n : INT;\nEND_VAR\nn := n + 1;\nEND_FUNCTION_BLOCK\n\nACTION Reset:\nn := 0;\nEND_ACTION\n", 0);
+    idx.set("file:///w/PRG_Main.st", "PROGRAM PRG_Main\nVAR\n  c : FB_Count;\n  a : INT;\n  b : INT;\nEND_VAR\nc();\nc();\na := c.n;\nc.Reset();\nb := c.n;\nEND_PROGRAM\n", 0);
+    for (const uri of ["file:///w/FB_Count.st", "file:///w/PRG_Main.st"]) expect(diagnostics(idx, uri).map((d) => d.code + ": " + d.message), uri).toEqual([]);
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_Main");
+    s.runInstance(main);
+    expect([main.mem.A, main.mem.B]).toEqual([2, 0]);
+  });
+
+  it("GET and SET have locals of their own; two PLCs' properties of one name stay apart", () => {
+    const idx = new WorkspaceIndex();
+    const fb = (plc: string, get: number) =>
+      idx.set(
+        `file:///w/plc/${plc}/blocks/FB_P.st`,
+        `FUNCTION_BLOCK FB_P\nVAR\n  v : INT;\nEND_VAR\nEND_FUNCTION_BLOCK\n\nPROPERTY P : INT\nGET\nVAR\n  tmp : INT := ${get};\nEND_VAR\nP := tmp;\nEND_GET\nSET\nVAR\n  tmp : INT := 7;\nEND_VAR\nv := P + tmp;\nEND_SET\nEND_PROPERTY\n`,
+        0,
+      );
+    fb("PLC_A", 1);
+    fb("PLC_B", 2);
+    for (const plc of ["PLC_A", "PLC_B"]) idx.set(`file:///w/plc/${plc}/blocks/PRG_Main.st`, "PROGRAM PRG_Main\nVAR\n  f : FB_P;\n  r : INT;\n  w : INT;\nEND_VAR\nr := f.P;\nf.P := 3;\nw := f.v;\nEND_PROGRAM\n", 0);
+    for (const [plc, get] of [["PLC_A", 1], ["PLC_B", 2]] as const) {
+      const uri = `file:///w/plc/${plc}/blocks/PRG_Main.st`;
+      const s = new Simulator(scopedTo(idx, uri));
+      const main = s.newInstance("PRG_Main");
+      s.runInstance(main);
+      expect([main.mem.R, main.mem.W], plc).toEqual([get, 10]); // GET's tmp; SET's tmp is 7: 3 + 7
+    }
+    const text = idx.docs.get("file:///w/plc/PLC_A/blocks/FB_P.st")!.text;
+    const setTmp = text.lastIndexOf("+ tmp") + 2;
+    const def = definition(idx, "file:///w/plc/PLC_A/blocks/FB_P.st", setTmp)!;
+    expect(text.slice(def.start, def.end + 11)).toBe("tmp : INT := 7"); // SET's, not GET's
   });
 
   it("runs a property of a TwinCAT .TcPOU (<Property> with <Get> and <Set>)", () => {

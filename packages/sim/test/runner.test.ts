@@ -100,6 +100,27 @@ describe("rung test runner", () => {
     expect(r.cases[0]!.error).toMatch(/Start expects a BOOL \(true\/false\), got 1/);
   });
 
+  it("rejects values the declared type cannot hold, also for an FC's inputs before the first cycle", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/Fx_Add.scl", 'FUNCTION "Fx_Add" : Int\nVAR_INPUT\n  a : Int;\n  on : Bool;\nEND_VAR\nBEGIN\n  #Fx_Add := #a + 1;\nEND_FUNCTION\n', 0);
+    const run = async (set: string) => (await runTestFile(idx, "t.yaml", `block: Fx_Add\ncases:\n  - steps:\n      - set: ${set}\n`)).cases[0]!.error;
+    expect(await run("{ a: 40000 }")).toMatch(/a is Int: 40000 is outside -32768\.\.32767/);
+    expect(await run("{ a: 1.5 }")).toMatch(/a is Int: expects a whole number, got 1\.5/);
+    expect(await run("{ on: 1 }")).toMatch(/on expects a BOOL \(true\/false\), got 1/);
+    expect(await run("{ a: 32767, on: true }")).toBeUndefined();
+  });
+
+  it("with two PLCs, the test says which PLC's block (plc: or tests/<PLC>/), never a guess", async () => {
+    const idx = new WorkspaceIndex();
+    for (const [plc, add] of [["PLC_A", 1], ["PLC_B", 2]] as const)
+      idx.set(`file:///w/plc/${plc}/blocks/Fx_Add.scl`, `FUNCTION "Fx_Add" : Int\nVAR_INPUT\n  a : Int;\nEND_VAR\nBEGIN\n  #Fx_Add := #a + ${add};\nEND_FUNCTION\n`, 0);
+    const test = (extra: string) => `block: Fx_Add\n${extra}cases:\n  - steps:\n      - { set: { a: 1 }, cycle: 1, expect: { Fx_Add: 3 } }\n`;
+    expect((await runTestFile(idx, "tests/add.test.yaml", test(""))).error).toMatch(/Fx_Add is in several PLCs \(PLC_A, PLC_B\): add `plc: PLC_A`/);
+    expect((await runTestFile(idx, "tests/add.test.yaml", test("plc: PLC_B\n"))).cases[0]!.passed).toBe(true);
+    expect((await runTestFile(idx, "tests/PLC_B/add.test.yaml", test(""))).cases[0]!.passed).toBe(true);
+    expect((await runTestFile(idx, "tests/PLC_A/add.test.yaml", test(""))).cases[0]!.passed).toBe(false);
+  });
+
   it("discovers tests/**/*.test.yaml and renders JUnit XML", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-tests-"));
     mkdirSync(join(root, "tests", "drives"), { recursive: true });

@@ -168,6 +168,18 @@ describe("syncOnce", () => {
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#y := 23;");
   });
 
+  it("resolve --merged refuses when nothing was merged: the file is still only its own side", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 21;"));
+    t.bridge.edit(A, { ".scl": srcA.replace("#y := 2;", "#y := 22;") });
+    await t.sync();
+    const err = await t.withState((s) => resolveConflict(t.root, s, pA, "merged")).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/still contains conflict markers: merge it there, or merge into/);
+    expect(existsSync(t.f(pA + ".conflict"))).toBe(true);
+  });
+
   it("resolve --merged takes a hand-merged .conflict file and keeps a recovery copy of the rest", async () => {
     const t = setup();
     await t.sync();

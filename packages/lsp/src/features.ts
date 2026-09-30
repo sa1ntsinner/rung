@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
-import type { BlockModel, Ref, VarDecl } from "./parser.js";
+import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
 import { TAG_TEXT, scopedTo, tagTableFor, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, unknownArgs } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
@@ -41,9 +41,10 @@ export interface OutlineSymbol {
 
 const SECTION_LABEL: Record<string, string> = { Input: "VAR_INPUT", Output: "VAR_OUTPUT", InOut: "VAR_IN_OUT", Static: "VAR", Temp: "VAR_TEMP", Constant: "VAR CONSTANT" };
 
-function localDecl(block: BlockModel, name: string): VarDecl | undefined {
+/** A variable of `block` by name; with `at`, as the code at that offset sees it (a PROPERTY accessor's own locals). */
+function localDecl(block: BlockModel, name: string, at?: number): VarDecl | undefined {
   const u = name.toUpperCase();
-  return block.vars.find((v) => v.name.toUpperCase() === u);
+  return varsAt(block, at).find((v) => v.name.toUpperCase() === u);
 }
 
 /**
@@ -55,9 +56,9 @@ export function calledWithoutInstance(index: WorkspaceIndex, ref: Ref): boolean 
   return ref.kind === "global" && ref.access === "call" && !ref.members.length && index.global(ref.name)?.block?.kind === "FB";
 }
 
-export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string): Member | undefined {
+export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string, at?: number): Member | undefined {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
-  const own = localDecl(block, name);
+  const own = localDecl(block, name, at);
   if (own) return { ...own, uri };
   const u = name.toUpperCase();
   if (block.owner) {
@@ -89,7 +90,7 @@ function refAt(index: WorkspaceIndex, uri: string, offset: number): { block: Blo
 
 function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref, uri: string): Member[] {
   if (ref.kind === "local") {
-    const d = scopeDecl(index, uri, block, ref.name);
+    const d = scopeDecl(index, uri, block, ref.name, ref.start);
     return d ? index.membersOf(d) : [];
   }
   if (ref.kind === "global") {
@@ -154,7 +155,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   for (const block of doc.parsed.blocks) {
     for (const ref of block.refs) {
       if (ref.kind === "local") {
-        const known = scopeDecl(index, uri, block, ref.name) || ref.name.toUpperCase() === block.name.toUpperCase();
+        const known = scopeDecl(index, uri, block, ref.name, ref.start) || ref.name.toUpperCase() === block.name.toUpperCase();
         if (!known) {
           out.push({ start: ref.start, end: ref.end, severity: "warning", message: `#${ref.name} is not declared in ${block.name}`, code: "UNDECLARED" });
           continue;
@@ -165,7 +166,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
         continue;
       }
       // "Device~Module" names are hardware identifiers (system constants): exports never contain them
-      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length && !scopeDecl(index, uri, block, ref.name)) {
+      if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length && !scopeDecl(index, uri, block, ref.name, ref.start)) {
         const definable = ref.access !== "call" && !ref.members.length && /\.scl$/i.test(uri) && tagTableFor(index, uri);
         out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored${definable ? "; quick fix: create it as a PLC tag" : ""})`, code: "UNKNOWN_GLOBAL" });
         continue;
@@ -214,7 +215,7 @@ export function definition(index: WorkspaceIndex, uri: string, offset: number): 
   const { block, ref, member } = hit;
   if (member < 0) {
     if (ref.kind === "local") {
-      const d = scopeDecl(index, uri, block, ref.name);
+      const d = scopeDecl(index, uri, block, ref.name, ref.start);
       return d?.uri !== undefined && d.start !== undefined ? { uri: d.uri, start: d.start, end: d.end! } : undefined;
     }
     const g = index.global(ref.name);
@@ -239,17 +240,19 @@ function declAt(vars: VarDecl[], offset: number): VarDecl | undefined {
 function memberReferences(index: WorkspaceIndex, target: Location, includeDeclaration: boolean): Location[] {
   const out: Location[] = includeDeclaration ? [target] : [];
   const same = (m: Member | undefined) => m?.uri === target.uri && m.start === target.start;
-  for (const d of index.docs.values())
+  for (const d of index.docs.values()) {
+    const seen = scopedTo(index, d.uri); // each file's names mean its own PLC's objects
     for (const b of d.parsed?.blocks ?? [])
       for (const r of b.refs) {
         if (!r.members.length && r.kind !== "local") continue;
-        const root = rootMembers(index, b, r, d.uri);
-        if (r.kind === "local" && same(scopeDecl(index, d.uri, b, r.name))) out.push({ uri: d.uri, start: r.start, end: r.end });
+        const root = rootMembers(seen, b, r, d.uri);
+        if (r.kind === "local" && same(scopeDecl(seen, d.uri, b, r.name, r.start))) out.push({ uri: d.uri, start: r.start, end: r.end });
         if (!r.members.length || !root.length) continue;
-        index.resolveChain(root, r.members).forEach((m, i) => {
+        seen.resolveChain(root, r.members).forEach((m, i) => {
           if (same(m)) out.push({ uri: d.uri, start: r.members[i]!.start, end: r.members[i]!.end });
         });
       }
+  }
   return out;
 }
 
@@ -263,8 +266,9 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
   if (memberTarget) return memberReferences(index, memberTarget, includeDeclaration);
   if (hit && hit.member < 0 && hit.ref.kind === "local") {
     const u = hit.ref.name.toUpperCase();
-    for (const r of hit.block.refs) if (r.kind === "local" && r.name.toUpperCase() === u) out.push({ uri, start: r.start, end: r.end });
-    const d = localDecl(hit.block, hit.ref.name);
+    const d = localDecl(hit.block, hit.ref.name, hit.ref.start);
+    // the same variable: in a PROPERTY, GET's local and SET's local of one name are two
+    for (const r of hit.block.refs) if (r.kind === "local" && r.name.toUpperCase() === u && localDecl(hit.block, r.name, r.start) === d) out.push({ uri, start: r.start, end: r.end });
     if (d && includeDeclaration) out.unshift({ uri, start: d.start, end: d.end });
     return out;
   }
@@ -278,12 +282,15 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
   const u = name.toUpperCase();
   const g = index.global(name);
   if (g && includeDeclaration) out.push({ uri: g.uri, start: g.start, end: g.end });
-  for (const d of index.docs.values())
+  for (const d of index.docs.values()) {
+    // another PLC's file that uses the name means that PLC's object
+    if (g && scopedTo(index, d.uri).global(name) !== g) continue;
     for (const b of d.parsed?.blocks ?? []) {
       for (const r of b.refs) if (r.kind === "global" && r.name.toUpperCase() === u) out.push({ uri: d.uri, start: r.start, end: r.end });
       for (const v of b.vars) if (v.typeRef?.toUpperCase() === u && v.type.startsWith('"')) out.push({ uri: d.uri, start: v.start, end: v.end });
       if (b.dbOf?.toUpperCase() === u) out.push({ uri: d.uri, start: b.nameStart, end: b.nameEnd });
     }
+  }
   return out;
 }
 
@@ -300,7 +307,7 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
     return m ? { markdown: describeMember(m), start: seg.start, end: seg.end } : undefined;
   }
   if (ref.kind === "local") {
-    const d = scopeDecl(index, uri, block, ref.name);
+    const d = scopeDecl(index, uri, block, ref.name, ref.start);
     if (!d) return undefined;
     return { markdown: describeMember(d) + (d.init ? `\n\nStart value: \`${d.init}\`` : ""), start: ref.start, end: ref.end };
   }
@@ -419,7 +426,7 @@ export function rename(index: WorkspaceIndex, uri: string, offset: number, newNa
   if (!decl) {
     const hit = refAt(index, uri, offset);
     if (!hit || hit.ref.kind !== "local" || hit.member >= 0) return { error: "Only local variables can be renamed from the editor (blocks and globals are renamed in TIA Portal)" };
-    decl = localDecl(block, hit.ref.name);
+    decl = localDecl(block, hit.ref.name, hit.ref.start);
   }
   if (!decl) return { error: "Declaration not found" };
   if (localDecl(block, newName)) return { error: `${newName} already exists in ${block.name}` };

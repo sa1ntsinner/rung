@@ -77,14 +77,20 @@ export class Monitor implements vscode.Disposable {
       void vscode.window.showWarningMessage("Monitoring works on the blocks of a rung workspace.");
       return;
     }
-    // the plan comes from the file on disk: unsaved lines would put values next to the wrong statements
+    // asked first: the block could be edited while the password dialog is open
+    const password = await this.password();
+    if (password === undefined) return;
+    // the plan comes from the file on disk: unsaved lines would put values next to the wrong statements. From
+    // here to the session no await lets an edit in; after it, an edit stops monitoring.
     const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
     if (open?.isDirty && !(await open.save())) {
       void vscode.window.showWarningMessage("Save the block first: monitoring shows the values of the saved block.");
       return;
     }
-    const password = await this.password();
-    if (password === undefined) return;
+    if (open?.isDirty) {
+      void vscode.window.showWarningMessage("The block changed while it was saved; start monitoring again.");
+      return;
+    }
     const args = ["live", "watch", "--json", "--file", rel, ...(instance ? ["--instance", instance] : [])];
     const inv = this.cli.invocation(args);
     this.out.info(`$ ${inv.display}`);

@@ -9,7 +9,7 @@
   "BEGIN" "TITLE" "VERSION" "AUTHOR" "FAMILY" "NAME"
   "KNOW_HOW_PROTECT" "READ_ONLY" "UNLINKED"
   "END_REGION"
-  "PROGRAM" "END_PROGRAM" "METHOD" "END_METHOD" "PROPERTY" "END_PROPERTY" "GET" "END_GET" "SET" "END_SET" "INTERFACE" "END_INTERFACE"
+  "PROGRAM" "END_PROGRAM" "METHOD" "END_METHOD" "PROPERTY" "END_PROPERTY" "GET" "END_GET" "SET" "END_SET" "ACTION" "END_ACTION" "INTERFACE" "END_INTERFACE"
   "EXTENDS" "IMPLEMENTS" "ABSTRACT" "FINAL" "PUBLIC" "PRIVATE" "PROTECTED" "INTERNAL"
   "VAR_GLOBAL" "VAR_INST" "VAR_EXTERNAL" "VAR_CONFIG" "PERSISTENT"
 ] @keyword
@@ -34,6 +34,7 @@
 (enum_value name: (identifier) @constant)
 (program name: (_) @function)
 (method name: (_) @function)
+(action name: (_) @function)
 (property name: (_) @function)
 (interface name: (_) @type)
 (extends (identifier) @type)

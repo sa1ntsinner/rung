@@ -1,5 +1,35 @@
 [
   {
+    "type": "action",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "global_name",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "body",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "argument",
     "named": true,
     "fields": {
@@ -2835,6 +2865,10 @@
       "required": false,
       "types": [
         {
+          "type": "action",
+          "named": true
+        },
+        {
           "type": "data_block",
           "named": true
         },
@@ -3631,6 +3665,10 @@
     "named": false
   },
   {
+    "type": "ACTION",
+    "named": false
+  },
+  {
     "type": "AND",
     "named": false
   },
@@ -3684,6 +3722,10 @@
   },
   {
     "type": "ELSIF",
+    "named": false
+  },
+  {
+    "type": "END_ACTION",
     "named": false
   },
   {

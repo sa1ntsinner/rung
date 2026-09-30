@@ -234,3 +234,40 @@ END_PROPERTY
         (assignment_statement
           left: (identifier)
           right: (identifier))))))
+
+================================================================================
+ACTION after its FB
+================================================================================
+
+FUNCTION_BLOCK FB_Count
+VAR
+  n : INT;
+END_VAR
+n := n + 1;
+END_FUNCTION_BLOCK
+
+ACTION Reset:
+n := 0;
+END_ACTION
+
+---
+
+(source_file
+  (function_block
+    name: (identifier)
+    (var_section
+      (var_declaration
+        name: (identifier)
+        type: (identifier)))
+    (body
+      (assignment_statement
+        left: (identifier)
+        right: (binary_expression
+          left: (identifier)
+          right: (number)))))
+  (action
+    name: (identifier)
+    (body
+      (assignment_statement
+        left: (identifier)
+        right: (number)))))

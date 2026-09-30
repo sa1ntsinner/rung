@@ -238,10 +238,10 @@ export class WorkspaceIndex {
       const owned = (this.docs.get(g.uri)?.parsed?.blocks ?? []).filter((x) => x.owner?.toUpperCase() === b.name.toUpperCase());
       const extra: Member[] = owned.map((x) => ({
         name: x.name,
-        type: x.property ? (x.returnType ?? "?") : `method of ${b.name}`,
+        type: x.property ? (x.returnType ?? "?") : `${x.action ? "action" : "method"} of ${b.name}`,
         ...(x.property && x.returnType ? { typeRef: x.returnType.replace(/^"|"$/g, "") } : {}),
         isArray: false,
-        section: x.property ? "Property" : "Method",
+        section: x.property ? "Property" : x.action ? "Action" : "Method",
         uri: g.uri,
         start: x.nameStart,
         end: x.nameEnd,
@@ -321,10 +321,12 @@ export function deviceOfUri(uri: string): string | undefined {
  * simulator wrap the index once with it.
  */
 export function scopedTo(index: WorkspaceIndex, from: string): WorkspaceIndex {
+  index = unscoped(index); // seen from another file, the view of that file's PLC, not of both
   const device = deviceOfUri(from);
   if (!device) return index;
   return new Proxy(index, {
     get(target, prop, receiver) {
+      if (prop === UNSCOPED) return target;
       if (prop === "global") return (name: string, other?: string) => target.global(name, other ?? from);
       // the PLC's own objects, and those outside every PLC folder that no object of the PLC hides
       if (prop === "allGlobals") return () => target.allGlobals().filter((s) => deviceOfUri(s.uri) === device || (!deviceOfUri(s.uri) && target.global(s.name, from) === s));
@@ -332,6 +334,13 @@ export function scopedTo(index: WorkspaceIndex, from: string): WorkspaceIndex {
       return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(receiver) : v;
     },
   });
+}
+
+const UNSCOPED = Symbol("unscoped");
+
+/** The whole index behind a scopedTo view. */
+export function unscoped(index: WorkspaceIndex): WorkspaceIndex {
+  return (index as unknown as { [UNSCOPED]?: WorkspaceIndex })[UNSCOPED] ?? index;
 }
 
 /** A TIA tag table as text (rung `*.tags.st`): an IEC global variable list whose entries are PLC tags. */

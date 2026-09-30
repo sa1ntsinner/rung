@@ -36,7 +36,7 @@
 
   <main>
     <section class="hero">
-      <p class="eyebrow">For Siemens TIA Portal V20</p>
+      <p class="eyebrow">For Siemens TIA Portal V20 and CODESYS V3.5</p>
       <h1>TIA Portal projects,<br><em>as plain text.</em></h1>
       <p class="lede">
         rung keeps a TIA Portal project and a folder of text files in sync, in both directions.
@@ -181,7 +181,7 @@ rung_test          rung_live_read
       <h2>Careful by default</h2>
       <ul>
         <li>It talks to TIA Portal only through Siemens' Openness API and never opens project files itself.</li>
-        <li>It never downloads by itself. A person starts every download, types the PLC name and allows each risky question TIA asks by name. Agents never download. Live values come from the S7-1500 Web API, read only.</li>
+        <li>It never downloads by itself. A person starts every download, types the PLC name and allows each risky question TIA asks by name. rung's agent tools only prepare a download for a person. Live values come from the S7-1500 Web API, read only.</li>
         <li>Failsafe, know-how protected, system and GRAPH blocks and instances of library types are exported for reading and never imported.</li>
         <li>Imports run inside a TIA transaction and check the block's revision first. If someone changed it in the meantime, rung stops.</li>
         <li>Deleting a file never deletes a block. You confirm that yourself with <code>rung confirm-delete</code>.</li>
@@ -191,15 +191,15 @@ rung_test          rung_live_read
     <section class="facts">
       <div>
         <h3>Requirements</h3>
-        <p>Windows with TIA Portal V20 and the Openness option, your user in the <em>Siemens TIA Openness</em> group, and Node.js 22 or newer.</p>
+        <p>Windows with TIA Portal V20 and the Openness option (your user in the <em>Siemens TIA Openness</em> group), or with CODESYS V3.5. From Linux or macOS, a Windows PC with it over ssh.</p>
       </div>
       <div>
         <h3>Status</h3>
-        <p>Pre-alpha, no release yet. Tested against TIA Portal V20 on a generated project: 23 bridge tests and the full end-to-end suite pass. V21 builds but is untested.</p>
+        <p>Pre-alpha, no release yet. Tested against real TIA Portal V20, S7-PLCSIM and CODESYS V3.5 on generated projects; the end-to-end suites pass. V21 builds but is untested.</p>
       </div>
       <div>
         <h3>License</h3>
-        <p>Free for individuals, schools, non-commercial open source and teams of up to three. Larger companies need a commercial license. Each release becomes Apache 2.0 after three years.</p>
+        <p>Free for individuals, education, non-commercial open source and organizations where up to three people use it. Beyond that, a commercial license. Editor extensions, grammar and file format are MIT; each core release becomes Apache 2.0 after three years.</p>
       </div>
     </section>
 
