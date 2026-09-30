@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
-import { readFile, writeFile, appendFile } from "node:fs/promises";
+import { readFile, readdir, writeFile, appendFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,7 +17,7 @@ import {
   type RungConfig,
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
-import { OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
+import { OwnerClient, OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
 import { HINTS, bridgeFor, decodeArgs, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
@@ -38,16 +38,18 @@ export type { Io } from "./common.js";
 
 export const VERSION = "0.1.0-dev";
 
-const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
+export const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
 Usage:
   rung setup [dir] [--dry-run] [-y] [--agents claude,codex,...] [--skills all|a,b] [--editors vscode,zed] [--scope project|global]
+             [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
-  rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>]
-  rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
+  rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
+  rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
+  rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
@@ -72,6 +74,8 @@ PLC:
   rung online [dir] [--off|--state] [--plc <name>]          go online / offline, or show the online state
   rung compare [dir] [--json] [--plc <name>]                 the project against the PLC (read-only); exit 2 if they differ
   rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
+  rung connect [dir] --use <PG/PC interface> [--mode <mode>] [--number <n>] [--target <interface>]
+                                       save a connection you choose (rung interfaces lists them)
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
   rung upload [dir] --ip <address> [--use <PG/PC interface>]  the PLC as a new station of the project (the PLC is only read)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
@@ -199,9 +203,17 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
 
 async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const config = await loadConfig(dir);
-  const client = await bridgeFor(config, io);
+  // rung watch owns the workspace and brings TIA Portal's changes in by itself
+  const owner = await OwnerClient.connect(dir);
+  if (owner) {
+    owner.close();
+    io.stderr("rung: rung watch runs in this workspace and already brings TIA Portal's changes in; rung pull is not needed while it runs (Ctrl+C there stops it)\n");
+    return 1;
+  }
+  // the lock before the bridge: a workspace another rung process holds fails before a TIA Portal starts for nothing
+  const state = await openState(dir, config);
   try {
-    const state = await openState(dir, config);
+    const client = await bridgeFor(config, io);
     try {
       let last = 0;
       const report = await pull(dir, client, state, {
@@ -223,10 +235,10 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
       await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
       return report.warnings.some((w) => !isNotice(w.code)) ? 2 : 0;
     } finally {
-      await state.close();
+      await client.close();
     }
   } finally {
-    await client.close();
+    await state.close();
   }
 }
 
@@ -260,8 +272,30 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
   }
 }
 
+/** The command a typo most likely meant: two letters off at most (pul → pull, asignments → assignments). */
+function nearest(typed: string, commands: string[]): string | undefined {
+  const distance = (a: string, b: string) => {
+    let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const next = [i];
+      for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      row = next;
+    }
+    return row[b.length]!;
+  };
+  const best = commands.map((c) => ({ c, d: distance(typed.toLowerCase(), c) })).sort((x, y) => x.d - y.d)[0];
+  return best && best.d <= 2 ? best.c : undefined;
+}
+
+/** rung init has no rung.toml yet: what to do next is about the project it was given, or should be given. */
+function initHint(code: string, project: boolean): string | undefined {
+  if (code === "NO_PROJECT" && project) return "Check the path: --project is the project file (.ap20) with its full path.";
+  if (code === "NO_PROJECT" || code === "TIA_NOT_RUNNING") return "Open the project in TIA Portal, or name it: rung init --project <path to the .ap20> (rung then opens it in a TIA Portal without window).";
+  return undefined;
+}
+
 /** Options and positionals (after the command) each command takes: anything else is a typo worth stopping for. */
-const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
+export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host"], positionals: 1 },
@@ -409,14 +443,23 @@ export async function main(argv: string[], io: Io): Promise<number> {
           }
           for (const c of f.cases) {
             io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.error}` : ""}\n`);
-            for (const x of c.failures) io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}\n`);
+            for (const x of c.failures) {
+              // expect: { Running: "true" } is the text "true", never the BOOL the block has
+              const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));
+              io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}${quoted ? ` (in quotes "${x.expected}" is text: write ${x.expected} without them)` : ""}\n`);
+            }
             if (!c.passed) failed++;
           }
         }
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
         if (!total) {
-          io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)\n`);
+          // a test file named without .test is read by nobody: name it
+          const unnamed = v.filter
+            ? []
+            : ((await readdir(join(ws, "tests"), { recursive: true }).catch(() => [])) as string[]).map((f) => `tests/${f.split(sep).join("/")}`).filter((f) => /\.ya?ml$/i.test(f) && !/\.test\.ya?ml$/.test(f)).sort();
+          const hint = unnamed.length ? `; ${unnamed.slice(0, 3).join(", ")}${unnamed.length > 3 ? ` and ${unnamed.length - 3} more` : ""} ${unnamed.length === 1 ? "is" : "are"} not named *.test.yaml` : "";
+          io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
           return 1;
         }
         io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n`);
@@ -565,13 +608,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
       default:
-        io.stderr(`rung: unknown command ${cmd}\n${HELP}`);
+        {
+          const near = nearest(cmd, [...Object.keys(COMMANDS).filter((c) => c !== "codesys-bridge"), "bridge"]);
+          io.stderr(`rung: unknown command ${cmd}${near ? ` (did you mean rung ${near}?)` : ""}; rung --help lists the commands\n`);
+        }
         return 1;
     }
   } catch (e) {
     if (e instanceof BridgeError || e instanceof WorkspaceError || e instanceof OwnerError) {
       io.stderr(`rung: ${e.code}: ${e.message}\n`);
-      const hint = HINTS[e.code];
+      const hint = (cmd === "init" ? initHint(e.code, !!v.project) : undefined) ?? HINTS[e.code];
       if (hint) io.stderr(`hint: ${hint}\n`);
       return 1;
     }

@@ -4,8 +4,10 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { main } from "../src/main.js";
+import { COMMANDS, HELP, main } from "../src/main.js";
 import { decodeArgs } from "../src/common.js";
+import { StateStore } from "@rung/core";
+import { OwnerServer } from "@rung/sync";
 
 const fakeScript = fileURLToPath(new URL("./fake-bridge.mjs", import.meta.url));
 const PROJECT = "C:\\fx\\RungFixture\\RungFixture.ap20";
@@ -143,6 +145,27 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
 });
 
 describe("rung CLI", () => {
+  it("help names every command and every option the commands take", () => {
+    // codesys-bridge is started by rung itself (rung init --project x.project), never by a person
+    const commands = Object.keys(COMMANDS).filter((c) => c !== "codesys-bridge");
+    expect(commands.filter((c) => !HELP.includes(`rung ${c}`))).toEqual([]);
+    const options = [...new Set(commands.flatMap((c) => COMMANDS[c]!.options))];
+    expect(options.filter((o) => !HELP.includes(`--${o}`) && !(o === "yes" && HELP.includes("-y")))).toEqual([]);
+    expect(HELP).toContain("rung bridge");
+  });
+
+  it("an unknown command gets one line, with the command it probably meant", async () => {
+    const t = setup();
+    expect(await t.run("pul")).toBe(1);
+    expect(await t.run("asignments")).toBe(1);
+    expect(await t.run("frobnicate")).toBe(1);
+    expect(t.err.join("")).toBe(
+      "rung: unknown command pul (did you mean rung pull?); rung --help lists the commands\n" +
+        "rung: unknown command asignments (did you mean rung assignments?); rung --help lists the commands\n" +
+        "rung: unknown command frobnicate; rung --help lists the commands\n",
+    );
+  });
+
   it("prints help and version", async () => {
     const t = setup();
     expect(await t.run("--help")).toBe(0);
@@ -189,10 +212,28 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toBe("Bit memory of PLC_1\n  %MW10      Speed : Int (IO)\n\nBit memory of PLC_2\n  %MW11      Level : Int (IO)\n");
   });
 
+  it("test says when an expected value is text in quotes but the value is a BOOL or a number", async () => {
+    const t = setup();
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n      Count : Int;\n   END_VAR\nBEGIN\n   #Running := #Start;\n   #Count := 2;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - set: { Start: true }\n      - cycle: 1\n      - expect: { Running: \"false\", Count: \"3\" }\n");
+    expect(await t.run("test")).toBe(2);
+    expect(t.out.join("")).toContain(
+      '       step 3: Running expected "false" got true (in quotes "false" is text: write false without them)\n       step 3: Count expected "3" got 2 (in quotes "3" is text: write 3 without them)\n',
+    );
+  });
+
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
     expect(await t.run("test")).toBe(1);
     expect(t.out.join("")).toMatch(/^no tests: rung test runs tests\/\*\*\/\*\.test\.yaml/);
+    // a test file without .test in its name is read by nobody: say which
+    mkdirSync(join(t.dir, "tests", "drives"), { recursive: true });
+    writeFileSync(join(t.dir, "tests", "drives", "motor.yaml"), "block: Fx_Motor\n");
+    t.out.length = 0;
+    expect(await t.run("test")).toBe(1);
+    expect(t.out.join("")).toBe("no tests: rung test runs tests/**/*.test.yaml (docs/testing.md); tests/drives/motor.yaml is not named *.test.yaml\n");
   });
 
   it("init --tia must match the TIA Portal that has the project open", async () => {
@@ -206,6 +247,44 @@ describe("rung CLI", () => {
     const t = setup();
     expect(await t.run("init", "--project", "C:\\nope\\Nope.ap20")).toBe(1);
     expect(t.err.join("")).toMatch(/NO_PROJECT/);
+    // no rung.toml yet: the hint is about the path, not about rung.toml
+    expect(t.err.join("")).toMatch(/\nhint: Check the path: --project is the project file \(\.ap20\) with its full path\.\n$/);
+  });
+
+  it("init without --project and no project open in TIA Portal says to name it", async () => {
+    const t = setup({ FAKE_NO_PROJECT: "1" });
+    expect(await t.run("init")).toBe(1);
+    expect(t.err.join("")).toBe(
+      "rung: NO_PROJECT: No TIA Portal instance has a project open.\nhint: Open the project in TIA Portal, or name it: rung init --project <path to the .ap20> (rung then opens it in a TIA Portal without window).\n",
+    );
+  });
+
+  it("pull while rung watch runs says it is not needed, and a locked workspace starts no bridge", async () => {
+    const t = setup();
+    await t.run("init");
+    await t.run("pull");
+    t.err.length = 0;
+    const starts = () => (JSON.parse(readFileSync(t.objects, "utf8")) as { starts?: number }).starts ?? 0;
+    const before = starts();
+    const owner = await OwnerServer.start(t.dir, {});
+    try {
+      expect(await t.run("pull")).toBe(1);
+      expect(t.err.join("")).toBe("rung: rung watch runs in this workspace and already brings TIA Portal's changes in; rung pull is not needed while it runs (Ctrl+C there stops it)\n");
+    } finally {
+      await owner.close();
+    }
+    // another rung process holds the workspace: fail at once, before TIA Portal is involved
+    const lock = await StateStore.open(t.dir, null);
+    try {
+      for (const cmd of [["pull"], ["sync"], ["confirm-delete", "plc/PLC_1/blocks/Motor%2FValve 1.scl"]]) {
+        t.err.length = 0;
+        expect(await t.run(...cmd)).toBe(1);
+        expect(t.err.join("")).toMatch(/^rung: STATE_LOCKED: /);
+      }
+    } finally {
+      await lock.close();
+    }
+    expect(starts()).toBe(before);
   });
 
   it("pull mirrors the project and a second pull is a no-op", async () => {
@@ -276,5 +355,11 @@ describe("rung CLI", () => {
     await t.run("pull");
     expect(await t.run("status")).toBe(0);
     expect(t.out.join("")).toMatch(/2 objects, 2 synced/);
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    writeFileSync(t.objects, JSON.stringify({ ...db, objects: db.objects.slice(0, 1) }));
+    await t.run("pull");
+    t.out.length = 0;
+    await t.run("status");
+    expect(t.out.join("")).toMatch(/^1 object, 1 synced, 0 read-only\n/);
   });
 });

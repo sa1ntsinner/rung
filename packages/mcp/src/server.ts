@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung mcp: a small, agent-native tool surface. Agents read and edit the mirrored files directly;
 // the tools cover what files cannot tell: sync, compile, diagnostics, graph, conflicts and safety.
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -11,7 +12,7 @@ import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChec
 import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, assignmentList, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
-import { WebApiClient } from "@rung/live";
+import { WebApiClient, plainHttpRefusal } from "@rung/live";
 import { runTests } from "@rung/sim";
 import type { CompareOutcome, ConnectionTarget } from "@rung/bridge-client";
 import { handover } from "./handover.js";
@@ -79,6 +80,14 @@ async function onlyDevice(bridge: { projectInfo(): Promise<{ devices: string[] }
   return devices.length === 1 ? devices[0] : undefined;
 }
 
+/** Statuses of a mirrored object (ObjectState.status) an agent can filter by. */
+const STATUSES = ["synced", "conflicted", "fileDirty", "pendingDelete", "recoveryRequired", "importing"] as const;
+
+/** A path as an agent writes it (backslashes, absolute, ./) in the workspace's form: plc/PLC_1/blocks/X.scl. */
+function workspacePath(root: string, p: string): string {
+  return (isAbsolute(p) ? relative(root, p) : p).replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: "rung", version: "0.1.0" }, { instructions: SAFETY_RULES });
   let cache: { at: number; index: WorkspaceIndex; graph: CodeGraph } | undefined;
@@ -98,6 +107,31 @@ export function createMcpServer(ctx: McpContext): McpServer {
     } finally {
       o.close();
     }
+  };
+  /** Tools that sync, compile or change a workspace need one: the answer says how a person makes it. */
+  const noWorkspace = (): Text | undefined =>
+    existsSync(join(ctx.root, "rung.toml")) ? undefined : fail(`${ctx.root} is not a rung workspace (no rung.toml). A person binds a folder to a project with rung init --project <path to the .ap20 or .project>, then rung pull.`);
+  /** The mirrored object an address or a workspace path names. */
+  const objectOf = async (addressOrPath: string) => {
+    const p = workspacePath(ctx.root, addressOrPath);
+    return (await stateSnapshot(ctx.root)).find((s) => s.address === addressOrPath || s.path === p);
+  };
+  /**
+   * The PLC a tool means when none is named, as the CLI chooses it: the one rung.toml names, the one mirrored, or
+   * the project's only PLC. A message instead when it has to be named.
+   */
+  const chooseDevice = async (given: string | undefined, info?: () => Promise<{ devices: string[] }>): Promise<{ device: string } | { problem: string }> => {
+    if (given) return { device: given };
+    const config = await loadConfig(ctx.root);
+    if (config.devices.length === 1) return { device: config.devices[0]! };
+    if (Object.keys(config.plc).length === 1) return { device: Object.keys(config.plc)[0]! };
+    const mirrored = [...new Set((await stateSnapshot(ctx.root)).map((s) => parseAddress(s.address).device))].sort();
+    if (mirrored.length === 1) return { device: mirrored[0]! };
+    if (mirrored.length) return { problem: `This workspace mirrors several PLCs (${mirrored.join(", ")}); pass device.` };
+    if (!info) return { problem: "Nothing is mirrored yet, so rung cannot tell which PLC; pass device." };
+    const devices = (await info()).devices;
+    if (devices.length === 1) return { device: devices[0]! };
+    return { problem: devices.length ? `The project has several PLCs (${devices.join(", ")}); pass device.` : "The project has no PLC." };
   };
   /**
    * The graph node an agent means: a workspace path or address names one PLC's object; a bare name is enough in
@@ -120,6 +154,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
   const label = (n: { name: string; device?: string }) => (n.device ? `${n.device}/${n.name}` : n.name);
 
   server.registerTool("rung_status", { description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running." }, async () => {
+    const none = noWorkspace();
+    if (none) return none;
     const live = await withOwner((o) => o.request("status"));
     if (live) return json({ watching: true, ...(live as object) });
     const all = await stateSnapshot(ctx.root);
@@ -128,6 +164,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
   });
 
   server.registerTool("rung_sync", { description: "Run one two-way sync pass now: sends edited files to TIA Portal, brings TIA changes into files, compiles what was imported. Returns counts, warnings and diagnostics." }, async () => {
+    const none = noWorkspace();
+    if (none) return none;
     const viaOwner = await withOwner((o) => o.request<SyncReport | null>("syncNow"));
     if (viaOwner !== undefined) return viaOwner ? json(viaOwner) : fail("rung watch is backing off after a bridge error; check rung_status");
     if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is configured. Ask the human to start `rung watch`.");
@@ -148,8 +186,12 @@ export function createMcpServer(ctx: McpContext): McpServer {
   server.registerTool(
     "rung_diagnostics",
     { description: "Problems for one file or the whole workspace: SCL syntax/semantic checks plus TIA Portal compile errors and sync conflicts from the last sync.", inputSchema: { path: z.string().optional().describe("workspace-relative file, e.g. plc/PLC_1/blocks/Fx_Motor.scl") } },
-    async ({ path }) => {
+    async ({ path: given }) => {
       const { index } = await model();
+      const path = given === undefined ? undefined : workspacePath(ctx.root, given);
+      // a mistyped path would look like a file without problems
+      if (path !== undefined && !index.docs.has(uriOf(join(ctx.root, ...path.split("/")))) && !existsSync(join(ctx.root, ...path.split("/"))))
+        return fail(`${path} is not a file of this workspace (rung_list lists the mirrored objects)`);
       const sync = (await syncDiagnostics(ctx.root)).filter((d) => !path || d.path === path);
       const files = path ? [uriOf(join(ctx.root, ...path.split("/")))] : [...index.docs.keys()];
       const parsed = files.flatMap((uri) => {
@@ -161,8 +203,22 @@ export function createMcpServer(ctx: McpContext): McpServer {
     },
   );
 
-  server.registerTool("rung_compile", { description: "Compile objects in TIA Portal (needs rung watch or a bridge) and return compiler messages.", inputSchema: { addresses: z.array(z.string()).optional(), device: z.string().optional() } }, async ({ addresses, device }) => {
-    const r = await withOwner((o) => o.request("compile", { addresses: addresses ?? [], device }));
+  server.registerTool(
+    "rung_compile",
+    {
+      description: "Compile objects in TIA Portal (needs rung watch or a bridge) and return compiler messages.",
+      inputSchema: { addresses: z.array(z.string()).optional().describe("addresses (plc:PLC_1/blocks/Fx_Motor) or workspace paths of the objects; none: the whole PLC"), device: z.string().optional() },
+    },
+    async ({ addresses: given, device }) => {
+    const none = noWorkspace();
+    if (none) return none;
+    const addresses: string[] = [];
+    for (const a of given ?? []) {
+      const s = await objectOf(a);
+      if (!s && !a.startsWith("plc:")) return fail(`${a} is not a mirrored object (rung_list lists them)`);
+      addresses.push(s?.address ?? a);
+    }
+    const r = await withOwner((o) => o.request("compile", { addresses, device }));
     if (r !== undefined) return json(r);
     if (!ctx.bridgeFactory) return fail("No rung watch is running; start it to compile from the agent.");
     const config = await loadConfig(ctx.root).catch(() => undefined);
@@ -170,13 +226,14 @@ export function createMcpServer(ctx: McpContext): McpServer {
     try {
       const dev = device ?? (await onlyDevice(b, config?.devices ?? []));
       if (!dev) return fail(`The project has several PLCs (${(await b.projectInfo()).devices.join(", ")}); pass device.`);
-      const msgs = await b.compile(dev, addresses ?? []);
+      const msgs = await b.compile(dev, addresses);
       const states = await stateSnapshot(ctx.root);
       return json(await placeCompileMessages(ctx.root, (a) => states.find((s) => s.address === a)?.path, msgs, (f) => readFile(f, "utf8")));
     } finally {
       await b.close();
     }
-  });
+    },
+  );
 
   server.registerTool(
     "rung_compare",
@@ -186,22 +243,27 @@ export function createMcpServer(ctx: McpContext): McpServer {
       inputSchema: { device: z.string().optional() },
     },
     async ({ device }) => {
-      const config = await loadConfig(ctx.root).catch(() => undefined);
-      const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
-      const target = config?.plc[dev];
+      const none = noWorkspace();
+      if (none) return none;
+      const config = await loadConfig(ctx.root);
       const withFiles = async (r: CompareOutcome) => {
         const states = await stateSnapshot(ctx.root);
         return { ...r, items: r.items.map((i) => ({ ...i, file: i.address ? states.find((s) => s.address === i.address)?.path : undefined })) };
       };
-      const viaOwner = await withOwner((o) => o.request<CompareOutcome>("compare", { device: dev, ...(target ? { target } : {}) }));
-      if (viaOwner !== undefined) return json(await withFiles(viaOwner));
-      if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is available.");
-      const b = await ctx.bridgeFactory();
+      const owner = await OwnerClient.connect(ctx.root);
+      const b = owner ? undefined : await ctx.bridgeFactory?.();
       try {
-        if (!b.compare) return fail("This bridge cannot compare with the PLC.");
-        return json(await withFiles(await b.compare(dev, target)));
+        if (!owner && !b) return fail("No rung watch is running and no bridge is available.");
+        // the PLC rung mirrors, else the project's only one: never a guessed name
+        const chosen = await chooseDevice(device, owner ? () => owner.request("projectInfo") : () => b!.projectInfo());
+        if ("problem" in chosen) return fail(chosen.problem);
+        const target = config.plc[chosen.device];
+        if (owner) return json(await withFiles(await owner.request<CompareOutcome>("compare", { device: chosen.device, ...(target ? { target } : {}) })));
+        if (!b!.compare) return fail("This bridge cannot compare with the PLC.");
+        return json(await withFiles(await b!.compare(chosen.device, target)));
       } finally {
-        await b.close();
+        owner?.close();
+        await b?.close();
       }
     },
   );
@@ -274,7 +336,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
     });
   });
 
-  server.registerTool("rung_diff", { description: "Unified diff of a file against the version last synced with TIA Portal (what a sync would send).", inputSchema: { path: z.string() } }, async ({ path }) => {
+  server.registerTool("rung_diff", { description: "Unified diff of a file against the version last synced with TIA Portal (what a sync would send).", inputSchema: { path: z.string() } }, async ({ path: given }) => {
+    const none = noWorkspace();
+    if (none) return none;
+    const path = workspacePath(ctx.root, given);
     const st = (await stateSnapshot(ctx.root)).find((s) => s.path === path);
     const current = await readFile(join(ctx.root, ...path.split("/")), "utf8").catch(() => null);
     if (!st) return current === null ? fail(`${path} not found`) : text(`${path} is new (not in TIA Portal yet)`);
@@ -283,15 +348,22 @@ export function createMcpServer(ctx: McpContext): McpServer {
     return text(unifiedDiff(normalizeText(base), current === null ? "" : normalizeText(current), `${path} (TIA, last sync)`, `${path} (workspace)`));
   });
 
-  server.registerTool("rung_list", { description: "List mirrored objects, optionally filtered by status (synced, conflicted, fileDirty, pendingDelete, recoveryRequired) or path prefix.", inputSchema: { status: z.string().optional(), prefix: z.string().optional() } }, async ({ status, prefix }) => {
+  server.registerTool("rung_list", { description: "List mirrored objects, optionally filtered by status or path prefix (plc/PLC_1/blocks/).", inputSchema: { status: z.enum(STATUSES).optional(), prefix: z.string().optional() } }, async ({ status, prefix }) => {
+    const none = noWorkspace();
+    if (none) return none;
     const all = await stateSnapshot(ctx.root);
-    return json(all.filter((s) => (!status || s.status === status) && (!prefix || s.path.startsWith(prefix))).map((s) => ({ path: s.path, address: s.address, form: s.form, status: s.status, readOnly: s.readOnly })));
+    const from = prefix === undefined ? undefined : workspacePath(ctx.root, prefix);
+    return json(all.filter((s) => (!status || s.status === status) && (!from || s.path.startsWith(from))).map((s) => ({ path: s.path, address: s.address, form: s.form, status: s.status, readOnly: s.readOnly })));
   });
 
   server.registerTool(
     "rung_resolve",
     { description: "Resolve a sync conflict: 'theirs' takes TIA's version, 'ours'/'merged' keeps the current file (edit it first to merge) and sends it on the next sync.", inputSchema: { path: z.string(), mode: z.enum(["ours", "theirs", "merged"]) } },
-    async ({ path, mode }) => {
+    async ({ path: given, mode }) => {
+      const none = noWorkspace();
+      if (none) return none;
+      // the file itself, or one of the helper files a conflict writes next to it
+      const path = workspacePath(ctx.root, given).replace(/\.(conflict|tia)$/, "");
       const viaOwner = await withOwner((o) => o.request("resolve", { path, mode }));
       if (viaOwner === undefined) {
         const config = await loadConfig(ctx.root);
@@ -314,9 +386,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       inputSchema: { address: z.string().describe("address or workspace path of the object"), newName: z.string() },
     },
     async ({ address, newName }) => {
-      const states = await stateSnapshot(ctx.root);
-      const target = states.find((s) => s.address === address || s.path === address)?.address;
-      if (!target) return fail(`${address} is not a mirrored object`);
+      const none = noWorkspace();
+      if (none) return none;
+      const target = (await objectOf(address))?.address;
+      if (!target) return fail(`${address} is not a mirrored object (rung_list lists them)`);
       const viaOwner = await withOwner((o) => o.request<RenameReport>("rename", { address: target, newName }));
       if (viaOwner !== undefined) return json(viaOwner);
       if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is available.");
@@ -335,7 +408,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
     },
   );
 
-  server.registerTool("rung_confirm_delete", { description: "Delete an object in TIA Portal after its files were deleted in the workspace. Only for objects in pendingDelete; refuses if TIA changed meanwhile.", inputSchema: { address: z.string() } }, async ({ address }) => {
+  server.registerTool("rung_confirm_delete", { description: "Delete an object in TIA Portal after its files were deleted in the workspace. Only for objects in pendingDelete; refuses if TIA changed meanwhile.", inputSchema: { address: z.string().describe("address or workspace path of the deleted object") } }, async ({ address: given }) => {
+    const none = noWorkspace();
+    if (none) return none;
+    const address = (await objectOf(given))?.address ?? given;
     const viaOwner = await withOwner((o) => o.request("confirmDelete", { address }));
     if (viaOwner !== undefined) return text(`deleted ${address}`);
     if (!ctx.bridgeFactory) return fail("No rung watch is running; start it first.");
@@ -358,10 +434,16 @@ export function createMcpServer(ctx: McpContext): McpServer {
     "rung_live_read",
     { description: "Read current values from the running PLC (S7-1500 Web API, read-only). Needs [live.webapi] in rung.toml and RUNG_WEBAPI_PASSWORD. Use TIA names, e.g. \"Fx_Global\".Counter.", inputSchema: { names: z.array(z.string()).min(1).max(100) } },
     async ({ names }) => {
+      const none = noWorkspace();
+      if (none) return none;
       const config = await loadConfig(ctx.root);
       const w = config.live?.webapi;
-      const password = (ctx.env ?? process.env).RUNG_WEBAPI_PASSWORD;
+      const env = ctx.env ?? process.env;
+      const password = env.RUNG_WEBAPI_PASSWORD;
       if (!w || !password) return fail("Live reads are not configured: add [live.webapi] url/user to rung.toml and set RUNG_WEBAPI_PASSWORD.");
+      // as rung live: the login sends the password
+      const refused = plainHttpRefusal(w.url, env);
+      if (refused) return fail(refused);
       const client = new WebApiClient({ url: w.url, user: w.user, password, ...(w.insecure ? { insecure: true } : {}) });
       try {
         return json(await client.read(names));
@@ -379,6 +461,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
     async ({ filter }) => {
       const { index } = await model();
       const results = await runTests(ctx.root, index, filter);
+      if (!results.length && filter) {
+        const all = (await runTests(ctx.root, index)).length;
+        if (all) return text(`No tests match "${filter}" (by file path or block name); tests/**/*.test.yaml has ${all} file${all === 1 ? "" : "s"}.`);
+      }
       if (!results.length) return text("No tests found. Add tests/<name>.test.yaml (see rung docs: block, cases, steps set/cycle/advance/expect).");
       return json(results);
     },
@@ -404,9 +490,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
       },
     },
     async ({ device, summary, testPlan, interfaceChanges }) => {
-      const config = await loadConfig(ctx.root).catch(() => undefined);
-      const dev = device ?? config?.devices[0] ?? Object.keys(config?.plc ?? {})[0] ?? "PLC_1";
-      const conn = config?.plc[dev];
+      const none = noWorkspace();
+      if (none) return none;
+      const config = await loadConfig(ctx.root);
+      const chosen = await chooseDevice(device);
+      if ("problem" in chosen) return fail(chosen.problem);
+      const dev = chosen.device;
+      const conn = config.plc[dev];
       const errors = (await syncDiagnostics(ctx.root)).filter((d) => d.severity === "error" && !/^Compiling finished/.test(d.message));
       return text(
         await handover({

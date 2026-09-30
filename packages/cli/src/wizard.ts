@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import * as p from "@clack/prompts";
-import { LINKS, realProbes, runChecks, writeFileAtomic, type CheckItem } from "@rung/core";
+import { LINKS, WorkspaceError, realProbes, runChecks, writeFileAtomic, type CheckItem } from "@rung/core";
 import { bridgeExecutable, devPath, installRoot } from "./paths.js";
 import { whitelistStatus } from "./setup.js";
 import type { Io } from "./common.js";
@@ -211,9 +211,24 @@ export function describeAction(a: Action): string {
 
 // ------------------------------------------------------------------ the interactive part
 
-const list = (v: unknown) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+const list = (v: unknown) => (typeof v === "string" ? v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) : undefined);
+
+/** A value setup does not know would leave its part out of the plan without a word: refuse it and list what fits. */
+function checkChoices(v: Record<string, unknown>, env: Record<string, string | undefined>) {
+  const known = (option: string, values: readonly string[], allowed: string) => {
+    const bad = list(v[option])?.find((x) => !values.includes(x));
+    if (bad) throw new WorkspaceError("BAD_ARGUMENT", `--${option} takes ${allowed}; not ${bad}`);
+  };
+  known("agents", Object.keys(AGENTS), Object.keys(AGENTS).join(", "));
+  known("editors", ["vscode", "zed", "neovim"], "vscode, zed, neovim");
+  known("platforms", ["tia", "twincat", "codesys"], "tia, twincat, codesys");
+  const skills = bundledSkills(env).map((s) => s.name);
+  if (v.skills !== "all") known("skills", skills, `all or skill names (${skills.join(", ")})`);
+  if (v.scope !== undefined && !["project", "global"].includes(String(v.scope).toLowerCase())) throw new WorkspaceError("BAD_ARGUMENT", `--scope is project or global; not ${String(v.scope)}`);
+}
 
 export async function cmdSetupWizard(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  checkChoices(v, io.env);
   const interactive = !v.yes && !!process.stdin.isTTY && !io.prompt;
   const env = io.env;
   const cancelled = (x: unknown): x is symbol => p.isCancel(x);
@@ -264,7 +279,8 @@ export async function cmdSetupWizard(dir: string, v: Record<string, unknown>, io
   }
 
   // scope
-  let scope: Scope = v.scope === "global" ? "global" : v.scope === "project" ? "project" : existsSync(join(dir, "rung.toml")) ? "project" : "global";
+  const asked = typeof v.scope === "string" ? v.scope.toLowerCase() : undefined;
+  let scope: Scope = asked === "global" ? "global" : asked === "project" ? "project" : existsSync(join(dir, "rung.toml")) ? "project" : "global";
   if (interactive && !v.scope && agents.length) {
     const r = await p.select({
       message: "Where should agents get rung?",

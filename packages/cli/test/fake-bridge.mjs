@@ -37,8 +37,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return fail("NO_PROJECT", "Project is not open in any TIA Portal instance: " + projectArg);
   switch (req.method) {
     case "bridge.hello":
+      // how often a bridge was started (a TIA Portal the real one may open)
+      db.starts = (db.starts ?? 0) + 1;
+      save(db);
       return reply({ protocol: 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: allowImport ? ["import"] : [] });
     case "project.info":
+      // no TIA Portal has a project open, and none was named: what the real bridge answers then
+      if (process.env.FAKE_NO_PROJECT && !projectArg) return fail("NO_PROJECT", "No TIA Portal instance has a project open.");
       return reply(db.project);
     case "objects.list":
       return reply(db.objects.filter((o) => o.address.startsWith(`plc:${p.device}/`)).map(entry));

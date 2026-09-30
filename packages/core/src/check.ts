@@ -115,9 +115,10 @@ export async function runChecks(p: Probes): Promise<CheckItem[]> {
         group: "plc",
         name: "rung bridge in the Openness whitelist",
         status: wl === "ok" ? "ok" : wl === "unknown" ? "warn" : "missing",
-        ...(wl === "stale" ? { detail: "registered, but the bridge changed since" } : {}),
+        // unknown on Windows: there is no bridge file to look up (rung setup openness would fail the same way)
+        ...(wl === "stale" ? { detail: "registered, but the bridge changed since" } : wl === "unknown" ? { detail: "rung's bridge (bridge\\rung-bridge-v20.exe) was not found, so rung cannot tell" } : {}),
         enables: "no \"Openness access\" prompt; a TIA Portal without window never hangs on it",
-        ...(wl === "ok" ? {} : { fix: "rung setup openness" }),
+        ...(wl === "ok" ? {} : { fix: wl === "unknown" ? "Keep the bridge folder of the release next to rung.exe, then run rung setup openness" : "rung setup openness" }),
       });
     }
     const plcsim = find(win, /S7-PLCSIM V\d+/i).filter((x) => !/Advanced/i.test(x.name));

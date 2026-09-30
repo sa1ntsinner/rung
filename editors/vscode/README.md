@@ -10,6 +10,7 @@ SCL editing and TIA Portal sync for [rung](https://github.com/sa1ntsinner/rung).
   - *PLC*: whether `rung watch` runs (start/stop), each PLC with its online state and connection, and Go online, Go offline, Compile PLC, Compile hardware, Connect…, Interfaces…, Download….
 - **Status bar**: watching / idle / conflicts, and online PLCs. Click it for all rung actions.
 - **CodeLens** above each block header: Compile · Test · Open in TIA Portal. Editor title buttons do the same.
+- **Monitor Values** (the eye in the editor title): the values of the open block at the end of each line, read twice a second from the PLC's Web API or from `rung simulate`, read-only.
 - **Problems** from `rung compile`, with file and line.
 
 ## Going online

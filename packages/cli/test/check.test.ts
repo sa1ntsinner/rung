@@ -43,6 +43,12 @@ describe("rung check", () => {
     expect(r.plcsim).toMatchObject({ status: "ok", detail: "V20" });
   });
 
+  it("when rung's bridge is not found, says so instead of sending you to rung setup openness, which needs it", async () => {
+    const tia = { installed: [{ name: "Siemens Totally Integrated Automation Portal V20 - STEP 7 Single SetupPackage  V20.0", version: "20.00.0000" }], opennessApis: ["V20"], inOpennessGroup: true };
+    const r = await byId(probes({ inv: tia, bridgeWhitelisted: async () => "unknown" }));
+    expect(r.whitelist).toMatchObject({ status: "warn", detail: "rung's bridge (bridge\\rung-bridge-v20.exe) was not found, so rung cannot tell", fix: "Keep the bridge folder of the release next to rung.exe, then run rung setup openness" });
+  });
+
   it("finds editors, rung extensions and agents", async () => {
     const r = await byId(probes({ on: ["code", "claude", "git"], vscodeExtensions: async () => ["sa1ntsinner.rung-scl"], exists: (p) => p.endsWith(".codex") }));
     expect(r.vscode).toMatchObject({ status: "ok", detail: "rung extension installed" });

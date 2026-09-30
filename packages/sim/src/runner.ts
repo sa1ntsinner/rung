@@ -94,6 +94,38 @@ function checkKind(name: string, current: Value, value: Value) {
   if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${JSON.stringify(value)}`);
 }
 
+const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * What is wrong with the shape of a test file, in the words of the file: steps outside a case, a case whose
+ * steps slipped out of it by indentation (it would pass without testing anything), a cycle that is no time.
+ */
+function shapeProblem(spec: unknown): string | undefined {
+  if (!plain(spec) || spec.block === undefined) return undefined; // "missing block:" says it
+  const top = Object.keys(spec).find((k) => !["block", "plc", "cycle", "cases"].includes(k));
+  if (top) return `unknown key ${top}: a test file has block, plc, cycle and cases${top === "steps" ? " (the steps go in a case under cases:)" : ""}`;
+  if (spec.cycle !== undefined) {
+    let ms: number;
+    try {
+      ms = toMs(spec.cycle);
+    } catch {
+      return `cycle is the time of one cycle, such as 10ms; not ${String(spec.cycle)}`;
+    }
+    if (!(ms > 0)) return `cycle is the time of one cycle, such as 10ms; ${String(spec.cycle)} runs no time`;
+  }
+  if (spec.cases === undefined || spec.cases === null) return "no cases: list them under cases:, each with a name and its steps";
+  if (!Array.isArray(spec.cases)) return "cases is a list, one case per entry starting with -";
+  for (const [i, c] of spec.cases.entries()) {
+    const label = `case ${i + 1}${plain(c) && typeof c.name === "string" ? ` (${c.name})` : ""}`;
+    if (!plain(c)) return `${label} is not a case: a case has name and steps`;
+    const key = Object.keys(c).find((k) => k !== "name" && k !== "steps");
+    if (key) return `${label}: unknown key ${key} (a case has name and steps)`;
+    if (c.steps === undefined || c.steps === null || (Array.isArray(c.steps) && !c.steps.length)) return `${label} has no steps: indent them under the case, below its name`;
+    if (!Array.isArray(c.steps)) return `${label}: steps is a list, one step per line starting with -`;
+  }
+  return undefined;
+}
+
 const INT_RANGE: Record<string, [number, number]> = {
   SINT: [-128, 127], INT: [-32768, 32767], DINT: [-2147483648, 2147483647], LINT: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
   USINT: [0, 255], UINT: [0, 65535], UDINT: [0, 4294967295], ULINT: [0, Number.MAX_SAFE_INTEGER],
@@ -133,6 +165,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   let spec: TestFile;
   try {
     spec = (parseYaml(text) ?? {}) as TestFile;
+    const problem = shapeProblem(spec);
+    if (problem) return { file, block: typeof spec.block === "string" ? spec.block : "?", cases: [], error: problem };
   } catch (e) {
     return { file, block: "?", cases: [], error: `invalid YAML: ${(e as Error).message}` };
   }
@@ -288,8 +322,9 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
   for (const f of files.sort()) {
     const rel = relative(root, f).split(sep).join("/");
     const text = await readFile(f, "utf8");
-    // --filter matches the file path or the block under test (rung test --filter Fx_Motor)
-    if (filter && !rel.includes(filter) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(text)) continue;
+    // --filter matches the file path or the block under test (rung test --filter Fx_Motor), which may carry a
+    // comment after it; block names ignore letter case as in TIA Portal
+    if (filter && !rel.includes(filter) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text)) continue;
     out.push(await runTestFile(index, rel, text));
   }
   return out;

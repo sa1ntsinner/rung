@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung live: read-only values of a running PLC: an S7-1500 through its Web API, CODESYS through rung's CODESYS bridge.
 import { WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
-import { WebApiClient } from "@rung/live";
+import { WebApiClient, plainHttpRefusal } from "@rung/live";
 import { readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { WorkspaceIndex, uriOf } from "@rung/lsp";
@@ -16,10 +16,8 @@ export async function webApiFor(dir: string, env: Io["env"]): Promise<WebApiClie
   if (!w) throw new WorkspaceError("CONFIG_INVALID", 'no [live.webapi] in rung.toml (url = "https://<plc-ip>", user = "<web server user>")');
   const password = env.RUNG_WEBAPI_PASSWORD;
   if (!password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user (it is never stored in rung.toml)");
-  // the Web API login sends the password; over plain http anyone on the network can read it
-  const loopback = /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:|\/|$)/i.test(w.url); // rung simulate: nothing leaves the PC
-  if (/^http:\/\//i.test(w.url) && !loopback && env.RUNG_WEBAPI_ALLOW_HTTP !== "1")
-    throw new WorkspaceError("CONFIG_INVALID", `${w.url} is plain http: the password would travel unencrypted. Use https:// (set insecure = true for the PLC's self-signed certificate), or set RUNG_WEBAPI_ALLOW_HTTP=1 if you really mean it`);
+  const refused = plainHttpRefusal(w.url, env);
+  if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
   return new WebApiClient({ url: w.url, user: w.user, password, ...(w.insecure ? { insecure: true } : {}) });
 }
 

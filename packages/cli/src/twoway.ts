@@ -32,18 +32,19 @@ export async function cmdSync(dir: string, io: Io): Promise<number> {
     }
   }
   const config = await loadConfig(dir);
-  const client = await bridgeFor(config, io, importFlags(config));
+  // the lock before the bridge: a workspace another rung process holds fails before a TIA Portal starts for nothing
+  const state = await openState(dir, config);
   try {
-    const state = await openState(dir, config);
+    const client = await bridgeFor(config, io, importFlags(config));
     try {
       const r = await syncOnce(dir, client, state, { config });
       printReport(io, r);
       return exitCode(r);
     } finally {
-      await state.close();
+      await client.close();
     }
   } finally {
-    await client.close();
+    await state.close();
   }
 }
 
@@ -164,7 +165,7 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
       await state.close();
     }
   }
-  io.stdout(`${s.objects} objects, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
+  io.stdout(`${s.objects} object${s.objects === 1 ? "" : "s"}, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
   for (const [label, list] of [["conflicted", s.conflicted], ["file dirty", s.fileDirty], ["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
   // compile errors TIA reported and that still apply
@@ -213,16 +214,16 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
     }
   } else {
     const config = await loadConfig(dir);
-    const client = await bridgeFor(config, io, importFlags(config));
+    const state = await openState(dir, config);
     try {
-      const state = await openState(dir, config);
+      const client = await bridgeFor(config, io, importFlags(config));
       try {
         await confirmDelete(dir, client, state, address);
       } finally {
-        await state.close();
+        await client.close();
       }
     } finally {
-      await client.close();
+      await state.close();
     }
   }
   io.stdout(`deleted ${address} in TIA Portal\n`);

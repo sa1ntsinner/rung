@@ -1,13 +1,36 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyAction, bundledSkills, planSetup, summarizePlan } from "../src/wizard.js";
+import { main } from "../src/main.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "rung-wizard-"));
 
 describe("rung setup", () => {
+  it("stops at a value it does not know instead of planning nothing, before it looks at the PC", async () => {
+    const dir = tmp();
+    const err: string[] = [];
+    const run = (...args: string[]) => main(["setup", "--dry-run", ...args], { cwd: dir, stdout: () => {}, stderr: (s) => err.push(s), env: {}, prompt: async () => "" });
+    expect(await run("--agents", "Claude,copilot-cli")).toBe(1);
+    expect(await run("--editors", "code")).toBe(1);
+    expect(await run("--platforms", "s7")).toBe(1);
+    expect(await run("--skills", "nope")).toBe(1);
+    expect(await run("--scope", "workspace")).toBe(1);
+    expect(err.join("")).toBe(
+      [
+        "rung: BAD_ARGUMENT: --agents takes claude, codex, cursor, gemini, opencode, copilot, zed; not copilot-cli",
+        "rung: BAD_ARGUMENT: --editors takes vscode, zed, neovim; not code",
+        "rung: BAD_ARGUMENT: --platforms takes tia, twincat, codesys; not s7",
+        `rung: BAD_ARGUMENT: --skills takes all or skill names (${bundledSkills({}).map((s) => s.name).join(", ")}); not nope`,
+        "rung: BAD_ARGUMENT: --scope is project or global; not workspace",
+        "",
+      ].join("\n"),
+    );
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
   it("ships the PLC skills and tags them by platform", () => {
     const s = bundledSkills({});
     const names = s.map((x) => x.name);

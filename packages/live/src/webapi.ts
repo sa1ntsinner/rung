@@ -14,6 +14,16 @@ export interface WebApiOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Why the password must not go to this URL, or undefined: the Web API login sends it, and over plain http anyone
+ * on the network can read it. rung simulate on this PC (loopback) is fine; RUNG_WEBAPI_ALLOW_HTTP=1 allows the rest.
+ */
+export function plainHttpRefusal(url: string, env: Record<string, string | undefined>): string | undefined {
+  const loopback = /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:|\/|$)/i.test(url);
+  if (!/^http:\/\//i.test(url) || loopback || env.RUNG_WEBAPI_ALLOW_HTTP === "1") return undefined;
+  return `${url} is plain http: the password would travel unencrypted. Use https:// (set insecure = true for the PLC's self-signed certificate), or set RUNG_WEBAPI_ALLOW_HTTP=1 if you really mean it`;
+}
+
 export class WebApiError extends Error {
   override name = "WebApiError";
   constructor(

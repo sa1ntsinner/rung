@@ -13,8 +13,10 @@ PLC platforms
   ✓ TIA Portal (STEP 7)  V20
   ✓ TIA Portal Openness  V17, V18, V19, V20
   · Windows group "Siemens TIA Openness"
-      → as administrator: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in
+      permission to use Openness at all
+      → As administrator: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in again.
   · rung bridge in the Openness whitelist
+      no "Openness access" prompt; a TIA Portal without window never hangs on it
       → rung setup openness
 ```
 
@@ -52,7 +54,7 @@ rung watch         # keeps both sides in sync; Ctrl+C to stop
 - Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`.
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
-- Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor flags a tag without an address or with a type that does not fit it. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
+- Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor flags what TIA Portal's import would refuse: a tag without an address or with a type that does not fit it, two tags on one line, a name used twice. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
 - `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
 `rung sync` does one pass instead of watching; `rung status` shows what is open.
@@ -71,7 +73,7 @@ rung compare                # the project against the PLC, read-only; exit 2 if 
 rung download               # you type the PLC name to confirm; TIA's risky questions need --allow
 ```
 
-`rung download` never picks a PLC by itself: run `rung connect` once (or `rung connect --pick` to choose among what answers). Agents never download. Everything about TIA's questions (stop the CPU, reinitialise data blocks, …) is in [downloads](downloads.md).
+`rung download` never picks a PLC by itself: run `rung connect` once (or `rung connect --pick` to choose among what answers). rung's agent tools never download; a person does. Everything about TIA's questions (stop the CPU, reinitialise data blocks, …) is in [downloads](downloads.md).
 
 ## More
 

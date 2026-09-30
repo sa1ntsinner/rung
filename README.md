@@ -35,7 +35,7 @@ The [quickstart](docs/quickstart.md) walks through setup, including the Openness
 
 ## What it won't do
 
-rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself, and agents never download to a PLC. Failsafe, know-how protected, system and GRAPH blocks and instances of library types stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
+rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself. A person starts every download: rung's MCP server, language server and agent instructions never download, and an agent that runs shell commands as you is trusted as you are ([downloads](docs/downloads.md) says how to keep a PLC out of its reach). Failsafe, know-how protected, system and GRAPH blocks and instances of library types stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
 
 ## Requirements
 

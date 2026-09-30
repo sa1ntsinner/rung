@@ -5,6 +5,7 @@ rung runs unit tests for SCL and LAD function blocks and functions on an **offli
 ```
 rung test                       # all tests/**/*.test.yaml
 rung test --filter motor        # only files whose path contains "motor"
+rung test --filter Fx_Motor     # only the tests of the block Fx_Motor
 rung test --junit report.xml    # JUnit XML for CI
 ```
 

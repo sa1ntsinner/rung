@@ -106,9 +106,9 @@ describe("two-way CLI", () => {
     t.out.length = 0;
     expect(await t.run(["status"])).toBe(0);
     expect(t.out.join("")).toMatch(/watching/);
-    // a second writer is refused while watch holds the workspace
+    // a second writer is refused while watch holds the workspace, with what to do instead
     expect(await t.run(["pull"])).toBe(1);
-    expect(t.err.join("")).toMatch(/STATE_LOCKED/);
+    expect(t.err.join("")).toMatch(/rung watch runs in this workspace and already brings TIA Portal's changes in; rung pull is not needed while it runs/);
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 42;\nEND_FUNCTION_BLOCK\n');
     await until(() => t.db().objects[0]!.content.includes("#a := 42;"));
     t.out.length = 0;

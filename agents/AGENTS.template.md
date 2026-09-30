@@ -12,7 +12,7 @@ This folder is a text mirror of the TIA Portal project `{{PROJECT}}`, maintained
 
 ## Rules for agents
 1. Read and edit the files directly. Do not ask the user to copy code from TIA Portal.
-2. Files ending in `.protected.yaml`, failsafe (F-) blocks, system blocks and GRAPH blocks are **read-only**. Never modify them.
-3. Never download anything to a real PLC. Downloads are done by a human in TIA Portal.
-4. `rung pull` refreshes files from TIA Portal and never overwrites local edits without `--force`.
+2. Files ending in `.protected.yaml`, failsafe (F-) blocks, system blocks, GRAPH blocks and instances of library types are **read-only**. Never modify them.
+3. Never download to a PLC and never run `rung download`: a person downloads. Prepare it for them with the MCP tool `rung_download_request`.
+4. Edits reach TIA Portal with `rung sync` or a running `rung watch`. `rung pull` refreshes files from TIA Portal and never overwrites local edits without `--force`.
 5. Keep SCL edits in the existing style: `#local` variables, `"Global".member` references, `REGION` blocks.
