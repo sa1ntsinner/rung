@@ -39,6 +39,7 @@ describe("LAD in SIMATIC SD text", () => {
     const body = pump.slice(pump.indexOf("    {\n      S7_Language"), pump.lastIndexOf("END_FUNCTION_BLOCK"));
     expect(translateLad(body)).toEqual({
       unsupported: [],
+      temps: [],
       scl: [
         "// network 1",
         "#Run := (#Start OR #Run) AND (NOT #Stop) AND (NOT #Fault);",
@@ -59,7 +60,9 @@ describe("LAD in SIMATIC SD text", () => {
     const net = (rung: string) => `NETWORK\n RUNG wire#powerrail\n${rung}\n END_RUNG\nEND_NETWORK\n`;
     expect(translateLad(net("Contact( #a )\nContact( #b )\nNot()\nCoil( #q )")).scl).toContain("#q := NOT (#a AND #b);");
     expect(translateLad(net('Contact( #a )\nMove{ Card := 1; DisableENO := TRUE }( IN := 5, OUT1 => "DB".x )')).scl).toContain('IF #a THEN "DB".x := 5; END_IF;');
-    expect(translateLad(net("Contact( #a )\nP_Contact( #b, #m )\nCoil( #q )")).unsupported).toEqual(["P_Contact( #b, #m )"]);
+    // an edge contact: the operand's rising edge, whatever the power flow; the edge memory keeps the operand
+    expect(translateLad(net("Contact( #a )\nP_Contact( #b, #m )\nCoil( #q )")).scl).toContain("#__rung1 := #b AND NOT #m;\n#m := #b;\n#q := #a AND #__rung1;");
+    expect(translateLad(net("Contact( #a )\nCalculate{ SrcType := Int }( IN1 := #x, OUT => #y )")).unsupported).toEqual(["Calculate{ SrcType := Int }( IN1 := #x, OUT => #y )"]);
     expect(translateLad("NETWORK\n RUNG wire#w1\n Contact( #a )\n END_RUNG\nEND_NETWORK\n").unsupported[0]).toMatch(/never join/);
   });
 });

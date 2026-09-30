@@ -4,7 +4,6 @@
 // runs these blocks the way it runs LAD in SIMATIC SD.
 import type { Ref } from "./parser.js";
 import type { XmlNode } from "./simaticml.js";
-import { andFlow, wrapFlow } from "./simaticsd.js";
 
 export interface NetworkTranslation {
   /** SCL statements of all networks, in order. */
@@ -20,6 +19,16 @@ export interface NetworkTranslation {
 
 const kid = (n: XmlNode | undefined, name: string) => n?.children.find((c) => c.name === name);
 const kids = (n: XmlNode | undefined, name: string) => n?.children.filter((c) => c.name === name) ?? [];
+
+/**
+ * One network in FlgNet form (TIA Portal's own, or built from a network in SIMATIC SD): its SCL statements, and the
+ * parts it has that the translation does not know (by UId and name). A network that cannot be read at all throws.
+ */
+export function translateFlgNet(net: XmlNode, out: NetworkTranslation): { lines: string[]; missing: Map<string, string> } {
+  const network = new Network(net, out);
+  const lines = network.translate();
+  return { lines, missing: network.missing };
+}
 
 /** The networks (compile units) of a SimaticML block: LAD, FBD and SCL translated, STL kept as STL text, any other language listed. */
 export function translateNetworks(block: XmlNode): NetworkTranslation {
@@ -575,6 +584,7 @@ function callRefs(info: XmlNode | undefined, refs: Ref[]) {
 /** An Access (or an Instance) as SCL: #local.member, "Global".member[i], a constant, %I0.0. */
 function operandText(a: XmlNode): string {
   const scope = a.attrs.Scope?.value ?? "";
+  if (scope === "Text") return a.text; // an operand already written as SCL (a network read from SIMATIC SD)
   if (scope === "LiteralConstant" || scope === "TypedConstant") {
     const c = kid(a, "Constant");
     const v = kid(c, "ConstantValue")?.text.trim() ?? "";
@@ -732,6 +742,31 @@ function sclNetwork(st: XmlNode): { text: string; missing: string[]; refs: Ref[]
 }
 
 const quoted = (n: string) => (IDENT.test(n) ? n : `"${n}"`);
+
+/** Whether the parenthesis opening `e` closes at its end: "(a OR b)" yes, "(a) AND (b)" no. */
+function enclosed(e: string): boolean {
+  if (!e.startsWith("(")) return false;
+  let depth = 0;
+  for (let i = 0; i < e.length; i++) {
+    if (e[i] === "(") depth++;
+    else if (e[i] === ")" && --depth === 0) return i === e.length - 1;
+  }
+  return false;
+}
+/** An operand of AND/OR/NOT: in parentheses unless it is a plain operand or already enclosed. */
+export const wrapFlow = (e: string) => (/^[#"%\w.[\]]+$/.test(e) || enclosed(e) ? e : `(${e})`);
+/** OR / XOR outside any parentheses: such an expression needs parentheses as an AND operand. */
+function looseOr(e: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < e.length; i++) {
+    if (e[i] === "(") depth++;
+    else if (e[i] === ")") depth--;
+    else if (depth === 0 && /^ (OR|XOR) /.test(e.slice(i, i + 5))) return true;
+  }
+  return false;
+}
+/** The power flow `a` through a contact `b`; the left side is usually the AND chain so far and needs parentheses only around a top-level OR. */
+export const andFlow = (a: string, b: string) => (a === "TRUE" ? b : `${looseOr(a) ? `(${a})` : a} AND ${wrapFlow(b)}`);
 /** A flow no coil can change before it is used: a constant, or one of the translation's own temporaries. Even a
  * plain operand is taken first: a coil on one branch may write it before the next branch reads it. */
 const fixed = (e: string) => e === "TRUE" || e === "FALSE" || /^#__rung\d+$/.test(e);

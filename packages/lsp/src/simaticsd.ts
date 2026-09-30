@@ -2,6 +2,8 @@
 // LAD blocks in SIMATIC SD text (.s7dcl): the interface goes through the SCL parser, operand references come
 // from the networks, and the networks are translated to SCL statements so the simulator can run LAD blocks.
 import { parse, type ParsedDocument, type Ref } from "./parser.js";
+import { translateFlgNet, type NetworkTranslation } from "./flgnet.js";
+import type { XmlNode } from "./simaticml.js";
 
 const END = /\b(END_FUNCTION_BLOCK|END_FUNCTION|END_ORGANIZATION_BLOCK)\b/g;
 
@@ -16,6 +18,7 @@ export function parseSd(text: string): ParsedDocument {
     const t = translateLad(text.slice(region.start, region.end));
     block.lad = t.scl;
     if (t.unsupported.length) block.ladUnsupported = t.unsupported;
+    if (t.temps.length) block.ladTemps = t.temps;
   }
   return doc;
 }
@@ -96,6 +99,8 @@ interface Item {
   /** wire name, or the element's callee as written: Contact, #Delay.TON, "DB".FB_X */
   name: string;
   args: { pin?: string; dir?: ":=" | "=>"; expr: string }[];
+  /** `{ SrcType := Int; Card := 2 }` after the callee */
+  templates: Record<string, string>;
   raw: string;
 }
 
@@ -108,44 +113,39 @@ interface Rung {
 export interface LadTranslation {
   scl: string;
   unsupported: string[];
+  /** Bool temporaries the statements use (see NetworkTranslation.temps). */
+  temps: string[];
 }
 
-const COMPARE: Record<string, string> = { EQ: "=", NE: "<>", GT: ">", GE: ">=", LT: "<", LE: "<=" };
-const IEC_BOX: Record<string, { input: string; output: string }> = {
-  TON: { input: "IN", output: "Q" },
-  TOF: { input: "IN", output: "Q" },
-  TP: { input: "IN", output: "Q" },
-  TONR: { input: "IN", output: "Q" },
-  CTU: { input: "CU", output: "Q" },
-  CTD: { input: "CD", output: "Q" },
-  CTUD: { input: "CU", output: "QU" },
-  R_TRIG: { input: "CLK", output: "Q" },
-  F_TRIG: { input: "CLK", output: "Q" },
-};
-const MATH: Record<string, string> = { ADD: "+", SUB: "-", MUL: "*", DIV: "/", MOD: "MOD" };
-
-/** Translates the NETWORK … END_NETWORK text of a LAD block into SCL statements. */
+/**
+ * Translates the NETWORK … END_NETWORK text of a LAD block into SCL statements. Each network becomes the graph of
+ * parts and wires TIA Portal keeps in SimaticML, and that one translation runs it: LAD reads the same in both forms.
+ */
 export function translateLad(networks: string): LadTranslation {
-  const out: string[] = [];
-  const unsupported: string[] = [];
+  const out: NetworkTranslation = { scl: "", unsupported: [], temps: [], refs: [], stl: [] };
+  const lines: string[] = [];
   let n = 0;
   for (const m of networks.matchAll(/\bNETWORK\b([\s\S]*?)\bEND_NETWORK\b/g)) {
     n++;
-    out.push(`// network ${n}`);
+    lines.push(`// network ${n}`);
     try {
-      out.push(...network(parseRungs(m[1]!), unsupported));
+      const graph = new Graph();
+      const net = graph.build(parseRungs(m[1]!));
+      const t = translateFlgNet(net, out);
+      lines.push(...t.lines);
+      for (const uid of t.missing.keys()) out.unsupported.push(graph.raw.get(uid) ?? t.missing.get(uid)!);
     } catch (e) {
-      unsupported.push(`network ${n}: ${(e as Error).message}`);
+      out.unsupported.push(`network ${n}: ${(e as Error).message}`);
     }
   }
-  return { scl: out.join("\n") + "\n", unsupported };
+  return { scl: lines.join("\n") + "\n", unsupported: out.unsupported, temps: out.temps };
 }
 
 function parseRungs(body: string): Rung[] {
   const rungs: Rung[] = [];
   const re = /\bRUNG\s+(wire#\w+)([\s\S]*?)\bEND_RUNG\b(?:[ \t]+(wire#\w+))?/g;
   for (const m of body.matchAll(re)) rungs.push({ from: m[1]!.slice(5), to: m[3]?.slice(5), items: parseItems(m[2]!) });
-  if (!rungs.length && /\S/.test(body)) throw new Error("no RUNG found (FBD networks are not simulated yet)");
+  if (!rungs.length && /\S/.test(body)) throw new Error("no RUNG found (FBD networks in SD are not simulated yet)");
   return rungs;
 }
 
@@ -159,7 +159,7 @@ function parseItems(src: string): Item[] {
     const start = i;
     if (src.startsWith("wire#", i)) {
       const m = /^wire#(\w+)/.exec(src.slice(i))!;
-      items.push({ kind: "wire", name: m[1]!, args: [], raw: m[0] });
+      items.push({ kind: "wire", name: m[1]!, args: [], templates: {}, raw: m[0] });
       i += m[0].length;
       continue;
     }
@@ -170,7 +170,15 @@ function parseItems(src: string): Item[] {
     }
     const name = src.slice(start, i);
     skipWs();
-    if (src[i] === "{") i = balanced(src, i, "{", "}");
+    const templates: Record<string, string> = {};
+    if (src[i] === "{") {
+      const close = balanced(src, i, "{", "}");
+      for (const t of src.slice(i + 1, close - 1).split(/[;,]/)) {
+        const m = /^\s*(\w+)\s*:=\s*(.*?)\s*$/.exec(t);
+        if (m) templates[m[1]!] = m[2]!;
+      }
+      i = close;
+    }
     skipWs();
     let args: Item["args"] = [];
     if (src[i] === "(") {
@@ -179,7 +187,7 @@ function parseItems(src: string): Item[] {
       i = close;
     }
     if (!name) throw new Error(`cannot read "${src.slice(start, start + 20)}"`);
-    items.push({ kind: "element", name, args, raw: src.slice(start, i) });
+    items.push({ kind: "element", name, args, templates, raw: src.slice(start, i).replace(/\s+/g, " ") });
   }
   return items;
 }
@@ -224,135 +232,215 @@ function splitArgs(s: string): Item["args"] {
   });
 }
 
-/** Whether the parenthesis opening `e` closes at its end: "(a OR b)" yes, "(a) AND (b)" no. */
-function enclosed(e: string): boolean {
-  if (!e.startsWith("(")) return false;
-  let depth = 0;
-  for (let i = 0; i < e.length; i++) {
-    if (e[i] === "(") depth++;
-    else if (e[i] === ")" && --depth === 0) return i === e.length - 1;
-  }
-  return false;
-}
-const wrap = (e: string) => (/^[#"%\w.[\]]+$/.test(e) || enclosed(e) ? e : `(${e})`);
-/** OR / XOR outside any parentheses: such an expression needs parentheses as an AND operand. */
-function looseOr(e: string): boolean {
-  let depth = 0;
-  for (let i = 0; i < e.length; i++) {
-    if (e[i] === "(") depth++;
-    else if (e[i] === ")") depth--;
-    else if (depth === 0 && /^ (OR|XOR) /.test(e.slice(i, i + 5))) return true;
-  }
-  return false;
-}
-// the left side is usually the AND chain built so far: it only needs parentheses around a top-level OR
-const and = (a: string, b: string) => (a === "TRUE" ? b : `${looseOr(a) ? `(${a})` : a} AND ${wrap(b)}`);
-export { and as andFlow, wrap as wrapFlow };
+// ------------------------------------------------------------------------------ SD network → FlgNet graph
 
-function network(rungs: Rung[], unsupported: string[]): string[] {
-  // split rungs into segments at the wires they pass through
-  interface Segment {
-    from: string;
-    to?: string;
-    items: Item[];
+type End = { kind: "rail" } | { kind: "pin"; uid: number; pin: string } | { kind: "ident"; uid: number };
+
+const node = (name: string, attrs: Record<string, string> = {}, children: XmlNode[] = [], text = ""): XmlNode => ({
+  name,
+  attrs: Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, { value: v, start: 0, rawLength: v.length }])),
+  children,
+  text,
+  textStart: 0,
+  textRawLength: text.length,
+  start: 0,
+  end: 0,
+});
+
+/** The pin a LAD element takes its power flow at and gives it on at, as TIA Portal names them in SimaticML. */
+const FLOW: Record<string, [string, string]> = {
+  CONTACT: ["in", "out"],
+  I_CONTACT: ["in", "out"],
+  COIL: ["in", "out"],
+  I_COIL: ["in", "out"],
+  S_COIL: ["in", "out"],
+  R_COIL: ["in", "out"],
+  P_CONTACT: ["pre", "out"],
+  N_CONTACT: ["pre", "out"],
+  P_COIL: ["in", "out"],
+  N_COIL: ["in", "out"],
+  PBOX: ["in", "out"],
+  NBOX: ["in", "out"],
+  NOT: ["in", "out"],
+  S_SR: ["s", "q"],
+  S_RS: ["r", "q"],
+};
+const PART_OF: Record<string, string> = {
+  CONTACT: "Contact",
+  I_CONTACT: "Contact",
+  COIL: "Coil",
+  I_COIL: "Coil",
+  S_COIL: "SCoil",
+  R_COIL: "RCoil",
+  P_CONTACT: "PContact",
+  N_CONTACT: "NContact",
+  P_COIL: "PCoil",
+  N_COIL: "NCoil",
+  PBOX: "PBox",
+  NBOX: "NBox",
+  NOT: "Not",
+  S_SR: "Sr",
+  S_RS: "Rs",
+};
+const IEC_FLOW: Record<string, [string, string]> = {
+  TON: ["in", "q"],
+  TOF: ["in", "q"],
+  TP: ["in", "q"],
+  TONR: ["in", "q"],
+  CTU: ["cu", "q"],
+  CTD: ["cd", "q"],
+  CTUD: ["cu", "qu"],
+  R_TRIG: ["clk", "q"],
+  F_TRIG: ["clk", "q"],
+};
+const COMPARING = /^(EQ|NE|GT|GE|LT|LE|INRANGE|OUTRANGE)$/;
+
+/** Where the last dot outside quotes is: "DB".FB_X → the dot before FB_X. */
+function lastDot(name: string): number {
+  let quote = false;
+  let at = -1;
+  for (let i = 0; i < name.length; i++) {
+    if (name[i] === '"') quote = !quote;
+    else if (name[i] === "." && !quote) at = i;
   }
-  const segments: Segment[] = [];
-  for (const r of rungs) {
-    let seg: Segment = { from: r.from, items: [] };
-    for (const it of r.items) {
-      if (it.kind === "wire") {
-        segments.push({ ...seg, to: it.name });
-        seg = { from: it.name, items: [] };
-      } else seg.items.push(it);
-    }
-    segments.push({ ...seg, ...(r.to ? { to: r.to } : {}) });
-  }
-  const incoming = new Map<string, number>();
-  for (const s of segments) if (s.to) incoming.set(s.to, (incoming.get(s.to) ?? 0) + 1);
-  const joined = new Map<string, string[]>();
-  const value = new Map<string, string>([["powerrail", "TRUE"]]);
-  const done = new Set<Segment>();
-  const out: string[] = [];
-  while (done.size < segments.length) {
-    const next = segments.find((s) => !done.has(s) && value.has(s.from));
-    if (!next) throw new Error("branches that never join (wire used before it is complete)");
-    done.add(next);
-    const flow = segmentFlow(value.get(next.from)!, next.items, out, unsupported);
-    if (next.to) {
-      const list = [...(joined.get(next.to) ?? []), flow];
-      joined.set(next.to, list);
-      if (list.length === incoming.get(next.to)) value.set(next.to, list.length === 1 ? list[0]! : `(${list.map(wrap).join(" OR ")})`);
-    }
-  }
-  return out;
+  return at;
 }
 
-/** Emits the statements of one segment and returns the power flow at its end. */
-function segmentFlow(start: string, items: Item[], out: string[], unsupported: string[]): string {
-  let flow = start;
-  const operand = (it: Item) => it.args[0]?.expr ?? "";
-  const pin = (it: Item, name: string) => it.args.find((a) => a.pin?.toUpperCase() === name)?.expr;
-  for (const it of items) {
-    const callee = it.name;
-    const upper = callee.toUpperCase();
-    const leaf = upper.split(".").pop()!.replace(/"/g, "");
-    switch (upper) {
-      case "CONTACT":
-        flow = and(flow, operand(it));
-        continue;
-      case "I_CONTACT":
-        flow = and(flow, `NOT ${wrap(operand(it))}`);
-        continue;
-      case "NOT":
-        flow = `NOT ${wrap(flow)}`;
-        continue;
-      case "COIL":
-        out.push(`${operand(it)} := ${flow};`);
-        continue;
-      case "I_COIL":
-        out.push(`${operand(it)} := NOT ${wrap(flow)};`);
-        continue;
-      case "S_COIL":
-        out.push(`IF ${flow} THEN ${operand(it)} := TRUE; END_IF;`);
-        continue;
-      case "R_COIL":
-        out.push(`IF ${flow} THEN ${operand(it)} := FALSE; END_IF;`);
-        continue;
+class Graph {
+  private uid = 21;
+  private readonly parts: XmlNode[] = [];
+  /** Wires by what drives them. */
+  private readonly wires = new Map<string, { from: End; to: End[] }>();
+  /** The SD text of each element, for "does not run yet". */
+  readonly raw = new Map<string, string>();
+
+  build(rungs: Rung[]): XmlNode {
+    // rungs split into segments at the wires they pass through
+    const segments: { from: string; to?: string; items: Item[] }[] = [];
+    for (const r of rungs) {
+      let seg: { from: string; to?: string; items: Item[] } = { from: r.from, items: [] };
+      for (const it of r.items) {
+        if (it.kind === "wire") {
+          segments.push({ ...seg, to: it.name });
+          seg = { from: it.name, items: [] };
+        } else seg.items.push(it);
+      }
+      segments.push({ ...seg, ...(r.to ? { to: r.to } : {}) });
     }
-    if (COMPARE[leaf] && !callee.includes(".")) {
-      flow = and(flow, `${wrap(pin(it, "IN1") ?? "")} ${COMPARE[leaf]} ${wrap(pin(it, "IN2") ?? "")}`);
-      continue;
+    // the elements, each with the pin its flow enters and the one it leaves at
+    const chains = segments.map((s) => ({ ...s, parts: s.items.map((it) => this.element(it)) }));
+    // what drives each named wire: one segment, or several joined by an OR (a parallel branch)
+    const drivers = new Map<string, End>([["powerrail", { kind: "rail" }]]);
+    const resolving = new Set<string>();
+    const driver = (w: string): End => {
+      const hit = drivers.get(w);
+      if (hit) return hit;
+      if (resolving.has(w)) throw new Error(`wire#${w} leads into itself`);
+      resolving.add(w);
+      const ends = chains.filter((c) => c.to === w).map((c) => (c.parts.length ? { kind: "pin" as const, uid: c.parts.at(-1)!.uid, pin: c.parts.at(-1)!.out } : driver(c.from)));
+      if (!ends.length) throw new Error(`wire#${w} is used but nothing leads into it (branches that never join)`);
+      let end: End = ends[0]!;
+      if (ends.length > 1) {
+        const o = this.part("O", { Card: String(ends.length) });
+        ends.forEach((e, i) => this.connect(e, { kind: "pin", uid: o, pin: `in${i + 1}` }));
+        end = { kind: "pin", uid: o, pin: "out" };
+      }
+      drivers.set(w, end);
+      return end;
+    };
+    for (const c of chains) {
+      let prev = driver(c.from);
+      for (const p of c.parts) {
+        this.connect(prev, { kind: "pin", uid: p.uid, pin: p.in });
+        for (const w of p.wired) this.connect(driver(w.wire), { kind: "pin", uid: p.uid, pin: w.pin });
+        prev = { kind: "pin", uid: p.uid, pin: p.out };
+      }
     }
-    if (leaf === "MOVE" && !callee.includes(".")) {
-      const value = pin(it, "IN") ?? "";
-      const targets = it.args.filter((a) => a.dir === "=>" && /^OUT\d*$/i.test(a.pin ?? "") && a.expr).map((a) => `${a.expr} := ${value};`);
-      out.push(flow === "TRUE" ? targets.join(" ") : `IF ${flow} THEN ${targets.join(" ")} END_IF;`);
-      continue;
-    }
-    if (MATH[leaf] && !callee.includes(".")) {
-      const ins = it.args.filter((a) => /^IN\d+$/i.test(a.pin ?? "")).map((a) => wrap(a.expr));
-      const target = pin(it, "OUT");
-      if (target) out.push(`IF ${flow} THEN ${target} := ${ins.join(` ${MATH[leaf]} `)}; END_IF;`);
-      continue;
-    }
-    const dot = callee.lastIndexOf(".");
-    const iec = dot > 0 ? IEC_BOX[leaf] : undefined;
-    if (iec) {
-      // #Delay.TON(…) / "IEC_Timer_DB".TON(…): the rung drives the input pin, the output pin continues it
-      const inst = callee.slice(0, dot);
-      const params = [`${iec.input} := ${flow}`, ...it.args.filter((a) => a.pin && a.expr && a.pin.toUpperCase() !== iec.input).map((a) => `${a.pin} ${a.dir} ${a.expr}`)];
-      out.push(`${inst}(${params.join(", ")});`);
-      flow = `${inst}.${iec.output}`;
-      continue;
-    }
-    if (dot > 0 || callee.startsWith('"')) {
-      // an FB with its instance ("DB".FB_X, #Inst.FB_X) or an FC ("FC_X"): EN is the power flow, ENO continues it
-      const target = dot > 0 ? callee.slice(0, dot) : callee;
-      const params = it.args.filter((a) => a.pin && a.expr).map((a) => `${a.pin} ${a.dir} ${a.expr}`);
-      out.push(flow === "TRUE" ? `${target}(${params.join(", ")});` : `IF ${flow} THEN ${target}(${params.join(", ")}); END_IF;`);
-      continue;
-    }
-    unsupported.push(it.raw.replace(/\s+/g, " ").slice(0, 60));
+    const endNode = (e: End) => (e.kind === "rail" ? node("Powerrail") : e.kind === "ident" ? node("IdentCon", { UId: String(e.uid) }) : node("NameCon", { UId: String(e.uid), Name: e.pin }));
+    const wires = [...this.wires.values()].map((w) => node("Wire", {}, [endNode(w.from), ...w.to.map(endNode)]));
+    return node("FlgNet", {}, [node("Parts", {}, this.parts), node("Wires", {}, wires)]);
   }
-  return flow;
+
+  private next = () => this.uid++;
+
+  private connect(from: End, to: End) {
+    const key = from.kind === "rail" ? "rail" : from.kind === "ident" ? `i${from.uid}` : `${from.uid}:${from.pin}`;
+    const w = this.wires.get(key) ?? { from, to: [] };
+    w.to.push(to);
+    this.wires.set(key, w);
+  }
+
+  private part(name: string, templates: Record<string, string> = {}, extra: XmlNode[] = []): number {
+    const uid = this.next();
+    const t = Object.entries(templates).map(([k, v]) => node("TemplateValue", { Name: k, Type: k === "Card" ? "Cardinality" : "Type" }, [], v));
+    this.parts.push(node("Part", { Name: name, UId: String(uid) }, [...extra, ...t]));
+    return uid;
+  }
+
+  /** An operand written as SCL, as an Access of its own. */
+  private operand(expr: string): End {
+    const uid = this.next();
+    this.parts.push(node("Access", { Scope: "Text", UId: String(uid) }, [], expr.trim()));
+    return { kind: "ident", uid };
+  }
+
+  /** `pin := expr` (read) or `pin => target` (written); a wire#w as the value is a flow. */
+  private arg(uid: number, pin: string, expr: string, written: boolean, wired: { pin: string; wire: string }[]) {
+    const w = /^wire#(\w+)$/.exec(expr.trim());
+    if (w) {
+      wired.push({ pin, wire: w[1]! });
+      return;
+    }
+    if (!expr.trim()) return; // ET => with nothing after it
+    const op = this.operand(expr);
+    if (written) this.connect({ kind: "pin", uid, pin }, op);
+    else this.connect(op, { kind: "pin", uid, pin });
+  }
+
+  private element(it: Item): { uid: number; in: string; out: string; wired: { pin: string; wire: string }[] } {
+    const upper = it.name.toUpperCase();
+    const wired: { pin: string; wire: string }[] = [];
+    const named = (pin: string, at: number) => it.args.find((a) => a.pin?.toUpperCase() === pin) ?? (it.args[at]?.pin ? undefined : it.args[at]);
+    const done = (uid: number, flow: [string, string]) => {
+      this.raw.set(String(uid), it.raw);
+      return { uid, in: flow[0], out: flow[1], wired };
+    };
+    const part = PART_OF[upper];
+    if (part) {
+      const negated = upper === "I_CONTACT" || upper === "I_COIL" ? [node("Negated", { Name: "operand" })] : [];
+      const uid = this.part(part, {}, negated);
+      const top = named("TOP", 0);
+      if (upper === "PBOX" || upper === "NBOX") this.arg(uid, "bit", it.args[0]?.expr ?? "", true, wired);
+      else if (upper !== "NOT") this.arg(uid, "operand", top?.expr ?? "", false, wired);
+      if (/^[PN]_(CONTACT|COIL)$/.test(upper)) this.arg(uid, "bit", named("BOTTOM", 1)?.expr ?? "", true, wired);
+      if (upper === "S_SR") this.arg(uid, "r1", named("R1", 1)?.expr ?? "", false, wired);
+      if (upper === "S_RS") this.arg(uid, "s1", named("S1", 1)?.expr ?? "", false, wired);
+      return done(uid, FLOW[upper]!);
+    }
+    const dot = lastDot(it.name);
+    const leaf = (dot > 0 ? it.name.slice(dot + 1) : it.name).replace(/"/g, "");
+    const pins = (uid: number) => {
+      for (const a of it.args) if (a.pin) this.arg(uid, a.pin.toLowerCase(), a.expr, a.dir === "=>", wired);
+    };
+    if (dot > 0 && IEC_FLOW[leaf.toUpperCase()]) {
+      // #Delay.TON{ time_type := Time }(PT := T#3S, ET => #t): the instance, the rung drives IN
+      const uid = this.part(leaf.toUpperCase(), it.templates, [node("Instance", { Scope: "Text" }, [], it.name.slice(0, dot))]);
+      pins(uid);
+      return done(uid, IEC_FLOW[leaf.toUpperCase()]!);
+    }
+    if (dot > 0 || it.name.startsWith('"')) {
+      // an FB with its instance ("DB".FB_X, #Inst.FB_X) or an FC ("FC_X"): EN is the power flow, ENO goes on
+      const fb = dot > 0;
+      const params = it.args.filter((a) => a.pin).map((a) => node("Parameter", { Name: a.pin!, Section: a.dir === ":=" ? "Input" : /^ret_val$/i.test(a.pin!) ? "Return" : "Output" }));
+      const info = node("CallInfo", { Name: fb ? leaf : it.name.replace(/"/g, ""), BlockType: fb ? "FB" : "FC" }, [...(fb ? [node("Instance", { Scope: "Text" }, [], it.name.slice(0, dot))] : []), ...params]);
+      const uid = this.next();
+      this.parts.push(node("Call", { UId: String(uid) }, [info]));
+      pins(uid);
+      return done(uid, ["en", "eno"]);
+    }
+    // a box by its name as TIA Portal writes it (Add, Gt, Move, Convert, InRange, …), templates and all
+    const uid = this.part(it.name, it.templates);
+    pins(uid);
+    return done(uid, COMPARING.test(upper) ? ["pre", "out"] : ["en", "eno"]);
+  }
 }
