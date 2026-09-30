@@ -87,3 +87,31 @@ describe("standard functions", () => {
     expect(m.S).toBe("a\nb\rc\tdA$'");
   });
 });
+
+describe("values are copied, slices have their width, a DTL starts in 1970", () => {
+  it("an assigned structure or array is a copy; an FB input too, an IN_OUT is the caller's variable", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/types/Pt.udt", 'TYPE "Pt"\nSTRUCT\n  x : Int;\nEND_STRUCT;\nEND_TYPE\n', 0);
+    idx.set("file:///w/plc/P/blocks/Keep.scl", 'FUNCTION_BLOCK "Keep"\nVAR_INPUT\n  p : "Pt";\nEND_VAR\nVAR_IN_OUT\n  q : "Pt";\nEND_VAR\nVAR\n  seen : Int;\nEND_VAR\nBEGIN\n  #seen := #p.x;\n  #q.x := 7;\nEND_FUNCTION_BLOCK\n', 0);
+    idx.set(
+      "file:///w/plc/P/blocks/T.scl",
+      'FUNCTION_BLOCK "T"\nVAR\n  a : "Pt";\n  b : "Pt";\n  arr : Array[0..1] of Int;\n  brr : Array[0..1] of Int;\n  k : "Keep";\n  r : "Pt";\nEND_VAR\nBEGIN\n  #a.x := 1;\n  #b := #a;\n  #a.x := 5;\n  #arr[0] := 1;\n  #brr := #arr;\n  #arr[0] := 9;\n  #k(p := #a, q := #r);\n  #a.x := 6;\nEND_FUNCTION_BLOCK\n',
+      0,
+    );
+    const s = new Simulator(idx);
+    const i = s.newInstance("T");
+    s.callBlock(i, {} as never);
+    const m = i.mem as Record<string, any>;
+    expect([m.B.X, m.BRR.items[0], m.K.mem.P.X, m.K.mem.SEEN, m.R.X]).toEqual([1, 1, 5, 5, 7]);
+  });
+
+  it("a %B slice is a Byte and a %W slice a Word for NOT", () => {
+    const m = run("VAR\n  d : DWord := 16#0000_00F0;\n  b : Bool;\n  w : Bool;\nEND_VAR", "  #b := NOT #d.%B0 = 16#0F;\n  #w := NOT #d.%W0 = 16#FF0F;");
+    expect([m.B, m.W]).toEqual([true, true]);
+  });
+
+  it("a DTL nobody set is 1970-01-01, a Thursday", () => {
+    const m = run("VAR\n  t : DTL;\n  y : Int;\n  wd : USInt;\nEND_VAR", "  #y := #t.YEAR;\n  #wd := #t.WEEKDAY;");
+    expect([m.Y, m.WD]).toEqual([1970, 5]);
+  });
+});

@@ -363,7 +363,11 @@ export class Simulator {
       } else if (g?.block?.kind === "UDT") v = this.structOf(g.block.vars, g.block);
       else if (g?.block?.kind === "FB") v = this.newInstance(g.block.name);
       else if (STANDARD_BY_NAME.get(t.toUpperCase())?.kind === "functionBlock") v = this.newInstance(t);
-      else if (sys) v = Object.fromEntries(sys.map((m) => [m.name.toUpperCase(), this.defaultValue({ type: m.type, typeRef: m.typeRef ?? m.type, isArray: !!m.isArray })]));
+      else if (sys) {
+        v = Object.fromEntries(sys.map((m) => [m.name.toUpperCase(), this.defaultValue({ type: m.type, typeRef: m.typeRef ?? m.type, isArray: !!m.isArray })]));
+        // a DTL nobody set is DTL#1970-01-01-00:00:00, a Thursday (WEEKDAY 5), as in TIA Portal
+        if (/^DTL$/i.test(t)) Object.assign(v as Struct, { YEAR: 1970, MONTH: 1, DAY: 1, WEEKDAY: 5 });
+      }
       else v = 0; // unknown elementary type (Variant, system types, …): treated as a number
     }
     if (decl.init !== undefined && !isInstance(v) && typeof v !== "object") {
@@ -543,8 +547,9 @@ export class Simulator {
       return;
     }
     const { obj, key } = this.locate(ref, frame);
+    // an assigned structure or array is copied, as on the PLC: #b := #a; then #a.x := 5; leaves #b.x alone
     (obj as Record<string | number, Value>)[key] =
-      typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : value;
+      typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -616,7 +621,7 @@ export class Simulator {
         const shape = d.isArray ? splitArrayType(d.type) : undefined;
         if (!shape) return undefined;
         d = { type: shape.element, typeRef: d.typeRef, isArray: /^array\b/i.test(shape.element), members: d.members };
-      } else d = { type: seg.slice === "X" ? "Bool" : "DWord", isArray: false };
+      } else d = { type: ({ X: "Bool", B: "Byte", W: "Word", D: "DWord" } as const)[seg.slice], isArray: false }; // .%B is a Byte, .%W a Word
     }
     return d && targetDecl(d, /^REFERENCE\s+TO\s+/i);
   }
@@ -1098,7 +1103,10 @@ export class Simulator {
       const key = (a.name ?? params[i]?.name)?.toUpperCase();
       if (!key) throw new SimError("positional argument without matching parameter", caller?.block.name);
       if (!(key in mem)) throw new SimError(`${a.name ?? key} is not an input of ${b?.name ?? "the block"}`, caller?.block.name);
-      mem[key] = this.eval(a.value, caller);
+      // an input gets a copy; an IN_OUT is the caller's variable itself (by reference)
+      const inOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
+      const value = this.eval(a.value, caller);
+      mem[key] = inOut ? value : copyValue(value);
     });
   }
 
