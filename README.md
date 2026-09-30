@@ -1,45 +1,100 @@
-<p>
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo-dark.png">
-    <img alt="rung" src="site/assets/logo-light.png" width="236">
+    <img alt="rung" src="site/assets/logo-light.png" width="200">
   </picture>
 </p>
 
-TIA Portal projects as plain text.
+<h3 align="center">TIA Portal projects, as plain text.</h3>
 
-rung keeps a Siemens TIA Portal project, or a CODESYS project, and a folder of text files in sync, both ways. You write SCL or structured text in VS Code, Zed or Neovim, review changes in git like any other code, and coding agents work on the same files you do.
+<p align="center">
+  <a href="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Status: pre-release" src="https://img.shields.io/badge/status-pre--release-e3b86a">
+  <a href="LICENSE"><img alt="License: BUSL-1.1 and MIT" src="https://img.shields.io/badge/license-BUSL--1.1%20%2B%20MIT-6cc08f"></a>
+</p>
 
-It's pre-alpha. It runs against TIA Portal V20 and CODESYS V3.5, and the full test suite passes on real projects of both, but there is no release yet.
+<p align="center">
+  <a href="https://sa1ntsinner.github.io/rung/"><b>Website</b></a> ·
+  <a href="https://sa1ntsinner.github.io/rung/#play">Try a test in your browser</a> ·
+  <a href="docs/quickstart.md">Quickstart</a> ·
+  <a href="docs">Docs</a>
+</p>
+
+<p align="center">
+  <img src="docs/media/sync.gif" width="920" alt="A file saved goes to TIA Portal and compiles; a line added in TIA Portal comes back to the file; edits on both sides merge; the same line edited on both sides stops as a conflict">
+</p>
+
+rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text files in sync, both ways. Edit in your editor, review in git, test without a PLC.
+
+| | |
+|---|---|
+| **Two-way sync** | Save a file: rung imports it through Openness, compiles it and writes TIA's version back. Changes made in TIA Portal come back. Both sides changed: a three-way merge, SCL by line, LAD and FBD by network. |
+| **An editor for SCL** | A language server for VS Code, Zed and Neovim: completion, definitions through DBs, UDTs and instances, references, rename, TIA's compile errors on their line, live values. |
+| **Tests without a PLC** | `rung test` runs YAML tests on an offline simulator: SCL, LAD, FBD, STL and structured text, with virtual time. Any CI runner, Linux too, no TIA Portal or PLCSIM. |
+| **Coding agents** | An MCP server and skills. Agents edit the files, rung carries the change into TIA Portal, a person starts every download. |
+| **Change review** <sub>Pro</sub> | Interfaces, attributes, logic per region and network, and what a change affects. A gate in your CI and a FAT/SAT record. |
+
+## Try a test
+
+<img src="docs/media/playground.gif" width="920" alt="The playground: a latch passes, one change breaks it, the failing step is marked, the restored latch passes again">
+
+The [playground](https://sa1ntsinner.github.io/rung/#play) runs rung's own simulator in your browser. The same tests run on your CI:
+
+```yaml
+- uses: sa1ntsinner/rung@v1        # a failing step shows on its line in the pull request
+```
+
+## Your project, as files
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/workspace-dark.png">
+  <img src="docs/media/workspace-light.png" width="920" alt="A rung workspace: plc/PLC_1 with blocks, tags, types, hardware and watch tables, and a test folder">
+</picture>
+
+One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `network.yaml` `.test.yaml`. The [format](docs/format/README.md) is documented and MIT.
+
+## Measured against real TIA Portal
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/soak-dark.png">
+  <img src="docs/media/soak-light.png" width="920" alt="Twenty minutes of sync against TIA Portal V20: 247 actions, 78 syncs killed mid-run, 42 merges, 0 conflicts, 0 check failures">
+</picture>
+
+| Two 20-minute runs, two people, syncs killed at random | One production program | On every change |
+|---|---|---|
+| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([explore](https://sa1ntsinner.github.io/rung/#evidence)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 34/34 bridge tests on TIA Portal V20, 700+ TypeScript and 234 .NET tests, Windows and Linux |
 
 ## Quick start
 
 ```sh
-rung init --project D:\TIA\Line3.ap20   # bind this folder to a project open in TIA Portal
-rung pull                               # export blocks, types and tag tables as text
-rung watch                              # keep both sides in sync until Ctrl+C
+rung init --project D:\TIA\Line3.ap20   # link this folder to a project open in TIA Portal
+rung pull                               # blocks, types and tag tables as text
+rung watch                              # keep both sides in sync
 ```
 
-The [quickstart](docs/quickstart.md) walks through setup, including the Openness group your Windows user has to be in.
+Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md) covers the setup, including the Openness group your Windows user has to be in.
 
-## What's in it
+## Works with
 
-- Two-way sync. Save a file and rung imports it, compiles the block and writes TIA's version back. Changes made in TIA Portal come back to the files. If both sides changed, you get a merge (by line in SCL, by network in LAD and FBD) or a conflict to resolve.
-- A language server for SCL and IEC structured text: completion, go to definition through DBs, UDTs and FB instances, references, rename, help on hover, quick fixes (declare a tag, define a PLC tag, create an instance DB, update a block call) and TIA's compile errors on the right line. There are extensions for [VS Code and Zed](docs/editors/README.md) and a config for Neovim.
-- Monitoring like TIA Portal's: the values of a running block at the end of each line in the editor, from the PLC's Web API or `rung simulate`, a virtual PLC.
-- An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
-- `rung test`, which runs YAML unit tests for SCL, LAD, FBD, STL and structured text blocks on an offline simulator (IEC timers and counters, common system instructions, virtual time) and prints JUnit, on any CI runner, without TIA Portal or PLCSIM. See [testing](docs/testing.md).
-- Compile, go online, compare with the PLC and download, from the terminal or the editor. A person starts every download and allows each risky question TIA asks by name. See [downloads](docs/downloads.md).
-- Tag tables as text, one tag per line (`Start AT %I0.0 : Bool;  // start button`), with the address and type checked as you type.
-- Network settings as a file: IP addresses, subnet masks, routers and PROFINET device names of the PLC and its IO devices in `hardware/network.yaml`.
-- Read-only views of hardware, HMI, technology objects and the project library (types, versions, which blocks are instances).
+| | Sync | Editor | `rung test` |
+|---|:---:|:---:|:---:|
+| Siemens TIA Portal V20 | ✓ | ✓ | ✓ |
+| CODESYS V3.5 | ✓ | ✓ | ✓ |
+| TwinCAT 3 sources | files already | ✓ | ✓ |
 
-## What it won't do
+**Editors** VS Code and Zed extensions, a Neovim config · **Agents** Claude Code, Codex, Cursor, Gemini CLI (`rung setup`) · **Runs on** Windows; Linux and macOS through a Windows PC [over ssh](docs/remote.md) · V21 builds, untested.
 
-rung talks to TIA Portal only through Siemens' Openness API. It never opens project files itself. A person starts every download: rung's MCP server, language server and agent instructions never download, and an agent that runs shell commands as you is trusted as you are ([downloads](docs/downloads.md) says how to keep a PLC out of its reach). Failsafe, know-how protected, system and GRAPH blocks and instances of library types stay read-only, and deleting a file doesn't delete the block until you run `rung confirm-delete`.
+## Careful by default
 
-## Requirements
+- Only Siemens Openness talks to TIA Portal; rung never opens project files itself.
+- Failsafe, know-how protected, system and GRAPH blocks and library instances stay read-only. Deleting a file never deletes a block: `rung confirm-delete` does.
+- A person starts every [download](docs/downloads.md). Agents never do.
 
-Windows with TIA Portal V20 and the Openness option (from Linux or macOS: a Windows PC with it, over ssh, see [Linux and macOS](docs/remote.md)), or with CODESYS V3.5 (tested with SP22; see [CODESYS](docs/codesys.md)). TwinCAT projects are files already: rung's language server and simulator read them as they are. The VS Code extension brings rung with it; `rung.exe` needs nothing else, and `rung.cjs` runs anywhere with Node.js 22 or newer (a Linux CI runner, for example).
+## License
+
+The core is under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to three users, and each release becomes Apache 2.0 after three years. Larger teams take rung Pro, €49 per user and month: the commercial license, change review, a CI policy gate, FAT/SAT records and support (smile0murr@gmail.com). The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE).
+
+rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG.
 
 <details>
 <summary>Working on rung</summary>
@@ -53,9 +108,3 @@ dotnet test bridge/tests/Rung.Bridge.Core.Tests   # bridge core, no TIA Portal n
 The live tests against TIA Portal run headless, without windows or prompts; the steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>
-
-## License
-
-The core is under the Business Source License 1.1. It's free for individuals, education, non-commercial open source and organizations with up to three users; larger teams take rung Pro (€49 per user and month: the commercial license, team change review, a CI policy gate, FAT/SAT records and support). Each version becomes Apache 2.0 three years after its release. The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE); for Pro and Enterprise, write to smile0murr@gmail.com.
-
-rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG.
