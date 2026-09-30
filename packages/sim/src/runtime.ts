@@ -29,6 +29,8 @@ export interface Instance {
   mem: Struct;
   /** Native state for standard FBs (TON, CTU, ...). */
   std?: Record<string, number | boolean>;
+  /** A stubbed type nobody describes (rung test stubs:): members come from the stub, the call arguments and the test. */
+  stub?: true;
 }
 
 export class SimError extends Error {
@@ -51,7 +53,7 @@ const isInstance = (v: Value): v is Instance => typeof v === "object" && v !== n
 const MAX_CALL_DEPTH = 100;
 
 /** The system instructions the simulator runs (systemCall); docs/testing.md lists them. */
-const SYSTEM_FUNCTIONS = new Set([
+export const SYSTEM_FUNCTIONS = new Set([
   "SWAP", "RD_SYS_T", "RD_LOC_T", "RUNTIME", "T_DIFF", "T_ADD", "T_SUB", "IS_ARRAY", "COUNTOFELEMENTS", "LOWER_BOUND", "UPPER_BOUND",
   "MOVE_BLK", "UMOVE_BLK", "FILL_BLK", "UFILL_BLK", "VAL_STRG", "DELETE", "INSERT", "REPLACE",
   "TYPEOF", "TYPEOFELEMENTS", "VARIANTGET", "VARIANTPUT", "MOVE_BLK_VARIANT", "IS_NULL", "NOT_NULL",
@@ -396,14 +398,91 @@ export class Simulator {
 
   newInstance(fbName: string): Instance {
     const std = STANDARD_BY_NAME.get(fbName.toUpperCase());
+    const stub = this.stubOf(fbName);
     if (std?.kind === "functionBlock") {
       const mem: Struct = {};
       for (const p of std.params) mem[p.name.toUpperCase()] = /Bool/i.test(p.type) ? false : 0;
-      return { __fb: std.name, mem, std: {} };
+      return { __fb: std.name, mem: stub ? Object.assign(mem, copyValue(stub) as Struct) : mem, std: {} };
     }
+    // a stubbed FB nobody describes (a system FB, a missing block): its members are the stub's, then what calls and tests name
+    if (stub && !this.index.global(fbName)?.block) return { __fb: fbName, mem: copyValue(stub) as Struct, stub: true };
     const b = this.block(fbName);
     if (b.kind !== "FB" && b.kind !== "PRG") throw new SimError(`"${fbName}" is ${b.kind}, not a function block`);
-    return { __fb: b.name, mem: this.structOf(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant"), b) };
+    const vars = b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant");
+    const mem = this.structOf(vars, b);
+    this.stubMembers(mem, vars);
+    return { __fb: b.name, mem: stub ? Object.assign(mem, copyValue(stub) as Struct) : mem };
+  }
+
+  // ------------------------------------------------------------------ stubs (rung test: stubs:)
+
+  /**
+   * What a test stands in for, by block, instruction or technology object name (upper case, no quotes): the values
+   * its outputs start with. Only what is named here is stubbed.
+   */
+  stubs = new Map<string, Struct>();
+  /** How often each stub was called (a technology object: used) since the simulator started. */
+  readonly stubCalls = new Map<string, number>();
+  /** Values a test gives hardware identifiers ("Rack~Module"), system constants of a device configuration rung does not have. */
+  hardwareIds = new Map<string, number>();
+
+  private stubOf(name: string): Struct | undefined {
+    return this.stubs.size ? this.stubs.get(name.replace(/^"|"$/g, "").toUpperCase()) : undefined;
+  }
+
+  private stubCalled(name: string) {
+    const k = name.replace(/^"|"$/g, "").toUpperCase();
+    this.stubCalls.set(k, (this.stubCalls.get(k) ?? 0) + 1);
+  }
+
+  /** Multi-instances of a stubbed type that structOf left as placeholders (a type the workspace does not have) get their stub instance. */
+  private stubMembers(mem: Struct, vars: VarDecl[]) {
+    if (!this.stubs.size) return;
+    for (const v of vars) {
+      const shape = v.isArray ? splitArrayType(v.type) : undefined;
+      const type = (shape ? shape.element : (v.typeRef ?? v.type)).replace(/^"|"$/g, "");
+      if (!this.stubOf(type) || this.index.global(type)?.block || STANDARD_BY_NAME.has(type.toUpperCase())) continue;
+      const fill = (x: Value): Value => (isArray(x) ? { ...x, items: x.items.map(fill) } : isInstance(x) ? x : this.newInstance(type));
+      mem[v.name.toUpperCase()] = fill(mem[v.name.toUpperCase()]);
+    }
+  }
+
+  /** One call of a stubbed FB: the arguments reach its members, its outputs go back to the caller, no code runs. */
+  private runStub(inst: Instance, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
+    this.stubCalled(inst.__fb);
+    const b = inst.stub ? undefined : this.index.global(inst.__fb)?.block;
+    if (!inst.stub) {
+      // a type with an interface (a user FB, an IEC FB): its parameters as declared
+      this.bindInputs(inst.mem, b?.kind === "FB" ? b : null, args, caller);
+      this.bindOutputs(inst.mem, b?.kind === "FB" ? b : null, args, caller);
+      return;
+    }
+    for (const a of args) {
+      if (!a.name) throw new SimError(`${inst.__fb} is stubbed: name its arguments (REQ := ...), the stub has no parameter list`, caller?.block.name);
+      const key = a.name.toUpperCase();
+      if (!a.out) inst.mem[key] = copyValue(this.eval(a.value, caller));
+      else if (!(key in inst.mem)) {
+        // an output first named here starts at its type's default, like a fresh FB's
+        const d = a.value.k === "ref" ? this.declOf(a.value.ref, caller) : undefined;
+        inst.mem[key] = d ? this.defaultValue(d) : 0;
+      }
+    }
+    for (const a of args) if (a.out && a.value.k === "ref") this.write(a.value.ref, inst.mem[a.name!.toUpperCase()], caller);
+  }
+
+  /** A call of a stubbed FC or function: inputs are evaluated, outputs and the return value come from the stub. */
+  private callStub(name: string, c: Extract<Expr, { k: "call" }>, frame: Frame | null, stub: Struct): Value {
+    this.stubCalled(name);
+    const b = this.index.global(name)?.block;
+    for (const a of c.args) {
+      const key = a.name?.toUpperCase();
+      const inOut = !!key && !!b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
+      if ((a.out || inOut) && a.value.k === "ref") {
+        if (key && key in stub) this.write(a.value.ref, stub[key], frame); // an output the stub does not name keeps the caller's value
+      } else this.eval(a.value, frame);
+    }
+    if ("RET_VAL" in stub) return copyValue(stub.RET_VAL);
+    return b?.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }, b) : 0;
   }
 
   /** IEC 61131-3 globals are referenced without quotes: GVL lists, their variables and PROGRAMs. */
@@ -429,8 +508,19 @@ export class Simulator {
         // PLC tags start at their type's default; user constants from a tag table have a value
         this.globals[key] = this.defaultValue({ type: g.tag.dataType, typeRef: g.tag.dataType, isArray: false, ...(g.tag.value !== undefined ? { init: g.tag.value } : {}) });
       }
-      else if (g?.kind === "OBJECT") throw this.objectError(name);
-      else throw new SimError(`"${name}" is not a data block or tag in the workspace`);
+      else if (g?.kind === "OBJECT") {
+        // a stubbed technology object: its members as the stub names them, readable, settable and callable like an instance
+        const stub = this.stubOf(name);
+        if (!stub) throw this.objectError(name);
+        this.globals[key] = { __fb: g.name, mem: copyValue(stub) as Struct, stub: true };
+        this.stubCalled(name);
+      } else if (name.includes("~")) {
+        // a hardware identifier: its value is in the device configuration, which rung does not have offline
+        const id = this.hardwareIds.get(key);
+        if (id === undefined) throw new SimError(`"${name}" is a hardware identifier: it has no value offline; give it one in the test (stubs: { '"${name}"': 257 })`);
+        this.globals[key] = id;
+        this.stubCalled(name);
+      } else throw new SimError(`"${name}" is not a data block or tag in the workspace`);
     }
     return { obj: this.globals, key };
   }
@@ -488,12 +578,14 @@ export class Simulator {
         ({ obj, key } = cur.__ptr);
         continue;
       }
+      const stubbed = isInstance(cur) && cur.stub ? cur.__fb : undefined;
       if (isInstance(cur)) cur = cur.mem;
       if ("member" in seg) {
         if (typeof cur !== "object" || cur === null || isArray(cur)) throw new SimError(`${seg.member}: not a structure`, frame?.block.name, ref.start);
         obj = cur as Struct;
         key = seg.member.toUpperCase();
-        if (!(key in obj)) throw new SimError(`${seg.member} is not a member`, frame?.block.name, ref.start);
+        if (!(key in obj))
+          throw new SimError(stubbed ? `${seg.member} is not a member of the stub of ${stubbed}: give it a start value in the test (stubs: { ${stubbed}: { ${seg.member}: … } })` : `${seg.member} is not a member`, frame?.block.name, ref.start);
       } else if ("index" in seg) {
         for (let d = 0; d < seg.index.length; d++) {
           const arr = d === 0 ? cur : (obj as Value[])[key as number];
@@ -772,8 +864,11 @@ export class Simulator {
     // FB instance call: #inst(...), "Inst_DB"(...), #inst.sub(...)
     if (c.callee.root.kind !== "ident" || c.callee.path.length || (frame && (upper in frame.mem || upper in frame.temps))) {
       const target = c.callee.root.kind === "global" && !c.callee.path.length ? this.index.global(name) : undefined;
+      // a stubbed FC, or a block the workspace does not have, called by its name
+      const stubbed = c.callee.root.kind === "global" && !c.callee.path.length ? this.stubOf(name) : undefined;
+      if (stubbed && (!target || target.block?.kind === "FC")) return this.callStub(name, c, frame, stubbed);
       if (target?.block?.kind === "FC") return this.callFc(target.block, c, frame);
-      if (target?.kind === "OBJECT") throw this.objectError(name);
+      if (target?.kind === "OBJECT" && !stubbed) throw this.objectError(name);
       // instruction called on typed instance data: #t.TON(...) on an IEC_TIMER, #c.CTU(...) on an IEC_COUNTER
       const last = c.callee.path[c.callee.path.length - 1];
       if (last && "member" in last) {
@@ -790,12 +885,14 @@ export class Simulator {
       if (!isInstance(inst)) {
         const d = this.declOf(c.callee, frame);
         const type = (d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
-        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
+        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: ${NOT_SIMULATED}; a test can stand in for it with stubs: { ${type}: {} }`, frame?.block.name, c.callee.start);
         throw new SimError(`${name} is not a function block instance`, frame?.block.name, c.callee.start);
       }
       this.runInstance(inst, c.args, frame);
       return undefined;
     }
+    const stubbed = path.length ? undefined : this.stubOf(name);
+    if (stubbed) return this.callStub(name, c, frame, stubbed);
     const std = STANDARD_BY_NAME.get(upper);
     const args = c.args.map((a) => this.eval(a.value, frame));
     const named = (n: string, i: number) => {
@@ -907,7 +1004,7 @@ export class Simulator {
         throw e;
       }
     }
-    throw new SimError(`${name} is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
+    throw new SimError(`${name} is not simulated: ${NOT_SIMULATED}; a test can stand in for it with stubs: { ${name}: {} }`, frame?.block.name, c.callee.start);
   }
 
   /**
@@ -1286,6 +1383,7 @@ export class Simulator {
 
   /** Runs one call of an FB instance (user FB or standard FB). */
   runInstance(inst: Instance, args: { name?: string; out?: boolean; value: Expr }[] = [], caller: Frame | null = null) {
+    if (inst.stub || this.stubOf(inst.__fb)) return this.runStub(inst, args, caller);
     if (inst.std) {
       this.bindInputs(inst.mem, null, args, caller);
       this.stdStep(inst);

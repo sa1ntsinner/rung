@@ -175,8 +175,8 @@ describe("system instructions", () => {
       Sv: fb("Sv", "VAR\n  v : Real;\n  p : UInt := 1;\nEND_VAR", "  STRG_VAL(IN := '12', FORMAT := 16#0000, P := #p, OUT => #v);"),
     });
     const rest = "is not simulated: communication, motion, diagnostics, data logging and the other system instructions are not part of the offline simulator (docs/testing.md lists the ones it runs)";
-    expect(errorOf(() => run(s, "Rd"))).toBe(`RDREC ${rest}`);
-    expect(errorOf(() => run(s, "Sv"))).toBe(`STRG_VAL ${rest}`);
+    expect(errorOf(() => run(s, "Rd"))).toBe(`RDREC ${rest}; a test can stand in for it with stubs: { RDREC: {} }`);
+    expect(errorOf(() => run(s, "Sv"))).toBe(`STRG_VAL ${rest}; a test can stand in for it with stubs: { STRG_VAL: {} }`);
   });
 
   it("rung test reads the virtual clock after advance", async () => {

@@ -470,6 +470,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
             }
             if (!c.passed) failed++;
           }
+          // once per file: what the test stood in for, and stubs it named but never reached
+          if (f.stubbed?.length) io.stdout(`       stubbed: ${f.stubbed.map((s) => `${s.name}${s.calls > 1 ? ` ×${s.calls}` : ""}${s.runs ? " (replaces code the simulator runs)" : ""}`).join(", ")}\n`);
+          for (const w of f.warnings ?? []) io.stdout(`       warning: ${w}\n`);
         }
         // in GitHub Actions a failure also shows in the pull request, on the line of its step
         if (io.env.GITHUB_ACTIONS === "true") for (const a of githubAnnotations(results, ws, io.env.GITHUB_WORKSPACE ?? io.cwd)) io.stdout(`${a}\n`);

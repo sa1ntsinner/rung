@@ -493,7 +493,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_test",
-    { description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour.", inputSchema: { filter: z.string().optional() } },
+    { description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed.", inputSchema: { filter: z.string().optional() } },
     async ({ filter }) => {
       const { index } = await model();
       const results = await runTests(ctx.root, index, filter);

@@ -3,13 +3,16 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parse as parseYaml, parseDocument } from "yaml";
-import { deviceOfUri, nearest, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
-import { Simulator, SimError, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
+import { STANDARD, STANDARD_BY_NAME, deviceOfUri, nearest, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
+import { SYSTEM_FUNCTIONS, Simulator, SimError, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
+import { ELEMENTARY_TYPE } from "./system.js";
 
 /*
  * tests/motor.test.yaml
  *   block: Fx_Motor            # FB (instance kept across steps) or FC (called per cycle)
  *   cycle: 10ms                # optional, default 10ms
+ *   stubs:                     # optional: what the test stands in for, and the values its outputs start with
+ *     RDREC: { VALID: true, STATUS: 0 }
  *   cases:
  *     - name: latches
  *       steps:
@@ -47,6 +50,10 @@ export interface FileResult {
   plc?: string;
   cases: CaseResult[];
   error?: string;
+  /** The stubs the cases called (a technology object: used), with how often; `runs`: the simulator could have run it. */
+  stubbed?: { name: string; calls: number; runs?: true }[];
+  /** Stubs named but never called (probably a typo). */
+  warnings?: string[];
 }
 
 interface TestFile {
@@ -54,6 +61,8 @@ interface TestFile {
   /** The PLC of the block when the workspace has several with one of that name (else tests/<PLC>/ says it). */
   plc?: string;
   cycle?: string | number;
+  /** What the test stands in for: a block, instruction or technology object, and the values its outputs start with. */
+  stubs?: Record<string, Record<string, unknown> | null>;
   cases?: { name?: string; steps?: Record<string, unknown>[] }[];
 }
 
@@ -108,8 +117,21 @@ const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object
  */
 function shapeProblem(spec: unknown): string | undefined {
   if (!plain(spec) || spec.block === undefined) return undefined; // "missing block:" says it
-  const top = Object.keys(spec).find((k) => !["block", "plc", "cycle", "cases"].includes(k));
-  if (top) return `unknown key ${top}: a test file has block, plc, cycle and cases${top === "steps" ? " (the steps go in a case under cases:)" : ""}`;
+  const top = Object.keys(spec).find((k) => !["block", "plc", "cycle", "stubs", "cases"].includes(k));
+  if (top) return `unknown key ${top}: a test file has block, plc, cycle, stubs and cases${top === "steps" ? " (the steps go in a case under cases:)" : ""}`;
+  if (spec.stubs !== undefined) {
+    if (!plain(spec.stubs)) return "stubs is a map: a block, instruction or technology object, then the values its outputs start with (RDREC: { VALID: true })";
+    for (const [name, values] of Object.entries(spec.stubs)) {
+      if (name.includes("~")) {
+        // a hardware identifier ("Rack~Module"): a system constant from the device configuration, which rung does not have
+        if (!Number.isInteger(values)) return `stubs.${name}: a hardware identifier stands for a number (its HW_IO value), such as 257`;
+        continue;
+      }
+      if (values !== null && !plain(values)) return `stubs.${name} is a map of output values, such as { STATUS: 0 } (or {} for none)`;
+      for (const [k, v] of Object.entries(values ?? {}))
+        if (!["boolean", "number", "string"].includes(typeof v)) return `stubs.${name}.${k}: a value is true/false, a number or a string, not ${JSON.stringify(v)}`;
+    }
+  }
   if (spec.cycle !== undefined) {
     let ms: number;
     try {
@@ -224,6 +246,73 @@ function hinted(e: unknown, index: WorkspaceIndex, g: GlobalSymbol, typed: strin
   return near ? new SimError(`${e.message} (did you mean ${near}?)`, e.block, e.offset) : e;
 }
 
+/**
+ * Everything a stub can stand in for, by upper-case name: the PLC's FBs, FCs and technology objects, the types its
+ * blocks declare instances of and the names they call, and the instructions of the catalogue and the simulator.
+ */
+function stubbable(seen: WorkspaceIndex): Map<string, string> {
+  const out = new Map<string, string>();
+  const add = (n: string) => {
+    const bare = n.replace(/^"|"$/g, "");
+    if (bare && !ELEMENTARY_TYPE.test(bare) && !/^(array|struct|string|wstring)\b/i.test(bare)) out.set(bare.toUpperCase(), bare);
+  };
+  for (const s of seen.allGlobals()) {
+    if (s.kind === "FB" || s.kind === "FC" || s.kind === "OBJECT") add(s.name);
+    for (const v of s.block?.vars ?? []) add(v.isArray ? (splitArrayType(v.type)?.element ?? "") : (v.typeRef ?? v.type));
+    for (const r of s.block?.refs ?? []) if (r.kind === "call" || (r.kind === "global" && (r.access === "call" || r.name.includes("~")))) add(r.name);
+    if (s.block?.dbOf) add(s.block.dbOf);
+  }
+  for (const e of STANDARD) add(e.name);
+  for (const n of SYSTEM_FUNCTIONS) add(n);
+  return out;
+}
+
+/** The members (for an FC its outputs and RET_VAL) a stub may give values, by upper-case name; undefined when nothing describes the type. */
+function stubInterface(seen: WorkspaceIndex, name: string): Map<string, { name: string; type: string }> | undefined {
+  const b = seen.global(name)?.block;
+  const upper = (xs: [string, string][]) => new Map(xs.map(([n, type]) => [n.toUpperCase(), { name: n, type }]));
+  if (b?.kind === "FB") return upper(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant").map((v) => [v.name, v.type]));
+  if (b?.kind === "FC") return upper([...b.vars.filter((v) => v.section === "Output" || v.section === "InOut").map((v): [string, string] => [v.name, v.type]), ...(b.returnType && !/^void$/i.test(b.returnType) ? [["RET_VAL", b.returnType] as [string, string]] : [])]);
+  const std = STANDARD_BY_NAME.get(name.toUpperCase());
+  if (std?.kind === "functionBlock") return upper(std.params.map((p) => [p.name, p.type]));
+  if (std) return upper([["RET_VAL", std.returns ?? "ANY"], ...std.params.filter((p) => p.dir !== "in").map((p): [string, string] => [p.name, p.type])]);
+  return undefined; // a system instruction, a missing block, a technology object: whatever the test names
+}
+
+/** A stub of something the simulator runs itself (a workspace block with code, a catalogue or simulated instruction). */
+function runnable(seen: WorkspaceIndex, name: string): boolean {
+  const g = seen.global(name);
+  return !!g?.block || (!g && (STANDARD_BY_NAME.has(name.toUpperCase()) || SYSTEM_FUNCTIONS.has(name.toUpperCase())));
+}
+
+/** What is wrong with the stubs of a test file, in its words: a name nothing calls (did you mean?), an output the type does not have. */
+function stubProblem(seen: WorkspaceIndex, tested: string, stubs: NonNullable<TestFile["stubs"]>): string | undefined {
+  const known = stubbable(seen);
+  for (const [name, values] of Object.entries(stubs)) {
+    const bare = name.replace(/^"|"$/g, "");
+    if (bare.toUpperCase() === tested.toUpperCase()) return `stubs.${name}: ${tested} is the block under test; stub what it calls`;
+    if (!known.has(bare.toUpperCase())) {
+      const near = nearest(bare, known.values());
+      return `stubs.${name}: nothing in the workspace calls or declares ${bare}${near ? ` (did you mean ${near}?)` : ""}`;
+    }
+    const iface = bare.includes("~") ? undefined : stubInterface(seen, bare);
+    if (!iface) continue;
+    for (const [k, v] of Object.entries(values ?? {})) {
+      const member = iface.get(k.toUpperCase());
+      if (!member) {
+        const near = nearest(k, [...iface.values()].map((m) => m.name));
+        return `stubs.${name}.${k}: ${bare} has no ${k}${near ? ` (did you mean ${near}?)` : ""}`;
+      }
+      try {
+        checkType(`stubs.${name}.${k}`, member.type, normalizeExpected(v) as Value);
+      } catch (e) {
+        return (e as Error).message;
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function runTestFile(index: WorkspaceIndex, file: string, text: string): Promise<FileResult> {
   let spec: TestFile;
   try {
@@ -239,12 +328,24 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   if ("error" in found) return { file, block: blockName, cases: [], error: found.error };
   const g = found.symbol;
   if (!g.block) return { file, block: blockName, cases: [], error: `${blockName} has no code the simulator can run (a technology object or a know-how protected block)` };
+  const seen = scopedTo(index, g.uri);
+  const stubProblemText = spec.stubs ? stubProblem(seen, g.block.name, spec.stubs) : undefined;
+  if (stubProblemText) return { file, block: blockName, cases: [], error: stubProblemText };
+  // by upper-case name, without quotes; T#... values are durations; hardware identifiers are numbers
+  const entries = Object.entries(spec.stubs ?? {}).map(([n, values]) => [n.replace(/^"|"$/g, "").toUpperCase(), values] as const);
+  const stubs = new Map<string, Struct>(
+    entries.filter(([n]) => !n.includes("~")).map(([n, values]) => [n, Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k.toUpperCase(), normalizeExpected(v) as Value]))]),
+  );
+  const hardware = new Map<string, number>(entries.filter(([n]) => n.includes("~")).map(([n, v]) => [n, Number(v)]));
+  const stubCalls = new Map<string, number>();
   const cycleMs = spec.cycle !== undefined ? toMs(spec.cycle) : 10;
   const results: CaseResult[] = [];
   for (const [ci, c] of (spec.cases ?? []).entries()) {
     const t0 = Date.now();
     // what the block calls and uses is its own PLC's (another PLC may have objects of the same names)
-    const sim = new Simulator(scopedTo(index, g.uri));
+    const sim = new Simulator(seen);
+    sim.stubs = stubs;
+    sim.hardwareIds = hardware;
     const failures: TestFailure[] = [];
     const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     const inOuts = g.block.vars.filter((v) => v.section === "InOut");
@@ -260,10 +361,15 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       const walk = (base: Struct, key: string, rest: Seg[]) => {
         let holder: Struct | Value[] = base;
         let k: string | number = key.toUpperCase();
+        let open = false; // a stub of a type nobody describes: a member a test names is created
         const at = (): Value => (holder as Record<string | number, Value>)[k];
         for (const seg of rest) {
           let cur = at();
-          if (cur && typeof cur === "object" && "__fb" in (cur as object)) cur = (cur as Instance).mem;
+          open = false;
+          if (cur && typeof cur === "object" && "__fb" in (cur as object)) {
+            open = !!(cur as Instance).stub;
+            cur = (cur as Instance).mem;
+          }
           if (typeof seg === "string") {
             if (!cur || typeof cur !== "object" || isArrayValue(cur)) throw new SimError(`${name}: ${seg} is not reachable`);
             holder = cur as Struct;
@@ -276,9 +382,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
             if (!Number.isInteger(idx) || idx < arr.lo || idx >= arr.lo + arr.items.length) throw new SimError(`${name}: index ${idx} out of range ${arr.lo}..${arr.lo + arr.items.length - 1}`);
             holder = arr.items;
             k = idx - arr.lo;
+            open = false;
           }
         }
-        if (!Array.isArray(holder) && !((k as string) in holder)) throw new SimError(`${name} does not exist`);
+        if (!Array.isArray(holder) && !((k as string) in holder) && !open) throw new SimError(`${name} does not exist`);
         const h = holder as Record<string | number, Value>;
         const kk = k;
         return { get: () => h[kk], set: (v: Value) => void (h[kk] = v) };
@@ -371,6 +478,15 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       const where = e instanceof SimError && e.block ? ` (in ${e.block}${e.offset !== undefined && !/\(line \d+\)/.test(e.message) ? `, line ${sim.lineOf(e.block, e.offset) ?? "?"}` : ""})` : "";
       results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0 });
     }
+    for (const [k, n] of sim.stubCalls) stubCalls.set(k, (stubCalls.get(k) ?? 0) + n);
+  }
+  // the stubs the cases reached, once per file; one never reached is most likely a typo
+  const stubbed: NonNullable<FileResult["stubbed"]> = [];
+  const warnings: string[] = [];
+  for (const name of Object.keys(spec.stubs ?? {})) {
+    const calls = stubCalls.get(name.replace(/^"|"$/g, "").toUpperCase()) ?? 0;
+    if (calls) stubbed.push({ name, calls, ...(runnable(seen, name.replace(/^"|"$/g, "")) ? { runs: true as const } : {}) });
+    else warnings.push(`stub ${name} was never called: a typo, or code these cases do not reach`);
   }
   const plc = deviceOfUri(g.uri);
   const at = testPositions(text);
@@ -380,7 +496,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     r.line = p.line;
     for (const f of r.failures) if (p.steps[f.step - 1]) f.line = p.steps[f.step - 1];
   }
-  return { file, block: blockName, ...(plc ? { plc } : {}), cases: results };
+  return { file, block: blockName, ...(plc ? { plc } : {}), cases: results, ...(stubbed.length ? { stubbed } : {}), ...(warnings.length ? { warnings } : {}) };
 }
 
 /** Where each case and each of its steps starts in a test file (lines from 1), for editors. */

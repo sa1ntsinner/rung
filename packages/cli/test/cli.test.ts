@@ -253,6 +253,20 @@ describe("rung CLI", () => {
     );
   });
 
+  it("test prints once per file what the stubs stood in for, and a stub the cases never called", async () => {
+    const t = setup();
+    const blocks = join(t.dir, "plc", "PLC_1", "blocks");
+    mkdirSync(blocks, { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(blocks, "Fx_Scale.scl"), 'FUNCTION_BLOCK "Fx_Scale"\n   VAR_INPUT\n      x : Int;\n   END_VAR\n   VAR_OUTPUT\n      y : Int;\n   END_VAR\nBEGIN\n   #y := #x * 2;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(blocks, "Fx_Reader.scl"), 'FUNCTION_BLOCK "Fx_Reader"\n   VAR_OUTPUT\n      ok : Bool;\n      scaled : Int;\n   END_VAR\n   VAR\n      rd : RDREC;\n      sc : "Fx_Scale";\n      mb : MB_CLIENT;\n   END_VAR\nBEGIN\n   #rd(REQ := TRUE, ID := 256, INDEX := 1);\n   #ok := #rd.VALID;\n   #sc(x := 3, y => #scaled);\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "reader.test.yaml"), "block: Fx_Reader\nstubs:\n  RDREC: { VALID: true }\n  Fx_Scale: { y: 5 }\n  MB_CLIENT: {}\ncases:\n  - name: reads\n    steps:\n      - cycle: 2\n      - expect: { ok: true, scaled: 5 }\n");
+    expect(await t.run("test")).toBe(0);
+    expect(t.out.join("")).toContain(
+      "ok   Fx_Reader: reads\n       stubbed: RDREC ×2, Fx_Scale ×2 (replaces code the simulator runs)\n       warning: stub MB_CLIENT was never called: a typo, or code these cases do not reach\n",
+    );
+  });
+
   it("test says which name a misspelt one most likely meant", async () => {
     const t = setup();
     mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });

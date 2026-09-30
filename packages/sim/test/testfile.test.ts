@@ -22,7 +22,7 @@ const errorOf = async (yaml: string) => {
 describe("a test file with a mistake in its shape", () => {
   it("names what is missing or misplaced instead of passing or finding no tests", async () => {
     // steps without a case around them: nothing would run
-    expect(await errorOf("block: Fx_Motor\nsteps:\n  - set: { Start: true }\n")).toBe("unknown key steps: a test file has block, plc, cycle and cases (the steps go in a case under cases:)");
+    expect(await errorOf("block: Fx_Motor\nsteps:\n  - set: { Start: true }\n")).toBe("unknown key steps: a test file has block, plc, cycle, stubs and cases (the steps go in a case under cases:)");
     expect(await errorOf("block: Fx_Motor\n")).toBe("no cases: list them under cases:, each with a name and its steps");
     // a case whose steps slipped out of it by indentation would pass without testing anything
     expect(await errorOf("block: Fx_Motor\ncases:\n  - name: runs\n  - steps:\n      - cycle: 1\n")).toBe("case 1 (runs) has no steps: indent them under the case, below its name");

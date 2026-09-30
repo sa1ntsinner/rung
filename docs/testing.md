@@ -37,6 +37,41 @@ cases:
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
 
+## Stubs
+
+What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:
+
+```yaml
+block: Fx_Reader
+stubs:
+  RDREC: { VALID: false, BUSY: false, ERROR: false, STATUS: 0, LEN: 4 }
+  MB_CLIENT: { DONE: false, BUSY: false, ERROR: false }
+  Lib_Filter: { Out: 0.0 }        # an FB the workspace does not have
+  Fx_Log: { RET_VAL: 0 }          # an FC: its return value and outputs
+  '"Axis_1"': { StatusWord: 0 }   # a technology object, with its quotes
+  '"Rack~Gateway"': 257           # a hardware identifier: the number the device configuration gives it
+cases:
+  - name: reads a valid record
+    steps:
+      - set: { start: true }
+      - cycle: 1
+      - expect: { rd.REQ: true, rd.INDEX: 1 }   # what the block passed to the stub
+      - set: { rd.VALID: true }                 # what the stub gives back from now on
+      - cycle: 1
+      - expect: { value: 4 }
+```
+
+- **An FB** named there (a system FB, a user FB, one the workspace does not have) runs no code. A call puts its arguments into the instance (`rd.REQ`), and its outputs keep what they hold: the stub's values first, then what a step `set`s (`rd.VALID`). Its instances in the block under test, in the blocks it calls and in instance DBs are all stubs.
+  - For a type nothing describes, a member is created the first time a call argument or a test names it. A member the code only reads must be given a value in the stub; the error says so.
+  - Arguments with `:=` are inputs.
+- **An FC or instruction** named there returns `RET_VAL` from the stub, or else 0 (for a workspace FC: its type's default). It writes the outputs the stub names; an output it does not name keeps the caller's value.
+- **A technology object**, named with its quotes, has the members the stub names. They are readable and settable (`'"Axis_1".StatusWord'`), and the object can be called like an instance.
+- **A hardware identifier** (`"Rack~Gateway"`, a system constant) has no value offline. The test gives it one, a number, where the code passes it on (to a stubbed RDREC, for example).
+- **Only what is named is stubbed.**
+  - `rung test` prints once per file what the stubs stood in for (`stubbed: RDREC ×2, MB_CLIENT`), and marks a stub of code the simulator could run itself ("replaces code the simulator runs"). This is allowed, to test one unit alone.
+  - A stub the cases never called gets a warning: a typo, or code they do not reach.
+  - Refused like the rest of the file: a name nothing in the workspace calls or declares (with the closest one), a member a known type does not have, a value its declared type cannot hold, and the block under test itself.
+
 ## What the simulator covers
 
 - SCL statements: assignment (also `a := b := 0;`), IF/ELSIF/ELSE, CASE (lists, ranges), FOR/WHILE/REPEAT with EXIT/CONTINUE, RETURN, REGION, GOTO to a label.
