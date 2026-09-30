@@ -136,14 +136,12 @@ class Network {
         const inst = kid(p, "Instance");
         if (inst) this.accessRefs(inst, "call", refs);
       } else if (p.name === "Call") {
+        // as SCL has them: #inst(…) and "Inst_DB"(…) call the instance, "FC"(…) the function
         const info = kid(p, "CallInfo");
         const inst = kid(info, "Instance");
         const name = info?.attrs.Name;
-        if (inst?.attrs.Scope?.value === "LocalVariable") this.accessRefs(inst, "call", refs);
-        else {
-          if (name) refs.push({ kind: "call", name: name.value, start: name.start, end: name.start + name.rawLength, members: [], access: "call" });
-          if (inst) this.accessRefs(inst, "write", refs);
-        }
+        if (inst) this.accessRefs(inst, "call", refs);
+        else if (name) refs.push({ kind: "global", name: name.value, start: name.start, end: name.start + name.rawLength, members: [], access: "call" });
       }
     }
     return refs;

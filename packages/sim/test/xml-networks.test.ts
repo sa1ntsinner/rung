@@ -103,7 +103,7 @@ cases:
     expect(seen("go")).toEqual(["local:read", "local:read", "local:read", "local:read"]);
     expect(seen("sum")).toEqual(["local:write"]);
     expect(seen("delay")).toEqual(["local:call"]);
-    expect(seen("Fx_LadHelper")).toEqual(["call:call"]);
+    expect(seen("Fx_LadHelper")).toEqual(["global:call"]);
     expect(seen("done")).toEqual(["local:write"]);
   });
 });

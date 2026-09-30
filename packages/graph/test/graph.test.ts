@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { WorkspaceIndex } from "@rung/lsp";
 import { CodeGraph } from "../src/index.js";
 
@@ -51,6 +53,19 @@ describe("CodeGraph", () => {
   it("finds dependency paths", () => {
     expect(g.path("Main", "Fx_Types")!.map((n) => n.name)).toEqual(["Main", "Fx_Global", "Fx_Types"]);
     expect(g.path("Fx_Types", "Main")).toBeNull();
+  });
+
+  it("sees what LAD and FBD blocks kept as SimaticML call, read and write", () => {
+    const fixture = (n: string) => readFileSync(fileURLToPath(new URL(`../../../tools/fixtures/xml/sim/${n}`, import.meta.url)), "utf8");
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/blocks/Fx_LadBoxes.xml", fixture("Fx_LadBoxes.xml"), 0);
+    idx.set("file:///w/plc/P/blocks/Fx_LadHelper.scl", fixture("Fx_LadHelper.scl"), 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Box_DB.db", 'DATA_BLOCK "Fx_Box_DB"\n"Fx_LadBoxes"\nBEGIN\nEND_DATA_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Main.scl", 'ORGANIZATION_BLOCK "Main"\nBEGIN\n  "Fx_Box_DB"(go := TRUE);\nEND_ORGANIZATION_BLOCK\n', 0);
+    const x = CodeGraph.fromIndex(idx);
+    expect(x.callees("Fx_LadBoxes").map((n) => n.name).sort()).toEqual(["CTU_INT", "Fx_LadHelper", "TON_TIME"]);
+    expect(x.callers("Fx_LadHelper").map((n) => n.name)).toEqual(["Fx_LadBoxes"]);
+    expect(x.impact("Fx_LadHelper").map((i) => i.node.name)).toEqual(["Fx_LadBoxes", "Fx_Box_DB", "Main"]);
   });
 
   it("serializes deterministically", () => {
