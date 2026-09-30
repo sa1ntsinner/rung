@@ -2,7 +2,7 @@
 // Integration tests on the fake-backend workspace (packages/cli/test/fake-bridge.mjs): every view, the
 // status bar, CodeLens, every command, compile → Problems, watch, online / connect, download, the LSP.
 import * as assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
@@ -337,7 +337,9 @@ describe("rung extension on a fake-bridge workspace", function () {
         await api.monitor.stop();
         delete process.env.RUNG_WEBAPI_PASSWORD;
         writeFileSync(tomlPath, toml);
-        sim.kill();
+        // the shim (rung.cmd) runs rung in a child: end the whole tree, not only cmd.exe
+        if (process.platform === "win32" && sim.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(sim.pid)], { windowsHide: true });
+        else sim.kill();
         await vscode.workspace.fs.delete(db).then(undefined, () => {});
       }
     });
