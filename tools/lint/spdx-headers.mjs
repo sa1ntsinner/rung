@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 export const RULES = [
   { prefix: "packages/bridge-client/", license: "MIT" },
-  { prefix: "pro/", license: "LicenseRef-Rung-Commercial" },
   { prefix: "packages/", license: "BUSL-1.1" },
   { prefix: "bridge/", license: "BUSL-1.1" },
   { prefix: "grammars/", license: "MIT" },

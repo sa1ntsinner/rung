@@ -9,5 +9,5 @@ obj/
 TestResults/
 .rung-live/
 
-# local agent worktrees
-.claude/worktrees/
+# never in this repository: agent sessions and their worktrees
+.claude/

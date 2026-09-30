@@ -12,7 +12,7 @@ every source file carries an SPDX-License-Identifier header.
     Apache-2.0 (LICENSES/Apache-2.0.txt) three years after its first public
     release.
 
-  Commercial                                pro/ (not part of this repository's
-                                            public distribution)
+  rung Pro (team review, CI policy gate, FAT/SAT records) is a separate,
+  commercial product and not part of this repository.
 
 See docs/faq.md for what this means in practice.

@@ -149,30 +149,6 @@ importers:
         specifier: ^3.1.2
         version: 3.2.1
 
-  pro/packages/pro:
-    dependencies:
-      '@rung/core':
-        specifier: workspace:*
-        version: link:../../../packages/core
-      '@rung/graph':
-        specifier: workspace:*
-        version: link:../../../packages/graph
-      '@rung/lsp':
-        specifier: workspace:*
-        version: link:../../../packages/lsp
-      '@rung/sim':
-        specifier: workspace:*
-        version: link:../../../packages/sim
-      '@rung/sync':
-        specifier: workspace:*
-        version: link:../../../packages/sync
-      node-diff3:
-        specifier: ^3.1.2
-        version: 3.2.1
-      smol-toml:
-        specifier: ^1.4.2
-        version: 1.9.0
-
 packages:
 
   '@clack/core@1.5.1':

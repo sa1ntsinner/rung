@@ -27,9 +27,6 @@
     },
     {
       "path": "packages/cli"
-    },
-    {
-      "path": "pro/packages/pro"
     }
   ]
 }

@@ -15,11 +15,10 @@ export default defineConfig({
       "@rung/mcp": src("mcp"),
       "@rung/live": src("live"),
       "@rung/sim": src("sim"),
-      "@rung/pro": fileURLToPath(new URL("./pro/packages/pro/src/index.ts", import.meta.url)),
     },
   },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "editors/vscode/test/**/*.test.ts", "pro/packages/*/test/**/*.test.ts", "tests/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "editors/vscode/test/**/*.test.ts", "tests/**/*.test.ts"],
     testTimeout: 20000,
     // live e2e suites share one TIA Portal instance: run their files one after another
     fileParallelism: process.env.RUNG_E2E !== "1",
