@@ -40,7 +40,9 @@ async function workspace(cfg: (c: RungConfig) => void = () => {}) {
 
 describe("rung mcp outside a workspace", () => {
   it("tools that need one say how a person makes one, instead of reporting an empty workspace", async () => {
-    const call = await connect(mkdtempSync(join(tmpdir(), "rung-mcp-none-")));
+    // a PC with nothing installed: what rung_check finds is not the point here, and probing a real one can take long
+    const probes = { platform: "linux" as const, nodeVersion: "v22.0.0", windows: async () => null, which: () => null, vscodeExtensions: async () => null, zedExtensions: () => null, exists: () => false, home: tmpdir(), bridgeWhitelisted: async () => "unknown" as const };
+    const call = await connect(mkdtempSync(join(tmpdir(), "rung-mcp-none-")), { probes });
     for (const tool of ["rung_status", "rung_sync", "rung_list", "rung_compile", "rung_download_request"]) {
       const r = await call(tool);
       expect([tool, r.isError, r.text]).toEqual([tool, true, expect.stringMatching(/is not a rung workspace \(no rung\.toml\)\. A person binds a folder to a project with rung init --project <path to the \.ap20 or \.project>, then rung pull\.$/)]);
