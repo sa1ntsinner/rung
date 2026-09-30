@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Builds the Windows release archive: rung.exe + bridge + editor packages + licences.
 //   node tools/release/package.mjs [--skip-build]
-// Output: dist/release/rung-<version>-win-x64.zip (unsigned; signing and publishing are manual steps).
+// Output: dist/release/rung-<version>-win-x64.zip and SHA256SUMS.txt. The programs are not code-signed: the checksums
+// on the release page are how a download is checked. Publishing is a manual step.
 import { execFileSync, execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -73,4 +74,9 @@ rmSync(zip, { force: true });
 // Windows ships bsdtar (zip-capable); GNU tar from Git is not.
 const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
 execFileSync(tar, ["-a", "-c", "-f", zip, "-C", out, `rung-${version}-win-x64`], { stdio: "inherit" });
-console.log(`release: ${relative(root, zip)} (${(statSync(zip).size / 1024 / 1024).toFixed(1)} MiB), ${walk(stage).length} files, Siemens audit clean`);
+// what the release page lists, in the format of sha256sum (Get-FileHash on Windows shows the same hex)
+const sums = [zip, join(out, "rung.cjs"), join(out, "rung.exe"), join(stage, "editors", "rung-scl.vsix")]
+  .filter((f) => existsSync(f))
+  .map((f) => `${createHash("sha256").update(readFileSync(f)).digest("hex")}  ${f.split(/[\\/]/).pop()}`);
+writeFileSync(join(out, "SHA256SUMS.txt"), sums.join("\n") + "\n");
+console.log(`release: ${relative(root, zip)} (${(statSync(zip).size / 1024 / 1024).toFixed(1)} MiB), ${walk(stage).length} files, Siemens audit clean; SHA256SUMS.txt`);
