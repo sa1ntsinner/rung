@@ -107,6 +107,8 @@ interface ImportJob {
   form: string;
   stem: string;
   bundle: Record<string, string>;
+  /** For a merge: the workspace files the merged bundle was made from. */
+  local?: Record<string, string>;
   /** TIA revision the bundle was based on, or "absent" for a new object. */
   expected: string;
   /** Raw disk hashes of the files as read, used to guard the canonical rewrite. */
@@ -385,6 +387,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       status: "conflicted",
       conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files, ...(staged.result.form !== st.form ? { tiaForm: staged.result.form } : {}), ...(Object.keys(local).length ? { local } : {}) },
       sending: undefined,
+      sent: undefined,
     });
     report.conflicts++;
     diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: "Edited in the workspace and in TIA Portal; resolve with rung resolve" });
@@ -459,7 +462,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
             report.exported++;
           } else {
             // a restored file ends a pending delete or a refused edit
-            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending) state.upsert({ ...cur, status: "synced", sending: undefined });
+            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending || cur.sent) state.upsert({ ...cur, status: "synced", sending: undefined, sent: undefined });
             report.unchanged++;
           }
           continue;
@@ -517,12 +520,19 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         let m = mergeBundle(cur.form, base, bundle, tia);
-        if (m.kind === "conflict" && cur.sending) {
-          // the last pass stopped during an import (Ctrl+C, a crash). If TIA Portal already has what it sent,
-          // that is the base the file was edited from since; if not, the conflict is real.
-          const sent = await baseBundle(root, stemOf(cur), cur.sending);
-          const probe = mergeBundle(cur.form, base, sent, tia);
-          if (probe.kind !== "conflict" && sameTexts(probe.files, tia)) m = mergeBundle(cur.form, sent, bundle, tia);
+        if (m.kind === "conflict" && (cur.sending || cur.sent?.length)) {
+          // the last passes stopped during an import (Ctrl+C, a crash). If TIA Portal already has the file edits
+          // one of them sent (the newest it has; TIA Portal may have changed other lines since), those files are
+          // the base the file was edited from since; if none, the conflict is real.
+          for (const files of [cur.sending, ...(cur.sent ?? [])]) {
+            if (!files) continue;
+            const from = await baseBundle(root, stemOf(cur), files);
+            const probe = mergeBundle(cur.form, base, from, tia);
+            if (probe.kind !== "conflict" && sameTexts(probe.files, tia)) {
+              m = mergeBundle(cur.form, from, bundle, tia);
+              break;
+            }
+          }
         }
         if (m.kind === "conflict") {
           await writeConflict(cur, stem, m.files, staged!, SOURCE_FORMS.has(cur.form));
@@ -533,7 +543,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           await publish(address, captured, staged!, readOnly, false);
           report.exported++;
         } else
-          queue.push({ address, name, form: cur.form, stem, bundle: m.files, expected: staged!.result.fingerprint, captured, kind: "merge", rank: rankOf(cur.form, mergedTexts), deps: referencedNames(mergedTexts, name) });
+          queue.push({ address, name, form: cur.form, stem, bundle: m.files, local: bundle, expected: staged!.result.fingerprint, captured, kind: "merge", rank: rankOf(cur.form, mergedTexts), deps: referencedNames(mergedTexts, name) });
         continue;
       }
 
@@ -680,11 +690,13 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     }
     const stage = await stageForImport(root, job.form, job.bundle);
     if (st) {
-      // what is sent, kept until the import's outcome is recorded (see ObjectState.sending)
+      // the files this send was made from, kept until the import's outcome is recorded (see ObjectState.sending)
       const blobs = new BlobStore(root);
       const sending: StateFile[] = [];
-      for (const [suffix, text] of Object.entries(job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
-      state.upsert({ ...st, sending });
+      for (const [suffix, text] of Object.entries(job.local ?? job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
+      // a send whose outcome the last pass never recorded stays known: TIA Portal may have that one
+      const sent = st.sending ? [st.sending, ...(st.sent ?? [])].slice(0, 8) : st.sent;
+      state.upsert({ ...st, sending, ...(sent?.length ? { sent } : {}) });
       await state.flush();
     }
     if (job.kind === "create" && !st) {
@@ -714,7 +726,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (REFUSALS.has(e.code)) opts.refused?.set(job.address, { key, code: e.code, message: e.message });
       if (e.code === "STALE_REVISION") warn(job.address, e.code, "TIA Portal changed meanwhile; merging on the next pass");
       else diag({ address: job.address, path: primaryPath, severity: "error", code: e.code, message: e.message });
-      if (st) state.upsert({ ...st, status: "fileDirty" });
+      // what was sent stays known: an error can come after TIA Portal took the import (another Openness client
+      // replaced the block before the answer was read)
+      if (st) state.upsert({ ...(state.get(job.address) ?? st), status: "fileDirty" });
       else state.remove(job.address); // refused: still just a new file
       continue;
     } finally {
@@ -902,7 +916,7 @@ async function resolveUnknownImport(root: string, state: StateStore, st: ObjectS
       } else await replaceGuarded(from, await blobs.get(f.hash), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
     }
     if (create) state.remove(st.address);
-    else state.upsert({ ...st, status: "synced", tiaFingerprint: `stale:${st.tiaFingerprint}`, sending: undefined });
+    else state.upsert({ ...st, status: "synced", tiaFingerprint: `stale:${st.tiaFingerprint}`, sending: undefined, sent: undefined });
   } else if (create) {
     // as a create Ctrl+C interrupted: finished from TIA Portal's side if it has the object, else created again
     state.upsert({ ...st, status: "importing" });

@@ -52,10 +52,16 @@ export interface ObjectState {
    */
   conflict?: { tiaFingerprint: string; tiaFiles: StateFile[]; tiaForm?: string; deletedInTia?: true; local?: Record<string, string> };
   /**
-   * Set while an import runs: the files rung sent (blob hashes). A pass that was interrupted leaves it behind,
-   * and the next pass tells from it whether TIA Portal already has the edit.
+   * Set while an import runs: the workspace files the import was made from (blob hashes; for a merge, the file
+   * side, not the merged text). A pass that was interrupted leaves it behind, and the next pass tells from it
+   * whether TIA Portal already has the edit: then these files are the base the file was edited from since.
    */
   sending?: StateFile[];
+  /**
+   * Earlier sends whose outcome was never recorded either (several passes interrupted in a row), newest first:
+   * TIA Portal may have any one of them.
+   */
+  sent?: StateFile[][];
 }
 
 export interface Binding {

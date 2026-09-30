@@ -88,7 +88,14 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         for (let attempt = 0; attempt < 3; attempt++) {
           // a create that a kill interrupted reaches TIA Portal only with the next sync
           if (!(await user.listObjects("PLC_1")).some((e) => e.address === addr(n))) return false;
-          const r = await user.exportObject(addr(n), "auto", mkdtempSync(join(tmpdir(), "rung-soak-tia-")));
+          let r;
+          try {
+            r = await user.exportObject(addr(n), "auto", mkdtempSync(join(tmpdir(), "rung-soak-tia-")));
+          } catch (e) {
+            // an import replaces the block: for a moment the other Openness client finds none
+            if (e instanceof BridgeError && e.code === "NOT_FOUND") continue;
+            throw e;
+          }
           const p = r.files.find((f) => f.role === "primary")!.path;
           writeFileSync(p, readFileSync(p, "utf8").replace(/#l4 := -?\d+;/, `#l4 := ${v};`));
           try {
@@ -96,7 +103,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
             l4.set(n, v);
             return true;
           } catch (e) {
-            if (e instanceof BridgeError && e.code === "STALE_REVISION") continue; // rung imported meanwhile
+            if (e instanceof BridgeError && (e.code === "STALE_REVISION" || e.code === "NOT_FOUND")) continue; // rung imported meanwhile
             throw e;
           }
         }
