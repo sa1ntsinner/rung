@@ -11,3 +11,6 @@ TestResults/
 
 # never in this repository: agent sessions and their worktrees
 .claude/
+
+# built from the simulator by tools/site/build.mjs (the pages workflow builds it too)
+site/assets/play.js

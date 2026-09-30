@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rung · TIA Portal projects as plain text</title>
-  <meta name="description" content="rung keeps a Siemens TIA Portal project and a folder of text files in sync, in both directions. Write SCL in your own editor, review changes in git, test blocks without a PLC, and let coding agents work on the same files.">
+  <title>rung — TIA Portal, as plain text</title>
+  <meta name="description" content="Keep TIA Portal projects and text files in sync. Edit in your own tools, test PLC logic offline, and review changes in git.">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0b0c0e">
-  <meta property="og:title" content="rung">
-  <meta property="og:description" content="TIA Portal projects as plain text. Two-way sync, an SCL language server, tests without a PLC and tools for coding agents.">
+  <meta property="og:title" content="rung — TIA Portal, as plain text">
+  <meta property="og:description" content="Two-way sync between TIA Portal and text files, a language server for SCL, PLC tests that run without a PLC, and tools for coding agents.">
   <meta property="og:image" content="https://sa1ntsinner.github.io/rung/assets/og.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
@@ -17,51 +17,74 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/style.css">
-  <script>try { const t = new URLSearchParams(location.search).get("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
-  <script src="assets/site.js" defer></script>
+  <script>try { const t = new URLSearchParams(location.search).get("theme") || localStorage.getItem("rung-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
+  <script src="assets/site.js" type="module"></script>
 </head>
 <body>
-  <!-- the page sits between two power rails, like a ladder diagram; scrolling puts power on the left one -->
-  <div class="rails" aria-hidden="true"><span class="power"></span></div>
+  <a class="skip" href="#main">Skip to content</a>
 
   <header class="top">
-    <a class="brand" href="./" aria-label="rung home">
-      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark"/></svg>
-      <span>rung</span>
-    </a>
-    <nav>
-      <a href="#features">Product</a>
-      <a href="#pricing">Pricing</a>
-      <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Docs</a>
-      <a href="https://github.com/sa1ntsinner/rung" class="gh">GitHub</a>
-    </nav>
+    <div class="wrap bar">
+      <a class="brand" href="./" aria-label="rung home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark"/></svg>
+        <span>rung</span>
+      </a>
+      <nav class="links" id="nav" aria-label="Main">
+        <a href="#workspace">Workspace</a>
+        <a href="#play">Try a test</a>
+        <a href="#evidence">Evidence</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Docs</a>
+        <a href="https://github.com/sa1ntsinner/rung">GitHub</a>
+      </nav>
+      <a class="btn small primary only-phone" href="#play">Try a test</a>
+      <button class="menu only-phone" type="button" aria-expanded="false" aria-controls="nav" aria-label="Open navigation"><svg aria-hidden="true"><use href="assets/icons.svg#g-menu"/></svg></button>
+    </div>
   </header>
 
-  <main>
-    <section class="hero">
-      <p class="eyebrow"><span class="long">For Siemens TIA Portal V20, CODESYS V3.5 and TwinCAT 3</span><span class="short" aria-hidden="true">TIA Portal · CODESYS · TwinCAT</span></p>
-      <h1>TIA Portal projects,<br><em>as plain text.</em></h1>
-      <p class="lede">
-        rung keeps a TIA Portal project and a folder of text files in sync, in both directions.
-        Write SCL in VS Code, Zed or Neovim, review every change in git, test blocks without a PLC,
-        and let coding agents work on the same files you do.
-      </p>
-      <div class="actions">
-        <a class="btn primary" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Quickstart</a>
-        <a class="btn" href="https://github.com/sa1ntsinner/rung">Source on GitHub</a>
+  <main id="main">
+    <!-- ================================================================ hero -->
+    <section class="hero wrap">
+      <div class="hero-row">
+        <div>
+          <p class="eyebrow"><span class="dot"></span>Two-way project sync <span class="tag">Pre-release · no public release yet</span></p>
+          <h1>TIA Portal,<br><em>as plain text.</em></h1>
+        </div>
+        <div class="hero-side">
+          <p class="lede">Edit PLC code in your editor. rung syncs it with TIA Portal, compiles imported blocks and writes TIA’s version back to your files.</p>
+          <div class="actions">
+            <a class="btn primary" href="#play">Try a test</a>
+            <a class="btn" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Read quickstart</a>
+          </div>
+        </div>
       </div>
 
       <div class="stage">
         <div class="glow g1" aria-hidden="true"></div>
         <div class="glow g2" aria-hidden="true"></div>
-        <figure class="window demo" aria-label="A block edited in the editor goes to TIA Portal and compiles; a line added in TIA Portal comes back to the file">
+        <figure class="window demo" aria-label="Illustrated sync: a file saved, an edit in TIA Portal, a merge and a conflict">
           <div class="chrome">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            <span class="title">line-3 · rung watch</span>
+            <span class="title">Files ⇄ TIA Portal</span>
+            <div class="scenes" role="tablist" aria-label="Scenario">
+              <button role="tab" type="button" data-scene="save" aria-selected="true"><span class="fill"></span>File edit</button>
+              <button role="tab" type="button" data-scene="tia" aria-selected="false"><span class="fill"></span>TIA edit</button>
+              <button role="tab" type="button" data-scene="both" aria-selected="false"><span class="fill"></span>Both edited</button>
+              <button role="tab" type="button" data-scene="conflict" aria-selected="false"><span class="fill"></span>Conflict</button>
+            </div>
+            <button class="pause" type="button" aria-label="Pause"><svg aria-hidden="true"><use href="assets/icons.svg#g-pause"/></svg></button>
           </div>
-          <div class="duo">
+          <p class="caption-bar"><span class="scene-caption">Import through Openness → compile → update the file</span><span class="disclosure">Illustration · declarations shortened · polls TIA every 2 s</span></p>
+          <div class="views only-phone" role="tablist" aria-label="Side">
+            <button type="button" role="tab" data-view="file" aria-selected="true">File</button>
+            <button type="button" role="tab" data-view="tia" aria-selected="false">TIA Portal</button>
+          </div>
+          <div class="duo" data-view="file">
             <div class="pane editor">
-              <div class="bar"><span class="tab">Fx_Motor.scl<i class="dirty" aria-hidden="true"></i></span><span class="path">plc/PLC_1/blocks/10_Drives</span></div>
+              <div class="bar">
+                <span class="tab on" data-tab="scl">Fx_Motor.scl<i class="dirty" aria-hidden="true"></i></span>
+                <span class="tab conflict-tab" data-tab="conflict">Fx_Motor.scl.conflict</span>
+                <span class="path">plc/PLC_1/blocks/10_Drives</span>
+              </div>
               <pre class="code" data-pane="file"></pre>
             </div>
             <div class="channel" aria-hidden="true">
@@ -70,266 +93,492 @@
               <span class="spark to-file"></span>
             </div>
             <div class="pane tia">
-              <div class="bar"><span class="tab">Fx_Motor [FB1]</span><span class="path">TIA Portal V20 · PLC_1 › Program blocks</span></div>
+              <div class="bar"><span class="tab on">Fx_Motor [FB1]</span><span class="path">TIA Portal V20 · PLC_1 › Program blocks</span></div>
               <pre class="code" data-pane="tia"></pre>
-              <div class="status"><span class="led"></span><span class="text">Ready</span></div>
             </div>
           </div>
+          <div class="status"><span class="led"></span><span class="text">In sync</span></div>
+          <details class="log-box" open>
+            <summary>Sync log</summary>
 <pre class="term" aria-live="off"><code><span class="p">$</span> rung watch
 rung watch: C:\work\line-3 ⇄ D:\TIA\Line3.ap20 (poll 2000 ms, import auto). Ctrl+C to stop.
 <span class="log"></span></code></pre>
+          </details>
         </figure>
       </div>
     </section>
 
-    <div class="marquee" aria-label="Works with">
-      <div class="track">
-        <span>TIA Portal V20</span><span>S7-PLCSIM</span><span>CODESYS V3.5</span><span>TwinCAT 3</span><span>VS Code</span><span>Cursor</span><span>Zed</span><span>Neovim</span><span>Claude Code</span><span>Codex</span><span>Gemini CLI</span><span>GitHub Actions</span><span>GitLab CI</span><span>Linux</span><span>macOS</span>
-        <span aria-hidden="true">TIA Portal V20</span><span aria-hidden="true">S7-PLCSIM</span><span aria-hidden="true">CODESYS V3.5</span><span aria-hidden="true">TwinCAT 3</span><span aria-hidden="true">VS Code</span><span aria-hidden="true">Cursor</span><span aria-hidden="true">Zed</span><span aria-hidden="true">Neovim</span><span aria-hidden="true">Claude Code</span><span aria-hidden="true">Codex</span><span aria-hidden="true">Gemini CLI</span><span aria-hidden="true">GitHub Actions</span><span aria-hidden="true">GitLab CI</span><span aria-hidden="true">Linux</span><span aria-hidden="true">macOS</span>
-      </div>
-    </div>
-
-    <div id="features"></div>
-    <section class="rung-section reveal">
-      <div class="rung-label"><span class="contact" aria-hidden="true"></span><span>01</span></div>
-      <div class="rung-body split">
-        <div>
-          <h2>Both sides stay current</h2>
-          <p>
-            Start <code>rung watch</code> and leave it running. When you save a file, rung imports it through
-            Openness, compiles the block and writes TIA's version back, so the file always matches the project.
-            Change something in TIA Portal and the file follows within a couple of seconds. If both sides changed,
-            rung merges: SCL line by line, LAD and FBD network by network, so two people working on different
-            networks of one block both keep their change. A real conflict stops and shows you both sides, and a
-            sync cut off halfway picks up where it stopped.
-          </p>
-        </div>
-        <figure class="ladder" aria-label="A LAD block: network 1 changed in the file, network 2 changed in TIA Portal, both kept">
-          <svg viewBox="0 0 420 250" role="img">
-            <g class="rail"><line x1="20" y1="18" x2="20" y2="232"/><line x1="400" y1="18" x2="400" y2="232"/></g>
-            <text class="nl" x="30" y="30">Network 1</text>
-            <g class="net n1">
-              <line class="w" x1="20" y1="70" x2="96" y2="70"/>
-              <g class="ct"><line x1="96" y1="58" x2="96" y2="82"/><line x1="112" y1="58" x2="112" y2="82"/></g>
-              <text class="op" x="104" y="50">Start</text>
-              <line class="w" x1="112" y1="70" x2="186" y2="70"/>
-              <g class="ct nc"><line x1="186" y1="58" x2="186" y2="82"/><line x1="202" y1="58" x2="202" y2="82"/><line x1="188" y1="80" x2="200" y2="60"/></g>
-              <text class="op" x="194" y="50">Stop</text>
-              <line class="w" x1="202" y1="70" x2="300" y2="70"/>
-              <g class="coil"><path d="M300 58 a14 12 0 0 0 0 24"/><path d="M324 58 a14 12 0 0 1 0 24"/></g>
-              <text class="op" x="312" y="50">Running</text>
-              <line class="w" x1="324" y1="70" x2="400" y2="70"/>
-            </g>
-            <text class="tag file" x="232" y="102">edited in the file</text>
-            <text class="nl" x="30" y="146">Network 2</text>
-            <g class="net n2">
-              <line class="w" x1="20" y1="186" x2="96" y2="186"/>
-              <g class="ct"><line x1="96" y1="174" x2="96" y2="198"/><line x1="112" y1="174" x2="112" y2="198"/></g>
-              <text class="op" x="104" y="166">Running</text>
-              <line class="w" x1="112" y1="186" x2="186" y2="186"/>
-              <g class="box"><rect x="186" y="170" width="54" height="32" rx="3"/><text x="213" y="191">TON</text></g>
-              <line class="w" x1="240" y1="186" x2="300" y2="186"/>
-              <g class="coil"><path d="M300 174 a14 12 0 0 0 0 24"/><path d="M324 174 a14 12 0 0 1 0 24"/></g>
-              <text class="op" x="312" y="166">Ready</text>
-              <line class="w" x1="324" y1="186" x2="400" y2="186"/>
-            </g>
-            <text class="tag tia" x="190" y="222">edited in TIA Portal</text>
-          </svg>
-          <figcaption><span class="ok">merged</span> both changes kept · <code>rung sync</code></figcaption>
-        </figure>
+    <!-- ================================================================ compatibility -->
+    <section class="compat wrap" aria-label="Works with">
+      <div class="compat-grid">
+        <p class="compat-label">Engineering tools</p>
+        <div class="cell"><svg aria-hidden="true"><use href="assets/icons.svg#g-plc"/></svg><div><b>Siemens TIA Portal V20</b><span>Two-way project sync</span></div></div>
+        <div class="cell"><svg aria-hidden="true"><use href="assets/icons.svg#g-rack"/></svg><div><b>CODESYS V3.5</b><span>Two-way project sync</span></div></div>
+        <div class="cell"><svg aria-hidden="true"><use href="assets/icons.svg#g-source"/></svg><div><b>TwinCAT 3 sources</b><span>Language server and offline tests</span></div></div>
+        <p class="compat-label">Editors</p>
+        <div class="cell"><svg aria-hidden="true"><use href="assets/icons.svg#g-editor"/></svg><div><b>VS Code</b><span>Extension</span></div></div>
+        <div class="cell"><svg class="brand-mark" aria-hidden="true"><use href="assets/icons.svg#zedindustries"/></svg><div><b>Zed</b><span>Extension</span></div></div>
+        <div class="cell"><svg class="brand-mark" aria-hidden="true"><use href="assets/icons.svg#neovim"/></svg><div><b>Neovim</b><span>Configuration</span></div></div>
       </div>
     </section>
 
-    <section class="rung-section reveal">
-      <div class="rung-label"><span class="contact" aria-hidden="true"></span><span>02</span></div>
-      <div class="rung-body split">
+    <!-- ================================================================ workspace and editor -->
+    <section class="block wrap reveal" id="workspace">
+      <header class="head split-head">
         <div>
-          <h2>An editor that knows SCL</h2>
-          <p>
-            The language server completes variables and members, jumps to definitions through DBs, UDTs and
-            FB instances, finds references and renames safely. Compile errors from TIA Portal land on the line
-            they belong to, and the values of a running block appear at the end of its lines, like TIA's
-            monitoring. There are extensions for VS Code and Zed, and a short config for Neovim.
-            TwinCAT and CODESYS structured text work too.
-          </p>
+          <p class="kicker">Workspace</p>
+          <h2>Your project, as files</h2>
         </div>
-        <figure class="editor-bits" aria-label="Hover information, a compile error and live values in the editor">
-<pre class="snippet"><code>#SpeedOut := <u>#Motor.SpeedOut</u>;<span class="live">1500.0</span></code></pre>
-          <div class="hover"><b>SpeedOut</b> : <span class="t">Real</span><small>Output of "Fx_Motor"</small></div>
+        <p class="sub">Browse real files exported from rung’s TIA Portal V20 test project.</p>
+      </header>
+      <div class="explorer window">
+        <div class="chrome">
+          <span class="title">RungFixture · exported with <code>rung pull</code> · TIA Portal V20</span>
+        </div>
+        <div class="explorer-body">
+          <nav class="tree" aria-label="Workspace files"></nav>
+          <div class="viewer">
+            <div class="viewer-head">
+              <span class="viewer-name"></span>
+              <span class="viewer-path"></span>
+              <span class="viewer-kind"></span>
+              <button class="copy small" type="button">Copy</button>
+            </div>
+            <pre class="code viewer-code" tabindex="0"></pre>
+            <p class="viewer-note"></p>
+          </div>
+        </div>
+      </div>
+      <div class="under">
+        <p>One file per object. Hardware, HMI, technology objects and library views are read-only. The file format is documented and MIT-licensed.</p>
+        <details class="formats">
+          <summary>Supported file formats</summary>
+          <dl>
+            <div><dt>SCL</dt><dd>.scl</dd></div>
+            <div><dt>STL</dt><dd>.awl</dd></div>
+            <div><dt>Data block</dt><dd>.db</dd></div>
+            <div><dt>PLC data type</dt><dd>.udt</dd></div>
+            <div><dt>LAD</dt><dd>.s7dcl <small>SIMATIC SD</small></dd></div>
+            <div><dt>LAD / FBD</dt><dd>.xml <small>SimaticML</small></dd></div>
+            <div><dt>Tag table</dt><dd>.tags.st</dd></div>
+            <div><dt>Network settings</dt><dd>network.yaml</dd></div>
+            <div><dt>Unit tests</dt><dd>.test.yaml</dd></div>
+          </dl>
+        </details>
+      </div>
+
+      <div class="sub-block">
+        <h3 class="sub-title">SCL in your editor</h3>
+        <div class="lsp-grid">
+          <figure class="lsp-card">
+            <div class="lsp-demo">
+<pre class="snippet"><code><span class="k">IF</span> #Running <span class="k">THEN</span>
+    #SpeedOut := <u>#Motor.SpeedOut</u>;<span class="live">1500.0</span>
+<span class="k">END_IF</span>;</code></pre>
+              <div class="hover"><b>SpeedOut</b> : <span class="t">Real</span><small>Output of "Fx_Motor"</small></div>
+            </div>
+            <figcaption><b>Types and live values on hover</b>Read-only values from the PLC’s Web API, or from <code>rung simulate</code>.</figcaption>
+          </figure>
+          <figure class="lsp-card">
+            <div class="lsp-demo">
 <pre class="snippet diag"><code><span class="c">11</span>  <span class="err">#Missing</span> := #A;
-    <span class="msg">Tag #Missing not defined.  <em>TIA Portal</em></span></code></pre>
+    <span class="msg">Tag #Missing not defined.</span>
+    <span class="fix">Declare #Missing : Bool as a temporary (VAR_TEMP)</span></code></pre>
+            </div>
+            <figcaption><b>TIA compile errors beside your code</b>Quick fixes for tags, instance DBs and calls.</figcaption>
+          </figure>
+          <ul class="lsp-list">
+            <li><b>Autocomplete</b> variables and members</li>
+            <li><b>Go to definitions</b> in DBs, UDTs and FB instances</li>
+            <li><b>Find references</b> before you edit</li>
+            <li><b>Rename</b> symbols across references</li>
+            <li><b>TwinCAT and CODESYS</b> structured text too</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ playground -->
+    <section class="band play-band reveal" id="play">
+      <div class="wrap">
+        <header class="head split-head">
+          <div>
+            <p class="kicker">rung test</p>
+            <h2>Run a block. Change something.</h2>
+          </div>
+          <p class="sub">Edit the block or its test, then run it here with rung’s actual simulator.</p>
+        </header>
+        <div class="play window">
+          <div class="chrome play-chrome">
+            <div class="presets" role="tablist" aria-label="Example"></div>
+            <button class="btn small ghost reset" type="button">Reset example</button>
+          </div>
+          <div class="play-tabs only-phone" role="tablist" aria-label="File">
+            <button type="button" role="tab" aria-selected="true" data-show="src">Block</button>
+            <button type="button" role="tab" aria-selected="false" data-show="yaml">Test</button>
+          </div>
+          <div class="play-body">
+            <div class="ed" data-ed="src">
+              <div class="ed-bar"><span class="ed-name"></span><span class="ed-lang"></span></div>
+              <div class="ed-area"><pre class="ed-hl" aria-hidden="true"></pre><textarea spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Block source"></textarea></div>
+            </div>
+            <div class="ed" data-ed="yaml">
+              <div class="ed-bar"><span class="ed-name">tests/playground.test.yaml</span><span class="ed-lang">YAML</span></div>
+              <div class="ed-area"><pre class="ed-hl" aria-hidden="true"></pre><textarea spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Test"></textarea></div>
+            </div>
+          </div>
+          <div class="play-result" aria-live="polite"><span class="verdict">Run the example, then change it.</span><span class="timing"></span></div>
+          <div class="play-run">
+            <button class="btn primary run" type="button"><svg aria-hidden="true"><use href="assets/icons.svg#g-play"/></svg>Run test</button>
+            <button class="btn break" type="button"></button>
+            <p class="challenge"></p>
+          </div>
+          <details class="raw" hidden>
+            <summary>Raw output</summary>
+<pre class="term play-out"><code><span class="p">$</span> rung test
+<span class="out"></span></code></pre>
+          </details>
+          <p class="play-limit">Offline logic simulation. The time shown is this browser’s run, not a PLC scan: validate timing and hardware in PLCSIM or on the machine.</p>
+        </div>
+        <div class="coverage">
+          <div class="cov-table">
+            <table>
+              <caption>Simulator coverage</caption>
+              <tbody>
+                <tr><th>Languages</th><td>SCL, LAD, FBD, STL, TwinCAT and CODESYS structured text</td></tr>
+                <tr><th>Execution model</th><td>Virtual cycles, IEC timers, counters and edges</td></tr>
+                <tr><th>Instructions</th><td>Standard functions and a documented set of system instructions</td></tr>
+                <tr><th>Unsupported ones</th><td>Reported by name. A test can stub them: <code>RDREC: { VALID: true }</code></td></tr>
+                <tr><th>Out of scope</th><td>GRAPH, OB scheduling, interrupts, hardware timing</td></tr>
+              </tbody>
+            </table>
+            <a class="more" href="https://github.com/sa1ntsinner/rung/blob/main/docs/testing.md">Supported instructions and limits <svg aria-hidden="true"><use href="assets/icons.svg#g-arrow"/></svg></a>
+          </div>
+          <div class="ci">
+            <p class="ci-title"><svg class="brand-mark" aria-hidden="true"><use href="assets/icons.svg#githubactions"/></svg>Run these tests in CI</p>
+<pre class="snippet"><code><span class="k">- uses:</span> sa1ntsinner/rung@v1
+<span class="c"># or anywhere with Node.js 22</span>
+rung test --junit report.xml</code></pre>
+            <ul class="ticks">
+              <li>Linux runners, no TIA Portal or PLCSIM</li>
+              <li>Failed steps are annotated in the pull request</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================ evidence -->
+    <section class="block wrap reveal" id="evidence">
+      <header class="head split-head">
+        <div>
+          <p class="kicker">Recorded against TIA Portal V20</p>
+          <h2>Interruptions included.</h2>
+        </div>
+        <p class="sub">Two people. Six blocks. Syncs killed at random. Checks after every step, and at the end every file matches TIA Portal’s export.</p>
+      </header>
+      <div class="soak window">
+        <div class="chrome soak-chrome">
+          <span class="title">20-minute sync recording</span>
+          <div class="seeds" role="tablist" aria-label="Recording">
+            <button type="button" role="tab" data-seed="11" aria-selected="true">Seed 11 <small>fc47884</small></button>
+            <button type="button" role="tab" data-seed="7" aria-selected="false">Seed 7 <small>c316eba</small></button>
+          </div>
+          <div class="soak-actions">
+            <button class="btn small ghost replay" type="button"><svg aria-hidden="true"><use href="assets/icons.svg#g-play"/></svg>Play</button>
+            <button class="btn small ghost next-kill" type="button"><svg aria-hidden="true"><use href="assets/icons.svg#g-bolt"/></svg>Next interruption</button>
+          </div>
+        </div>
+        <div class="soak-body">
+          <div class="soak-chart" role="img" aria-label="Timeline of the recorded run: every action by time, the syncs that were interrupted, and what each sync synced"></div>
+          <aside class="inspector" aria-live="polite"></aside>
+        </div>
+        <div class="soak-totals">
+          <div><b data-t="actions">247</b><span>actions recorded</span></div>
+          <div class="warm"><b data-t="killed">78</b><span>interrupted syncs</span></div>
+          <div><b data-t="merged">42</b><span>merges</span></div>
+          <div class="ok"><b data-t="conflicts">0</b><span>conflicts</span></div>
+          <div class="ok"><b data-t="problems">0</b><span>check failures</span></div>
+        </div>
+        <p class="soak-foot"><span class="steps-note"></span><a class="step-link" href="#evidence">Copy link to this step</a><a href="assets/data/soak.json" download>Download recording data</a></p>
+      </div>
+      <details class="checks">
+        <summary>What the test checks</summary>
+        <ul class="ticks">
+          <li>No conflict where nobody edited the same line</li>
+          <li>No crash and no stack trace from any sync</li>
+          <li>At the end, every file equals TIA Portal’s export</li>
+          <li>Both people’s last values are there</li>
+          <li>Nothing left behind: no temporary or conflict files</li>
+        </ul>
+        <p class="fine">Each recording names the commit it ran on. Source: <a href="https://github.com/sa1ntsinner/rung/blob/main/tests/e2e/soak.e2e.test.ts">tests/e2e/soak.e2e.test.ts</a>.</p>
+      </details>
+
+      <div class="proof-grid">
+        <figure class="program">
+          <figcaption><b>One production program</b><span>42 of 43 blocks run in <code>rung test</code>, including 8 that need stubs.</span></figcaption>
+          <div class="squares" aria-label="34 blocks run without stubs, 8 with stubs, 1 does not run offline"></div>
+          <p class="legend"><span class="k-ok">Runs</span><span class="k-stub">Runs with stubs</span><span class="k-no">Does not run offline</span></p>
+          <p class="fine">One confidential machine program, so no names. It does not stand for general compatibility.</p>
         </figure>
-      </div>
-    </section>
-
-    <section class="rung-section reveal">
-      <div class="rung-label"><span class="contact" aria-hidden="true"></span><span>03</span></div>
-      <div class="rung-body split">
-        <div>
-          <h2>Tests for blocks, without a PLC</h2>
-          <p>
-            Describe a few scan cycles in YAML and <code>rung test</code> runs them on an offline simulator:
-            SCL, LAD, FBD, STL and structured text, with virtual time, IEC timers and counters, edges and common
-            system instructions. What it does not model, a test replaces with a stub, and anything else it refuses
-            by name instead of guessing. No PLC, PLCSIM or TIA Portal, so it runs on any CI runner, Linux too, and a
-            failed step shows on its line in the pull request.
-          </p>
+        <div class="verify">
+          <table>
+            <caption>Automated checks on every change</caption>
+            <tbody>
+              <tr><th>TIA Portal V20 bridge checks</th><td><b>34 / 34</b></td></tr>
+              <tr><th>S7-PLCSIM and CODESYS end to end</th><td><b>pass</b></td></tr>
+              <tr><th>TypeScript tests</th><td><b>700+</b></td></tr>
+              <tr><th>.NET tests</th><td><b>234</b></td></tr>
+              <tr><th>Runners</th><td>Windows and Linux</td></tr>
+            </tbody>
+          </table>
         </div>
-<pre class="snippet yaml"><code><span class="c"># tests/motor.test.yaml</span>
-<span class="k">block:</span> Fx_Motor
-<span class="k">cases:</span>
-  - <span class="k">name:</span> starts and latches
-    <span class="k">steps:</span>
-      - <span class="k">set:</span> { Start: <span class="n">true</span>, SpeedSetpoint: <span class="n">1500</span> }
-      - <span class="k">cycle:</span> <span class="n">1</span>
-      - <span class="k">expect:</span> { Running: <span class="n">true</span>, SpeedOut: <span class="n">1500</span> }
-
-<span class="c">$ rung test</span>
-<span class="pass">ok  </span> Fx_Motor: starts and latches
-<span class="c">1/1 passed (offline simulation — not a PLCSIM run)</span></code></pre>
       </div>
     </section>
 
-    <section class="rung-section reveal">
-      <div class="rung-label"><span class="contact" aria-hidden="true"></span><span>04</span></div>
-      <div class="rung-body split">
+    <!-- ================================================================ agents -->
+    <section class="block wrap reveal agents">
+      <header class="head split-head">
         <div>
-          <h2>Agents edit files, not the project</h2>
-          <p>
-            Claude Code, Codex and Cursor change the text files like any other code, and rung carries the
-            change into TIA Portal. A small MCP server gives them what the files can't: sync status, compile
-            results, cross references and the test runner. <code>rung setup</code> connects every agent it finds,
-            with skills for the sync workflow, for keeping away from safety code, and for reviewing a change
-            before it goes in. Downloads to a PLC stay with a person.
-          </p>
+          <p class="kicker">Coding agents</p>
+          <h2>Agents edit. People download to the PLC.</h2>
         </div>
-<pre class="snippet tools" aria-label="MCP tools"><code><span class="c">$ rung mcp</span>
-rung_status        rung_sync
-rung_diagnostics   rung_compile
-rung_find_usages   rung_graph
-rung_explain       rung_diff
-rung_test          rung_live_read
-<span class="c">…and a few more</span></code></pre>
+        <p class="sub">Agents edit project files and use MCP tools for status, diagnostics, references and tests.</p>
+      </header>
+      <div class="flow" aria-label="An agent edits workspace files, rung carries them into the TIA Portal project, and only a person downloads to the PLC">
+        <div class="node"><svg aria-hidden="true"><use href="assets/icons.svg#g-term"/></svg><p><b>Coding agent</b><span>edits files</span></p></div>
+        <i class="edge"></i>
+        <div class="node"><svg aria-hidden="true"><use href="assets/icons.svg#g-files"/></svg><p><b>Workspace</b><span>plain text, in git</span></p></div>
+        <i class="edge"></i>
+        <div class="node accent"><svg class="mk" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark"/></svg><p><b>rung</b><span>import, compile, merge</span></p></div>
+        <i class="edge"></i>
+        <div class="node"><svg aria-hidden="true"><use href="assets/icons.svg#g-plc"/></svg><p><b>TIA Portal project</b><span>through Openness</span></p></div>
+        <i class="edge gate"><span><svg aria-hidden="true"><use href="assets/icons.svg#g-person"/></svg>a person</span></i>
+        <div class="node"><svg aria-hidden="true"><use href="assets/icons.svg#g-bolt"/></svg><p><b>PLC</b><span>download</span></p></div>
       </div>
-    </section>
-
-    <section class="rung-section reveal">
-      <div class="rung-label"><span class="contact" aria-hidden="true"></span><span>05</span></div>
-      <div class="rung-body split">
-        <div>
-          <h2>A review that knows PLCs</h2>
-          <p>
-            rung Pro reads a change the way a controls engineer does: the interface variable by variable,
-            attributes such as optimized access and retain, the logic per region and per LAD or FBD network,
-            tag addresses, network settings, and which callers and instance DBs it touches. Nothing it cannot
-            explain is ever called formatting. It gates pull requests in your own CI and writes the change
-            record for FAT and SAT.
-          </p>
-        </div>
-<pre class="snippet review"><code><span class="c">$ rung-pro review --fat --out FAT-v1.5.md</span>
-<b>## plc/PLC_1/blocks/Fx_Motor.scl</b> (modified)
-<b>FB Fx_Motor</b> — modified
-| <span class="add">+</span> | Output | Ready | | <span class="t">Bool</span> |
-Logic:
-<span class="warn">- #Overspeed := #Speed &gt; 3000.0;</span>
-<span class="add">+ #Overspeed := #Speed &gt; 2500.0;</span>
-<span class="add">+ #Ready := #Running AND NOT #Overspeed;</span>
-Affected (callers, instances, users): Main
-<b>## Sign-off</b>  <span class="c">author · reviewer · safety · customer</span></code></pre>
-      </div>
-    </section>
-
-    <section class="proof reveal" aria-label="Measured">
-      <h2>Measured against real TIA Portal</h2>
-      <div class="stats">
-        <div class="stat"><b data-count="255">255</b><span>sync steps in a 20-minute soak: two people edit, syncs are killed at random, nothing typed is lost</span></div>
-        <div class="stat"><b data-count="42" data-suffix=" / 43">42 / 43</b><span>blocks of a production machine's PLC program run offline in <code>rung test</code>, 8 of them with stubs</span></div>
-        <div class="stat"><b data-count="34" data-suffix=" / 34">34 / 34</b><span>bridge tests against TIA Portal V20, plus S7-PLCSIM and CODESYS end to end</span></div>
-        <div class="stat"><b data-count="700" data-suffix="+">700+</b><span>automated tests run on every change</span></div>
-      </div>
-    </section>
-
-    <section class="careful reveal">
-      <h2>Careful by default</h2>
-      <ul>
-        <li>It talks to TIA Portal only through Siemens' Openness API and never opens project files itself.</li>
-        <li>It never downloads by itself. A person starts every download, types the PLC name and allows each risky question TIA asks by name. Live values come from the S7-1500 Web API, read only.</li>
-        <li>Failsafe, know-how protected, system and GRAPH blocks and instances of library types are exported for reading and never imported.</li>
-        <li>Imports run inside a TIA transaction and check the block's revision first. If someone changed it in the meantime, rung merges or stops.</li>
-        <li>Deleting a file never deletes a block. You confirm that yourself with <code>rung confirm-delete</code>.</li>
+      <ul class="rules">
+        <li><b>Project changes go through Siemens Openness.</b> rung never opens project files itself.</li>
+        <li><b>Conflicts stop for review.</b> Nothing is overwritten to make a sync pass.</li>
+        <li><b>A person starts every PLC download.</b> Each risky TIA question is allowed by name.</li>
       </ul>
+      <div class="agents-grid">
+        <div class="setup">
+<pre class="snippet"><code><span class="c">$</span> rung setup</code></pre>
+          <p>Connects the agents it finds and installs skills for syncing, reviewing changes and staying away from safety code.</p>
+          <ul class="agent-list">
+            <li><svg class="brand-mark" aria-hidden="true"><use href="assets/icons.svg#claude"/></svg>Claude Code</li>
+            <li><svg aria-hidden="true"><use href="assets/icons.svg#g-term"/></svg>Codex</li>
+            <li><svg class="brand-mark" aria-hidden="true"><use href="assets/icons.svg#cursor"/></svg>Cursor</li>
+            <li><svg aria-hidden="true"><use href="assets/icons.svg#g-term"/></svg>Gemini CLI</li>
+          </ul>
+        </div>
+        <div class="disclosures">
+          <details>
+            <summary>MCP tools <span><code>rung mcp</code></span></summary>
+            <dl class="tool-grid">
+              <div><dt>rung_status</dt><dd>Sync state</dd></div>
+              <div><dt>rung_sync</dt><dd>Sync now</dd></div>
+              <div><dt>rung_diagnostics</dt><dd>Compile errors</dd></div>
+              <div><dt>rung_compile</dt><dd>Compile</dd></div>
+              <div><dt>rung_find_usages</dt><dd>References</dd></div>
+              <div><dt>rung_graph</dt><dd>Call graph</dd></div>
+              <div><dt>rung_explain</dt><dd>Explain a block</dd></div>
+              <div><dt>rung_diff</dt><dd>What changed</dd></div>
+              <div><dt>rung_test</dt><dd>Run tests</dd></div>
+              <div><dt>rung_live_read</dt><dd>Live values</dd></div>
+            </dl>
+          </details>
+          <details>
+            <summary>Built-in safeguards</summary>
+            <table class="defaults">
+              <tbody>
+                <tr><th>Project access</th><td>Through Siemens Openness; project files are never opened directly</td></tr>
+                <tr><th>Imports</th><td>Revision checked first, inside a TIA transaction</td></tr>
+                <tr><th>Conflicts</th><td>Sync stops for a person</td></tr>
+                <tr><th>Deleted file</th><td>The block stays until <code>rung confirm-delete</code></td></tr>
+                <tr><th>Protected objects</th><td>Failsafe, know-how protected, system, GRAPH and library instances are read-only</td></tr>
+                <tr><th>Downloads</th><td>A person starts each one and allows every risky TIA question by name</td></tr>
+              </tbody>
+            </table>
+          </details>
+          <p class="fine">Agent instructions do not restrict a shell: an agent with one has your permissions. <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/downloads.md">Keep a PLC out of an agent’s reach</a>.</p>
+        </div>
+      </div>
     </section>
 
-    <div id="pricing"></div>
-    <section class="pricing reveal">
-      <h2>Pricing</h2>
+    <!-- ================================================================ pro, then pricing -->
+    <section class="block wrap reveal pro-sec">
+      <header class="head split-head">
+        <div>
+          <p class="kicker">rung Pro</p>
+          <h2>Review what changed, and what it affects</h2>
+        </div>
+        <p class="sub">Interfaces, logic, addresses and callers, read like a controls engineer reads them. A gate in your CI and a FAT/SAT change record.</p>
+      </header>
+      <div class="pro-grid">
+        <figure class="diff">
+          <figcaption>git diff · Fx_Motor.scl</figcaption>
+<pre class="snippet"><code>   #Running := #Latch;
+<span class="del">-  #Overspeed := #Speed &gt; 3000.0;</span>
+<span class="add">+  #Overspeed := #Speed &gt; 2500.0;</span>
+<span class="add">+  #Ready := #Running AND NOT #Overspeed;</span>
+   END_FUNCTION_BLOCK</code></pre>
+        </figure>
+        <div class="review window">
+          <div class="chrome review-chrome">
+            <div class="review-tabs" role="tablist" aria-label="Review">
+              <button type="button" role="tab" aria-selected="true" data-rt="interface">Interface</button>
+              <button type="button" role="tab" aria-selected="false" data-rt="logic">Logic</button>
+              <button type="button" role="tab" aria-selected="false" data-rt="affected">Affected blocks</button>
+            </div>
+            <span class="title">rung-pro review --fat</span>
+          </div>
+          <div class="review-body">
+            <p class="review-head"><b>FB Fx_Motor</b> — modified</p>
+            <div data-rp="interface">
+              <table class="rtable"><thead><tr><th></th><th>Section</th><th>Name</th><th>Type</th></tr></thead>
+                <tbody><tr class="add"><td>+</td><td>Output</td><td>Ready</td><td>Bool</td></tr></tbody></table>
+            </div>
+            <div data-rp="logic" hidden>
+<pre class="snippet flat"><code>Logic:
+<span class="del">- #Overspeed := #Speed &gt; 3000.0;</span>
+<span class="add">+ #Overspeed := #Speed &gt; 2500.0;</span>
+<span class="add">+ #Ready := #Running AND NOT #Overspeed;</span></code></pre>
+            </div>
+            <div data-rp="affected" hidden>
+              <p class="affected"><span>Callers, instances and users</span><b>Main</b></p>
+            </div>
+          </div>
+          <p class="review-foot"><span>CI policy gate</span><span>FAT/SAT change record</span><span>Support</span><a href="#pricing">Pricing <svg aria-hidden="true"><use href="assets/icons.svg#g-arrow"/></svg></a></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="block wrap reveal" id="pricing">
+      <header class="head split-head">
+        <div>
+          <p class="kicker">Plans</p>
+          <h2>Pricing</h2>
+        </div>
+        <p class="sub">Free for individuals, education, non-commercial open source and organizations with up to three rung users. Pro adds change review, CI policy gates, FAT/SAT records and support.</p>
+      </header>
       <div class="plans">
         <article class="plan">
           <h3>Free</h3>
           <p class="price">€0</p>
-          <p class="who">Individuals, education, non-commercial open source, and organizations where up to three people use it.</p>
-          <ul>
-            <li>Two-way sync with TIA Portal and CODESYS</li>
-            <li>Language server, VS Code and Zed extensions</li>
-            <li><code>rung test</code> on your CI</li>
+          <p class="who">Individuals, education, non-commercial open source, and organizations with up to three rung users.</p>
+          <ul class="ticks">
+            <li>Two-way sync</li>
+            <li>Language server and editor extensions</li>
+            <li>Offline tests and CI</li>
             <li>MCP server and agent skills</li>
           </ul>
-          <a class="btn" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Get started</a>
+          <a class="btn" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Read quickstart</a>
         </article>
         <article class="plan pro">
           <h3>Pro</h3>
-          <p class="price">€49<small> per user / month</small></p>
-          <p class="who">Teams of any size. The commercial license and what a team needs on top.</p>
-          <ul>
+          <p class="price">€49<small>per user / month</small></p>
+          <p class="who">Teams of any size.</p>
+          <ul class="ticks">
             <li>Everything in Free</li>
-            <li>Change review that knows PLCs</li>
-            <li>Policy gate in your own CI</li>
+            <li><a href="https://github.com/sa1ntsinner/rung/blob/main/LICENSE">Commercial license</a></li>
+            <li>PLC change review</li>
+            <li>CI policy gate</li>
             <li>FAT/SAT change records</li>
             <li>Support</li>
           </ul>
-          <a class="btn primary" href="https://github.com/sa1ntsinner">Contact</a>
+          <a class="btn primary" href="https://github.com/sa1ntsinner">Discuss Pro on GitHub</a>
         </article>
         <article class="plan">
           <h3>Enterprise</h3>
           <p class="price">On request</p>
-          <p class="who">For plants and machine builders that roll rung out across teams.</p>
-          <ul>
+          <p class="who">For plants and machine builders deploying rung across teams.</p>
+          <ul class="ticks">
             <li>Everything in Pro</li>
             <li>SLA and onboarding</li>
-            <li>Training for your engineers</li>
-            <li>Your own review rules, offline installation</li>
+            <li>Training</li>
+            <li>Your own review rules</li>
+            <li>Offline installation</li>
           </ul>
-          <a class="btn" href="https://github.com/sa1ntsinner">Contact</a>
+          <a class="btn" href="https://github.com/sa1ntsinner">Discuss Enterprise on GitHub</a>
         </article>
       </div>
     </section>
 
-    <section class="facts reveal">
-      <div>
-        <h3>Requirements</h3>
-        <p>Windows with TIA Portal V20 and the Openness option (your user in the <em>Siemens TIA Openness</em> group), or with CODESYS V3.5. From Linux or macOS, a Windows PC with it over ssh.</p>
-      </div>
-      <div>
-        <h3>Status</h3>
-        <p>Pre-release, no public release yet. Tested against real TIA Portal V20, S7-PLCSIM and CODESYS V3.5 on generated projects; the end-to-end suites pass. V21 builds but is untested.</p>
-      </div>
-      <div>
-        <h3>License</h3>
-        <p>The core is source-available under the Business Source License 1.1, and each release becomes Apache 2.0 after three years. Editor extensions, grammar and file format are MIT.</p>
+    <!-- ================================================================ requirements -->
+    <section class="block wrap reveal spec">
+      <header class="head">
+        <p class="kicker">Before you start</p>
+        <h2>Requirements</h2>
+      </header>
+      <ul class="spec-rows">
+        <li><b>TIA Portal</b><span>Windows, V20 with Openness</span></li>
+        <li><b>CODESYS</b><span>Windows, V3.5; tested with SP22</span></li>
+        <li><b>Offline tests</b><span>No TIA Portal or PLCSIM required, Linux too</span></li>
+      </ul>
+      <div class="spec-more">
+        <details>
+          <summary>Platform details</summary>
+          <table><tbody>
+            <tr><th>TIA Portal</th><td>Your Windows user in the <em>Siemens TIA Openness</em> group</td></tr>
+            <tr><th><svg class="brand-mark inline" aria-hidden="true"><use href="assets/icons.svg#linux"/></svg>Linux, macOS</th><td>Connect over ssh to a Windows PC running the engineering software</td></tr>
+            <tr><th>TwinCAT</th><td>Its existing sources, with the language server and the simulator</td></tr>
+            <tr><th>TIA Portal V21</th><td>Builds; not tested</td></tr>
+          </tbody></table>
+        </details>
+        <details>
+          <summary>Installation options</summary>
+          <table><tbody>
+            <tr><th>VS Code extension</th><td>Includes rung</td></tr>
+            <tr><th><code>rung.exe</code></th><td>No separate runtime</td></tr>
+            <tr><th><code>rung.cjs</code></th><td>Node.js 22 or newer</td></tr>
+          </tbody></table>
+        </details>
+        <details>
+          <summary>Licenses</summary>
+          <table><tbody>
+            <tr><th>Core</th><td>Business Source License 1.1; each release becomes Apache 2.0 after three years</td></tr>
+            <tr><th>Extensions, grammar, protocol client, file format</th><td>MIT</td></tr>
+            <tr><th>TIA Portal and CODESYS</th><td>Their own licenses are still required</td></tr>
+          </tbody></table>
+        </details>
       </div>
     </section>
 
-    <div class="start reveal">
-<pre><code><span class="p">$</span> rung init --project D:\TIA\Line3.ap20
-<span class="p">$</span> rung pull
-<span class="p">$</span> rung watch</code></pre>
-      <button class="copy" type="button" data-copy="rung init --project D:\TIA\Line3.ap20&#10;rung pull&#10;rung watch">Copy</button>
-    </div>
+    <!-- ================================================================ start -->
+    <section class="start-sec wrap reveal">
+      <div class="start">
+        <div>
+          <h2>How a project connects</h2>
+          <p>Open a TIA Portal project, link a folder to it, then pull and sync its files.</p>
+          <p class="avail">Pre-release: there is no public release yet. The quickstart describes the setup of the first one.</p>
+          <div class="actions">
+            <a class="btn primary" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Read quickstart</a>
+            <button class="btn copy" type="button" data-copy="rung init --project D:\TIA\Line3.ap20&#10;rung pull&#10;rung watch">Copy commands</button>
+          </div>
+        </div>
+<pre class="cmds"><code><span class="p">$</span> rung init --project D:\TIA\Line3.ap20   <span class="c"># link the folder</span>
+<span class="p">$</span> rung pull                               <span class="c"># export to files</span>
+<span class="p">$</span> rung watch                              <span class="c"># keep both sides in sync</span></code></pre>
+      </div>
+    </section>
   </main>
 
-  <footer>
+  <footer class="wrap foot">
     <span class="brand small"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#mark"/></svg>rung</span>
-    <p>Not affiliated with Siemens AG. TIA Portal, SIMATIC and STEP 7 are trademarks of Siemens AG.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/sa1ntsinner/rung/tree/main/docs">Docs</a>
+      <a href="https://github.com/sa1ntsinner/rung">Source</a>
+      <a href="https://github.com/sa1ntsinner/rung/blob/main/LICENSE">License</a>
+    </nav>
+    <label class="theme">Theme
+      <select aria-label="Theme">
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </label>
+    <p>Not affiliated with Siemens AG. TIA Portal, SIMATIC and STEP 7 are trademarks of Siemens AG. Other names and marks belong to their owners.</p>
   </footer>
 
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
