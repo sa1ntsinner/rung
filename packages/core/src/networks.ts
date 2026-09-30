@@ -74,7 +74,8 @@ function mapIds(xml: string, value: () => string): string {
       else if (c === ">") break;
     }
     const tag = xml.slice(lt, j + 1);
-    out += tag.replace(/(\sID=")[^"]*(")/g, (_, a: string, b: string) => `${a}${value()}${b}`);
+    // attribute by attribute, each with its whole quoted value: ID="x" inside another attribute's value is text
+    out += tag.replace(/(\s)([^\s=/>]+)(\s*=\s*)("[^"]*"|'[^']*')/g, (m, sp: string, name: string, eq: string, v: string) => (name === "ID" ? `${sp}${name}${eq}${v[0]}${value()}${v[0]}` : m));
     i = j + 1;
   }
   return out + xml.slice(i);

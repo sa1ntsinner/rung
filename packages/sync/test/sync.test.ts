@@ -823,6 +823,23 @@ describe("syncOnce", () => {
     expect(t.read(pA)).toBe(tiaNow());
   });
 
+  it("an interrupted create: a change of spaces inside a string in TIA Portal is an edit, not layout", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    const src = srcA.replace("#z := 3;", "#s := 'a b';");
+    t.write(pA, src);
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    const tiaNow = () => t.bridge.objects.get(A)!.files[".scl"]!;
+    t.bridge.edit(A, { ".scl": tiaNow().replace("'a b'", "'ab'") });
+    t.write(pA, src.replace("#x := 1;", "#x := 5;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    expect(tiaNow()).toContain("#s := 'ab';");
+    expect(tiaNow()).toContain("#x := 5;");
+  });
+
   it("an interrupted create both edited on the same line is a conflict, not an overwrite", async () => {
     const t = setup(() => {});
     await t.sync();

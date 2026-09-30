@@ -167,6 +167,24 @@ describe("recoverJournal", () => {
     expect(readdirSync(join(root, ".rung", "journal"))).toHaveLength(0);
   });
 
+  it("drops a write-back whose file to remove was edited since, and keeps that file", async () => {
+    const root = ws();
+    const h = await new BlobStore(root).put("new\n");
+    mkdirSync(join(root, "plc/P/blocks"), { recursive: true });
+    writeFileSync(join(root, "plc/P/blocks/B.scl"), "old\n");
+    writeFileSync(join(root, "plc/P/blocks/B.s7res"), "edited\n");
+    await new Journal(root).write({
+      opId: "rm",
+      address: "plc:P/blocks/B",
+      targets: [{ path: "plc/P/blocks/B.scl", hash: h, prevHash: sha256("old\n") }],
+      removes: [{ path: "plc/P/blocks/B.s7res", prevHash: sha256("res\n") }],
+      nextState: next("plc:P/blocks/B", "plc/P/blocks/B.scl", h),
+    });
+    const r = await recoverJournal(root);
+    expect(r).toEqual({ completed: [], recoveryRequired: [], dropped: ["plc:P/blocks/B"] });
+    expect(readFileSync(join(root, "plc/P/blocks/B.s7res"), "utf8")).toBe("edited\n");
+  });
+
   it("puts back a file the dropped write-back had moved aside", async () => {
     const root = ws();
     const blobs = new BlobStore(root);

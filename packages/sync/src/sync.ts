@@ -120,11 +120,27 @@ interface ImportJob {
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
 const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
-/** The same texts but for spaces and line breaks: TIA Portal's own layout of what was sent. */
+/** The same texts but for spaces and line breaks outside '…' and "…": TIA Portal's own layout of what was sent. */
 const sameLayoutFree = (a: Record<string, string>, b: Record<string, string>) => {
-  const squeeze = (x: Record<string, string>) => Object.fromEntries(Object.entries(x).map(([k, v]) => [k, v.replace(/\s+/g, "")]));
+  const squeeze = (x: Record<string, string>) => Object.fromEntries(Object.entries(x).map(([k, v]) => [k, withoutLayout(v)]));
   return sameTexts(squeeze(a), squeeze(b));
 };
+function withoutLayout(text: string): string {
+  let out = "";
+  let quote: string | undefined;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (quote) {
+      out += c;
+      if (c === "$" && quote === "'") out += text[++i] ?? ""; // $' and $$ inside a string
+      else if (c === quote) quote = undefined; // '' and "" inside a literal close and reopen: the same text either way
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      out += c;
+    } else if (!/\s/.test(c)) out += c;
+  }
+  return out;
+}
 const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml", "tags.st", "st"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 

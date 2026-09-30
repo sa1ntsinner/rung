@@ -202,6 +202,13 @@ export async function recoverJournal(root: string): Promise<RecoveryReport> {
       if (now === "absent" && (await hasPreimage(root, intent.opId, t.prevHash))) continue;
       consistent = false;
     }
+    // a file it was to remove, edited since, is the person's too
+    const targetKeys = new Set(intent.targets.map((t) => fold(t.path)));
+    for (const r of intent.removes) {
+      if (targetKeys.has(fold(r.path))) continue;
+      const now = await currentHash(abs(root, r.path));
+      if (now !== "absent" && now !== r.prevHash) consistent = false;
+    }
     if (!consistent) {
       // A file was edited after the write-back stopped. The person's files stay and the write-back is dropped;
       // the state stays as it was, so the next pass compares the files with TIA Portal again (a merge, or a

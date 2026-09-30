@@ -55,6 +55,29 @@ interface Node {
 const COMPARE: Record<string, string> = { EQ: "=", NE: "<>", GT: ">", GE: ">=", LT: "<", LE: "<=" };
 const MATH: Record<string, string> = { ADD: "+", SUB: "-", MUL: "*", DIV: "/", MOD: "MOD" };
 const UNARY = new Set(["ABS", "SQRT", "SQR", "LN", "EXP", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN"]);
+/**
+ * What a data type holds, for ENO: an integer result outside it, or a REAL that overflows or is not a number,
+ * clears ENO. 64-bit integers are left out: their limits are beyond exact arithmetic here.
+ */
+const RANGE: Record<string, [string, string]> = {
+  SINT: ["-128", "127"],
+  INT: ["-32768", "32767"],
+  DINT: ["-2147483648", "2147483647"],
+  USINT: ["0", "255"],
+  UINT: ["0", "65535"],
+  UDINT: ["0", "4294967295"],
+  BYTE: ["0", "255"],
+  WORD: ["0", "65535"],
+  DWORD: ["0", "4294967295"],
+  REAL: ["-3.4028235E38", "3.4028235E38"],
+  LREAL: ["-1.7976931348623157E308", "1.7976931348623157E308"],
+};
+/** Whether every value of `narrow` fits `wide` (a conversion from one to the other never overflows). */
+const contains = (wide: string, narrow: string) => {
+  const w = RANGE[wide.toUpperCase()];
+  const n = RANGE[narrow.toUpperCase()];
+  return !!w && !!n && Number(w[0]) <= Number(n[0]) && Number(n[1]) <= Number(w[1]);
+};
 /** IEC timers, counters and triggers: their inputs; everything else they have is an output. */
 const IEC_INPUTS: Record<string, string[]> = {
   TON: ["IN", "PT"],
@@ -151,7 +174,7 @@ class Network {
     for (const node of this.idents.get(uid) ?? [])
       for (const e of node.ends) {
         if (e.kind !== "pin") continue;
-        if (this.isOutput(e.uid, e.pin)) return true;
+        if (this.isOutput(e.uid, e.pin) || this.isInOut(e.uid, e.pin)) return true;
         const part = this.items.get(e.uid);
         if (part?.name === "Part" && WRITES[(part.attrs.Name?.value ?? "").toUpperCase()]?.includes(e.pin)) return true;
       }
@@ -182,6 +205,12 @@ class Network {
       if (param) return /^(Output|Return)$/.test(param.attrs.Section?.value ?? "");
     }
     return OUTPUT_PIN.test(pin);
+  }
+
+  /** An in/out parameter of a call: the block reads and writes the operand wired to it. */
+  private isInOut(uid: string, pin: string): boolean {
+    const p = this.items.get(uid);
+    return p?.name === "Call" && kids(kid(p, "CallInfo"), "Parameter").some((x) => x.attrs.Name?.value.toLowerCase() === pin && x.attrs.Section?.value === "InOut");
   }
 
   /** What drives the wire a pin is on: the power rail, an output pin, else an operand. */
@@ -236,7 +265,7 @@ class Network {
       throw new Error(`${this.items.get(uid)?.attrs.Name?.value ?? "a part"} has no output ${pin} the simulator knows`);
     }
     // a branch splits here: the power flow is taken once, as the PLC does, not again for each branch
-    if (this.consumers(uid, pin) > 1 && !simple(e)) {
+    if (this.consumers(uid, pin) > 1 && !fixed(e)) {
       const key = `${uid}:${pin}`;
       let t = this.splits.get(key);
       if (!t) this.splits.set(key, (t = this.temp(e)));
@@ -254,7 +283,7 @@ class Network {
 
   /** A flow that goes on past a part with side effects is taken before them. */
   private pass(uid: string, pin: string, flow: string): string {
-    return this.consumers(uid, pin) && !simple(flow) ? this.temp(flow) : flow;
+    return this.consumers(uid, pin) && !fixed(flow) ? this.temp(flow) : flow;
   }
 
   private guarded(en: string, stmts: string[]) {
@@ -354,22 +383,62 @@ class Network {
       }
       case "INC":
       case "DEC": {
-        const eno = this.pass(uid, "eno", en());
         const t = this.target(uid, "operand");
-        this.guarded(eno, [`${t} := ${t} ${P === "INC" ? "+" : "-"} 1;`]);
-        return { eno };
+        const v = `${t} ${P === "INC" ? "+" : "-"} 1`;
+        const range = RANGE[(template("SrcType") ?? "").toUpperCase()];
+        if (!range || !this.consumers(uid, "eno")) {
+          const eno = this.pass(uid, "eno", en());
+          this.guarded(eno, [`${t} := ${v};`]);
+          return { eno };
+        }
+        // ENO is 0 when the operand leaves its data type (it wraps round)
+        const flow = en();
+        const ok = this.temp(`${flow === "TRUE" ? "" : `${wrapFlow(flow)} AND `}${range[0]} <= ${v} AND ${v} <= ${range[1]}`);
+        this.guarded(flow, [`${t} := ${v};`]);
+        return { eno: ok };
       }
     }
     if (COMPARE[P]) return { out: andFlow(this.input(uid, "pre") ?? "TRUE", `${wrapFlow(this.need(uid, "in1"))} ${COMPARE[P]} ${wrapFlow(this.need(uid, "in2"))}`) };
-    const box = (value: () => string) => {
-      const eno = this.pass(uid, "eno", en());
+    // A box writing OUT: ENO is EN, and 0 where Siemens clears it: a result outside OUT's data type, a division by 0
+    // (OUT is then not written). Both are taken before OUT is written: OUT may be one of the inputs.
+    const box = (value: () => string, type?: string, divisor?: () => string, checked?: () => string, widen = false): Record<string, string> => {
+      const flow = en();
       const v = value();
-      this.guarded(eno, this.targets(uid, "out").map((t) => `${t} := ${v};`));
-      return { eno };
+      const d = divisor?.();
+      const range = type ? RANGE[type.toUpperCase()] : undefined;
+      if (type && !range && this.consumers(uid, "eno")) {
+        this.missing.set(uid, `${name} on ${type} with ENO wired on (its overflow is not modelled)`);
+        return {};
+      }
+      // the value against OUT's range: the result, or for a conversion its input (a REAL rounds to the nearest)
+      const c = wrapFlow(checked?.() ?? v);
+      const bounds = range ? (widen ? [`${range[0]} - 0.5 < ${c}`, `${c} < ${range[1]} + 0.5`] : [`${range[0]} <= ${c}`, `${c} <= ${range[1]}`]) : [];
+      const assigns = this.targets(uid, "out").map((t) => `${t} := ${v};`);
+      const enAnd = flow === "TRUE" ? "" : `${wrapFlow(flow)} AND `;
+      if (d) {
+        // the result is worked out only when the divisor is not 0
+        const go = this.temp(`${enAnd}${wrapFlow(d)} <> 0`);
+        let ok = go;
+        if (bounds.length && this.consumers(uid, "eno")) {
+          ok = this.temp("FALSE");
+          this.lines.push(`IF ${go} THEN ${ok} := ${bounds.join(" AND ")}; END_IF;`);
+        }
+        this.guarded(go, assigns);
+        return { eno: ok };
+      }
+      if (!bounds.length || !this.consumers(uid, "eno")) {
+        const eno = this.pass(uid, "eno", flow);
+        this.guarded(eno, assigns);
+        return { eno };
+      }
+      const ok = this.temp(`${enAnd}${bounds.join(" AND ")}`);
+      this.guarded(flow, assigns);
+      return { eno: ok };
     };
-    if (MATH[P]) return box(() => (P === "MOD" ? ["in1", "in2"] : numbered("in")).map((i) => wrapFlow(this.need(uid, i))).join(` ${MATH[P]} `));
-    if (P === "NEG") return box(() => `-${wrapFlow(this.need(uid, "in"))}`);
-    if (UNARY.has(P)) return box(() => `${P}(${this.need(uid, "in")})`);
+    const src = template("SrcType");
+    if (MATH[P]) return box(() => (P === "MOD" ? ["in1", "in2"] : numbered("in")).map((i) => wrapFlow(this.need(uid, i))).join(` ${MATH[P]} `), src, P === "DIV" || P === "MOD" ? () => this.need(uid, "in2") : undefined);
+    if (P === "NEG") return box(() => `-${wrapFlow(this.need(uid, "in"))}`, src);
+    if (UNARY.has(P)) return box(() => `${P}(${this.need(uid, "in")})`, src);
     if (P === "MIN" || P === "MAX") return box(() => `${P}(${numbered("in").map((i) => `${i.toUpperCase()} := ${this.need(uid, i)}`).join(", ")})`);
     if (P === "LIMIT") return box(() => `LIMIT(MN := ${this.need(uid, "mn")}, IN := ${this.need(uid, "in")}, MX := ${this.need(uid, "mx")})`);
     if (P === "SEL") return box(() => `SEL(G := ${this.need(uid, "g")}, IN0 := ${this.need(uid, "in0")}, IN1 := ${this.need(uid, "in1")})`);
@@ -381,11 +450,20 @@ class Network {
         this.missing.set(uid, name);
         return {};
       }
-      return box(() => {
-        const v = this.need(uid, "in");
-        if (P !== "CONVERT") return `${P}(${v})`;
-        return src.toUpperCase() === dest.toUpperCase() ? v : `${src.toUpperCase()}_TO_${dest.toUpperCase()}(${v})`;
-      });
+      const input = () => this.need(uid, "in");
+      const real = /^L?REAL$/i.test(src);
+      return box(
+        () => {
+          const v = input();
+          if (P !== "CONVERT") return `${P}(${v})`;
+          return src.toUpperCase() === dest.toUpperCase() ? v : `${src.toUpperCase()}_TO_${dest.toUpperCase()}(${v})`;
+        },
+        // a conversion into a type as wide as its source cannot leave it
+        RANGE[dest.toUpperCase()] && !(RANGE[src.toUpperCase()] && contains(dest, src)) ? dest : undefined,
+        undefined,
+        input,
+        real && P === "CONVERT",
+      );
     }
     if (IEC_INPUTS[P]) return this.iec(uid, p, P);
     this.missing.set(uid, name);
@@ -492,7 +570,9 @@ class Network {
 }
 
 const quoted = (n: string) => (IDENT.test(n) ? n : `"${n}"`);
-const simple = (e: string) => /^(TRUE|FALSE|#?[\w.[\]"%]+)$/.test(e);
+/** A flow no coil can change before it is used: a constant, or one of the translation's own temporaries. Even a
+ * plain operand is taken first: a coil on one branch may write it before the next branch reads it. */
+const fixed = (e: string) => e === "TRUE" || e === "FALSE" || /^#__rung\d+$/.test(e);
 
 const AREA: Record<string, string> = { Input: "I", Output: "Q", Memory: "M" };
 const WIDTH: Record<string, string> = { Byte: "B", SInt: "B", USInt: "B", Char: "B", Word: "W", Int: "W", UInt: "W", DWord: "D", DInt: "D", UDInt: "D", Real: "D" };

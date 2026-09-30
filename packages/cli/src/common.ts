@@ -49,6 +49,14 @@ export function cleanEnv(env: Io["env"]): Record<string, string> {
   return Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined)) as Record<string, string>;
 }
 
+/**
+ * The environment of a bridge process. BridgeClient puts it over rung's own, so the CODESYS download right is
+ * always set here: on only for a bridge started for a download, never inherited by a sync, MCP or init bridge.
+ */
+export function bridgeEnv(env: Io["env"], extra: Record<string, string> = {}, allowDownload = false): Record<string, string> {
+  return { ...cleanEnv(env), ...extra, RUNG_CODESYS_ALLOW_DOWNLOAD: allowDownload ? "1" : "" };
+}
+
 export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []) {
   if (config.project.tiaVersion === "CODESYS" && !io.env.RUNG_BRIDGE && !config.bridge.command) {
     // CODESYS: rung itself relays to its bridge script inside CODESYS (codesys.ts); imports are always allowed
@@ -56,8 +64,7 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
     const b = codesysBridgeCommand(config.project.path);
     // the script inside CODESYS downloads only for a bridge started for it (like --allow-download for TIA Portal)
     // set here and only here: one inherited from rung's own environment never gives a sync or MCP bridge the right
-    const { RUNG_CODESYS_ALLOW_DOWNLOAD: _inherited, ...rest } = cleanEnv(io.env);
-    const env = { ...rest, ...b.env, ...(extra.includes("--allow-download") ? { RUNG_CODESYS_ALLOW_DOWNLOAD: "1" } : {}) };
+    const env = bridgeEnv(io.env, b.env, extra.includes("--allow-download"));
     const client = await BridgeClient.spawn({ command: b.command, args: b.args, env, requestTimeoutMs: 300_000, closeTimeoutMs: 30_000 }); // the relay gives CODESYS 10 s to close its project
     client.onEvent((e) => showBridgeEvent(io, e));
     return client;
@@ -72,7 +79,7 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   const env = defaultBridge(io.env);
   const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
-  const client = await BridgeClient.spawn({ command, args, env: cleanEnv(io.env) });
+  const client = await BridgeClient.spawn({ command, args, env: bridgeEnv(io.env, {}, extra.includes("--allow-download")) });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
 }
@@ -113,7 +120,7 @@ export async function remoteBridge(host: string, command: string, args: string[]
   const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
   const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia === "V21" ? ["--tia", "V21"] : []), ...args])}`;
   try {
-    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: cleanEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
+    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
   } catch (e) {
     throw new WorkspaceError(
       "BRIDGE_UNREACHABLE",

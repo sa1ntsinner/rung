@@ -26,6 +26,10 @@ describe("SimaticML object IDs", () => {
     expect(renumberIds(blank)).toBe(xml.replace('ID="1"', 'ID="1"').replace('<Note Text="a > b" ID="2" />', '<Note Text="a > b" ID="2" />'));
   });
 
+  it('leaves ID="…" alone inside another attribute\'s value, in either quote style', () => {
+    expect(renumberIds(`<X Note='asset ID="pump"' ID="9"/><Y ID='3' Title="ID='x'" />`)).toBe(`<X Note='asset ID="pump"' ID="0"/><Y ID='1' Title="ID='x'" />`);
+  });
+
   it("numbers in hex as TIA Portal does", () => {
     const many = Array.from({ length: 12 }, () => '<X ID="*" />').join("");
     expect(renumberIds(many)).toContain('<X ID="9" /><X ID="A" /><X ID="B" />');

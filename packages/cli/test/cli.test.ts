@@ -376,6 +376,22 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toMatch(/unchanged\s+2/);
   });
 
+  it("a bridge for init, pull or sync never inherits the right to download, from rung's environment or the process's", async () => {
+    const seen = join(tmpdir(), `rung-env-${Date.now()}-${Math.random()}.json`);
+    const t = setup({ FAKE_ENV_OUT: seen, RUNG_CODESYS_ALLOW_DOWNLOAD: "1" });
+    const before = process.env.RUNG_CODESYS_ALLOW_DOWNLOAD;
+    process.env.RUNG_CODESYS_ALLOW_DOWNLOAD = "1"; // BridgeClient puts the given environment over the process's
+    try {
+      for (const cmd of ["init", "pull", "sync"]) {
+        await t.run(cmd);
+        expect([cmd, (JSON.parse(readFileSync(seen, "utf8")) as { allowDownload: string | null }).allowDownload]).toEqual([cmd, ""]);
+      }
+    } finally {
+      if (before === undefined) delete process.env.RUNG_CODESYS_ALLOW_DOWNLOAD;
+      else process.env.RUNG_CODESYS_ALLOW_DOWNLOAD = before;
+    }
+  });
+
   it("keeps working after a PLC is added to the project (devices = all)", async () => {
     const t = setup();
     await t.run("init");

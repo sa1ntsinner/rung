@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 const argv = process.argv.slice(2);
+// what the bridge process was given for downloads (tests check that it is never inherited)
+if (process.env.FAKE_ENV_OUT) writeFileSync(process.env.FAKE_ENV_OUT, JSON.stringify({ allowDownload: process.env.RUNG_CODESYS_ALLOW_DOWNLOAD ?? null, argv }));
 const projectArg = argv.includes("--project") ? argv[argv.indexOf("--project") + 1] : null;
 const allowImport = argv.includes("--allow-import") || argv.includes("--allow-fixture-import");
 const load = () => JSON.parse(readFileSync(process.env.FAKE_OBJECTS, "utf8"));

@@ -16,6 +16,46 @@ function index(...names: string[]) {
   return idx;
 }
 
+/** A hand-made LAD network in TIA Portal's FlgNet form (parts, operands, wires). */
+class Net {
+  private uid = 21;
+  readonly parts: string[] = [];
+  readonly wires: string[] = [];
+  local(name: string) {
+    const u = this.uid++;
+    this.parts.push(`<Access Scope="LocalVariable" UId="${u}"><Symbol><Component Name="${name}" /></Symbol></Access>`);
+    return u;
+  }
+  part(name: string, templates: Record<string, string> = {}) {
+    const u = this.uid++;
+    const t = Object.entries(templates).map(([k, v]) => `<TemplateValue Name="${k}" Type="${k === "Card" ? "Cardinality" : "Type"}">${v}</TemplateValue>`);
+    this.parts.push(`<Part Name="${name}" UId="${u}">${t.join("")}</Part>`);
+    return u;
+  }
+  call(name: string, type: "FB" | "FC", params: [string, string, string][]) {
+    const u = this.uid++;
+    this.parts.push(`<Call UId="${u}"><CallInfo Name="${name}" BlockType="${type}">${params.map(([n, s, t]) => `<Parameter Name="${n}" Section="${s}" Type="${t}" />`).join("")}</CallInfo></Call>`);
+    return u;
+  }
+  ident = (u: number) => `<IdentCon UId="${u}" />`;
+  pin = (u: number, name: string) => `<NameCon UId="${u}" Name="${name}" />`;
+  wire(...ends: string[]) {
+    this.wires.push(`<Wire UId="${this.uid++}">${ends.join("")}</Wire>`);
+  }
+}
+
+/** An FB with these statics and one LAD network per Net, in a workspace of its own. */
+function block(name: string, members: [string, string][], ...nets: Net[]) {
+  const units = nets.map(
+    (n, i) =>
+      `<SW.Blocks.CompileUnit ID="${i + 1}" CompositionName="CompileUnits"><AttributeList><NetworkSource><FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v5"><Parts>${n.parts.join("")}</Parts><Wires>${n.wires.join("")}</Wires></FlgNet></NetworkSource><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList></SW.Blocks.CompileUnit>`,
+  );
+  const xml = `<?xml version="1.0" encoding="utf-8"?><Document><SW.Blocks.FB ID="0"><AttributeList><Interface><Sections><Section Name="Static">${members.map(([m, t]) => `<Member Name="${m}" Datatype="${t}" />`).join("")}</Section></Sections></Interface><Name>${name}</Name><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList>${units.join("")}</ObjectList></SW.Blocks.FB></Document>`;
+  const idx = new WorkspaceIndex();
+  idx.set(`file:///w/plc/PLC_1/blocks/${name}.xml`, xml, 0);
+  return idx;
+}
+
 async function run(idx: WorkspaceIndex, yaml: string) {
   const r = await runTestFile(idx, "t.test.yaml", yaml);
   return [r.error, ...r.cases.map((c) => [c.name, c.passed, c.error ?? (c.failures?.map((f) => JSON.stringify(f)).join("; ") || undefined)])];
@@ -89,6 +129,75 @@ cases:
       - { set: { a: false, b: false, c: true }, cycle: 1, expect: { or_: true, mix: false, late: false, latch: false } }
 `),
     ).toEqual([undefined, ["logic", true, undefined]]);
+  });
+
+  it("takes the power flow where a branch splits before a coil on one branch changes it", async () => {
+    // a ─┬─(R a)
+    //    └─( b )     b gets the flow a had at the split, not a after the reset
+    const n = new Net();
+    const [a1, a2, b] = [n.local("a"), n.local("a"), n.local("b")];
+    const c = n.part("Contact");
+    const r = n.part("RCoil");
+    const q = n.part("Coil");
+    n.wire("<Powerrail />", n.pin(c, "in"));
+    n.wire(n.ident(a1), n.pin(c, "operand"));
+    n.wire(n.pin(c, "out"), n.pin(r, "in"), n.pin(q, "in"));
+    n.wire(n.ident(a2), n.pin(r, "operand"));
+    n.wire(n.ident(b), n.pin(q, "operand"));
+    expect(
+      await run(block("Fx_Split", [["a", "Bool"], ["b", "Bool"]], n), `
+block: Fx_Split
+cases:
+  - name: split
+    steps:
+      - { set: { a: true }, cycle: 1, expect: { a: false, b: true } }
+      - { cycle: 1, expect: { a: false, b: false } }
+`),
+    ).toEqual([undefined, ["split", true, undefined]]);
+  });
+
+  it("clears ENO where Siemens does: an overflow, a division by 0, a conversion that does not fit", async () => {
+    // box(in1, in2) → OUT, ENO → coil; one network per box
+    const nets = (["Add", "Div", "Convert"] as const).map((box) => {
+      const n = new Net();
+      const [x, y, out, ok] = [n.local("x"), n.local("y"), n.local(`${box.toLowerCase()}Out`), n.local(`${box.toLowerCase()}Ok`)];
+      const p = n.part(box, box === "Convert" ? { SrcType: "Int", DestType: "SInt" } : { Card: "2", SrcType: "Int" });
+      const q = n.part("Coil");
+      n.wire("<Powerrail />", n.pin(p, "en"));
+      if (box === "Convert") n.wire(n.ident(x), n.pin(p, "in"));
+      else {
+        n.wire(n.ident(x), n.pin(p, "in1"));
+        n.wire(n.ident(y), n.pin(p, "in2"));
+      }
+      n.wire(n.pin(p, "out"), n.ident(out));
+      n.wire(n.pin(p, "eno"), n.pin(q, "in"));
+      n.wire(n.ident(ok), n.pin(q, "operand"));
+      return n;
+    });
+    const idx = block("Fx_Eno", [["x", "Int"], ["y", "Int"], ["addOut", "Int"], ["addOk", "Bool"], ["divOut", "Int"], ["divOk", "Bool"], ["convertOut", "SInt"], ["convertOk", "Bool"]], ...nets);
+    expect(
+      await run(idx, `
+block: Fx_Eno
+cases:
+  - name: in range
+    steps:
+      - { set: { x: 100, y: 7 }, cycle: 1, expect: { addOut: 107, addOk: true, divOut: 14, divOk: true, convertOut: 100, convertOk: true } }
+  - name: out of range, and a division by 0
+    steps:
+      - { set: { x: 32767, y: 0 }, cycle: 1, expect: { addOut: 32767, addOk: true, divOk: false, divOut: 0, convertOk: false } }
+      - { set: { y: 1 }, cycle: 1, expect: { addOut: -32768, addOk: false, divOut: 32767, divOk: true } }
+`),
+    ).toEqual([undefined, ["in range", true, undefined], ["out of range, and a division by 0", true, undefined]]);
+  });
+
+  it("an FC's in/out writes the operand wired to it: the call graph and the editor see a write", () => {
+    const n = new Net();
+    const count = n.local("count");
+    const f = n.call("Fx_Bump", "FC", [["c", "InOut", "Int"]]);
+    n.wire("<Powerrail />", n.pin(f, "en"));
+    n.wire(n.ident(count), n.pin(f, "c"));
+    const b = [...block("Fx_Caller", [["count", "Int"]], n).docs.values()][0]!.parsed!.blocks[0]!;
+    expect(b.refs.filter((r) => r.name === "count").map((r) => r.access)).toEqual(["write"]);
   });
 
   it("names what it does not run, network by network", async () => {
