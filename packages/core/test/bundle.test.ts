@@ -127,7 +127,7 @@ describe("recoverJournal", () => {
     mkdirSync(join(root, ".rung", "recovery", "gap"), { recursive: true });
     writeFileSync(join(root, ".rung", "recovery", "gap", "1-x-A.scl"), "old\n");
     const r = await recoverJournal(root);
-    expect(r).toEqual({ completed: [intent.nextState], recoveryRequired: [] });
+    expect(r).toEqual({ completed: [intent.nextState], recoveryRequired: [], dropped: [] });
     expect(readFileSync(join(root, "plc/P/blocks/A.scl"), "utf8")).toBe("new\n");
   });
 
@@ -155,14 +155,39 @@ describe("recoverJournal", () => {
     expect(readFileSync(join(root, "plc/P/blocks/MOTOR.scl"), "utf8")).toBe("m\n");
   });
 
-  it("flags recovery when a target has foreign content, keeping the journal", async () => {
+  it("drops a write-back whose file was edited since: the edit stays, the state is not moved on", async () => {
     const root = ws();
     await crashedIntent(root, false);
     mkdirSync(join(root, "plc/P/blocks"), { recursive: true });
     writeFileSync(join(root, "plc/P/blocks/L.s7res"), "someone else\n");
     const r = await recoverJournal(root);
-    expect(r.recoveryRequired).toEqual(["plc:P/blocks/L"]);
+    expect(r).toEqual({ completed: [], recoveryRequired: [], dropped: ["plc:P/blocks/L"] });
     expect(readFileSync(join(root, "plc/P/blocks/L.s7res"), "utf8")).toBe("someone else\n");
-    expect(readdirSync(join(root, ".rung", "journal"))).toHaveLength(1);
+    expect(existsSync(join(root, "plc/P/blocks/L.s7dcl"))).toBe(false);
+    expect(readdirSync(join(root, ".rung", "journal"))).toHaveLength(0);
+  });
+
+  it("puts back a file the dropped write-back had moved aside", async () => {
+    const root = ws();
+    const blobs = new BlobStore(root);
+    mkdirSync(join(root, "plc/P/blocks"), { recursive: true });
+    const a = await blobs.put("new a\n");
+    const b = await blobs.put("new b\n");
+    await new Journal(root).write({
+      opId: "both",
+      address: "plc:P/blocks/A",
+      targets: [
+        { path: "plc/P/blocks/A.s7dcl", hash: a, prevHash: sha256("old a\n") },
+        { path: "plc/P/blocks/A.s7res", hash: b, prevHash: sha256("old b\n") },
+      ],
+      removes: [],
+      nextState: next("plc:P/blocks/A", "plc/P/blocks/A.s7dcl", a),
+    });
+    mkdirSync(join(root, ".rung", "recovery", "both"), { recursive: true });
+    writeFileSync(join(root, ".rung", "recovery", "both", "1-x-A.s7dcl"), "old a\n"); // moved aside, then killed
+    writeFileSync(join(root, "plc/P/blocks/A.s7res"), "edited b\n");
+    const r = await recoverJournal(root);
+    expect(r.dropped).toEqual(["plc:P/blocks/A"]);
+    expect([readFileSync(join(root, "plc/P/blocks/A.s7dcl"), "utf8"), readFileSync(join(root, "plc/P/blocks/A.s7res"), "utf8")]).toEqual(["old a\n", "edited b\n"]);
   });
 });

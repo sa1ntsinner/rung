@@ -55,7 +55,8 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
   const recovery = await recoverJournal(root);
   for (const s of recovery.completed) state.upsert(s);
   const blocked = new Set(recovery.recoveryRequired);
-  for (const a of blocked) w(a, "RECOVERY_REQUIRED", "interrupted publication left foreign content; see .rung/journal and .rung/recovery");
+  for (const a of blocked) w(a, "RECOVERY_REQUIRED", "an interrupted write-back could not be finished; see .rung/journal and .rung/recovery");
+  for (const a of recovery.dropped) w(a, "WRITE_BACK_DROPPED", "the file was edited after an interrupted write-back of TIA Portal's version; it is compared with TIA Portal again");
 
   const found: { entry: ObjectEntry; address: Address }[] = [];
   const skipped = new Set<string>();

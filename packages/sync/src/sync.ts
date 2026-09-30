@@ -120,6 +120,11 @@ interface ImportJob {
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
 const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+/** The same texts but for spaces and line breaks: TIA Portal's own layout of what was sent. */
+const sameLayoutFree = (a: Record<string, string>, b: Record<string, string>) => {
+  const squeeze = (x: Record<string, string>) => Object.fromEntries(Object.entries(x).map(([k, v]) => [k, v.replace(/\s+/g, "")]));
+  return sameTexts(squeeze(a), squeeze(b));
+};
 const CREATABLE = new Set(["scl", "awl", "db", "udt", "xml", "s7dcl", "tags.xml", "tags.st", "st"]);
 const CONFLICT_SUFFIXES = [".conflict", ".tia"];
 
@@ -407,6 +412,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         // a create interrupted (Ctrl+C, a crash) before rung recorded how it ended
         const untouched = (await localStatus(root, st.files)) === "clean";
         const files = st.files;
+        const sending = st.sending;
         state.remove(address);
         st = undefined;
         if (item && untouched) {
@@ -416,11 +422,27 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         if (item && loc && cfg.sync.import === "auto") {
-          // TIA Portal has it and the file was edited since: the file is newer
+          // TIA Portal has it and the file was edited since. What the create sent is the base: if TIA Portal's
+          // version is that (in its own layout), the file is simply newer; if someone changed it in TIA Portal
+          // meanwhile, the two are merged, or a conflict where both changed the same lines
           const { bundle, captured } = await localBundle(root, loc.stem, loc.path);
           const name = parseAddress(address).name;
           const texts = Object.values(bundle);
-          queue.push({ address, name, form: loc.form, stem: item.stem!, bundle, expected: item.entry.fingerprint, captured, kind: "update", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
+          const job = { address, name, form: loc.form, stem: item.stem!, captured, rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) };
+          const sent = sending?.length ? await baseBundle(root, loc.stem, sending) : undefined;
+          const staged = sent ? await stageExport(root, bridge, address, item.stem!) : undefined;
+          const tia = staged ? Object.fromEntries(staged.texts) : undefined;
+          if (!sent || !staged || !tia || staged.result.form !== loc.form || sameLayoutFree(sent, tia)) {
+            queue.push({ ...job, bundle, expected: item.entry.fingerprint, kind: "update" });
+            continue;
+          }
+          const m = mergeBundle(loc.form, sent, bundle, tia);
+          const cur: ObjectState = { address, path: loc.path, form: loc.form, fileHash: bundleHash(captured), files: sending!, tiaFingerprint: staged.result.fingerprint, baseId: "", readOnly: isReadOnlyEntry(item.entry), warnings: [], status: "synced" };
+          if (m.kind === "conflict") await writeConflict(cur, loc.stem, m.files, staged, SOURCE_FORMS.has(loc.form));
+          else if (sameTexts(m.files, tia)) {
+            await publish(address, captured, staged, cur.readOnly);
+            report.created++;
+          } else queue.push({ ...job, bundle: m.files, local: bundle, expected: staged.result.fingerprint, kind: "merge" });
           continue;
         }
         // not in TIA Portal: the file is simply new again
@@ -700,8 +722,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       await state.flush();
     }
     if (job.kind === "create" && !st) {
-      // written down before TIA Portal creates it: an interrupted pass then knows the object came from this file
-      state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing" });
+      // written down before TIA Portal creates it: an interrupted pass then knows the object came from this file,
+      // and with what was sent, what someone may have changed in TIA Portal since
+      const blobs = new BlobStore(root);
+      const sending: StateFile[] = [];
+      for (const [suffix, text] of Object.entries(job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
+      state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing", sending });
       await state.flush();
     }
     let result;

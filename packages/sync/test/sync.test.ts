@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { chmodSync, mkdtempSync, readFileSync, renameSync, writeFileSync, existsSync, unlinkSync, mkdirSync, readdirSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
+import { BlobStore, Journal, StateStore, defaultConfig, sha256, type RungConfig } from "@rung/core";
 import { BridgeError, type CompileMessage, type ExportResult } from "@rung/bridge-client";
 import { pull, syncOnce, confirmDelete, resolveConflict } from "../src/index.js";
 import { FakeBridge } from "./fake-bridge.js";
@@ -783,6 +783,59 @@ describe("syncOnce", () => {
     expect(tiaNow()).toContain("#x := 6;");
     expect(tiaNow()).toContain("#z := 30;");
     expect(t.read(pA)).toBe(tiaNow());
+  });
+
+  it("a write-back a kill interrupted, then the file edited: the edit merges with TIA Portal's version (soak, seed 7)", async () => {
+    const t = setup();
+    await t.sync();
+    const tiaNow = () => t.bridge.objects.get(A)!.files[".scl"]!;
+    t.bridge.edit(A, { ".scl": tiaNow().replace("#z := 3;", "#z := 30;") }); // someone in TIA Portal
+    // rung read TIA Portal's version and was killed before writing it to the file
+    const hash = await new BlobStore(t.root).put(tiaNow());
+    const st = await t.withState(async (s) => s.get(A)!);
+    const next = { ...st, files: [{ ...st.files[0]!, hash }], tiaFingerprint: t.bridge.objects.get(A)!.entry.fingerprint };
+    await new Journal(t.root).write({ opId: "killed", address: A, targets: [{ path: pA, hash, prevHash: sha256(readFileSync(t.f(pA))) }], removes: [], nextState: next });
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;")); // the person edits the file meanwhile
+    const r = await t.sync();
+    expect(r.warnings.map((w) => w.code)).toEqual(["WRITE_BACK_DROPPED"]);
+    expect(r.conflicts).toBe(0);
+    expect(tiaNow()).toContain("#x := 5;");
+    expect(tiaNow()).toContain("#z := 30;");
+    expect(t.read(pA)).toBe(tiaNow());
+    const idle = await t.sync();
+    expect(idle.imported + idle.exported + idle.merged + idle.conflicts + idle.warnings.length).toBe(0);
+  });
+
+  it("an interrupted create TIA Portal made, then edited on both sides: both edits stay (soak, seed 7)", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    const tiaNow = () => t.bridge.objects.get(A)!.files[".scl"]!;
+    t.bridge.edit(A, { ".scl": tiaNow().replace("#z := 3;", "#z := 30;") });
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    expect(tiaNow()).toContain("#x := 5;");
+    expect(tiaNow()).toContain("#z := 30;");
+    expect(t.read(pA)).toBe(tiaNow());
+  });
+
+  it("an interrupted create both edited on the same line is a conflict, not an overwrite", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    t.bridge.edit(A, { ".scl": t.bridge.objects.get(A)!.files[".scl"]!.replace("#x := 1;", "#x := 7;") });
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(1);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 7;");
+    expect(t.read(pA)).toContain("#x := 5;");
   });
 
   it("an interrupted update TIA Portal never got stays a conflict when TIA Portal changed the same line", async () => {

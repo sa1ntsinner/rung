@@ -151,6 +151,24 @@ export async function publishBundle(root: string, intent: PublishIntent, opts: {
   return intent;
 }
 
+/** Puts back the file a dropped write-back had moved aside (its preimage), if it did. */
+async function restorePreimage(root: string, opId: string, t: PublishTarget): Promise<void> {
+  if (t.prevHash === "absent") return;
+  const dir = join(root, ".rung", "recovery", opId);
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const n of names)
+    if ((await currentHash(join(dir, n))) === t.prevHash) {
+      await mkdir(dirname(abs(root, t.path)), { recursive: true });
+      await rename(join(dir, n), abs(root, t.path));
+      return;
+    }
+}
+
 /** A retained preimage of `prevHash` for this operation proves an "absent" target is mid-publication, not foreign. */
 async function hasPreimage(root: string, opId: string, prevHash: string): Promise<boolean> {
   const dir = join(root, ".rung", "recovery", opId);
@@ -167,13 +185,15 @@ async function hasPreimage(root: string, opId: string, prevHash: string): Promis
 export interface RecoveryReport {
   /** Intents that are now fully published; the caller must record nextState. */
   completed: ObjectState[];
-  /** Objects whose files hold content matching neither side; journal entry kept. */
+  /** Objects whose write-back could not be finished; journal entry kept. */
   recoveryRequired: string[];
+  /** Objects whose files were edited after an interrupted write-back: dropped, the files and the state kept. */
+  dropped: string[];
 }
 
 export async function recoverJournal(root: string): Promise<RecoveryReport> {
   const journal = new Journal(root);
-  const report: RecoveryReport = { completed: [], recoveryRequired: [] };
+  const report: RecoveryReport = { completed: [], recoveryRequired: [], dropped: [] };
   for (const intent of await journal.pending()) {
     let consistent = true;
     for (const t of intent.targets) {
@@ -183,7 +203,12 @@ export async function recoverJournal(root: string): Promise<RecoveryReport> {
       consistent = false;
     }
     if (!consistent) {
-      report.recoveryRequired.push(intent.address);
+      // A file was edited after the write-back stopped. The person's files stay and the write-back is dropped;
+      // the state stays as it was, so the next pass compares the files with TIA Portal again (a merge, or a
+      // conflict where both changed the same lines). A file the write-back had moved aside comes back.
+      for (const t of intent.targets) if ((await currentHash(abs(root, t.path))) === "absent") await restorePreimage(root, intent.opId, t);
+      await journal.done(intent.opId);
+      report.dropped.push(intent.address);
       continue;
     }
     try {
