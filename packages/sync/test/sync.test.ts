@@ -847,6 +847,26 @@ describe("syncOnce", () => {
     expect(tiaNow()).toContain("#x := 5;");
   });
 
+  it("an interrupted create whose next send TIA Portal refuses keeps its base: no whole-file conflict later (soak, seed 11)", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.killed = "after";
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.bridge.killed = undefined;
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    t.bridge.failImport.set(A, "STALE_REVISION"); // someone changed it in TIA Portal just before the send
+    await t.sync();
+    t.bridge.failImport.delete(A);
+    await t.withState(async (s) => expect(s.get(A)?.files.length).toBe(1));
+    const tiaNow = () => t.bridge.objects.get(A)!.files[".scl"]!;
+    t.bridge.edit(A, { ".scl": tiaNow().replace("#z := 3;", "#z := 30;") });
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    expect(tiaNow()).toContain("#x := 5;");
+    expect(tiaNow()).toContain("#z := 30;");
+  });
+
   it("an interrupted create both edited on the same line is a conflict, not an overwrite", async () => {
     const t = setup(() => {});
     await t.sync();

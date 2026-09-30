@@ -454,12 +454,15 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const sent = sending?.length ? await baseBundle(root, loc.stem, sending) : undefined;
           const staged = sent ? await stageExport(root, bridge, address, item.stem!) : undefined;
           const tia = staged ? Object.fromEntries(staged.texts) : undefined;
+          // from here on the object is an ordinary one with a file edit: what the create sent is its base, so a
+          // send TIA Portal refuses (it changed meanwhile) leaves it for the next pass to merge
+          const cur: ObjectState = { address, path: loc.path, form: loc.form, fileHash: bundleHash(captured), files: sending?.length ? sending : files, tiaFingerprint: staged?.result.fingerprint ?? item.entry.fingerprint, baseId: "", readOnly: isReadOnlyEntry(item.entry), warnings: [], status: "fileDirty" };
+          state.upsert(cur);
           if (!sent || !staged || !tia || staged.result.form !== loc.form || sameLayoutFree(sent, tia)) {
             queue.push({ ...job, bundle, expected: item.entry.fingerprint, kind: "update" });
             continue;
           }
           const m = mergeBundle(loc.form, sent, bundle, tia);
-          const cur: ObjectState = { address, path: loc.path, form: loc.form, fileHash: bundleHash(captured), files: sending!, tiaFingerprint: staged.result.fingerprint, baseId: "", readOnly: isReadOnlyEntry(item.entry), warnings: [], status: "synced" };
           if (m.kind === "conflict") await writeConflict(cur, loc.stem, m.files, staged, SOURCE_FORMS.has(loc.form));
           else if (sameTexts(m.files, tia)) {
             await publish(address, captured, staged, cur.readOnly);
