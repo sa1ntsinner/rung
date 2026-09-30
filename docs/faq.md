@@ -22,7 +22,7 @@ The language server, `rung test` and `rung views --offline` work on any OS with 
 V20 today. A V21 build exists but is not verified yet.
 
 **What does it cost?**
-The editor extensions, grammar and workspace format are MIT. The rung core is source-available under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to 3 users. Larger teams subscribe to rung Pro, €49 per user and month: the commercial license, plus change review that knows PLCs (interface per variable, attributes, logic per region and LAD/FBD network, what the change affects), a policy gate in your own CI, FAT/SAT change records and support. Every version becomes Apache-2.0 three years after its release.
+The editor extensions, grammar and workspace format are MIT. The rung core is source-available under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to 3 users. Larger teams subscribe to rung Pro, €49 per user and month: the commercial license, plus change review that knows PLCs (interface per variable, attributes, logic per region and LAD/FBD network, what the change affects), a policy gate in your own CI, FAT/SAT change records and support (smile0murr@gmail.com). Every version becomes Apache-2.0 three years after its release.
 
 **Is rung affiliated with Siemens?**
 No. SIMATIC, TIA Portal and related names are trademarks of Siemens AG, used here only to describe compatibility.

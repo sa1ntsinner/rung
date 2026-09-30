@@ -56,6 +56,6 @@ The live tests against TIA Portal run headless, without windows or prompts; the 
 
 ## License
 
-The core is under the Business Source License 1.1. It's free for individuals, education, non-commercial open source and organizations with up to three users; larger teams take rung Pro (€49 per user and month: the commercial license, team change review, a CI policy gate, FAT/SAT records and support). Each version becomes Apache 2.0 three years after its release. The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE).
+The core is under the Business Source License 1.1. It's free for individuals, education, non-commercial open source and organizations with up to three users; larger teams take rung Pro (€49 per user and month: the commercial license, team change review, a CI policy gate, FAT/SAT records and support). Each version becomes Apache 2.0 three years after its release. The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE); for Pro and Enterprise, write to smile0murr@gmail.com.
 
 rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG.
