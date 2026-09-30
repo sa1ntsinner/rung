@@ -39,6 +39,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "bridge.hello":
       // how often a bridge was started (a TIA Portal the real one may open)
       db.starts = (db.starts ?? 0) + 1;
+      db.startArgs = [...(db.startArgs ?? []), argv];
       save(db);
       return reply({ protocol: 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: allowImport ? ["import"] : [] });
     case "project.info":
@@ -127,6 +128,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
     }
     case "plc.download": {
+      // like the real bridge: only one started for downloads may download
+      if (!argv.includes("--allow-download")) return fail("DOWNLOAD_DISABLED", "This bridge was not started for downloads");
       const r = p.request;
       db.downloads = [...(db.downloads ?? []), r];
       save(db);

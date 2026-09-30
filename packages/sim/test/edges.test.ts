@@ -30,6 +30,14 @@ describe("bit strings are unsigned, whatever their width", () => {
     expect([m.HI, m.ANY, m.X, m.LO]).toEqual([true, true, true, true]);
   });
 
+  it("typed literals and conversions have their type's width too", () => {
+    const m = run(
+      "VAR\n  a : Bool;\n  b : Bool;\n  c : Bool;\n  d : Bool;\n  e : Bool;\nEND_VAR",
+      "  #a := SHL(IN := BYTE#16#80, N := 1) = 0;\n  #b := NOT WORD#16#00FF = WORD#16#FF00;\n  #c := NOT W#16#0F0F = 16#F0F0;\n  #d := SHL(IN := INT_TO_WORD(1), N := 16) = 0;\n  #e := (NOT BYTE#16#0F AND BYTE#16#FF) = 16#F0;",
+    );
+    expect([m.A, m.B, m.C, m.D, m.E]).toEqual([true, true, true, true, true]);
+  });
+
   it("inverts a WORD in its own width", () => {
     const m = run("VAR\n  w : Word := 16#00FF;\n  same : Bool;\nEND_VAR", "  #same := NOT #w = 16#FF00;");
     expect(m.SAME).toBe(true);

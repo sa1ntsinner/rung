@@ -29,8 +29,8 @@ describe("CodeGraph", () => {
   });
 
   it("records instance and type relations", () => {
-    expect(g.outgoing("Fx_Motor_DB").map((e) => [e.kind, e.to])).toEqual([["instanceOf", "FX_MOTOR"]]);
-    expect(g.outgoing("Fx_Global").map((e) => [e.kind, e.to])).toEqual([["usesType", "FX_TYPES"]]);
+    expect(g.outgoing("Fx_Motor_DB").map((e) => [e.kind, e.to])).toEqual([["instanceOf", "P/FX_MOTOR"]]);
+    expect(g.outgoing("Fx_Global").map((e) => [e.kind, e.to])).toEqual([["usesType", "P/FX_TYPES"]]);
     expect(g.outgoing("Fx_Motor", ["instantiates"]).map((e) => e.to)).toEqual(["TON"]);
   });
 
@@ -87,5 +87,15 @@ END_ORGANIZATION_BLOCK
     expect(g.callers("PLC_B/Motor")).toEqual([]);
     expect(g.outgoing("PLC_B/Motor_DB").map((e) => e.to)).toEqual(["PLC_B/MOTOR"]);
     expect(g.impact(g.key("Motor", "PLC_B")).map((i) => i.node.id)).toEqual(["PLC_B/MOTOR_DB"]);
+  });
+
+  it("a block of a PLC that has no other files left is never taken for another PLC's", () => {
+    const only = new WorkspaceIndex();
+    only.set("file:///w/plc/PLC_B/blocks/Motor.scl", 'FUNCTION_BLOCK "Motor"\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
+    only.set("file:///w/plc/PLC_B/blocks/Main.scl", 'ORGANIZATION_BLOCK "Main"\nVAR_TEMP\n  m : "Motor";\nEND_VAR\nBEGIN\n  #m();\nEND_ORGANIZATION_BLOCK\n', 0);
+    const g1 = CodeGraph.fromIndex(only);
+    expect(g1.get(g1.key("Motor", "PLC_A"))).toBeUndefined(); // PLC_A's deleted Motor
+    expect(g1.impact(g1.key("Motor", "PLC_A"))).toEqual([]);
+    expect(g1.label(g1.get("Motor")!)).toBe("Motor"); // one PLC: names without it
   });
 });

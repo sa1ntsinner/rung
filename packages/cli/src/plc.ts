@@ -36,6 +36,8 @@ class PlcLink {
     private readonly ws: string,
     private readonly config: RungConfig,
     private readonly io: Io,
+    /** Only rung download's own bridge may download (the bridge refuses plc.download without --allow-download). */
+    private readonly download = false,
   ) {
     PlcLink.open.add(this);
   }
@@ -43,7 +45,7 @@ class PlcLink {
   async call<T>(method: string, params: Record<string, unknown>, direct: (b: BridgeClient) => Promise<T>): Promise<T> {
     if (this.owner === undefined) this.owner = await OwnerClient.connect(this.ws);
     if (this.owner) return this.owner.request<T>(method, params);
-    this.bridge ??= bridgeFor(this.config, this.io);
+    this.bridge ??= bridgeFor(this.config, this.io, this.download && this.config.download.enabled ? ["--allow-download"] : []);
     return direct(await this.bridge);
   }
 
@@ -147,10 +149,10 @@ export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io
   return 0;
 }
 
-async function workspace(dir: string, io: Io) {
+async function workspace(dir: string, io: Io, download = false) {
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
-  return { ws, config, link: new PlcLink(ws, config, io) };
+  return { ws, config, link: new PlcLink(ws, config, io, download) };
 }
 
 async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[]): Promise<number> {
@@ -258,7 +260,7 @@ async function ask(io: Io, question: string): Promise<string> {
 }
 
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { ws, config, link } = await workspace(dir, io);
+  const { ws, config, link } = await workspace(dir, io, true);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
   const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
   const software = !v["no-sw"];
@@ -332,7 +334,11 @@ export function reportUpload(io: Io, r: UploadOutcome, address: string): number 
     return 3;
   }
   if (r.saveError) {
-    io.stderr(`rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}), so it is not kept. Free disk space or check the project folder's permissions, then upload again\n`);
+    io.stderr(
+      `rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}). ` +
+        `If your TIA Portal has the project open, the station is in it unsaved: fix the cause (disk space, the folder's permissions) and save the project there, rather than uploading again, which would add a second station. ` +
+        `If rung opened the project itself, nothing was kept; upload again once the cause is fixed.\n`,
+    );
     return 3;
   }
   io.stdout(`uploaded the station "${r.station}" from ${address}${r.plcs.length ? `: ${r.plcs.join(", ")}` : ""} (${r.state})\n`);

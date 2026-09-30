@@ -329,13 +329,27 @@ def split_decl_impl(unit):
                 i += 1
             i += 1
             continue
-        if lines[i].strip() == "":  # a comment is not blank: it starts the code
-            i += 1
-            continue
+        if s == "":
+            # blank lines and comments: part of the declaration when another VAR section follows them
+            # ("// inputs" above VAR_INPUT), else a comment is where the code starts
+            j = next_code_line(code, i)
+            if j < len(lines) and VAR_START.match(code[j].strip()):
+                i = j
+                continue
+            if lines[i].strip() == "":
+                i += 1
+                continue
         break
     decl = "\n".join(lines[:i]).rstrip() + "\n"
     impl = "\n".join(lines[i:]).strip("\n")
     return decl, (impl + "\n") if impl else ""
+
+
+def next_code_line(code, i):
+    """The first line from i on whose masked text is not blank (neither empty nor only a comment)."""
+    while i < len(code) and code[i].strip() == "":
+        i += 1
+    return i
 
 
 ACCESSOR = re.compile(r"^[ \t]*(GET|SET)[ \t]*$", re.I | re.M)
@@ -353,9 +367,11 @@ def accessor_decl_impl(body):
                 i += 1
             i += 1
             continue
-        if lines[i].strip() == "" and i + 1 < len(lines) and VAR_START.match(code[i + 1]):
-            i += 1
-            continue
+        if s == "":
+            j = next_code_line(code, i)
+            if j < len(lines) and VAR_START.match(code[j].strip()):
+                i = j  # comments and blank lines above another VAR section belong to the declaration
+                continue
         break
     decl = "\n".join(lines[:i]).strip("\n")
     impl = "\n".join(lines[i:]).strip("\n")
@@ -582,6 +598,10 @@ def restore(obj, snap):
     for kind, name, t, accs in kids:
         hit = [c for c in obj.get_children(False) if c.get_name() == name]
         c = hit[0] if hit else None
+        if c is not None and kind == "PROPERTY" and not set(accs) <= set(a.get_name().upper() for a in c.get_children(False)):
+            # the failed import took an accessor away (SET of a read-only property); CODESYS adds none back: made again
+            c.remove()
+            c = None
         if c is None:
             if kind == "METHOD":
                 c = obj.create_method(name, return_type(t[0] or ""))
@@ -736,6 +756,8 @@ def plc_download(params):
     """Online change by default. A full download stops the application, like TIA's "stop the CPU": only with
     allow stop-cpu (the person named it); otherwise nothing is changed and rung says what to allow."""
     devname = params["device"]
+    if os.environ.get("RUNG_CODESYS_ALLOW_DOWNLOAD") != "1":
+        raise RpcError("DOWNLOAD_DISABLED", "This bridge was not started for downloads: only rung download starts one that may download. Nothing was downloaded.")
     allow = set(params.get("allow") or [])
     connect_to(devname, params.get("target"))
     oa = online_app(devname, None)

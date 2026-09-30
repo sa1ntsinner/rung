@@ -183,7 +183,7 @@ export class Simulator {
   readonly globals: Struct = {};
   // by the block object, not its name: two PLCs, or two FBs' properties, can have blocks of one name
   private readonly bodies = new WeakMap<BlockModel, Map<string, Stmt[]>>();
-  private readonly consts = new WeakMap<BlockModel, Struct>();
+  private readonly consts = new WeakMap<BlockModel, Map<string, Struct>>();
   private blockUris = new WeakMap<BlockModel, string>();
   private steps = 0;
   private depth = 0;
@@ -263,13 +263,17 @@ export class Simulator {
   // ------------------------------------------------------------------ values
 
   /** Constants of a block (VAR CONSTANT), evaluated once; used for array bounds and initial values. */
-  private constants(scope: BlockModel | undefined): Struct {
+  /** With `accessor`, the constants a PROPERTY's GET or SET sees (its own, not the other accessor's). */
+  private constants(scope: BlockModel | undefined, accessor?: "get" | "set"): Struct {
     if (!scope) return {};
-    let c = this.consts.get(scope);
+    let byAccessor = this.consts.get(scope);
+    if (!byAccessor) this.consts.set(scope, (byAccessor = new Map()));
+    let c = byAccessor.get(accessor ?? "");
     if (!c) {
       c = {};
-      this.consts.set(scope, c);
-      for (const v of scope.vars) if (v.section === "Constant" && !v.isArray && !v.members?.length) c[v.name.toUpperCase()] = this.defaultValue(v, scope);
+      byAccessor.set(accessor ?? "", c);
+      for (const v of scope.vars)
+        if (v.section === "Constant" && !v.isArray && !v.members?.length && (!v.accessor || v.accessor === accessor)) c[v.name.toUpperCase()] = this.defaultValue(v, scope);
     }
     return c;
   }
@@ -520,6 +524,30 @@ export class Simulator {
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
 
+  /**
+   * The elementary type an expression has, where the source says it: a variable's declaration, a typed literal
+   * (WORD#16#00FF), a conversion (INT_TO_WORD), and NOT or a bit operation of those. Integer widths follow it.
+   */
+  private staticDecl(e: Expr, frame: Frame | null): Decl | undefined {
+    const named = (t: string): Decl => ({ type: t, typeRef: t, isArray: false });
+    switch (e.k) {
+      case "ref":
+        return this.declOf(e.ref, frame);
+      case "lit":
+        return e.typeName && INT_WIDTH[e.typeName] ? named(e.typeName) : undefined;
+      case "un":
+        return e.op === "NOT" ? this.staticDecl(e.e, frame) : undefined;
+      case "bin":
+        return ["AND", "&", "OR", "XOR"].includes(e.op) ? (this.staticDecl(e.l, frame) ?? this.staticDecl(e.r, frame)) : undefined;
+      case "call": {
+        const to = e.callee.path.length ? undefined : /_TO_([A-Z]+)$/i.exec(e.callee.root.name)?.[1]?.toUpperCase();
+        return to && INT_WIDTH[to] ? named(to) : undefined;
+      }
+      default:
+        return undefined;
+    }
+  }
+
   /** Declared type of a reference, when the workspace knows it. */
   private declOf(ref: LRef, frame: Frame | null): Decl | undefined {
     let d: Decl | undefined;
@@ -605,7 +633,7 @@ export class Simulator {
         if (typeof v !== "number") return !v;
         // in the width of the operand's type: NOT 16#00FF of a Word is 16#FF00
         const inverted = Number.isSafeInteger(v) ? Number(~BigInt(v)) : ~v;
-        return e.e.k === "ref" ? wrapInteger(inverted, this.declOf(e.e.ref, frame)) : inverted;
+        return wrapInteger(inverted, this.staticDecl(e.e, frame));
       }
       case "bin": {
         const l = this.eval(e.l, frame);
@@ -808,7 +836,7 @@ export class Simulator {
           const count = BigInt(Math.min(by, 64)); // every bit is gone after 64, whatever the width
           const shifted = Number(upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count);
           const input = c.args.find((a) => a.name?.toUpperCase() === "IN") ?? c.args.find((a) => !a.name);
-          return input?.value.k === "ref" ? wrapInteger(shifted, this.declOf(input.value.ref, frame)) : shifted;
+          return input ? wrapInteger(shifted, this.staticDecl(input.value, frame)) : shifted;
         }
       }
       const to = upper.split("_TO_")[1] ?? "";
@@ -959,7 +987,7 @@ export class Simulator {
       throw new SimError(`${prop.owner}.${prop.name} has no ${accessor.toUpperCase()}: it ${accessor === "set" ? "is read-only" : "can only be written"}`, prop.name);
     return this.enter(prop, () => {
       const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop);
-      Object.assign(own, this.constants(prop));
+      Object.assign(own, this.constants(prop, accessor));
       const key = prop.name.toUpperCase();
       own[key] = accessor === "set" ? value : this.defaultValue({ type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false }, prop);
       this.runBody(prop, { block: prop, mem: inst.mem, temps: own, inst, accessor }, accessor);

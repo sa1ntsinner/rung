@@ -431,7 +431,12 @@ export function rename(index: WorkspaceIndex, uri: string, offset: number, newNa
   if (!decl) return { error: "Declaration not found" };
   if (localDecl(block, newName)) return { error: `${newName} already exists in ${block.name}` };
   const u = decl.name.toUpperCase();
+  const text = index.docs.get(uri)?.code ?? index.docs.get(uri)?.text ?? "";
   const edits: TextEdit[] = [{ uri, start: decl.start, end: decl.end, newText: newName }];
-  for (const r of block.refs) if (r.kind === "local" && r.name.toUpperCase() === u) edits.push({ uri, start: r.start, end: r.end, newText: block.kind === "DB" ? newName : "#" + newName });
+  // only the references to this declaration (a PROPERTY's GET and SET may each have a local of the name), written
+  // as they were: #x in SCL, a bare x in IEC structured text
+  for (const r of block.refs)
+    if (r.kind === "local" && r.name.toUpperCase() === u && localDecl(block, r.name, r.start) === decl)
+      edits.push({ uri, start: r.start, end: r.end, newText: text[r.start] === "#" ? "#" + newName : newName });
   return edits;
 }

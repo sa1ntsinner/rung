@@ -3,7 +3,7 @@
 import { lex, type Token } from "@rung/lsp";
 
 export type Expr =
-  | { k: "lit"; value: boolean | number | string; type: "bool" | "int" | "real" | "time" | "string" }
+  | { k: "lit"; value: boolean | number | string; type: "bool" | "int" | "real" | "time" | "string"; typeName?: string }
   | { k: "ref"; ref: LRef }
   | { k: "un"; op: "NOT" | "-" | "+"; e: Expr }
   | { k: "bin"; op: string; l: Expr; r: Expr }
@@ -84,8 +84,10 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
     if (/^(BOOL)$/.test(prefix)) return { k: "lit", value: /^(1|TRUE)$/i.test(val), type: "bool" };
     if (/REAL$/.test(prefix)) return { k: "lit", value: parseFloat(val), type: "real" };
     const based = /^(2|8|16)#(.+)$/.exec(val);
-    if (based) return { k: "lit", value: parseInt(based[2]!, Number(based[1])), type: "int" };
-    return { k: "lit", value: Number(val), type: /[.eE]/.test(val) ? "real" : "int" };
+    // BYTE#16#80, W#16#00FF, DINT#5: the literal has its type's width (NOT and shifts keep to it)
+    const typeName = ({ B: "BYTE", W: "WORD", DW: "DWORD", LW: "LWORD" } as Record<string, string>)[prefix] ?? prefix;
+    if (based) return { k: "lit", value: parseInt(based[2]!, Number(based[1])), type: "int", typeName };
+    return { k: "lit", value: Number(val), type: /[.eE]/.test(val) ? "real" : "int", ...(/[.eE]/.test(val) ? {} : { typeName }) };
   }
   const clean = text.replace(/_/g, "");
   return { k: "lit", value: Number(clean), type: /[.eE]/.test(clean) ? "real" : "int" };

@@ -369,15 +369,21 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     return next;
   };
   const writeConflict = async (st: ObjectState, stem: string, files: Record<string, string>, staged: StagedExport, source: boolean) => {
+    const local: Record<string, string> = {};
     if (source) {
-      for (const [suffix, text] of Object.entries(files)) if (text.includes("<<<<<<< file")) await writeFileAtomic(rel2abs(root, stem + suffix + ".conflict"), text);
+      for (const [suffix, text] of Object.entries(files))
+        if (text.includes("<<<<<<< file")) {
+          await writeFileAtomic(rel2abs(root, stem + suffix + ".conflict"), text);
+          const h = await diskHash(root, stem + suffix);
+          if (h !== "absent") local[stem + suffix] = h;
+        }
     } else {
       for (const [suffix, text] of staged.texts) await writeFileAtomic(rel2abs(root, stem + suffix + ".tia"), text);
     }
     state.upsert({
       ...st,
       status: "conflicted",
-      conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files, ...(staged.result.form !== st.form ? { tiaForm: staged.result.form } : {}) },
+      conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files, ...(staged.result.form !== st.form ? { tiaForm: staged.result.form } : {}), ...(Object.keys(local).length ? { local } : {}) },
       sending: undefined,
     });
     report.conflicts++;
@@ -849,8 +855,14 @@ export async function resolveConflict(root: string, state: StateStore, path: str
         await replaceGuarded(rel2abs(root, f.path), Buffer.from(merged, "utf8"), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
       } else if (markers.test(primary)) {
         throw new WorkspaceError("CONFLICT_MARKERS", `${f.path} still contains conflict markers${merged !== null ? ` (so does ${f.path}.conflict)` : ""}`);
-      } else if (mode === "merged" && merged !== null && markers.test(merged) && normalizeText(primary) === normalizeText(fileSide(merged))) {
-        // nothing was merged (the file is still only its own side): taken as it is, TIA Portal's side would be lost
+      } else if (
+        mode === "merged" &&
+        merged !== null &&
+        markers.test(merged) &&
+        (st.conflict?.local?.[f.path] !== undefined ? (await diskHash(root, f.path)) === st.conflict.local[f.path] : normalizeText(primary) === normalizeText(fileSide(merged)))
+      ) {
+        // nothing was merged: the file is as it was when the conflict came (an older state: still only its own
+        // side). Taken as it is, TIA Portal's side would be lost
         throw new WorkspaceError(
           "CONFLICT_MARKERS",
           `${f.path}.conflict still contains conflict markers: merge it there, or merge into ${f.path} and delete ${f.path}.conflict; rung resolve --ours keeps your file, --theirs takes TIA Portal's`,

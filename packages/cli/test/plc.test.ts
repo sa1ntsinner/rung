@@ -105,6 +105,10 @@ describe("PLC commands", () => {
     await chosen.run(["init"]);
     expect(await chosen.run(["download", "--yes", "--allow", "stop-cpu"])).toBe(0);
     expect(chosen.db().downloads).toHaveLength(1);
+    // only rung download's own bridge may download: the others are started without --allow-download
+    const starts = (chosen.db() as unknown as { startArgs: string[][] }).startArgs;
+    expect(starts.at(-1)).toContain("--allow-download");
+    expect(starts.slice(0, -1).every((a) => !a.includes("--allow-download"))).toBe(true);
     expect(readFileSync(chosen.toml, "utf8")).toContain('pc_interface = "Ethernet"');
   });
 

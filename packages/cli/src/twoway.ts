@@ -60,7 +60,8 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
-    bridgeFactory: () => bridgeFor(config, io, importFlags(config)),
+    // the watch takes downloads only when they are on for the workspace (and checks the confirmed PLC itself)
+    bridgeFactory: () => bridgeFor(config, io, [...importFlags(config), ...(config.download.enabled ? ["--allow-download"] : [])]),
     onReport: (r) => {
       const now = standing(r);
       if (r.exported + r.imported + r.created + r.merged + r.removed || now !== shown) printReport(io, r);

@@ -11,7 +11,7 @@ export interface GraphNode {
   name: string;
   kind: NodeKind;
   uri?: string;
-  /** The PLC (plc/<device>/) when the workspace has several. */
+  /** The PLC (plc/<device>/) the object belongs to. */
   device?: string;
 }
 
@@ -34,16 +34,24 @@ export interface ImpactEntry {
 export class CodeGraph {
   readonly nodes = new Map<string, GraphNode>();
   private readonly edgeMap = new Map<string, GraphEdge>();
-  /** The workspace has several PLCs: ids are PLC/NAME, so same-named objects of two PLCs stay apart. */
-  private multi = false;
+  /** The workspace has objects of several PLCs (names are shown with their PLC then; ids always have it). */
+  multiPlc = false;
 
   get edges(): GraphEdge[] {
     return [...this.edgeMap.values()];
   }
 
-  /** The id of `name` in the PLC `device` (none for objects outside plc/ and for standard instructions). */
+  /**
+   * The id of `name` in the PLC `device` (none for objects outside plc/ and for standard instructions). Always
+   * with the PLC, however many PLCs have objects right now: a deleted block of PLC_A is never PLC_B's.
+   */
   key(name: string, device?: string): string {
-    return (this.multi && device ? `${device}/${name}` : name).toUpperCase();
+    return (device ? `${device}/${name}` : name).toUpperCase();
+  }
+
+  /** How a node is named for people: with its PLC when the workspace has several. */
+  label(n: GraphNode): string {
+    return this.multiPlc && n.device ? `${n.device}/${n.name}` : n.name;
   }
 
   /** The nodes named `name`: one per PLC that has an object of that name. */
@@ -59,7 +67,7 @@ export class CodeGraph {
   }
 
   private add(id: string, name: string, kind: NodeKind, uri?: string, device?: string): string {
-    if (!this.nodes.has(id)) this.nodes.set(id, { id, name, kind, ...(uri ? { uri } : {}), ...(device && this.multi ? { device } : {}) });
+    if (!this.nodes.has(id)) this.nodes.set(id, { id, name, kind, ...(uri ? { uri } : {}), ...(device ? { device } : {}) });
     return id;
   }
 
@@ -74,7 +82,7 @@ export class CodeGraph {
   static fromIndex(index: WorkspaceIndex): CodeGraph {
     const g = new CodeGraph();
     const globals = index.allGlobals();
-    g.multi = new Set(globals.map((s) => deviceOfUri(s.uri)).filter(Boolean)).size > 1;
+    g.multiPlc = new Set(globals.map((s) => deviceOfUri(s.uri)).filter(Boolean)).size > 1;
     const idOf = (s: GlobalSymbol) => g.key(s.name, deviceOfUri(s.uri));
     for (const s of globals) g.add(idOf(s), s.name, s.kind as NodeKind, s.uri, deviceOfUri(s.uri));
     const standard = (name: string) => {

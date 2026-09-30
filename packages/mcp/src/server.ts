@@ -151,7 +151,6 @@ export function createMcpServer(ctx: McpContext): McpServer {
     if (hits.length > 1) return { error: `${bare} is in several PLCs; name one: ${hits.map((h) => (h.device ? `${h.device}/${h.name}` : h.name)).join(" or ")}, or pass its workspace path` };
     return { ref: hits[0]?.id ?? bare, ...(hits[0]?.device ? { device: hits[0].device } : {}), name: hits[0]?.name ?? bare };
   };
-  const label = (n: { name: string; device?: string }) => (n.device ? `${n.device}/${n.name}` : n.name);
 
   server.registerTool("rung_status", { description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running." }, async () => {
     const none = noWorkspace();
@@ -284,7 +283,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     const r = await resolveNode(graph, name);
     if ("error" in r) return fail(r.error);
     if (!graph.get(r.ref)) return fail(`${name} is not in the workspace graph`);
-    return json(graph.usages(r.ref).map((u) => ({ by: label(u.node), kind: u.node.kind, how: u.kind, count: u.count, ...(u.members ? { members: u.members } : {}) })));
+    return json(graph.usages(r.ref).map((u) => ({ by: graph.label(u.node), kind: u.node.kind, how: u.kind, count: u.count, ...(u.members ? { members: u.members } : {}) })));
   });
 
   server.registerTool(
@@ -298,17 +297,17 @@ export function createMcpServer(ctx: McpContext): McpServer {
       if (!graph.get(n)) return fail(`${name} is not in the workspace graph`);
       switch (query) {
         case "callers":
-          return json(graph.callers(n).map(label));
+          return json(graph.callers(n).map((x) => graph.label(x)));
         case "callees":
-          return json(graph.callees(n).map((x) => ({ name: label(x), kind: x.kind })));
+          return json(graph.callees(n).map((x) => ({ name: graph.label(x), kind: x.kind })));
         case "impact":
-          return json(graph.impact(n).map((i) => ({ name: label(i.node), kind: i.node.kind, distance: i.distance, via: i.via })));
+          return json(graph.impact(n).map((i) => ({ name: graph.label(i.node), kind: i.node.kind, distance: i.distance, via: i.via })));
         case "path": {
           if (!to) return fail("path needs `to`");
           const t = await resolveNode(graph, r.device && !to.includes("/") && graph.find(to).length > 1 ? `${r.device}/${to}` : to);
           if ("error" in t) return fail(t.error);
           const p = graph.path(n, t.ref);
-          return p ? json(p.map(label)) : text("no dependency path");
+          return p ? json(p.map((x) => graph.label(x))) : text("no dependency path");
         }
       }
     },
@@ -332,7 +331,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       status: st?.status,
       ...(g.tag ? { tag: g.tag } : {}),
       ...(b ? { dbOf: b.dbOf, returnType: b.returnType, interface: b.vars.map((v) => ({ section: v.section, name: v.name, type: v.type, ...(v.comment ? { comment: v.comment } : {}) })), regions: b.regions.map((r) => r.name) } : {}),
-      usedBy: graph.usages(r.ref).map((u) => `${label(u.node)} (${u.kind})`),
+      usedBy: graph.usages(r.ref).map((u) => `${graph.label(u.node)} (${u.kind})`),
     });
   });
 

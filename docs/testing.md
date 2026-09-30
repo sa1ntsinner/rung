@@ -38,11 +38,11 @@ cases:
 
 - SCL statements: assignment, IF/ELSIF/ELSE, CASE (lists, ranges), FOR/WHILE/REPEAT with EXIT/CONTINUE, RETURN, REGION.
 - Expressions with SCL precedence, integer vs. real division, typed literals (`16#FF`, `T#1s`, `DINT#5`); integers wrap around on overflow like on an S7-1500 (32767 + 1 = -32768 in an Int).
-- TwinCAT / CODESYS structured text: PROGRAMs, FBs with METHODs and `THIS^`, enumerations (`E_State.Idle`, `E_State#Idle`, bare `Idle`), `POINTER TO` with `ADR` and `^`, `REFERENCE TO` with `REF=`.
+- TwinCAT / CODESYS structured text: PROGRAMs, FBs with METHODs and `THIS^`, PROPERTYs (GET and SET, each with its own locals), ACTIONs, enumerations (`E_State.Idle`, `E_State#Idle`, bare `Idle`), `POINTER TO` with `ADR` and `^`, `REFERENCE TO` with `REF=`.
 - User FBs (single and multi-instance), FCs, global DBs (including UDT members and start values), PLC tags.
 - IEC standard FBs with virtual time: TON/TOF/TP (and `_TIME`/`_LTIME`), CTU/CTD/CTUD, R_TRIG/F_TRIG, SR/RS; standard functions (LIMIT, MIN/MAX, SEL, MUX, math, strings, shifts, `*_TO_*` conversions).
 - LAD blocks mirrored as SIMATIC SD (`.s7dcl`): contacts, negated contacts, coils, set/reset coils, parallel branches, IEC timer/counter/trigger boxes, comparisons, MOVE, ADD/SUB/MUL/DIV/MOD and calls of FBs and FCs. A block with anything else (edge contacts, for example) is refused with the list of what is missing.
 
 ## What it does not do
 
-It is a logic simulator, not an emulation of the S7-1500 runtime: no system instructions (communication, motion, diagnostics), no FBD, GRAPH or STL blocks, no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS) or properties yet, and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.
+It is a logic simulator, not an emulation of the S7-1500 runtime: no system instructions (communication, motion, diagnostics), no FBD, GRAPH or STL blocks, no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS), and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.

@@ -19,6 +19,7 @@ namespace Rung.Bridge.Core.Protocol
         public const string AccessDenied = "ACCESS_DENIED";
         public const string NotFound = "NOT_FOUND";
         public const string ReadOnly = "READ_ONLY";
+        public const string DownloadDisabled = "DOWNLOAD_DISABLED";
         public const string Inconsistent = "INCONSISTENT";
         public const string Busy = "BUSY";
         public const string ExportFailed = "EXPORT_FAILED";

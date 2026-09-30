@@ -108,6 +108,13 @@ ACTION Reset:""")
         self.assertEqual(ns["return_type"](units[1][1]), "BOOL")
         self.assertEqual(ns["header_name"]("(* Program flow *)\nPROGRAM PLC_PRG\n"), "PLC_PRG")
 
+    def test_a_comment_above_a_var_section_stays_in_the_declaration(self):
+        unit = "FUNCTION_BLOCK FB_Motor\n// inputs\nVAR_INPUT\n    bOn : BOOL;\nEND_VAR\n\n(* outputs *)\nVAR_OUTPUT\n    bRun : BOOL;\nEND_VAR\n// the code\nbRun := bOn;\n"
+        decl, impl = ns["split_decl_impl"](unit)
+        self.assertEqual(decl, "FUNCTION_BLOCK FB_Motor\n// inputs\nVAR_INPUT\n    bOn : BOOL;\nEND_VAR\n\n(* outputs *)\nVAR_OUTPUT\n    bRun : BOOL;\nEND_VAR\n")
+        self.assertEqual(impl, "// the code\nbRun := bOn;\n")
+        self.assertEqual(ns["accessor_decl_impl"]("// locals\nVAR\n  t : INT;\nEND_VAR\n// value\nP := t;\n"), ("// locals\nVAR\n  t : INT;\nEND_VAR\n", "// value\nP := t;\n"))
+
     def test_the_header_keyword_past_comments_and_pragmas(self):
         kw = ns["lead_keyword"]
         self.assertEqual(kw("// the motor\nFUNCTION_BLOCK FB_Motor\n"), "FUNCTION_BLOCK")
@@ -146,6 +153,20 @@ ACTION Reset:""")
         with self.assertRaises(Exception):
             ns["apply_units"](pou, parts[0][1], ns["plan_units"]("FB_Motor", parts[1:]))
         self.assertNotEqual(dump(pou), before)
+        ns["restore"](pou, snap)
+        self.assertEqual(dump(pou), before)
+
+    def test_a_failed_import_that_took_a_set_away_gets_it_back(self):
+        pou = Obj("FB_Motor", "pou", "FUNCTION_BLOCK FB_Motor\nVAR\nEND_VAR\n", "x := 1;\n")
+        prop = pou.create_property("Speed", "REAL")  # GET and SET
+        prop.children[1].textual_implementation.text = "_speed := Speed;\n"
+        before = dump(pou)
+        snap = ns["snapshot"](pou)
+        # the file makes Speed read-only (SET removed), then CODESYS refuses a later method's code
+        text = "FUNCTION_BLOCK FB_Motor\nVAR\nEND_VAR\nx := 1;\nEND_FUNCTION_BLOCK\n\nPROPERTY Speed : REAL\nGET\nSpeed := 1;\nEND_GET\nEND_PROPERTY\n\nMETHOD New : INT\nBOOM\nEND_METHOD\n"
+        parts = ns["split_units"](text)
+        with self.assertRaises(Exception):
+            ns["apply_units"](pou, parts[0][1], ns["plan_units"]("FB_Motor", parts[1:]))
         ns["restore"](pou, snap)
         self.assertEqual(dump(pou), before)
 

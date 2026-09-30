@@ -17,6 +17,11 @@ namespace Rung.Bridge.V20
         public bool OpenHeadless;
         /// <summary>With OpenHeadless: create the project when its file does not exist yet (rung init --from-plc).</summary>
         public bool CreateProject;
+        /// <summary>
+        /// plc.download is refused without it: only `rung download` (and `rung watch` when downloads are on for the
+        /// workspace) start a bridge that may download. Sync, pull, the MCP server and tools never ask for it.
+        /// </summary>
+        public bool AllowDownload;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -43,6 +48,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--create-project":
                         a.CreateProject = true;
+                        break;
+                    case "--allow-download":
+                        a.AllowDownload = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);

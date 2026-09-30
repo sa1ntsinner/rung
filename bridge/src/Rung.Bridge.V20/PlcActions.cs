@@ -236,6 +236,8 @@ namespace Rung.Bridge.V20
 
         public DownloadOutcome Download(DownloadRequest request)
         {
+            if (!_args.AllowDownload)
+                throw new RpcException(ErrorCodes.DownloadDisabled, "This bridge was not started for downloads: only rung download starts one that may download (--allow-download). Nothing was downloaded.");
             Alive();
             var item = CpuItem(request.Device);
             var provider = item.GetService<DownloadProvider>();

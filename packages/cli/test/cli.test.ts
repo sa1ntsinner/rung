@@ -129,7 +129,8 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
   it("a station TIA Portal could not save is not a success: init --from-plc binds nothing", async () => {
     const t = setup({ FAKE_SAVE_ERROR: "There is not enough space on the disk." });
     expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT)).toBe(3);
-    expect(t.err.join("")).toContain("could not be saved (There is not enough space on the disk.), so it is not kept");
+    expect(t.err.join("")).toContain("could not be saved (There is not enough space on the disk.)");
+    expect(t.err.join("")).toContain("rather than uploading again");
     expect(existsSync(join(t.dir, "rung.toml"))).toBe(false);
   });
 

@@ -39,6 +39,8 @@ export interface CaseResult {
 export interface FileResult {
   file: string;
   block: string;
+  /** The PLC (plc/<device>/) of the block the file tested. */
+  plc?: string;
   cases: CaseResult[];
   error?: string;
 }
@@ -192,7 +194,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     const getMem = (): Struct => (isFb ? inst!.mem : fcOutputs);
     const resolve = (name: string): { get: () => Value; set: (v: Value) => void } => {
       let { global, root, path } = splitName(name);
-      const gvar = !global && !(isFb && root.toUpperCase() in getMem()) ? index.global(root)?.gvar : undefined;
+      const gvar = !global && !(isFb && root.toUpperCase() in getMem()) ? scopedTo(index, g.uri).global(root)?.gvar : undefined; // the block's own PLC's list
       if (gvar) ({ root, path } = { root: gvar.list, path: [root, ...path] }); // bare GVL variable
       const walk = (base: Struct, key: string, rest: Seg[]) => {
         let holder: Struct | Value[] = base;
@@ -298,7 +300,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0 });
     }
   }
-  return { file, block: blockName, cases: results };
+  const plc = deviceOfUri(g.uri);
+  return { file, block: blockName, ...(plc ? { plc } : {}), cases: results };
 }
 
 /** Runs every tests/**\/*.test.yaml in the workspace (or the given files). */

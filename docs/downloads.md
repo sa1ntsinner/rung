@@ -8,7 +8,7 @@ rung talks to the PLC through TIA Portal Openness, the same way TIA Portal does:
 
 ## Who downloads
 
-A person does. `rung download` runs from a terminal, the VS Code button (with a confirmation) or a Zed task, and asks you to type the PLC name unless you pass `--yes`. The MCP server never downloads; `rung_download_request` only writes a request for a person to run. The language server never downloads either. `rung watch` takes a download only when it names the PLC the person confirmed and `download.enabled` is on, so nothing else that reaches it can skip those checks.
+A person does. `rung download` runs from a terminal, the VS Code button (with a confirmation) or a Zed task, and asks you to type the PLC name unless you pass `--yes`. The MCP server never downloads; `rung_download_request` only writes a request for a person to run. The language server never downloads either. `rung watch` takes a download only when it names the PLC the person confirmed and `download.enabled` is on, so nothing else that reaches it can skip those checks. The bridge itself refuses a download unless the command that started it was `rung download`, or `rung watch` with downloads on: the bridges of `rung sync`, `rung pull`, the MCP server and the other commands cannot download.
 
 What this does not do: keep a program that runs as your Windows user from downloading. Such a program can run `rung download --yes`, or use TIA Portal Openness itself. rung's agent instructions and tools never download, but an agent that runs commands in your name is trusted as you are. Where a PLC must be out of an agent's reach, set `download.enabled = false` in the agent's workspace, and run the agent under a Windows user that is not in the "Siemens TIA Openness" group.
 

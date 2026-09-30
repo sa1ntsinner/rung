@@ -54,7 +54,9 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
     // CODESYS: rung itself relays to its bridge script inside CODESYS (codesys.ts); imports are always allowed
     // there, sync.import decides whether rung sends any
     const b = codesysBridgeCommand(config.project.path);
-    const client = await BridgeClient.spawn({ command: b.command, args: b.args, env: cleanEnv(io.env), requestTimeoutMs: 300_000, closeTimeoutMs: 30_000 }); // the relay gives CODESYS 10 s to close its project
+    // the script inside CODESYS downloads only for a bridge started for it (like --allow-download for TIA Portal)
+    const env = { ...cleanEnv(io.env), ...(extra.includes("--allow-download") ? { RUNG_CODESYS_ALLOW_DOWNLOAD: "1" } : {}) };
+    const client = await BridgeClient.spawn({ command: b.command, args: b.args, env, requestTimeoutMs: 300_000, closeTimeoutMs: 30_000 }); // the relay gives CODESYS 10 s to close its project
     client.onEvent((e) => showBridgeEvent(io, e));
     return client;
   }

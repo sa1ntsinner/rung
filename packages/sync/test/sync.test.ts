@@ -180,6 +180,20 @@ describe("syncOnce", () => {
     expect(existsSync(t.f(pA + ".conflict"))).toBe(true);
   });
 
+  it("resolve --merged refuses an untouched file even when TIA Portal's other changes merged into the .conflict", async () => {
+    const t = setup();
+    const long = (x: string, z: string) => `FUNCTION "Fx_A" : Void\nBEGIN\n  #x := ${x};\n  #a := 1;\n  #b := 2;\n  #c := 3;\n  #d := 4;\n  #z := ${z};\nEND_FUNCTION\n`;
+    t.bridge.edit(A, { ".scl": long("1", "3") });
+    await t.sync();
+    t.write(pA, long("21", "3")); // the person changes x
+    t.bridge.edit(A, { ".scl": long("22", "33") }); // TIA Portal changes x too, and z far away
+    await t.sync();
+    const conflict = readFileSync(t.f(pA + ".conflict"), "utf8");
+    expect(conflict).toContain("#z := 33;"); // TIA's z merged cleanly into the .conflict
+    const err = await t.withState((s) => resolveConflict(t.root, s, pA, "merged")).catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/still contains conflict markers/);
+  });
+
   it("resolve --merged takes a hand-merged .conflict file and keeps a recovery copy of the rest", async () => {
     const t = setup();
     await t.sync();

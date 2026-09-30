@@ -50,7 +50,8 @@ public sealed class FixtureSession : IDisposable
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "rung-fixtures", "RungFixture", "RungFixture.ap20");
         var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(ProjectPath), "fixture-manifest.json"))).RootElement;
         ManifestAddresses = manifest.GetProperty("addresses").EnumerateArray().Select(a => a.GetString()).ToArray();
-        Session = OpennessSession.Attach(new BridgeArgs { ProjectPath = ProjectPath, AllowFixtureImport = true }, (n, p) => { lock (Events) Events.Add(n); });
+        // downloads allowed like rung download's bridge: the fixture has no PLC to reach (see DownloadNeedsABridgeStartedForIt)
+        Session = OpennessSession.Attach(new BridgeArgs { ProjectPath = ProjectPath, AllowFixtureImport = true, AllowDownload = true }, (n, p) => { lock (Events) Events.Add(n); });
     }
 
     public void Dispose() => Session.Dispose();
@@ -389,6 +390,15 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         Assert.NotEmpty(c.Modes);
         Assert.Contains(c.Modes, m => m.PcInterfaces.Count > 0);
         Assert.Equal("Offline", _fx.Session.Online("PLC_1", "state", null).State);
+    }
+
+    [Fact] public void DownloadNeedsABridgeStartedForIt()
+    {
+        using (var plain = OpennessSession.Attach(new BridgeArgs { ProjectPath = _fx.ProjectPath }, (n, p) => { }))
+        {
+            var ex = Assert.Throws<RpcException>(() => plain.Download(new DownloadRequest { Device = "PLC_1" }));
+            Assert.Equal("DOWNLOAD_DISABLED", ex.Code);
+        }
     }
 
     [Fact] public void DownloadWithoutATargetExplainsWhatToConfigure()

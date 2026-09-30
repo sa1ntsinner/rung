@@ -51,7 +51,7 @@ export async function summarize(root: string, projectPath: string): Promise<stri
   ];
   if (folders.size) lines.push("- Block folders: " + [...folders.entries()].sort().map(([f, n]) => `\`${f.split("/").slice(3).join("/")}\` (${n})`).join(", "));
   if (conventions.length) lines.push("- Naming prefixes in use: " + conventions.join(", "));
-  if (hubs.length) lines.push("- Most used objects (change with care): " + hubs.map((h) => `\`${h.n.device ? `${h.n.device}/` : ""}${h.n.name}\` (${h.users} ${h.users === 1 ? "user" : "users"})`).join(", "));
+  if (hubs.length) lines.push("- Most used objects (change with care): " + hubs.map((h) => `\`${graph.label(h.n)}\` (${h.users} ${h.users === 1 ? "user" : "users"})`).join(", "));
   lines.push(readOnly.length ? `- Read-only here (${readOnly.length}): ${readOnly.slice(0, 20).map((p) => `\`${p}\``).join(", ")}${readOnly.length > 20 ? ", …" : ""}` : "- Read-only here: none");
   lines.push(END);
   return lines.join("\n") + "\n";

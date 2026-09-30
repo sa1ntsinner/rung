@@ -121,6 +121,17 @@ describe("rung test runner", () => {
     expect((await runTestFile(idx, "tests/PLC_A/add.test.yaml", test(""))).cases[0]!.passed).toBe(false);
   });
 
+  it("a bare GVL name in a step means the test's PLC's list", async () => {
+    const idx = new WorkspaceIndex();
+    for (const [plc, list] of [["PLC_A", "GVL_A"], ["PLC_B", "GVL_B"]] as const) {
+      idx.set(`file:///w/plc/${plc}/tags/${list}.st`, "VAR_GLOBAL\n  x : INT;\nEND_VAR\n", 0);
+      idx.set(`file:///w/plc/${plc}/blocks/FB_R.st`, "FUNCTION_BLOCK FB_R\nVAR_OUTPUT\n  y : INT;\nEND_VAR\ny := x * 2;\nEND_FUNCTION_BLOCK\n", 0);
+    }
+    const r = await runTestFile(idx, "tests/PLC_B/r.test.yaml", "block: FB_R\ncases:\n  - steps:\n      - { set: { x: 5 }, cycle: 1, expect: { y: 10 } }\n");
+    expect(r.error).toBeUndefined();
+    expect(r.cases[0]).toMatchObject({ passed: true });
+  });
+
   it("discovers tests/**/*.test.yaml and renders JUnit XML", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-tests-"));
     mkdirSync(join(root, "tests", "drives"), { recursive: true });

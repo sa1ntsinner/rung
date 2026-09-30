@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { WorkspaceIndex, definition, diagnostics, scopedTo } from "@rung/lsp";
+import { WorkspaceIndex, definition, diagnostics, rename, scopedTo } from "@rung/lsp";
 import { runTestFile, Simulator, type Instance } from "../src/index.js";
 
 const BLINK = `FUNCTION_BLOCK FB_Blink
@@ -230,6 +230,16 @@ cases:
     expect(() => s2.runInstance(s2.newInstance("PRG_Main"))).toThrow(/FB_Drive.MaxSpeed has no SET: it is read-only/);
   });
 
+  it("GET and SET have constants of their own too", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/FB_S.st", "FUNCTION_BLOCK FB_S\nVAR\n  v : INT;\nEND_VAR\nEND_FUNCTION_BLOCK\n\nPROPERTY P : INT\nGET\nVAR CONSTANT\n  scale : INT := 2;\nEND_VAR\nP := scale;\nEND_GET\nSET\nVAR CONSTANT\n  scale : INT := 4;\nEND_VAR\nv := P * scale;\nEND_SET\nEND_PROPERTY\n", 0);
+    idx.set("file:///w/PRG_S.st", "PROGRAM PRG_S\nVAR\n  f : FB_S;\n  r : INT;\n  w : INT;\nEND_VAR\nr := f.P;\nf.P := 3;\nw := f.v;\nEND_PROGRAM\n", 0);
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_S");
+    s.runInstance(main);
+    expect([main.mem.R, main.mem.W]).toEqual([2, 12]);
+  });
+
   it("an ACTION in the POU's file (rung's CODESYS form) is the FB's code: no errors, and a call runs it", () => {
     const idx = new WorkspaceIndex();
     idx.set("file:///w/FB_Count.st", "FUNCTION_BLOCK FB_Count\nVAR\n  n : INT;\nEND_VAR\nn := n + 1;\nEND_FUNCTION_BLOCK\n\nACTION Reset:\nn := 0;\nEND_ACTION\n", 0);
@@ -259,10 +269,17 @@ cases:
       s.runInstance(main);
       expect([main.mem.R, main.mem.W], plc).toEqual([get, 10]); // GET's tmp; SET's tmp is 7: 3 + 7
     }
-    const text = idx.docs.get("file:///w/plc/PLC_A/blocks/FB_P.st")!.text;
+    const uriA = "file:///w/plc/PLC_A/blocks/FB_P.st";
+    const text = idx.docs.get(uriA)!.text;
     const setTmp = text.lastIndexOf("+ tmp") + 2;
-    const def = definition(idx, "file:///w/plc/PLC_A/blocks/FB_P.st", setTmp)!;
+    const def = definition(idx, uriA, setTmp)!;
     expect(text.slice(def.start, def.end + 11)).toBe("tmp : INT := 7"); // SET's, not GET's
+    // renaming GET's tmp leaves SET's alone, and writes IEC names without #
+    const edits = rename(idx, uriA, text.indexOf("P := tmp") + 6, "t1") as { start: number; end: number; newText: string }[];
+    let renamed = text;
+    for (const e of [...edits].sort((a, b) => b.start - a.start)) renamed = renamed.slice(0, e.start) + e.newText + renamed.slice(e.end);
+    expect(renamed).toContain("GET\nVAR\n  t1 : INT := 1;\nEND_VAR\nP := t1;\nEND_GET");
+    expect(renamed).toContain("SET\nVAR\n  tmp : INT := 7;\nEND_VAR\nv := P + tmp;\nEND_SET");
   });
 
   it("runs a property of a TwinCAT .TcPOU (<Property> with <Get> and <Set>)", () => {
