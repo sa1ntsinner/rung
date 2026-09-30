@@ -51,7 +51,7 @@ import {
 import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
 import { placeCompileMessages } from "./compile-lines.js";
 
-export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile">;
+export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts">>;
 
 export interface Diagnostic {
   address: string;
@@ -119,6 +119,11 @@ interface ImportJob {
 }
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
+/** The sends whose outcome was never recorded, newest first (a state written before operation ids: files only). */
+function sendsOf(st: ObjectState): { files: StateFile[]; op?: string }[] {
+  const older = (st.sent ?? []).map((s) => (Array.isArray(s) ? { files: s as StateFile[] } : s));
+  return [...(st.sending ? [{ files: st.sending, ...(st.sendingOp ? { op: st.sendingOp } : {}) }] : []), ...older];
+}
 const sameTexts = (a: Record<string, string>, b: Record<string, string>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 /** The same texts but for spaces and line breaks outside '…' and "…": TIA Portal's own layout of what was sent. */
 const sameLayoutFree = (a: Record<string, string>, b: Record<string, string>) => {
@@ -408,6 +413,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       status: "conflicted",
       conflict: { tiaFingerprint: staged.result.fingerprint, tiaFiles: staged.files, ...(staged.result.form !== st.form ? { tiaForm: staged.result.form } : {}), ...(Object.keys(local).length ? { local } : {}) },
       sending: undefined,
+      sendingOp: undefined,
       sent: undefined,
     });
     report.conflicts++;
@@ -500,7 +506,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
             report.exported++;
           } else {
             // a restored file ends a pending delete or a refused edit
-            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending || cur.sent) state.upsert({ ...cur, status: "synced", sending: undefined, sent: undefined });
+            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending || cur.sent) state.upsert({ ...cur, status: "synced", sending: undefined, sendingOp: undefined, sent: undefined });
             report.unchanged++;
           }
           continue;
@@ -558,12 +564,22 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         let m = mergeBundle(cur.form, base, bundle, tia);
-        if (m.kind === "conflict" && (cur.sending || cur.sent?.length)) {
+        const sends = sendsOf(cur);
+        if (m.kind === "conflict" && sends.length) {
           // the last passes stopped during an import (Ctrl+C, a crash). If TIA Portal already has the file edits
           // one of them sent (the newest it has; TIA Portal may have changed other lines since), those files are
-          // the base the file was edited from since; if none, the conflict is real.
-          for (const files of [cur.sending, ...(cur.sent ?? [])]) {
-            if (!files) continue;
+          // the base the file was edited from since; if none, the conflict is real. With the bridge's receipts
+          // only the newest send TIA Portal committed can be it: an older one that matches is someone's change
+          // back to it, a conflict to show, not a base.
+          let candidates = sends;
+          if (bridge.receipts && sends.every((s) => s.op)) {
+            const landed = await bridge.receipts(sends.map((s) => s.op!));
+            if (landed) {
+              const newest = sends.find((s) => landed.includes(s.op!));
+              candidates = newest ? [newest] : [];
+            }
+          }
+          for (const { files } of candidates) {
             const from = await baseBundle(root, stemOf(cur), files);
             const probe = mergeBundle(cur.form, base, from, tia);
             if (probe.kind !== "conflict" && sameTexts(probe.files, tia)) {
@@ -727,14 +743,16 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       }
     }
     const stage = await stageForImport(root, job.form, job.bundle);
+    // the operation's id: the bridge keeps a receipt when TIA Portal commits it (see sendsOf)
+    const opId = randomUUID();
     if (st) {
       // the files this send was made from, kept until the import's outcome is recorded (see ObjectState.sending)
       const blobs = new BlobStore(root);
       const sending: StateFile[] = [];
       for (const [suffix, text] of Object.entries(job.local ?? job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
       // a send whose outcome the last pass never recorded stays known: TIA Portal may have that one
-      const sent = st.sending ? [st.sending, ...(st.sent ?? [])].slice(0, 8) : st.sent;
-      state.upsert({ ...st, sending, ...(sent?.length ? { sent } : {}) });
+      const sent = sendsOf(st).slice(0, 8);
+      state.upsert({ ...st, sending, sendingOp: opId, sent: sent.length ? sent : undefined });
       await state.flush();
     }
     if (job.kind === "create" && !st) {
@@ -743,12 +761,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       const blobs = new BlobStore(root);
       const sending: StateFile[] = [];
       for (const [suffix, text] of Object.entries(job.bundle)) sending.push({ path: job.stem + suffix, role: suffix === "." + job.form ? "primary" : "companion" + suffix, hash: await blobs.put(text) });
-      state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing", sending });
+      state.upsert({ address: job.address, path: primaryPath, form: job.form, fileHash: bundleHash(job.captured), files: job.captured, tiaFingerprint: "absent", baseId: "", readOnly: false, warnings: [], status: "importing", sending, sendingOp: opId });
       await state.flush();
     }
     let result;
     try {
-      result = await bridge.importObject(job.address, job.form, stage.primary, job.expected, randomUUID());
+      result = await bridge.importObject(job.address, job.form, stage.primary, job.expected, opId);
     } catch (e) {
       if (!(e instanceof BridgeError)) throw e;
       if (e.code === "OUTCOME_UNKNOWN") {
@@ -958,7 +976,7 @@ async function resolveUnknownImport(root: string, state: StateStore, st: ObjectS
       } else await replaceGuarded(from, await blobs.get(f.hash), { expectedHash: await diskHash(root, f.path), recoveryDir, force: true });
     }
     if (create) state.remove(st.address);
-    else state.upsert({ ...st, status: "synced", tiaFingerprint: `stale:${st.tiaFingerprint}`, sending: undefined, sent: undefined });
+    else state.upsert({ ...st, status: "synced", tiaFingerprint: `stale:${st.tiaFingerprint}`, sending: undefined, sendingOp: undefined, sent: undefined });
   } else if (create) {
     // as a create Ctrl+C interrupted: finished from TIA Portal's side if it has the object, else created again
     state.upsert({ ...st, status: "importing" });

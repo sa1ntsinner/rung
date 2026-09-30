@@ -95,6 +95,8 @@ namespace Rung.Bridge.Core.Protocol
                     if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("files", out var sent))
                         return InTempDir(dir => Inline(Session.Import(Str(p, "address"), Str(p, "form"), WriteSent(dir, sent, Str(p, "primary")), Str(p, "expectedTiaRevision"), Str(p, "operationId"))));
                     return Session.Import(Str(p, "address"), Str(p, "form"), Str(p, "path"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
+                case "objects.receipts":
+                    return new { landed = Receipts.Landed(StrArray(p, "operationIds")) };
                 case "objects.delete":
                     Session.Delete(Str(p, "address"), Str(p, "expectedTiaRevision"), Str(p, "operationId"));
                     return new { deleted = true };

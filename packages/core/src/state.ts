@@ -57,11 +57,13 @@ export interface ObjectState {
    * whether TIA Portal already has the edit: then these files are the base the file was edited from since.
    */
   sending?: StateFile[];
+  /** The import operation `sending` went with: the bridge keeps a receipt of each one TIA Portal committed. */
+  sendingOp?: string;
   /**
-   * Earlier sends whose outcome was never recorded either (several passes interrupted in a row), newest first:
-   * TIA Portal may have any one of them.
+   * Earlier sends whose outcome was never recorded either (several passes interrupted in a row), newest first,
+   * with their operations: TIA Portal may have any one of them, and with receipts rung knows which it took.
    */
-  sent?: StateFile[][];
+  sent?: { files: StateFile[]; op?: string }[];
 }
 
 export interface Binding {

@@ -178,6 +178,7 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.ImportFailed, Sentence(TiaReason(e)) + (attempted ? "" : " Nothing was changed."));
             }
             finally { _inImport = false; }
+            Receipts.Write(operationId, address);
             _index.Clear();
             var result = Export(address, "yaml", WorkDir(operationId, "out"));
             if (_args.SaveAfterImport)

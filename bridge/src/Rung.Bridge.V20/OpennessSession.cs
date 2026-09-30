@@ -672,6 +672,8 @@ namespace Rung.Bridge.V20
                 guard.Dispose();
                 try { Directory.Delete(WorkDir(operationId, "src"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
+            // committed: a rung stopped from here on (the compile takes seconds) learns it on its next pass
+            Receipts.Write(operationId, address);
 
             // Compile outside the transaction (Siemens forbids compile inside it), then return the fresh export.
             _index.Clear();

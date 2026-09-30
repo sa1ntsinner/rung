@@ -168,6 +168,19 @@ export class BridgeClient {
     return this.request("objects.import", { address, form, primary, files, expectedTiaRevision, operationId }) as Promise<ExportResult>;
   }
 
+  /**
+   * Which of these imports TIA Portal committed (the bridge notes each one right after the commit), or undefined
+   * when the bridge keeps no receipts (an older bridge, CODESYS).
+   */
+  async receipts(operationIds: string[]): Promise<string[] | undefined> {
+    try {
+      return ((await this.request("objects.receipts", { operationIds })) as { landed: string[] }).landed;
+    } catch (e) {
+      if (e instanceof BridgeError && e.code === ErrorCodes.BAD_REQUEST && /Unknown method/i.test(e.message)) return undefined;
+      throw e;
+    }
+  }
+
   deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<{ deleted: boolean }> {
     return this.request("objects.delete", { address, expectedTiaRevision, operationId }) as Promise<{ deleted: boolean }>;
   }

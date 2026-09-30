@@ -22,7 +22,13 @@ class TiaFake extends FakeBridge {
   /** TIA Portal took the import, but its answer is this error (another Openness client replaced the block meanwhile) */
   failAfter: string | undefined;
 
-  async importObject(address: string, form: string, path: string, expected: string): Promise<ExportResult> {
+  /** the operations TIA Portal committed: the bridge's receipts (undefined: a bridge that keeps none) */
+  landed: Set<string> | undefined = new Set();
+  async receipts(ops: string[]): Promise<string[] | undefined> {
+    return this.landed ? ops.filter((o) => this.landed!.has(o)) : undefined;
+  }
+
+  async importObject(address: string, form: string, path: string, expected: string, op = ""): Promise<ExportResult> {
     const text = readFileSync(path, "utf8");
     this.imports.push({ address, expected, text });
     if (this.hangImport) throw new BridgeError("OUTCOME_UNKNOWN", "timed out");
@@ -40,6 +46,7 @@ class TiaFake extends FakeBridge {
       for (const [suffix, content] of Object.entries(o.files)) if (suffix !== "." + form) files[suffix] = content;
       this.edit(address, files);
     }
+    this.landed?.add(op);
     if (this.killed === "after") throw new Error("killed"); // TIA Portal has it; rung never heard back
     if (this.failAfter) throw new BridgeError(this.failAfter, "No object at " + address);
     const dir = mkdtempSync(join(tmpdir(), "rung-bridge-out-"));
@@ -853,6 +860,24 @@ describe("syncOnce", () => {
     expect(r.conflicts).toBe(1);
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 7;");
     expect(t.read(pA)).toContain("#x := 5;");
+  });
+
+  it("with receipts, an older send TIA Portal holds again is someone's change back to it: a conflict, not a base (fifth review)", async () => {
+    const t = setup();
+    await t.sync();
+    const tiaNow = () => t.bridge.objects.get(A)!.files[".scl"]!;
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    t.bridge.killed = "after"; // TIA Portal takes 5
+    await expect(t.sync()).rejects.toThrow("killed");
+    t.write(pA, srcA.replace("#x := 1;", "#x := 6;"));
+    await expect(t.sync()).rejects.toThrow("killed"); // and 6
+    t.bridge.killed = undefined;
+    t.bridge.edit(A, { ".scl": tiaNow().replace("#x := 6;", "#x := 5;") }); // someone in TIA Portal puts 5 back
+    t.write(pA, srcA.replace("#x := 1;", "#x := 7;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(1); // neither 7 nor the change back to 5 is dropped silently
+    expect(tiaNow()).toContain("#x := 5;");
+    expect(t.read(pA)).toContain("#x := 7;");
   });
 
   it("an interrupted update TIA Portal never got stays a conflict when TIA Portal changed the same line", async () => {
