@@ -51,7 +51,7 @@ rung watch         # keeps both sides in sync; Ctrl+C to stop
 
 - Save `plc/PLC_1/blocks/.../Fx_Motor.scl` → rung imports it into TIA Portal, compiles it and writes TIA's formatting back. Compile errors appear on their line in the editor.
 - Change a block in TIA Portal → the file updates.
-- Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`.
+- Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`. LAD and FBD blocks merge network by network: one person's change to network 2 and another's to network 5 both stay; the same network changed on both sides is a conflict (`.tia` shows TIA Portal's version).
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
 - Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor flags what TIA Portal's import would refuse: a tag without an address or with a type that does not fit it, two tags on one line, a name used twice. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.

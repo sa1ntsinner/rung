@@ -24,3 +24,4 @@ export { type RungConfig, type EngineeringVersion, ENGINEERING_VERSIONS, CONFIG_
 export { preflight, isContained, sweepTempFiles, MAX_ABSOLUTE_PATH, type PlannedPath, type PreflightResult } from "./layout.js";
 export { toYaml } from "./yaml.js";
 export * from "./check.js";
+export { splitNetworks, networkKey, blankIds, renumberIds, type NetworkForm, type NetworkSplit } from "./networks.js";

@@ -23,7 +23,7 @@ The [quickstart](docs/quickstart.md) walks through setup, including the Openness
 
 ## What's in it
 
-- Two-way sync. Save a file and rung imports it, compiles the block and writes TIA's version back. Changes made in TIA Portal come back to the files. If both sides changed, you get a line merge or a conflict to resolve.
+- Two-way sync. Save a file and rung imports it, compiles the block and writes TIA's version back. Changes made in TIA Portal come back to the files. If both sides changed, you get a merge (by line in SCL, by network in LAD and FBD) or a conflict to resolve.
 - A language server for SCL and IEC structured text: completion, go to definition through DBs, UDTs and FB instances, references, rename, help on hover, quick fixes (declare a tag, define a PLC tag, create an instance DB, update a block call) and TIA's compile errors on the right line. There are extensions for [VS Code and Zed](docs/editors/README.md) and a config for Neovim.
 - Monitoring like TIA Portal's: the values of a running block at the end of each line in the editor, from the PLC's Web API or `rung simulate`, a virtual PLC.
 - An [MCP server and a Claude Code plugin](docs/agents/README.md), so agents can check sync status, compile, find usages and run tests.
