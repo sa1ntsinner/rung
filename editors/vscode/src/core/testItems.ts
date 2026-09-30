@@ -24,6 +24,9 @@ export interface CaseResult {
   error?: string;
   ms: number;
   line?: number;
+  /** For an error: the step it stopped in (from 1) and that step's line (from 1). */
+  errorStep?: number;
+  errorLine?: number;
 }
 
 export interface FileResult {

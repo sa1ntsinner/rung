@@ -14,21 +14,36 @@ export interface NetworkTranslation {
   /** Bool temporaries the statements use (the power flow where a branch splits, an edge): the simulator adds them. */
   temps: string[];
   refs: Ref[];
+  /** STL networks as STL text; the statements call __RUNG_STL(i) where network i runs, in the block's frame. */
+  stl: { source: string; network: number; last: boolean }[];
 }
 
 const kid = (n: XmlNode | undefined, name: string) => n?.children.find((c) => c.name === name);
 const kids = (n: XmlNode | undefined, name: string) => n?.children.filter((c) => c.name === name) ?? [];
 
-/** The networks (compile units) of a SimaticML block: LAD and FBD translated, any other language listed. */
+/** The networks (compile units) of a SimaticML block: LAD, FBD and SCL translated, STL kept as STL text, any other language listed. */
 export function translateNetworks(block: XmlNode): NetworkTranslation {
-  const out: NetworkTranslation = { scl: "", unsupported: [], temps: [], refs: [] };
+  const out: NetworkTranslation = { scl: "", unsupported: [], temps: [], refs: [], stl: [] };
   const lines: string[] = [];
   let n = 0;
-  for (const unit of kids(kid(block, "ObjectList"), "SW.Blocks.CompileUnit")) {
+  const units = kids(kid(block, "ObjectList"), "SW.Blocks.CompileUnit");
+  for (const unit of units) {
     n++;
     const attrs = kid(unit, "AttributeList");
     const source = kid(attrs, "NetworkSource");
     const net = kid(source, "FlgNet");
+    const stl = kid(source, "StatementList");
+    const scl = kid(source, "StructuredText");
+    if (stl || scl) {
+      const r = stl ? stlNetwork(stl) : sclNetwork(scl!);
+      out.refs.push(...r.refs);
+      if (r.missing.length) out.unsupported.push(`network ${n}: ${r.missing.join(", ")}`);
+      else if (stl) {
+        out.stl.push({ source: r.text, network: n, last: n === units.length });
+        lines.push(`// network ${n} (STL)`, `__RUNG_STL(${out.stl.length - 1});`);
+      } else lines.push(`// network ${n} (SCL)`, r.text);
+      continue;
+    }
     if (!net) {
       if (source?.children.length) out.unsupported.push(`network ${n}: ${kid(attrs, "ProgrammingLanguage")?.text.trim() || "a"} network`);
       continue;
@@ -182,18 +197,7 @@ class Network {
   }
 
   private accessRefs(a: XmlNode, access: Ref["access"], refs: Ref[]) {
-    const scope = a.attrs.Scope?.value ?? "";
-    const comps = kids(kid(a, "Symbol") ?? a, "Component");
-    const first = comps[0]?.attrs.Name;
-    if ((scope === "LocalVariable" || scope === "GlobalVariable") && first) {
-      const members = comps.slice(1).flatMap((c) => (c.attrs.Name ? [{ name: c.attrs.Name.value, start: c.attrs.Name.start, end: c.attrs.Name.start + c.attrs.Name.rawLength }] : []));
-      refs.push({ kind: scope === "LocalVariable" ? "local" : "global", name: first.value, start: first.start, end: first.start + first.rawLength, members, access });
-    } else if (scope === "LocalConstant" || scope === "GlobalConstant") {
-      const c = kid(a, "Constant")?.attrs.Name;
-      if (c) refs.push({ kind: scope === "LocalConstant" ? "local" : "global", name: c.value, start: c.start, end: c.start + c.rawLength, members: [], access: "read" });
-    }
-    // array indices are read
-    for (const c of comps) for (const i of kids(c, "Access")) this.accessRefs(i, "read", refs);
+    accessRefs(a, access, refs);
   }
 
   // ------------------------------------------------------------------------------------ evaluation
@@ -539,34 +543,192 @@ class Network {
     return this.operandOf(a);
   }
 
-  /** An Access (or an Instance) as SCL: #local.member, "Global".member[i], a constant, %I0.0. */
   private operandOf(a: XmlNode): string {
-    const scope = a.attrs.Scope?.value ?? "";
-    if (scope === "LiteralConstant" || scope === "TypedConstant") {
-      const c = kid(a, "Constant");
-      const v = kid(c, "ConstantValue")?.text.trim() ?? "";
-      const type = kid(c, "ConstantType")?.text.trim() ?? "";
-      if (/^bool$/i.test(type)) return /^(true|1)$/i.test(v) ? "TRUE" : "FALSE";
-      if (/^w?(string|char)$/i.test(type) && !v.startsWith("'")) return `'${v.replace(/'/g, "$'")}'`;
-      return v;
-    }
-    if (scope === "LocalConstant" || scope === "GlobalConstant") {
-      const n = kid(a, "Constant")?.attrs.Name?.value ?? "";
-      return scope === "LocalConstant" ? `#${quoted(n)}` : `"${n}"`;
-    }
-    if (scope === "Address") return absolute(kid(a, "Address"));
-    const comps = kids(kid(a, "Symbol") ?? a, "Component");
-    if (!comps.length) throw new Error(`an operand of scope ${scope || "?"} the simulator does not read`);
-    return comps
-      .map((c, i) => {
-        const n = c.attrs.Name?.value ?? "";
-        const head = i > 0 ? `.${quoted(n)}` : scope === "LocalVariable" ? `#${quoted(n)}` : `"${n}"`;
-        const index = kids(c, "Access").map((x) => this.operandOf(x));
-        const slice = c.attrs.SliceAccessModifier?.value;
-        return head + (index.length ? `[${index.join(", ")}]` : "") + (slice ? `.%${slice.toUpperCase()}` : "");
-      })
-      .join("");
+    return operandText(a);
   }
+}
+
+/** The operand references of an Access (or an Instance): its variable or constant, and the array indices it reads. */
+function accessRefs(a: XmlNode, access: Ref["access"], refs: Ref[]) {
+  const scope = a.attrs.Scope?.value ?? "";
+  const comps = kids(kid(a, "Symbol") ?? a, "Component");
+  const first = comps[0]?.attrs.Name;
+  if ((scope === "LocalVariable" || scope === "GlobalVariable") && first) {
+    const members = comps.slice(1).flatMap((c) => (c.attrs.Name ? [{ name: c.attrs.Name.value, start: c.attrs.Name.start, end: c.attrs.Name.start + c.attrs.Name.rawLength }] : []));
+    refs.push({ kind: scope === "LocalVariable" ? "local" : "global", name: first.value, start: first.start, end: first.start + first.rawLength, members, access });
+  } else if (scope === "LocalConstant" || scope === "GlobalConstant") {
+    const c = kid(a, "Constant")?.attrs.Name;
+    if (c) refs.push({ kind: scope === "LocalConstant" ? "local" : "global", name: c.value, start: c.start, end: c.start + c.rawLength, members: [], access: "read" });
+  }
+  // array indices are read
+  for (const c of comps) for (const i of kids(c, "Access")) accessRefs(i, "read", refs);
+}
+
+/** A call's references: the instance it calls (#inst, "Inst_DB"), or an FC by its name. */
+function callRefs(info: XmlNode | undefined, refs: Ref[]) {
+  const inst = kid(info, "Instance");
+  const name = info?.attrs.Name;
+  if (inst) accessRefs(inst, "call", refs);
+  else if (name) refs.push({ kind: "global", name: name.value, start: name.start, end: name.start + name.rawLength, members: [], access: "call" });
+}
+
+/** An Access (or an Instance) as SCL: #local.member, "Global".member[i], a constant, %I0.0. */
+function operandText(a: XmlNode): string {
+  const scope = a.attrs.Scope?.value ?? "";
+  if (scope === "LiteralConstant" || scope === "TypedConstant") {
+    const c = kid(a, "Constant");
+    const v = kid(c, "ConstantValue")?.text.trim() ?? "";
+    const type = kid(c, "ConstantType")?.text.trim() ?? "";
+    if (/^bool$/i.test(type)) return /^(true|1)$/i.test(v) ? "TRUE" : "FALSE";
+    if (/^w?(string|char)$/i.test(type) && !v.startsWith("'")) return `'${v.replace(/'/g, "$'")}'`;
+    return v;
+  }
+  if (scope === "LocalConstant" || scope === "GlobalConstant") {
+    const n = kid(a, "Constant")?.attrs.Name?.value ?? "";
+    return scope === "LocalConstant" ? `#${quoted(n)}` : `"${n}"`;
+  }
+  if (scope === "Address") return absolute(kid(a, "Address"));
+  const comps = kids(kid(a, "Symbol") ?? a, "Component");
+  if (!comps.length) throw new Error(`an operand of scope ${scope || "?"} the simulator does not read`);
+  return comps
+    .map((c, i) => {
+      const n = c.attrs.Name?.value ?? "";
+      const head = i > 0 ? `.${quoted(n)}` : scope === "LocalVariable" ? `#${quoted(n)}` : `"${n}"`;
+      const index = kids(c, "Access").map((x) => operandText(x));
+      const slice = c.attrs.SliceAccessModifier?.value;
+      return head + (index.length ? `[${index.join(", ")}]` : "") + (slice ? `.%${slice.toUpperCase()}` : "");
+    })
+    .join("");
+}
+
+/** STL tokens of SimaticML whose names are not the mnemonics (TIA Portal writes = as Assign); an empty line is none. */
+const STL_TOKEN: Record<string, string> = { ASSIGN: "=", ADD: "+", EMPTY_LINE: "" };
+/** Mnemonics that write their operand (FP and FN their edge memory). */
+const STL_WRITES = new Set(["=", "S", "R", "T", "FP", "FN"]);
+
+/**
+ * An STL network of SimaticML (<StlStatement> with an <StlToken> and its <Access>) as STL text, one statement a
+ * line, for the simulator's STL interpreter; its operands as references. A token or element the text cannot say is
+ * listed by name.
+ */
+function stlNetwork(list: XmlNode): { text: string; missing: string[]; refs: Ref[] } {
+  const missing = new Set<string>();
+  const refs: Ref[] = [];
+  const lines: string[] = [];
+  for (const st of list.children) {
+    if (st.name !== "StlStatement") {
+      if (!/^(Comment|LineComment)$/.test(st.name)) missing.add(`STL element ${st.name}`);
+      continue;
+    }
+    const tokenNode = kid(st, "StlToken");
+    const token = tokenNode?.attrs.Text?.value ?? "";
+    const op = STL_TOKEN[token.toUpperCase()] ?? token;
+    if (!tokenNode) {
+      if (st.children.some((c) => !/^(Comment|LineComment)$/.test(c.name))) missing.add("an STL statement without an instruction");
+      continue;
+    }
+    if (!op) continue; // an empty line
+    const access = kid(st, "Access");
+    for (const c of st.children) if (!/^(StlToken|Access|Comment|LineComment)$/.test(c.name)) missing.add(`STL ${token} with ${c.name}`);
+    let operand = "";
+    try {
+      if (access?.attrs.Scope?.value === "Call") {
+        const info = kid(access, "CallInfo");
+        callRefs(info, refs);
+        const inst = kid(info, "Instance");
+        const name = info?.attrs.Name?.value ?? "";
+        const head = inst ? (inst.attrs.Scope?.value === "LocalVariable" ? operandText(inst) : `"${name}", ${operandText(inst)}`) : `"${name}"`;
+        const params: string[] = [];
+        for (const p of kids(info, "Parameter")) {
+          const actual = kid(p, "Access");
+          if (!actual) continue; // listed in the call, given no actual parameter
+          const section = p.attrs.Section?.value ?? "";
+          accessRefs(actual, section === "Output" || section === "InOut" ? "write" : "read", refs);
+          params.push(`${quoted(p.attrs.Name?.value ?? "")} := ${operandText(actual)}`);
+        }
+        operand = params.length ? `${head} (${params.join(", ")})` : head;
+      } else if (access) {
+        accessRefs(access, STL_WRITES.has(op.toUpperCase()) ? "write" : "read", refs);
+        operand = operandText(access);
+        // + of a 32-bit constant: L#
+        if (op === "+" && /^dint$/i.test(kid(kid(access, "Constant"), "ConstantType")?.text.trim() ?? "")) operand = `L#${operand}`;
+      }
+    } catch (e) {
+      missing.add((e as Error).message);
+      continue;
+    }
+    lines.push(`${op}${operand ? ` ${operand}` : ""};`);
+  }
+  return { text: lines.join("\n") + "\n", missing: [...missing], refs };
+}
+
+/**
+ * An SCL network of SimaticML (<StructuredText>: Token, Blank, NewLine, Access, calls as Access Scope="Call") as
+ * SCL text, joined to the block's translated networks; its operands as references (written where := follows them
+ * or an output parameter takes them). Comments are left out.
+ */
+function sclNetwork(st: XmlNode): { text: string; missing: string[]; refs: Ref[] } {
+  const missing = new Set<string>();
+  const refs: Ref[] = [];
+  const text = (nodes: XmlNode[], write?: boolean): string => {
+    let s = "";
+    nodes.forEach((n, i) => {
+      switch (n.name) {
+        case "Token":
+          s += n.attrs.Text?.value ?? "";
+          break;
+        case "Blank":
+          s += " ".repeat(Math.max(1, Number(n.attrs.Num?.value ?? 1)));
+          break;
+        case "NewLine":
+          s += "\n".repeat(Math.max(1, Number(n.attrs.Num?.value ?? 1)));
+          break;
+        case "LineComment":
+        case "Comment":
+          break;
+        case "Access": {
+          if (n.attrs.Scope?.value === "Call") {
+            s += call(n);
+            break;
+          }
+          // written when the next token (after blanks) is :=
+          const next = nodes.slice(i + 1).find((x) => x.name !== "Blank");
+          accessRefs(n, write || (next?.name === "Token" && next.attrs.Text?.value === ":=") ? "write" : "read", refs);
+          s += operandText(n);
+          break;
+        }
+        default:
+          missing.add(`SCL element ${n.name}`);
+      }
+    });
+    return s;
+  };
+  const call = (a: XmlNode): string => {
+    const info = kid(a, "CallInfo");
+    callRefs(info, refs);
+    const inst = kid(info, "Instance");
+    let s = inst ? operandText(inst) : `"${info?.attrs.Name?.value ?? ""}"`;
+    for (const c of info?.children ?? []) {
+      if (c.name === "Instance") continue;
+      if (c.name !== "Parameter") {
+        s += text([c]);
+        continue;
+      }
+      const section = c.attrs.Section?.value ?? "";
+      const out = section === "Output" || section === "InOut";
+      const inner = text(c.children, out);
+      // the assignment token, when the export leaves it to the section
+      s += `${quoted(c.attrs.Name?.value ?? "")}${/^\s*(:=|=>)/.test(inner) ? "" : section === "Output" ? " => " : " := "}${inner}`;
+    }
+    return s;
+  };
+  let out = "";
+  try {
+    out = text(st.children);
+  } catch (e) {
+    missing.add((e as Error).message);
+  }
+  return { text: out, missing: [...missing], refs };
 }
 
 const quoted = (n: string) => (IDENT.test(n) ? n : `"${n}"`);

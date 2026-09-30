@@ -89,6 +89,8 @@ export interface BlockModel {
   ladUnsupported?: string[];
   /** Bool temporaries the translated networks use besides the block's own. */
   ladTemps?: string[];
+  /** The STL networks of a SimaticML block as STL text (`lad` calls __RUNG_STL(i) where network `network` runs). */
+  stlNetworks?: { source: string; network: number; last: boolean }[];
   /** IEC enumeration type: its values in order, and the default when it is not the first. */
   enumValues?: { name: string; value: number }[];
   enumDefault?: string;

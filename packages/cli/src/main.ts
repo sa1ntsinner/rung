@@ -460,7 +460,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             continue;
           }
           for (const c of f.cases) {
-            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.error}` : ""}\n`);
+            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}\n`);
             for (const x of c.failures) {
               // expect: { Running: "true" } is the text "true", never the BOOL the block has
               const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));

@@ -200,11 +200,12 @@ export function parseSimaticMl(xml: string): SimaticMlUnit {
       }
     }
     if (kind === "FC" && !block.returnType) block.returnType = "Void";
-    if ((kind === "FB" || kind === "FC" || kind === "OB") && /^(LAD|FBD)$/.test(child(attrs, "ProgrammingLanguage")?.text.trim() ?? "")) {
+    if ((kind === "FB" || kind === "FC" || kind === "OB") && /^(LAD|FBD|STL|SCL)$/.test(child(attrs, "ProgrammingLanguage")?.text.trim() ?? "")) {
       const t = translateNetworks(n);
       block.lad = t.scl;
       if (t.unsupported.length) block.ladUnsupported = t.unsupported;
       if (t.temps.length) block.ladTemps = t.temps;
+      if (t.stl.length) block.stlNetworks = t.stl;
       block.refs.push(...t.refs);
     }
     out.blocks.push(block);

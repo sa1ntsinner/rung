@@ -130,8 +130,8 @@ export class RungTests implements vscode.Disposable {
       if (c.passed) return run.passed(item, c.ms);
       const at = (line?: number) => new vscode.Location(uri, new vscode.Position(Math.max(0, (line ?? c.line ?? 1) - 1), 0));
       if (c.error) {
-        const m = new vscode.TestMessage(c.error);
-        m.location = at();
+        const m = new vscode.TestMessage(c.errorStep ? `step ${c.errorStep}: ${c.error}` : c.error);
+        m.location = at(c.errorLine);
         return run.failed(item, m, c.ms);
       }
       const messages = c.failures.map((x) => {

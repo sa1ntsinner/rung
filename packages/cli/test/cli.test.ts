@@ -284,12 +284,15 @@ describe("rung CLI", () => {
     mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
     mkdirSync(join(t.dir, "tests"), { recursive: true });
     writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
-    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: starts\n    steps:\n      - { set: { Start: true }, cycle: 1, expect: { Running: true } }\n  - name: stops\n    steps:\n      - set: { Start: false }\n      - cycle: 1\n      - expect: { Running: true }\n");
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: starts\n    steps:\n      - { set: { Start: true }, cycle: 1, expect: { Running: true } }\n  - name: stops\n    steps:\n      - set: { Start: false }\n      - cycle: 1\n      - expect: { Running: true }\n  - name: bad set\n    steps:\n      - cycle: 1\n      - set: { Strat: true }\n");
     expect(await t.run("test", "--json")).toBe(2);
-    const r = JSON.parse(t.out.join("")) as { files: { file: string; cases: { name: string; passed: boolean; line: number; failures: { step: number; line: number }[] }[] }[] };
+    const r = JSON.parse(t.out.join("")) as { files: { file: string; cases: { name: string; passed: boolean; line: number; failures: { step: number; line: number }[]; errorStep?: number; errorLine?: number }[] }[] };
     expect(r.files.map((f) => [f.file, f.cases.map((c) => [c.name, c.passed, c.line, c.failures.map((x) => [x.step, x.line])])])).toEqual([
-      ["tests/run.test.yaml", [["starts", true, 3, []], ["stops", false, 6, [[3, 10]]]]],
+      ["tests/run.test.yaml", [["starts", true, 3, []], ["stops", false, 6, [[3, 10]]], ["bad set", false, 11, []]]],
     ]);
+    // a case that stops with an error names the step it stopped in, and that step's line
+    expect(r.files[0]!.cases[2]).toMatchObject({ errorStep: 2, errorLine: 14 });
+    expect(r.files[0]!.cases[0]).not.toHaveProperty("errorStep");
   });
 
   it("test in GitHub Actions puts every failure on its step in the pull request", async () => {
@@ -297,9 +300,10 @@ describe("rung CLI", () => {
     mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
     mkdirSync(join(t.dir, "tests"), { recursive: true });
     writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
-    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: stops, then\n    steps:\n      - set: { Start: false }\n      - { cycle: 1, expect: { Running: true } }\n");
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: stops, then\n    steps:\n      - set: { Start: false }\n      - { cycle: 1, expect: { Running: true } }\n  - name: typo\n    steps:\n      - cycle: 1\n      - set: { Strat: true }\n");
     expect(await t.run("test")).toBe(2);
     expect(t.out.join("")).toContain("::error file=tests/run.test.yaml,line=6,title=rung test%3A Fx_Run%3A stops%2C then::step 2: Running expected true got false\n");
+    expect(t.out.join("")).toContain("::error file=tests/run.test.yaml,line=10,title=rung test%3A Fx_Run%3A typo::step 2: Strat does not exist (did you mean Start?)\n");
   });
 
   it("test says so when there are no tests instead of 0/0 passed", async () => {

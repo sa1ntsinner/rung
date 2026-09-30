@@ -5,7 +5,7 @@ description: Use when testing PLC logic in a rung workspace: writing tests/**/*.
 
 # Testing PLC logic with rung
 
-`rung test` runs FBs, FCs and PROGRAMs on an offline simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no GRAPH bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`), LAD and FBD blocks kept as SimaticML `.xml`, and STL blocks (`.awl`) with bit logic, L/T, integer and REAL arithmetic, compares, JU/JC/JCN and SD timers, following the STL manual's status-word rules (checked by unit tests, not on a PLC); anything else in an STL block is refused with the list of what is missing.
+`rung test` runs FBs, FCs and PROGRAMs on an offline simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no GRAPH bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`), LAD and FBD blocks kept as SimaticML `.xml` (with their SCL and STL networks), and STL blocks (`.awl` or `.xml`) with bit logic, L/T, integer and REAL arithmetic, compares, JU/JC/JCN, SD timers and CALL of FBs, multi-instances and FCs with parameters (stubs stand in for called blocks), following the STL manual's status-word rules (checked by unit tests, not on a PLC); anything else in an STL block is refused with the list of what is missing. 64-bit integers are exact or the test stops with the value.
 
 ## A test file
 

@@ -41,6 +41,9 @@ export interface CaseResult {
   ms: number;
   /** Line of the case in the test file (from 1). */
   line?: number;
+  /** For an error: the step it stopped in (from 1) and that step's line in the test file. */
+  errorStep?: number;
+  errorLine?: number;
 }
 
 export interface FileResult {
@@ -353,6 +356,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     let fcInputs: Record<string, Value> = {};
     let fcOutputs: Struct = {};
     let fcReturn: Value;
+    let current = 0; // the step running (from 1), for an error
     const getMem = (): Struct => (isFb ? inst!.mem : fcOutputs);
     const resolve = (name: string): { get: () => Value; set: (v: Value) => void } => {
       let { global, root, path } = splitName(name);
@@ -422,8 +426,9 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       else if (isFb) inst = sim.newInstance(g.block.name);
       else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs or PROGRAMs`);
       for (const [si, step] of (c.steps ?? []).entries()) {
+        current = si + 1;
         const unknown = Object.keys(step ?? {}).find((k) => !(STEP_ORDER as readonly string[]).includes(k));
-        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`step ${si + 1}: unknown step "${unknown ?? ""}" (use set, cycle, advance, expect)`);
+        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect)`);
         for (const op of STEP_ORDER) {
           if (!(op in step)) continue;
           const arg = step[op];
@@ -476,7 +481,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
       const e = input && input[2] === g.block.name ? hinted(err, index, g, input[1]!, "set") : err;
       const where = e instanceof SimError && e.block ? ` (in ${e.block}${e.offset !== undefined && !/\(line \d+\)/.test(e.message) ? `, line ${sim.lineOf(e.block, e.offset) ?? "?"}` : ""})` : "";
-      results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0 });
+      results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0, ...(current ? { errorStep: current } : {}) });
     }
     for (const [k, n] of sim.stubCalls) stubCalls.set(k, (stubCalls.get(k) ?? 0) + n);
   }
@@ -495,6 +500,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     if (!p) continue;
     r.line = p.line;
     for (const f of r.failures) if (p.steps[f.step - 1]) f.line = p.steps[f.step - 1];
+    if (r.errorStep && p.steps[r.errorStep - 1]) r.errorLine = p.steps[r.errorStep - 1];
   }
   return { file, block: blockName, ...(plc ? { plc } : {}), cases: results, ...(stubbed.length ? { stubbed } : {}), ...(warnings.length ? { warnings } : {}) };
 }
@@ -556,7 +562,7 @@ export function toJUnit(results: FileResult[]): string {
   const failed = cases.filter((x) => !x.c.passed).length;
   const body = cases
     .map(({ f, c }) => {
-      const inner = c.passed ? "" : c.error ? `<error message="${esc(c.error)}"/>` : `<failure message="${esc(c.failures.map((x) => `step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}`).join("; "))}"/>`;
+      const inner = c.passed ? "" : c.error ? `<error message="${esc(c.errorStep ? `step ${c.errorStep}: ${c.error}` : c.error)}"/>` : `<failure message="${esc(c.failures.map((x) => `step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}`).join("; "))}"/>`;
       return `  <testcase classname="${esc(f.file)}" name="${esc(`${f.block}: ${c.name}`)}" time="${(c.ms / 1000).toFixed(3)}">${inner}</testcase>`;
     })
     .join("\n");

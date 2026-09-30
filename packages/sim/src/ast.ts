@@ -84,17 +84,29 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
       const m = /^(\d+-\d+-\d+)-(.*)$/.exec(val);
       return { k: "lit", value: m ? Date.parse(`${m[1]}T${m[2]}Z`) : NaN, type: "time" };
     }
-    if (/^(2|8|16)$/.test(prefix)) return { k: "lit", value: parseInt(val, Number(prefix)), type: "int" };
+    if (/^(2|8|16)$/.test(prefix)) return { k: "lit", value: exactLiteral(t, val, Number(prefix)), type: "int" };
     if (/^(BOOL)$/.test(prefix)) return { k: "lit", value: /^(1|TRUE)$/i.test(val), type: "bool" };
     if (/REAL$/.test(prefix)) return { k: "lit", value: parseFloat(val), type: "real" };
     const based = /^(2|8|16)#(.+)$/.exec(val);
     // BYTE#16#80, W#16#00FF, DINT#5: the literal has its type's width (NOT and shifts keep to it)
     const typeName = ({ B: "BYTE", W: "WORD", DW: "DWORD", LW: "LWORD" } as Record<string, string>)[prefix] ?? prefix;
-    if (based) return { k: "lit", value: parseInt(based[2]!, Number(based[1])), type: "int", typeName };
-    return { k: "lit", value: Number(val), type: /[.eE]/.test(val) ? "real" : "int", ...(/[.eE]/.test(val) ? {} : { typeName }) };
+    if (based) return { k: "lit", value: exactLiteral(t, based[2]!, Number(based[1])), type: "int", typeName };
+    if (/[.eE]/.test(val)) return { k: "lit", value: Number(val), type: "real" };
+    return { k: "lit", value: exactLiteral(t, val, 10), type: "int", typeName };
   }
   const clean = text.replace(/_/g, "");
-  return { k: "lit", value: Number(clean), type: /[.eE]/.test(clean) ? "real" : "int" };
+  return /[.eE]/.test(clean) ? { k: "lit", value: Number(clean), type: "real" } : { k: "lit", value: exactLiteral(t, clean, 10), type: "int" };
+}
+
+/** An integer literal as a number, exactly: one a double cannot hold (LWORD#16#FFFF_FFFF_FFFF_FFFF) is refused. */
+function exactLiteral(t: Token, digits: string, radix: number): number {
+  const n = radix === 10 ? Number(digits) : parseInt(digits, radix);
+  if (Number.isSafeInteger(n) || !/^[+-]?[0-9A-Fa-f]+$/.test(digits)) return n;
+  const neg = digits.startsWith("-");
+  const body = digits.replace(/^[+-]/, "");
+  const big = BigInt((radix === 16 ? "0x" : radix === 8 ? "0o" : radix === 2 ? "0b" : "") + body) * (neg ? -1n : 1n);
+  if (BigInt(n) !== big) throw new SclSyntaxError(`${t.text} cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them`, t.start);
+  return n;
 }
 
 /** TypeOf(...) or TypeOfElements(...): its value is a data type. */

@@ -132,7 +132,9 @@ export function swapBytes(v: number, bits: number): number {
     out = (out << 8n) | (x & 0xffn);
     x >>= 8n;
   }
-  return Number(out);
+  const n = Number(out);
+  if (BigInt(n) !== out) throw new Unsupported(`the result 16#${out.toString(16).toUpperCase().padStart(bits / 4, "0")} cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them`);
+  return n;
 }
 
 /**

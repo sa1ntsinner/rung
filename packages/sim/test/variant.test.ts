@@ -126,4 +126,17 @@ describe("VARIANT parameters", () => {
     expect(run(s, "Caller")).toMatchObject({ BEFORE: true, AFTER: false, BOUND: true, GIVEN: true });
     expect(errorOf(() => run(s, "Plain"))).toBe("IS_NULL: OPERAND must be a REF_TO or VARIANT variable");
   });
+
+  it("stays bound to the caller's variable when the structure or array around it is assigned anew", () => {
+    const s = sim({
+      // the callee first replaces what holds the variable, then writes through the VARIANT
+      PutPoint: fc("PutPoint", "Void", 'VAR_IN_OUT\n  v : Variant;\nEND_VAR\nVAR_TEMP\n  x : Int;\nEND_VAR', '  "Fx_Data".point := "Fx_Data".other;\n  #x := 42;\n  VariantPut(SRC := #x, DST := #v);'),
+      PutList: fc("PutList", "Void", 'VAR_IN_OUT\n  v : Variant;\nEND_VAR\nVAR_TEMP\n  x : Int;\nEND_VAR', '  "Fx_Data".list := "Fx_Data".spare;\n  #x := 42;\n  VariantPut(SRC := #x, DST := #v);'),
+      Caller: fb("Caller", "VAR\n  i : Int := 2;\nEND_VAR", '  "PutPoint"(v := "Fx_Data".point.x);\n  "PutList"(v := "Fx_Data".list[#i]);'),
+    });
+    (s as unknown as { index: WorkspaceIndex }).index.set("file:///w/plc/P/blocks/Fx_Data.db", 'DATA_BLOCK "Fx_Data"\n   VAR\n      point : "Fx_Point";\n      other : "Fx_Point";\n      list : Array[1..3] of Int;\n      spare : Array[1..3] of Int;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n', 0);
+    run(s, "Caller");
+    const db = s.globals.FX_DATA as { POINT: Struct; LIST: { items: number[] } };
+    expect([db.POINT.X, db.LIST.items]).toEqual([42, [0, 42, 0]]);
+  });
 });

@@ -22,7 +22,7 @@ export function githubAnnotations(results: readonly FileResult[], ws: string, ba
     for (const c of f.cases) {
       if (c.passed) continue;
       const title = `rung test: ${f.block}: ${c.name}`;
-      if (c.error) at(f.file, c.line, title, c.error);
+      if (c.error) at(f.file, c.errorLine ?? c.line, title, c.errorStep ? `step ${c.errorStep}: ${c.error}` : c.error);
       for (const x of c.failures) at(f.file, x.line ?? c.line, title, `step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${typeof x.actual === "string" && /^<.*>$/.test(x.actual) ? x.actual : JSON.stringify(x.actual)}`);
     }
   }

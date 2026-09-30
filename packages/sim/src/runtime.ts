@@ -3,7 +3,7 @@
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
 // (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, parseAbsolute, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
-import { parseStl, runStl, type S5Timer, type StlProgram } from "./stl.js";
+import { parseStl, runStl, type S5Timer, type StlCall, type StlHost, type StlProgram } from "./stl.js";
 import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
 import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
@@ -14,6 +14,8 @@ export interface Pointer {
   ref?: true;
   /** A VARIANT or ARRAY[*] parameter bound to the caller's variable, with that variable's declared type when known. */
   variant?: { decl?: Pick<VarDecl, "type" | "typeRef" | "isArray" | "members"> };
+  /** The caller's variable by its root and path (indices fixed at the call), found again at each use. */
+  via?: { ref: LRef; frame: object | null };
 }
 const isPointer = (v: Value): v is Pointer => typeof v === "object" && v !== null && "__ptr" in v;
 export interface Struct {
@@ -166,13 +168,23 @@ function wrapInteger(v: number, d: Decl | undefined): number {
   if (!d || d.isArray || !Number.isInteger(v)) return v;
   const w = INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()];
   if (!w) return v;
-  const [bits, signed] = w;
-  if (bits === 64 && !Number.isSafeInteger(v)) return v; // beyond a double's integers: no exact wrap
-  const size = 2n ** BigInt(bits);
-  let x = BigInt(v) % size;
-  if (x < 0n) x += size;
-  if (signed && x >= size / 2n) x -= size;
-  return Number(x);
+  return wrapBig(BigInt(v), w);
+}
+
+/** An integer wrapped into its width, exactly: a 64-bit result a double cannot hold stops the test. */
+function wrapBig(x: bigint, [bits, signed]: [number, boolean]): number {
+  return exactInteger(signed ? BigInt.asIntN(bits, x) : BigInt.asUintN(bits, x));
+}
+
+/**
+ * An integer result as the simulator's number, when a double holds it exactly: every integer up to 2^53, and
+ * beyond that those with enough zero bits at the end (16#FF00_0000_0000_0000). Any other 64-bit value would lose
+ * bits, so the test stops instead of going on with a wrong one.
+ */
+function exactInteger(x: bigint): number {
+  const n = Number(x);
+  if (BigInt(n) !== x) throw new SimError(`the 64-bit value 16#${BigInt.asUintN(64, x).toString(16).toUpperCase()} cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them`);
+  return n;
 }
 
 /** A string cut to what its type holds, as the PLC stores it: String[5] keeps five characters, a String 254, a Char one. */
@@ -189,10 +201,18 @@ function fitString(v: string, d: Decl | undefined): string {
  * numbers, which turns a DWORD with its top bit set negative (16#FFFF0000 AND 16#FFFF0000 would be -65536).
  */
 function bitwise(op: string, l: number, r: number): number {
-  if (!Number.isSafeInteger(l) || !Number.isSafeInteger(r)) return op === "XOR" ? l ^ r : op === "OR" ? l | r : l & r;
+  if (!Number.isInteger(l) || !Number.isInteger(r)) return op === "XOR" ? l ^ r : op === "OR" ? l | r : l & r;
   const a = BigInt(l);
   const b = BigInt(r);
-  return Number(op === "XOR" ? a ^ b : op === "OR" ? a | b : a & b);
+  return exactInteger(op === "XOR" ? a ^ b : op === "OR" ? a | b : a & b);
+}
+
+/** + - * of two integers: past 2^53 a double rounds, so the result is worked out exactly and refused if it cannot be held. */
+function exactArith(op: string, l: number, r: number, n: number): number {
+  if (Number.isSafeInteger(n) || !Number.isInteger(l) || !Number.isInteger(r)) return n;
+  const a = BigInt(l);
+  const b = BigInt(r);
+  return exactInteger(op === "+" ? a + b : op === "-" ? a - b : a * b);
 }
 
 const combine = (a: Kind, b: Kind): Kind => (a === "real" || b === "real" ? "real" : a === "int" && b === "int" ? "int" : "unknown");
@@ -215,7 +235,7 @@ export class Simulator {
   private readonly bodies = new WeakMap<BlockModel, Map<string, Stmt[]>>();
   private readonly consts = new WeakMap<BlockModel, Map<string, Struct>>();
   private blockUris = new WeakMap<BlockModel, string>();
-  private readonly stlPrograms = new WeakMap<BlockModel, StlProgram>();
+  private readonly stlPrograms = new WeakMap<BlockModel, Map<string, StlProgram>>();
   /** The S5 timers STL starts with SD, by the timer tag. */
   private readonly s5timers = new Map<string, S5Timer>();
   private steps = 0;
@@ -249,6 +269,11 @@ export class Simulator {
       if (b.ladUnsupported?.length) throw new SimError(`"${b.name}" uses ${b.xml ? "LAD/FBD" : "LAD"} elements the simulator does not run yet: ${b.ladUnsupported.join("; ")}`, b.name);
       if (b.lad === undefined && b.xml) throw new SimError(`"${b.name}" is kept as SimaticML XML in a language the simulator does not run (GRAPH, or a data block)`, b.name);
       if (b.lad !== undefined) {
+        // its STL networks are refused before anything runs, as a block of STL is
+        for (const [n, net] of (b.stlNetworks ?? []).entries()) {
+          const p = this.stlProgram(b, String(n), () => parseStl(net.source, 0, net.source.length));
+          if (p.missing.length) throw new SimError(`"${b.name}" uses STL instructions the simulator does not run yet (network ${net.network}): ${p.missing.join(", ")}`, b.name);
+        }
         try {
           s = parseBody(b.lad);
         } catch (e) {
@@ -546,7 +571,7 @@ export class Simulator {
     const root = ref.root.name.toUpperCase();
     const follow = () => {
       for (let v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number]; isPointer(v) && v.ref; v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number])
-        ({ obj, key } = v.__ptr);
+        ({ obj, key } = this.placeOf(v));
     };
     const first = path[0];
     const second = path[1];
@@ -769,9 +794,11 @@ export class Simulator {
         const v = this.eval(e.e, frame);
         if (e.op !== "NOT") return e.op === "-" ? -Number(v) : Number(v);
         if (typeof v !== "number") return !v;
-        // in the width of the operand's type: NOT 16#00FF of a Word is 16#FF00
-        const inverted = Number.isSafeInteger(v) ? Number(~BigInt(v)) : ~v;
-        return wrapInteger(inverted, this.staticDecl(e.e, frame));
+        // in the width of the operand's type: NOT 16#00FF of a Word is 16#FF00 (worked out exactly, 64 bits too)
+        if (!Number.isInteger(v)) return ~v;
+        const d = this.staticDecl(e.e, frame);
+        const w = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()] : undefined;
+        return w ? wrapBig(~BigInt(v), w) : exactInteger(~BigInt(v));
       }
       case "bin": {
         const l = this.eval(e.l, frame);
@@ -800,11 +827,11 @@ export class Simulator {
           case ">=":
             return (l as number) >= (r as number);
           case "+":
-            return typeof l === "string" ? l + String(r) : (l as number) + (r as number);
+            return typeof l === "string" ? l + String(r) : this.intExact(e, frame, "+", l as number, r as number, (l as number) + (r as number));
           case "-":
-            return (l as number) - (r as number);
+            return this.intExact(e, frame, "-", l as number, r as number, (l as number) - (r as number));
           case "*":
-            return (l as number) * (r as number);
+            return this.intExact(e, frame, "*", l as number, r as number, (l as number) * (r as number));
           case "**":
             return Math.pow(l as number, r as number);
           case "MOD":
@@ -818,6 +845,8 @@ export class Simulator {
             const real = kl === "real" || kr === "real" || (!(kl === "int" && kr === "int") && !(Number.isInteger(l) && Number.isInteger(r)));
             if (real) return (l as number) / (r as number); // x / 0.0 gives ±Inf or NaN like the PLC
             if (r === 0) throw new SimError("integer division by zero", frame?.block.name);
+            // past 2^53 the quotient of two doubles rounds before it is cut: divide exactly (BigInt cuts towards 0, as SCL)
+            if (!Number.isSafeInteger(l) && Number.isInteger(l) && Number.isInteger(r)) return exactInteger(BigInt(l as number) / BigInt(r as number));
             return Math.trunc((l as number) / (r as number));
           }
         }
@@ -828,12 +857,25 @@ export class Simulator {
     }
   }
 
+  /** An integer + - * past 2^53 exactly (or refused); REAL arithmetic stays floating point. */
+  private intExact(e: Extract<Expr, { k: "bin" }>, frame: Frame | null, op: string, l: number, r: number, n: number): number {
+    if (Number.isSafeInteger(n) || !Number.isFinite(n)) return n;
+    const kl = this.kindOf(e.l, frame);
+    const kr = this.kindOf(e.r, frame);
+    return kl !== "real" && kr !== "real" && (kl === "int" || kr === "int") ? exactArith(op, l, r, n) : n;
+  }
+
   // ------------------------------------------------------------------ calls
 
   private call(c: Extract<Expr, { k: "call" }>, frame: Frame | null): Value {
     const name = c.callee.root.name;
     const upper = name.toUpperCase();
     const path = c.callee.path;
+    // an STL network of a SimaticML block, where the block's translation has it
+    if (upper === "__RUNG_STL" && c.callee.root.kind === "ident" && !path.length && frame) {
+      this.runStlNetwork(frame, Number(this.eval(c.args[0]!.value, frame)));
+      return undefined;
+    }
     // METHODs: fb.M(...), and inside the FB or one of its methods M(...) or THIS^.M(...)
     if (c.callee.root.kind === "ident") {
       const [p0, p1] = path;
@@ -980,9 +1022,12 @@ export class Simulator {
           const by = n(named("N", 1));
           if (!Number.isInteger(v) || !Number.isInteger(by) || by < 0) throw new SimError(`${upper}: IN and N must be integers (N at least 0)`, frame?.block.name, c.callee.start);
           const count = BigInt(Math.min(by, 64)); // every bit is gone after 64, whatever the width
-          const shifted = Number(upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count);
+          const shifted = upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count;
+          // cut to IN's width before it becomes a number: LWORD 1 shifted left by 64 is 0, not 2^64
           const input = c.args.find((a) => a.name?.toUpperCase() === "IN") ?? c.args.find((a) => !a.name);
-          return input ? wrapInteger(shifted, this.staticDecl(input.value, frame)) : shifted;
+          const d = input ? this.staticDecl(input.value, frame) : undefined;
+          const w = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()] : undefined;
+          return w ? wrapBig(shifted, w) : exactInteger(shifted);
         }
       }
       const to = upper.split("_TO_")[1] ?? "";
@@ -1049,7 +1094,7 @@ export class Simulator {
       if (e.k !== "ref") return { at: { obj: [this.eval(e, frame)], key: 0 }, decl: this.staticDecl(e, frame) };
       const raw = this.locate(e.ref, frame, true);
       const v = get(raw);
-      if (isPointer(v) && v.variant) return { at: v.__ptr, decl: v.variant.decl };
+      if (isPointer(v) && v.variant) return { at: this.placeOf(v), decl: v.variant.decl };
       const decl = this.declOf(e.ref, frame);
       if (decl && /^variant$/i.test(decl.type.trim())) throw new Unsupported(`${param} is a VARIANT that points nowhere (the call gave it no variable)`);
       return { at: this.locate(e.ref, frame), decl };
@@ -1275,17 +1320,73 @@ export class Simulator {
 
   /** An STL block (stl.ts): parsed once, and refused before it runs when it uses instructions outside the subset. */
   private runStlBody(b: BlockModel, frame: Frame) {
-    let p = this.stlPrograms.get(b);
-    if (!p) {
-      p = parseStl(this.index.docs.get(this.uriOf(b))!.text, b.bodyStart ?? b.start, b.end);
-      // an FC's return value is #RET_VAL in STL
-      if (b.returnType && !b.vars.some((v) => v.name.toUpperCase() === "RET_VAL"))
-        for (const c of p.code) if (c.operand.kind === "var" && c.operand.ref.root.kind === "local" && c.operand.ref.root.name.toUpperCase() === "RET_VAL") c.operand.ref = { ...c.operand.ref, root: { kind: "local", name: b.name } };
-      this.stlPrograms.set(b, p);
-    }
+    const p = this.stlProgram(b, "", () => parseStl(this.index.docs.get(this.uriOf(b))!.text, b.bodyStart ?? b.start, b.end));
     if (p.missing.length) throw new SimError(`"${b.name}" uses STL instructions the simulator does not run yet: ${p.missing.join(", ")}`, b.name);
+    runStl(p, this.stlHost(b, frame, (message, offset) => new SimError(message, b.name, offset)));
+  }
+
+  /** STL network `n` of a SimaticML block (its translation calls __RUNG_STL(n)), in the block's own frame. */
+  private runStlNetwork(frame: Frame, n: number) {
+    const b = frame.block;
+    const net = b.stlNetworks?.[n];
+    if (!net) throw new SimError(`${b.name} has no STL network ${n}`, b.name);
+    const p = this.stlProgram(b, String(n), () => parseStl(net.source, 0, net.source.length));
+    const fail = (message: string) => new SimError(`STL network ${net.network}: ${message}`, b.name);
+    if (p.missing.length) throw fail(`uses STL instructions the simulator does not run yet: ${p.missing.join(", ")}`);
+    // each STL network runs with a status word of its own; one whose logic string would go on into the next network is refused
+    runStl(p, this.stlHost(b, frame, fail), net.last ? {} : { endOpen: "the logic string is still open at the end of the network (on the PLC it goes on in the next one): not simulated" });
+  }
+
+  /** The parsed STL of a block (key: "" for an .awl body, the network for a SimaticML block), with #RET_VAL as the FC's return value. */
+  private stlProgram(b: BlockModel, key: string, parse: () => StlProgram): StlProgram {
+    let byKey = this.stlPrograms.get(b);
+    if (!byKey) this.stlPrograms.set(b, (byKey = new Map()));
+    let p = byKey.get(key);
+    if (!p) {
+      p = parse();
+      if (b.returnType && !b.vars.some((v) => v.name.toUpperCase() === "RET_VAL")) {
+        const own = (r: LRef): LRef => (r.root.kind === "local" && r.root.name.toUpperCase() === "RET_VAL" ? { ...r, root: { kind: "local", name: b.name } } : r);
+        for (const c of p.code) {
+          if (c.operand.kind === "var") c.operand.ref = own(c.operand.ref);
+          if (c.operand.kind === "call") for (const q of c.operand.call.params) if (q.value.k === "ref") q.value = { ...q.value, ref: own(q.value.ref) };
+        }
+      }
+      byKey.set(key, p);
+    }
+    return p;
+  }
+
+  /**
+   * A CALL of STL through the normal call path, so stubs stand in too. STL writes every parameter with :=; the
+   * callee's interface says which are outputs (a block of the workspace or the catalogue); for a type nothing
+   * describes they are inputs. RET_VAL := #x takes an FC's return value.
+   */
+  private stlCall(sc: StlCall, frame: Frame, at: number) {
+    const callee: LRef = sc.instance ?? { root: { kind: "global", name: sc.block! }, path: [], start: at };
+    const d = sc.instance && !sc.block ? this.declOf(sc.instance, frame) : undefined;
+    const type = (sc.block ?? d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
+    const b = type ? this.index.global(type)?.block : undefined;
+    const std = type ? STANDARD_BY_NAME.get(type.toUpperCase()) : undefined;
+    const output = (n: string) => {
+      const u = n.toUpperCase();
+      const v = b?.vars.find((x) => x.name.toUpperCase() === u);
+      return v ? v.section === "Output" : std?.params.find((q) => q.name.toUpperCase() === u)?.dir === "out";
+    };
+    const args: Arg[] = [];
+    let ret: LRef | undefined;
+    for (const q of sc.params) {
+      const isRet = q.name.toUpperCase() === "RET_VAL";
+      if ((isRet || output(q.name)) && q.value.k !== "ref") throw new SimError(`CALL: ${q.name} is an output and needs a variable`, frame.block.name, at);
+      if (isRet) ret = (q.value as Extract<Expr, { k: "ref" }>).ref;
+      else args.push({ name: q.name, ...(output(q.name) ? { out: true } : {}), value: q.value });
+    }
+    const r = this.call({ k: "call", callee, args }, frame);
+    if (ret) this.write(ret, r, frame);
+  }
+
+  private stlHost(b: BlockModel, frame: Frame, error: (message: string, offset: number) => SimError): StlHost {
     const at = (ref: LRef) => `${ref.root.kind === "global" ? `"${ref.root.name}"` : ref.root.name}${JSON.stringify(ref.path)}`.toUpperCase();
-    runStl(p, {
+    return {
       read: (ref) => this.read(ref, frame),
       write: (ref, v) => this.write(ref, v, frame),
       typeOf: (ref) => {
@@ -1303,11 +1404,12 @@ export class Simulator {
         if (!t) this.s5timers.set(at(ref), (t = { running: false, start: 0, preset: 0, last: false }));
         return t;
       },
+      call: (c, offset) => this.stlCall(c, frame, offset),
       tick: (offset) => this.tick(frame, offset),
       fail: (message, offset) => {
-        throw new SimError(message, b.name, offset);
+        throw error(message, offset);
       },
-    });
+    };
   }
 
   private callFc(b: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null, capture?: Struct): Value {
@@ -1357,13 +1459,21 @@ export class Simulator {
    * What a VARIANT or ARRAY[*] parameter holds: where the caller's variable is and its declared type (TypeOf reads
    * it). A parameter of the caller passed on is passed as it is; a constant or expression gets a place of its own.
    */
+  /** Where a pointer points: a VARIANT's variable found again from its root, else the place it was made for. */
+  private placeOf(p: Pointer): { obj: Struct | Value[]; key: string | number } {
+    return p.via ? this.locate(p.via.ref, p.via.frame as Frame | null) : p.__ptr;
+  }
+
   private bindReference(e: Expr, caller: Frame | null): Pointer {
     if (e.k === "ref") {
       const at = this.locate(e.ref, caller, true);
       const raw = (at.obj as Struct)[at.key as string] ?? (at.obj as Value[])[at.key as number];
       if (isPointer(raw) && raw.variant) return raw;
       const decl = this.declOf(e.ref, caller);
-      return { __ptr: this.locate(e.ref, caller), ref: true, variant: decl ? { decl } : {} };
+      // found again from its root at every use, its array indices as they are now: an assignment to the structure
+      // or array around it ("DB".point := "DB".other) replaces the storage, not the variable
+      const via = { ref: { ...e.ref, path: e.ref.path.map((s) => ("index" in s ? { index: s.index.map((x): Expr => ({ k: "lit", value: Number(this.eval(x, caller)), type: "int" })) } : s)) }, frame: caller };
+      return { __ptr: this.locate(e.ref, caller), ref: true, variant: decl ? { decl } : {}, via };
     }
     const decl = this.staticDecl(e, caller);
     return { __ptr: { obj: [this.eval(e, caller)], key: 0 }, ref: true, variant: decl ? { decl } : {} };

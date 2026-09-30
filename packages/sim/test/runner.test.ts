@@ -72,6 +72,19 @@ describe("rung test runner", () => {
     expect((await runTestFile(index(), "b.yaml", "block: [unclosed")).error).toMatch(/invalid YAML/);
     const r = await runTestFile(index(), "c.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - jump: 1\n");
     expect(r.cases[0]!.error).toMatch(/unknown step "jump"/);
+    expect(r.cases[0]).toMatchObject({ errorStep: 1, errorLine: 4 });
+  });
+
+  it("keeps the step an error stopped in, and its line", async () => {
+    const r = await runTestFile(index(), "e.yaml", "block: Fx_Motor\ncases:\n  - name: typo in step 2\n    steps:\n      - set: { Start: true }\n      - set: { Strat: false }\n      - cycle: 1\n");
+    expect(r.cases[0]).toMatchObject({ passed: false, error: "Strat does not exist (did you mean Start?)", errorStep: 2, errorLine: 6, line: 3 });
+    // an error before any step (a block the tests cannot call) has no step
+    const idx = index();
+    idx.set("file:///w/plc/P/blocks/Fx_Ob.scl", 'ORGANIZATION_BLOCK "Fx_Ob"\nBEGIN\nEND_ORGANIZATION_BLOCK\n', 0);
+    const ob = await runTestFile(idx, "o.yaml", "block: Fx_Ob\ncases:\n  - steps:\n      - cycle: 1\n");
+    expect(ob.cases[0]!.error).toMatch(/tests call FBs, FCs or PROGRAMs/);
+    expect(ob.cases[0]).not.toHaveProperty("errorStep");
+    expect(toJUnit([r])).toContain('<error message="step 2: Strat does not exist (did you mean Start?)"/>');
   });
 
   it("runs every key of a multi-key step in the order set, cycle, advance, expect", async () => {

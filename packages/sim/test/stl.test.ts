@@ -36,17 +36,25 @@ const errorOf = (f: () => unknown) => {
 };
 
 describe("STL bit logic", () => {
-  it("AND goes before OR: A a; A b; O c; A d is (a AND b) OR (c AND d)", () => {
-    truth(fc("A #a;\nA #b;\nO #c;\nA #d;\n= #q;"), (a, b, c, d) => (a && b) || (c && d));
-    truth(fc("A #a;\nO #b;\nA #c;\n= #q;"), (a, b, c) => a || (b && c));
-    // O without an operand between two AND groups
+  it("A, AN, O, ON and X combine the test result with the RLO, in order (manual §1.2 to §1.7)", () => {
+    // O with an operand ORs with the RLO so far, and an A after it ANDs with that: (a OR b) AND c
+    truth(fc("A #a;\nO #b;\nA #c;\n= #q;"), (a, b, c) => (a || b) && c);
+    truth(fc("A #a;\nA #b;\nO #c;\nA #d;\n= #q;"), (a, b, c, d) => ((a && b) || c) && d);
+    truth(fc("AN #a;\nON #b;\nA #c;\n= #q;"), (a, b, c) => (!a || !b) && c);
+    truth(fc("X #a;\nX #b;\nXN #c;\n= #q;"), (a, b, c) => (a !== b) !== !c);
+    truth(fc("A #a;\nNOT;\n= #q;"), (a) => !a);
+  });
+
+  it("only O without an operand puts AND before OR (manual §1.8)", () => {
     truth(fc("A #a;\nA #b;\nO;\nA #c;\nA #d;\n= #q;"), (a, b, c, d) => (a && b) || (c && d));
-    truth(fc("AN #a;\nON #b;\nA #c;\n= #q;"), (a, b, c) => !a || (!b && c));
+    // the manual's example: A a; A b; O; A c; A d; O e — the last O with an operand ORs with the whole RLO
+    truth(fc("A #a;\nA #b;\nO;\nA #c;\nO #d;\n= #q;"), (a, b, c, d) => (a && b) || c || d);
+    truth(fc("A #a;\nO;\nA(;\nA #b;\nO #c;\n);\nA #d;\n= #q;"), (a, b, c, d) => a || ((b || c) && d));
   });
 
   it("A( ... ) nests a string; AN( and ON( negate it; at most 7 levels", () => {
     truth(fc("A(;\nA #a;\nO #b;\n);\nA(;\nA #c;\nO #d;\n);\n= #q;"), (a, b, c, d) => (a || b) && (c || d));
-    truth(fc("A #a;\nO(;\nA #b;\nA #c;\n);\nAN(;\nA #d;\n);\n= #q;"), (a, b, c, d) => a || (b && c && !d));
+    truth(fc("A #a;\nO(;\nA #b;\nA #c;\n);\nAN(;\nA #d;\n);\n= #q;"), (a, b, c, d) => (a || (b && c)) && !d);
     truth(fc("ON(;\nA #a;\nA #b;\n);\nA #c;\n= #q;"), (a, b, c) => !(a && b) && c);
     // = or SD inside A( ... ) ends the string there and keeps its RLO, which ) then takes (a coil or timer in a LAD branch)
     truth(fc('A(;\nA #a;\n= #q;\n);\nA #b;\n= #q;'), (a, b) => a && b);
@@ -118,11 +126,10 @@ describe("STL compares and jumps", () => {
     expect(s.callBlock("Fx_Jump", { a: true }).outputs).toMatchObject({ Q: false, N: 7, K: 5 });
   });
 
-  it("refuses a network that starts while the string of the network before is open", () => {
+  it("a network does not end a logic string: it goes on in the next one (manual §1.22)", () => {
     const s = fc("A #a;");
-    const open = sim({ Fx_Logic: awl("FUNCTION", "Fx_Logic", BITS, ["A #a;", "= #q;"]) });
     expect(s.callBlock("Fx_Logic", { a: true }).outputs.Q).toBe(false); // the block's end discards an open string
-    expect(errorOf(() => open.callBlock("Fx_Logic", { a: true }))).toBe("network 2 starts while the logic string of network 1 is still open (it ends without =, S, R or a jump): not simulated");
+    truth(sim({ Fx_Logic: awl("FUNCTION", "Fx_Logic", BITS, ["A #a;", "A #b;\n= #q;"]) }), (a, b) => a && b);
   });
 });
 
@@ -203,6 +210,55 @@ describe("STL S5 timers", () => {
     expect(Array.from({ length: 6 }, () => cycle(s5, j, true))).toEqual([false, false, false, false, false, true]);
     const bad = sim({ Fx_Delay: awl("FUNCTION_BLOCK", "Fx_Delay", decl.replace("16#1020", "16#00AF"), ["A #start;\nL #preset;\nSD \"Fx_Timer\";"]) });
     expect(errorOf(() => cycle(bad, bad.newInstance("Fx_Delay"), true))).toBe("SD: 16#af in ACCU1 is not an S5TIME (BCD digits 0 to 9)");
+  });
+});
+
+describe("STL CALL", () => {
+  const COUNT = 'FUNCTION_BLOCK "Fx_Count"\nVAR_INPUT\n  up : Bool;\nEND_VAR\nVAR_OUTPUT\n  n : Int;\nEND_VAR\nVAR\n  last : Bool;\nEND_VAR\nBEGIN\n  IF #up AND NOT #last THEN\n    #n := #n + 1;\n  END_IF;\n  #last := #up;\nEND_FUNCTION_BLOCK\n';
+  const DOUBLE = 'FUNCTION "Fx_Double" : Int\nVAR_INPUT\n  x : Int;\nEND_VAR\nBEGIN\n  #Fx_Double := #x * 2;\nEND_FUNCTION\n';
+  const caller = awl(
+    "FUNCTION_BLOCK",
+    "Fx_Caller",
+    '   VAR_INPUT\n      go : Bool;\n   END_VAR\n   VAR_OUTPUT\n      n1 : Int;\n      n2 : Int;\n      d : Int;\n      after : Bool;\n   END_VAR\n   VAR\n      sub : "Fx_Count";\n   END_VAR',
+    [
+      'CALL "Fx_Count" , "Fx_Count_DB"\n(  up                          := #go ,\n   n                           := #n1\n);',
+      "CALL #sub\n(  up := #go ,\n   n := #n2\n);",
+      // CALL leaves the RLO as it was and ends the string (/FC = 0): the = after it writes the RLO from before
+      'SET;\nCALL "Fx_Double"\n(  x := 21 ,\n   RET_VAL := #d\n);\n= #after;',
+    ],
+  );
+  function workspace(extra: Record<string, string> = {}) {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/blocks/Fx_Count.scl", COUNT, 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Count_DB.db", 'DATA_BLOCK "Fx_Count_DB"\n"Fx_Count"\nBEGIN\nEND_DATA_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Double.scl", DOUBLE, 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Caller.awl", caller, 0);
+    for (const [k, v] of Object.entries(extra)) idx.set(`file:///w/plc/P/blocks/${k}`, v, 0);
+    return new Simulator(idx);
+  }
+
+  it("calls an FB with its instance DB, a multi-instance and an FC with RET_VAL, every parameter with :=", () => {
+    const s = workspace();
+    const i = s.newInstance("Fx_Caller");
+    const scan = (go: boolean) => (s.callBlock(i, { go }), [i.mem.N1, i.mem.N2, i.mem.D, i.mem.AFTER]);
+    expect([scan(true), scan(true), scan(false), scan(true)]).toEqual([
+      [1, 1, 42, true],
+      [1, 1, 42, true],
+      [1, 1, 42, true],
+      [2, 2, 42, true],
+    ]);
+  });
+
+  it("calls a stub where the FB is not in the workspace, and refuses a CALL by block number", () => {
+    const s = workspace({
+      "Lib_Pump_DB.db": 'DATA_BLOCK "Lib_Pump_DB"\n"Lib_Pump"\nBEGIN\nEND_DATA_BLOCK\n',
+      "Fx_Pump.awl": awl("FUNCTION", "Fx_Pump", "   VAR_INPUT\n      go : Bool;\n   END_VAR\n   VAR_OUTPUT\n      running : Bool;\n   END_VAR", ['CALL "Lib_Pump" , "Lib_Pump_DB"\n(  start := #go\n);', 'A "Lib_Pump_DB".running;\n= #running;']),
+      "Fx_Number.awl": awl("FUNCTION", "Fx_Number", "", ["CALL FB 10 , DB 10;"]),
+    });
+    s.stubs = new Map([["LIB_PUMP", { RUNNING: true }]]);
+    expect(s.callBlock("Fx_Pump", { go: true }).outputs.RUNNING).toBe(true);
+    expect(((s.globals.LIB_PUMP_DB as { mem: Record<string, unknown> }).mem.START)).toBe(true);
+    expect(errorOf(() => s.callBlock("Fx_Number"))).toBe('"Fx_Number" uses STL instructions the simulator does not run yet: CALL of a block by number (FB 10, DB 10)');
   });
 });
 

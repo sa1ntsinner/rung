@@ -41,6 +41,28 @@ describe("system instructions", () => {
     expect(errorOf(() => run(s, "Bad"))).toBe("SWAP: IN must be 16, 32 or 64 bits wide (a WORD, DWORD, LWORD or an integer of that width); it is BYTE");
   });
 
+  it("64-bit values are exact up to 2^53 and beyond where a double holds them; any other result stops the test", () => {
+    const s = sim({
+      Wide: fb(
+        "Wide",
+        "VAR\n  sw : LWord;\n  shl64 : LWord;\n  shl63 : LWord;\n  right : LWord;\n  both : LWord;\nEND_VAR",
+        "  #sw := SWAP(LWORD#16#FF);\n  #shl64 := SHL(IN := LWORD#1, N := 64);\n  #shl63 := SHL(IN := LWORD#1, N := 63);\n  #right := SHR(IN := LWORD#16#8000_0000_0000_0000, N := 63);\n  #both := LWORD#16#FF00_0000_0000_0000 AND LWORD#16#F000_0000_0000_0000;",
+      ),
+      Swap7: fb("Swap7", "VAR\n  w : LWord := 16#01_0203_0405_06FF;\n  o : LWord;\nEND_VAR", "  #o := SWAP(#w);"),
+      Not0: fb("Not0", "VAR\n  w : LWord;\n  o : LWord;\nEND_VAR", "  #o := NOT #w;"),
+      Sum: fb("Sum", "VAR\n  l : LInt := 9007199254740992;\n  o : LInt;\nEND_VAR", "  #o := #l + 1;"),
+      Big: fb("Big", "VAR\n  o : LWord;\nEND_VAR", "  #o := LWORD#16#FFFF_FFFF_FFFF_FFFF;"),
+      // 2^55 / 5 is 7205759403792793.6: the quotient of two doubles rounds up to ...94 before it is cut
+      Div: fb("Div", "VAR\n  l : LInt := 36028797018963968;\n  o : LInt;\nEND_VAR", "  #o := #l / 5;"),
+    });
+    expect(run(s, "Wide")).toMatchObject({ SW: Number(0xff00_0000_0000_0000n), SHL64: 0, SHL63: 2 ** 63, RIGHT: 1, BOTH: Number(0xf000_0000_0000_0000n) });
+    expect(run(s, "Div")).toMatchObject({ O: 7205759403792793 });
+    expect(errorOf(() => run(s, "Swap7"))).toBe("SWAP: the result 16#FF06050403020100 cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them");
+    expect(errorOf(() => run(s, "Not0"))).toBe("the 64-bit value 16#FFFFFFFFFFFFFFFF cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them");
+    expect(errorOf(() => run(s, "Sum"))).toMatch(/^the 64-bit value 16#20000000000001 cannot be held exactly/);
+    expect(errorOf(() => run(s, "Big"))).toMatch(/LWORD#16#FFFF_FFFF_FFFF_FFFF cannot be held exactly/);
+  });
+
   it("RD_SYS_T and RD_LOC_T read the virtual clock: 2024-01-01 00:00 (a Monday) plus the virtual time", () => {
     const s = sim({
       Clk: fb("Clk", "VAR\n  now : DTL;\n  loc : DTL;\n  dt : Date_And_Time;\n  ret : Int := -1;\nEND_VAR", "  #ret := RD_SYS_T(OUT => #now);\n  RD_LOC_T(#loc);\n  RD_SYS_T(OUT => #dt);"),
