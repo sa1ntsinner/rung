@@ -2,7 +2,7 @@
 // "Environment" view: what `rung check --json` finds on this PC (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS,
 // editors, agents) and how to get the rest. It needs no workspace.
 import * as vscode from "vscode";
-import { bundleBase, onPath } from "../bundled";
+import { onPath } from "../bundled";
 import { parseCheck, type CheckItem } from "../core/args";
 import { findExecutable } from "../core/exec";
 import { RungCli } from "../runner/cli";
@@ -45,7 +45,7 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
         this.error = this.items ? undefined : RungCli.summary(r.output) || "rung check gave no answer";
         // the extension's own rung works here; terminals and agents need it on PATH
         if (this.items && RungCli.bundled) {
-          const ok = onPath(bundleBase()) || !!findExecutable("rung", { platform: process.platform, env: process.env, isFile });
+          const ok = (!!RungCli.bundledBase && onPath(RungCli.bundledBase)) || !!findExecutable("rung", { platform: process.platform, env: process.env, isFile });
           this.items.push({
             id: "rung-command",
             group: "base",

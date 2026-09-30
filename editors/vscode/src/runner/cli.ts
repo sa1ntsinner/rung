@@ -31,6 +31,8 @@ export interface Finished {
 export class RungCli implements vscode.Disposable {
   /** The rung that came with the extension (bundled.ts), used while rung.command is the default and no rung is on PATH. */
   static bundled: string | undefined;
+  /** The extension's storage folder the bundled rung and its command live in. */
+  static bundledBase: string | undefined;
   private readonly finished = new vscode.EventEmitter<Finished>();
   /** Fires after every CLI command, so views can refresh. */
   readonly onDidFinish = this.finished.event;

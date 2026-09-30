@@ -152,7 +152,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   if (host && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --host needs --project <path of the project on that PC>");
   const client = host
     ? await remoteBridge(host, "", args.slice(bridge.args.length), v.tia === "V21" ? "V21" : "V20", io)
-    : await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string>, ...(codesys ? { closeTimeoutMs: 30_000 } : {}) });
+    : await BridgeClient.spawn({ command: bridge.command, args, env: { ...(io.env as Record<string, string>), ...("env" in bridge ? (bridge.env ?? {}) : {}) }, ...(codesys ? { closeTimeoutMs: 30_000 } : {}) });
   try {
     let info = await client.projectInfo();
     const tia = wanted ?? info.tiaVersion;

@@ -1,51 +1,55 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bundleBase, installBundledRung, onPath, shimPath, shimText } from "../src/bundled";
+import { batchPath, installBundledRung, onPath, shimPath, shimText, versionDir } from "../src/bundled";
 
 describe("the rung that comes with the extension", () => {
-  it("a shim runs the copy with VS Code's executable as Node.js, on Windows and elsewhere", () => {
-    const win = shimText("C:\\Program Files\\Microsoft VS Code\\Code.exe", "win32");
+  const env = { LOCALAPPDATA: "C:\\Users\\Əli\\AppData\\Local", APPDATA: "C:\\Users\\Əli\\AppData\\Roaming", ProgramFiles: "C:\\Program Files" };
+
+  it("a shim runs the current copy with VS Code's executable as Node.js; paths under known folders stay ASCII", () => {
+    const win = shimText("C:\\Users\\Əli\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", "1.0.0+abc", "win32", env);
     expect(win).toContain('set "ELECTRON_RUN_AS_NODE=1"');
-    expect(win).toContain('set "RUNG_HOME=%~dp0bundle"');
-    expect(win).toContain('"C:\\Program Files\\Microsoft VS Code\\Code.exe" "%~dp0bundle\\rung.cjs" %*');
+    expect(win).toContain('set "RUNG_HOME=%~dp0rung-1.0.0+abc"');
+    expect(win).toContain('"%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe" "%~dp0rung-1.0.0+abc\\rung.cjs" %*');
+    expect(win).not.toContain("chcp");
+    expect(/[^\x00-\x7f]/.test(win)).toBe(false);
     expect(win).toContain("\r\n");
-    const sh = shimText("/usr/share/code/code", "linux");
+    const sh = shimText("/usr/share/code/code", "1.0.0+abc", "linux");
     expect(sh.startsWith("#!/bin/sh\n")).toBe(true);
-    expect(sh).toContain('ELECTRON_RUN_AS_NODE=1 RUNG_HOME="$here/bundle" exec "/usr/share/code/code" "$here/bundle/rung.cjs" "$@"');
+    expect(sh).toContain('ELECTRON_RUN_AS_NODE=1 RUNG_HOME="$here/rung-1.0.0+abc" exec "/usr/share/code/code" "$here/rung-1.0.0+abc/rung.cjs" "$@"');
     expect(shimPath("C:\\x", "win32")).toMatch(/rung\.cmd$/);
-    expect(bundleBase({ LOCALAPPDATA: "C:\\Users\\a\\AppData\\Local" }, "win32")).toBe(join("C:\\Users\\a\\AppData\\Local", "rung"));
   });
 
-  it("copies the bundle once per version into a folder that survives updates, and writes the shim", async () => {
+  it("a path outside every known folder and outside ASCII switches the console to UTF-8 and back", () => {
+    const win = shimText("D:\\Programmə\\Code\\Code.exe", "1", "win32", env);
+    expect(win).toContain("chcp 65001 >nul");
+    expect(win).toContain("chcp %RUNG_CP% >nul");
+    expect(win).toContain("exit /b %RUNG_RC%");
+    expect(batchPath("C:\\Program Files\\Microsoft VS Code\\Code.exe", env)).toBe("%ProgramFiles%\\Microsoft VS Code\\Code.exe");
+  });
+
+  it("copies each version once into a folder of its own, points the shim at it and removes older ones", async () => {
     const ext = mkdtempSync(join(tmpdir(), "rung-ext-"));
     mkdirSync(join(ext, "rung", "bridge"), { recursive: true });
     writeFileSync(join(ext, "rung", "rung.cjs"), "console.log('hi')\n");
     writeFileSync(join(ext, "rung", "VERSION"), "1.0.0+abc\n");
-    const home = mkdtempSync(join(tmpdir(), "rung-home-"));
-    const saved = { LOCALAPPDATA: process.env.LOCALAPPDATA, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
-    Object.assign(process.env, { LOCALAPPDATA: home, HOME: home, USERPROFILE: home });
-    try {
-      const log: string[] = [];
-      const shim = await installBundledRung(ext, (s) => log.push(s));
-      expect(shim).toBeDefined();
-      const base = bundleBase();
-      expect(readFileSync(join(base, "bundle", "VERSION"), "utf8").trim()).toBe("1.0.0+abc");
-      expect(readFileSync(shim!, "utf8")).toContain(process.execPath);
-      expect(log).toHaveLength(1);
-      await installBundledRung(ext, (s) => log.push(s)); // same version: nothing copied
-      expect(log).toHaveLength(1);
-      writeFileSync(join(ext, "rung", "VERSION"), "1.0.1+def\n");
-      await installBundledRung(ext, (s) => log.push(s));
-      expect(readFileSync(join(base, "bundle", "VERSION"), "utf8").trim()).toBe("1.0.1+def");
-      // a development build carries no rung: nothing happens
-      expect(await installBundledRung(mkdtempSync(join(tmpdir(), "rung-ext-")), () => {})).toBeUndefined();
-    } finally {
-      for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
+    const base = join(mkdtempSync(join(tmpdir(), "rung-storage-")), "globalStorage");
+    const log: string[] = [];
+    const shim = await installBundledRung(ext, base, (s) => log.push(s));
+    expect(shim).toBe(shimPath(base));
+    expect(existsSync(join(base, versionDir("1.0.0+abc"), "rung.cjs"))).toBe(true);
+    expect(readFileSync(shim!, "utf8")).toContain(versionDir("1.0.0+abc"));
+    expect(log).toHaveLength(1);
+    await installBundledRung(ext, base, (s) => log.push(s)); // the same version: nothing copied
+    expect(log).toHaveLength(1);
+    writeFileSync(join(ext, "rung", "VERSION"), "1.0.1+def\n");
+    await installBundledRung(ext, base, (s) => log.push(s));
+    expect(readFileSync(shim!, "utf8")).toContain(versionDir("1.0.1+def"));
+    expect(readdirSync(base).filter((d) => d.startsWith("rung-"))).toEqual([versionDir("1.0.1+def")]);
+    // a development build carries no rung: nothing happens
+    expect(await installBundledRung(mkdtempSync(join(tmpdir(), "rung-ext-")), base, () => {})).toBeUndefined();
   });
 
   it("knows whether a folder is on PATH, whatever the letter case or trailing slash", () => {

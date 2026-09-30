@@ -44,13 +44,49 @@ export function networkKey(unit: string, form: NetworkForm): string {
   return form === "xml" ? blankIds(t) : t;
 }
 
+/**
+ * Rewrites the value of every ID attribute of the XML's start tags, in document order, and nothing else: text
+ * (a string constant, a title that says ID="x"), CDATA, comments and other attributes (UId) stay as they are.
+ */
+function mapIds(xml: string, value: () => string): string {
+  let out = "";
+  let i = 0;
+  while (i < xml.length) {
+    const lt = xml.indexOf("<", i);
+    if (lt < 0) break;
+    out += xml.slice(i, lt);
+    const skip = xml.startsWith("<![CDATA[", lt) ? "]]>" : xml.startsWith("<!--", lt) ? "-->" : xml[lt + 1] === "?" || xml[lt + 1] === "!" ? ">" : xml[lt + 1] === "/" ? ">" : undefined;
+    if (skip) {
+      const end = xml.indexOf(skip, lt + 2);
+      const stop = end < 0 ? xml.length : end + skip.length;
+      out += xml.slice(lt, stop);
+      i = stop;
+      continue;
+    }
+    // a start tag: up to its '>' outside quoted attribute values
+    let j = lt + 1;
+    let quote = "";
+    for (; j < xml.length; j++) {
+      const c = xml[j]!;
+      if (quote) {
+        if (c === quote) quote = "";
+      } else if (c === '"' || c === "'") quote = c;
+      else if (c === ">") break;
+    }
+    const tag = xml.slice(lt, j + 1);
+    out += tag.replace(/(\sID=")[^"]*(")/g, (_, a: string, b: string) => `${a}${value()}${b}`);
+    i = j + 1;
+  }
+  return out + xml.slice(i);
+}
+
 /** SimaticML object IDs (ID="3", not UId) as ID="*": one inserted network renumbers every object after it. */
 export function blankIds(xml: string): string {
-  return xml.replace(/(\sID=")[^"]*(")/g, "$1*$2");
+  return mapIds(xml, () => "*");
 }
 
 /** Fresh object IDs in document order (0, 1, … 9, A, B, …), as TIA Portal numbers them. */
 export function renumberIds(xml: string): string {
   let n = 0;
-  return xml.replace(/(\sID=")[^"]*(")/g, (_, a: string, b: string) => `${a}${(n++).toString(16).toUpperCase()}${b}`);
+  return mapIds(xml, () => (n++).toString(16).toUpperCase());
 }

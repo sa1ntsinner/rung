@@ -5,7 +5,9 @@ import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
-import { addToUserPath, bundleBase, installBundledRung, onPath } from "./bundled";
+import { addToUserPath, installBundledRung, onPath } from "./bundled";
+import { findExecutable } from "./core/exec";
+import { isFile } from "./workspace";
 import { Lsp } from "./lsp";
 import { Monitor } from "./monitor";
 import { OnlineMonitor } from "./online";
@@ -51,11 +53,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
 
   await ws.start();
-  // the rung that comes with the extension, unless one is installed (rung on PATH, or rung.command set)
-  RungCli.bundled = await installBundledRung(context.extensionPath, (s) => out.info(s)).catch((e: Error) => {
-    out.info(`the rung that comes with the extension could not be set up: ${e.message}`);
-    return undefined;
-  });
+  // the rung that comes with the extension, only when none is installed (rung on PATH, or rung.command set); it
+  // lives in the extension's own storage folder
+  const command = readSettings().command;
+  const installed = !(command.length === 1 && command[0] === "rung") || !!findExecutable("rung", { platform: process.platform, env: process.env, isFile });
+  RungCli.bundledBase = context.globalStorageUri.fsPath;
+  RungCli.bundled = installed
+    ? undefined
+    : await installBundledRung(context.extensionPath, RungCli.bundledBase, (s) => out.info(s)).catch((e: Error) => {
+        out.info(`the rung that comes with the extension could not be set up: ${e.message}`);
+        return undefined;
+      });
 
   const project = new ProjectView(ws);
   const plc = new PlcView(ws, online, watch);
@@ -73,9 +81,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     vscode.commands.registerCommand("rung.env.refresh", () => environment.refresh()),
     vscode.commands.registerCommand("rung.installCommand", async () => {
       // terminals and agents start `rung` from PATH: the copy the extension keeps up to date goes there
-      const dir = bundleBase();
-      if (!RungCli.bundled) {
-        void vscode.window.showInformationMessage("This build of the extension carries no rung of its own; install rung from its release and put it on PATH.");
+      const dir = RungCli.bundledBase;
+      if (!RungCli.bundled || !dir) {
+        void vscode.window.showInformationMessage(
+          findExecutable("rung", { platform: process.platform, env: process.env, isFile }) ? "rung is on PATH already." : "This build of the extension carries no rung of its own; install rung from its release and put it on PATH.",
+        );
         return;
       }
       if (onPath(dir)) {
