@@ -99,7 +99,8 @@ exported 0  imported <b>1</b>  created 0  merged 0  conflicts 0  pending-deletes
           Start <code>rung watch</code> and leave it running. When you save a file, rung imports it through
           Openness, compiles the block and writes TIA's version back, so the file always matches the project.
           Change something in TIA Portal and the file follows within a couple of seconds. If both sides changed,
-          rung merges line by line, or stops and shows you the conflict.
+          rung merges: SCL line by line, LAD and FBD network by network, so two people working on different
+          networks of one block both keep their change. A real conflict stops and shows you both sides.
         </p>
         </div>
         <figure class="flow" aria-label="TIA Portal, the rung bridge and the text files, connected in both directions">
@@ -161,9 +162,10 @@ rung_test          rung_live_read
         <div>
           <h2>Tests for blocks</h2>
           <p>
-            Describe a few scan cycles in YAML and <code>rung test</code> runs them on an offline SCL
-            simulator with virtual time, IEC timers and edge detection. No PLC or PLCSIM needed.
-            It prints JUnit, so it fits into the CI you already have.
+            Describe a few scan cycles in YAML and <code>rung test</code> runs them on an offline simulator
+            for SCL, LAD and structured text, with virtual time, IEC timers, edge detection and common system
+            instructions. No PLC, PLCSIM or TIA Portal needed, so it runs on any CI runner, Linux too, and prints
+            JUnit.
           </p>
         </div>
 <pre class="snippet"><code><span class="c"># tests/motor.test.yaml</span>
