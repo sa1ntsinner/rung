@@ -18,7 +18,7 @@ import {
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
-import { HINTS, bridgeFor, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
+import { HINTS, bridgeFor, decodeArgs, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
 import { startServer } from "@rung/lsp";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
@@ -101,8 +101,11 @@ async function agentsTemplate(project: string): Promise<string> {
 
 /** `rung bridge [--tia V21] <bridge arguments>`: runs the bridge that comes with rung on this PC, on stdin/stdout. */
 async function runBridge(args: string[], io: Io): Promise<number> {
+  // over ssh the arguments come as one word (common.ts encodeArgs): no shell on the way splits or expands them
+  const at = args.indexOf("--args");
+  if (at >= 0) args = [...args.slice(0, at), ...decodeArgs(args[at + 1] ?? ""), ...args.slice(at + 2)];
   let tia: "V20" | "V21" = "V20";
-  if (args[0] === "--tia") {
+  while (args[0] === "--tia") {
     tia = args[1] === "V21" ? "V21" : "V20";
     args = args.slice(2);
   }
@@ -124,9 +127,16 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     io.stderr(`rung: ${cfgPath} already exists (use --rebind to bind it to another project)\n`);
     return 1;
   }
+  // checked before anything starts: --from-plc changes the project, so a bad argument must stop rung before that
+  const wanted = v.tia as string | undefined;
+  if (wanted !== undefined && !ENGINEERING_VERSIONS.includes(wanted as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${wanted} (V20, V21 or CODESYS)`);
   // a .project file is CODESYS: rung relays to its bridge script inside CODESYS (codesys.ts)
   const codesys = !!v.project && /\.project$/i.test(String(v.project)) && !io.env.RUNG_BRIDGE;
-  const bridge = codesys ? codesysBridgeCommand(resolve(io.cwd, String(v.project))) : defaultBridge(io.env);
+  const bridge = codesys
+    ? codesysBridgeCommand(resolve(io.cwd, String(v.project)))
+    : io.env.RUNG_BRIDGE
+      ? defaultBridge(io.env)
+      : { command: bridgeExecutable(io.env, wanted === "V21" ? "V21" : "V20"), args: [] };
   // with an explicit project the bridge may open it in the background when no TIA Portal has it open
   // --from-plc: a new project, and the running PLC uploaded into it as its station
   const fromPlc = v["from-plc"] === undefined ? undefined : uploadRequest(String(v["from-plc"]), v);
@@ -141,21 +151,28 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     : await BridgeClient.spawn({ command: bridge.command, args, env: io.env as Record<string, string>, ...(codesys ? { closeTimeoutMs: 30_000 } : {}) });
   try {
     let info = await client.projectInfo();
+    const tia = wanted ?? info.tiaVersion;
+    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V20, V21 or CODESYS)`);
+    if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
+    const devices = (v.device as string[] | undefined) ?? [];
+    const checkDevices = () => {
+      for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BAD_ARGUMENT", `device ${d} not in project (${info.devices.join(", ")})`);
+    };
+    // a device named with --from-plc may be the one the upload brings; otherwise it must be there already
+    if (!fromPlc) checkDevices();
     if (fromPlc) {
       io.stderr(`reading the station at ${fromPlc.address} into ${info.path} (the PLC is only read) …\n`);
       const code = reportUpload(io, await client.upload(fromPlc), fromPlc.address);
       if (code !== 0) return code;
       info = await client.projectInfo();
+      checkDevices();
     }
-    const tia = (v.tia as string | undefined) ?? info.tiaVersion;
-    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V20, V21 or CODESYS)`);
-    if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
-    const devices = (v.device as string[] | undefined) ?? [];
-    for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BAD_ARGUMENT", `device ${d} not in project (${info.devices.join(", ")})`);
-    // On --rebind keep the user's sync/bridge settings; only the binding changes.
+    // On --rebind keep the user's sync/bridge settings; only the binding changes, and the bridge runs where the
+    // project was just looked at: on --host, or here when no --host was given
     const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir).catch(() => undefined) : undefined;
+    const rebound = previous && (({ host: _old, ...rest }) => (host ? { ...rest, host } : rest))(previous.bridge);
     const config = previous
-      ? { ...previous, project: { path: info.path, tiaVersion: tia as EngineeringVersion }, devices }
+      ? { ...previous, project: { path: info.path, tiaVersion: tia as EngineeringVersion }, devices, bridge: rebound! }
       : // the bridge that comes with rung is found at run time; only an explicit RUNG_BRIDGE is written down
         { ...defaultConfig(info.path, tia as EngineeringVersion, io.env.RUNG_BRIDGE ? bridge.command : "", devices), bridge: host ? { command: "", args: [], host } : io.env.RUNG_BRIDGE ? { command: bridge.command, args: bridge.args } : { command: "", args: [] } };
     // Take the state lock before touching rung.toml so config and state never disagree about the binding.

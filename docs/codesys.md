@@ -58,7 +58,7 @@ A download is an online change: the running application changes without a stop. 
 rung download --allow stop-cpu
 ```
 
-Afterwards rung starts the application only if it ran before the download (a full download stopped it), if the download was the first, or in CODESYS's simulation. An application someone had stopped stays stopped, and rung says so.
+Afterwards rung starts the application only if it ran before the download (a full download stopped it), if the download was the first, or in CODESYS's simulation. An application someone had stopped stays stopped, and so does one whose state rung could not read before the download; rung says so.
 
 A person starts every download; agents never do.
 

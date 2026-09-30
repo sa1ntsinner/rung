@@ -119,13 +119,36 @@ def text_of(doc):
     return (doc.text or "").replace("\r\n", "\n")
 
 
+def lead(text):
+    """Where a declaration's first keyword starts, past what may stand above it: comments (//, (* *), /* */) and
+    attribute pragmas ({ }). Export, import and the checks all find the header this one way."""
+    i, n = 0, len(text)
+    while i < n:
+        if text[i].isspace():
+            i += 1
+        elif text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j + 1
+        elif text.startswith("(*", i) or text.startswith("/*", i):
+            j = text.find("*)" if text[i] == "(" else "*/", i + 2)
+            i = n if j < 0 else j + 2
+        elif text[i] == "{":
+            j = text.find("}", i)
+            i = n if j < 0 else j + 1
+        else:
+            break
+    return i
+
+
+def lead_keyword(text):
+    m = re.match(r"[A-Za-z_]+", text[lead(text):])
+    return m.group(0).upper() if m else None
+
+
 def decl_keyword(obj):
     if not getattr(obj, "has_textual_declaration", False):
         return None
-    head = text_of(obj.textual_declaration).lstrip()
-    head = re.sub(r"^(\{[^}]*\}\s*)+", "", head)  # attribute pragmas before the header
-    m = re.match(r"([A-Za-z_]+)", head)
-    return m.group(1).upper() if m else None
+    return lead_keyword(text_of(obj.textual_declaration))
 
 
 def kind_of(obj):
@@ -387,15 +410,22 @@ def import_object(addr, path, expected):
             raise RpcError("STALE_REVISION", addr + " changed in CODESYS since it was exported")
     app = application(device(devname))
     if kind != "block":
-        m = re.match(r"^\s*TYPE\s+([A-Za-z_][A-Za-z0-9_]*)", text, re.I) if kind == "type" else None
+        at = lead(text)
+        m = re.match(r"TYPE\s+([A-Za-z_][A-Za-z0-9_]*)", text[at:], re.I) if kind == "type" else None
         if kind == "type" and (not m or m.group(1) != name):
             raise RpcError("IMPORT_FAILED", "the file declares " + (m.group(1) if m else "no type") + " but its name says " + name)
-        if kind == "tagtable" and not re.search(r"^\s*VAR_GLOBAL\b", text, re.I | re.M):
+        if kind == "tagtable" and lead_keyword(text) != "VAR_GLOBAL":
             raise RpcError("IMPORT_FAILED", "a global variable list starts with VAR_GLOBAL")
-        if obj is None:
+        created = obj is None
+        if created:
             parent = folder(app, groups)
             obj = parent.create_dut(name) if kind == "type" else parent.create_gvl(name)
-        set_text(obj.textual_declaration, ensure_nl(text))
+        try:
+            set_text(obj.textual_declaration, ensure_nl(text))
+        except Exception:
+            if created:
+                obj.remove()
+            raise
         return obj, kind
     units = split_units(text)
     if not units or units[0][0] not in POU_KEYWORDS:
@@ -405,30 +435,72 @@ def import_object(addr, path, expected):
         raise RpcError("IMPORT_FAILED", "the file declares " + str(header_name(main)) + " but its name says " + name)
     if obj is not None and decl_keyword(obj) != kw:
         raise RpcError("IMPORT_FAILED", name + " is a " + str(decl_keyword(obj)) + " in CODESYS; changing it to a " + kw + " is done in CODESYS")
-    if obj is None:
-        parent = folder(app, groups)
-        pou_type = {"PROGRAM": PouType.Program, "FUNCTION_BLOCK": PouType.FunctionBlock, "FUNCTION": PouType.Function}.get(kw)
-        if pou_type is None:
-            raise RpcError("IMPORT_FAILED", "rung creates PROGRAMs, FUNCTION_BLOCKs and FUNCTIONs; create an " + kw + " in CODESYS")
-        # all keywords: create_pou has two C# overloads (see its stub)
-        obj = parent.create_pou(name=name, type=pou_type, language=None, return_type=return_type(main) if kw == "FUNCTION" else None, base_type=None, interfaces=None)
+    pou_type = {"PROGRAM": PouType.Program, "FUNCTION_BLOCK": PouType.FunctionBlock, "FUNCTION": PouType.Function}.get(kw)
+    if obj is None and pou_type is None:
+        raise RpcError("IMPORT_FAILED", "rung creates PROGRAMs, FUNCTION_BLOCKs and FUNCTIONs; create an " + kw + " in CODESYS")
+    # the whole file is read and checked before CODESYS is touched: a mistake in the last unit changes nothing
+    plan = plan_units(name, units[1:])
+    snap = snapshot(obj) if obj is not None else None
+    created = obj is None
+    try:
+        if created:
+            # all keywords: create_pou has two C# overloads (see its stub)
+            obj = folder(app, groups).create_pou(name=name, type=pou_type, language=None, return_type=return_type(main) if kw == "FUNCTION" else None, base_type=None, interfaces=None)
+        apply_units(obj, main, plan)
+    except Exception as e:
+        # CODESYS refused something half-way: the POU goes back to what it was, so a later save keeps no half import
+        why = e.message if isinstance(e, RpcError) else str(e)
+        try:
+            if created and obj is not None:
+                obj.remove()
+            elif snap is not None:
+                restore(obj, snap)
+        except Exception as e2:
+            raise RpcError("IMPORT_FAILED", why + "; CODESYS kept part of the file and rung could not put the previous version back (" + str(e2) + "): check " + name + " in CODESYS")
+        raise RpcError(e.code if isinstance(e, RpcError) else "IMPORT_FAILED", why + "; nothing was changed")
+    return obj, kind
+
+
+def plan_units(owner, units):
+    """The METHODs, PROPERTYs and ACTIONs of a POU file, each split and checked: [(keyword, name, parts)]."""
+    plan = []
+    for ukw, unit in units:
+        uname = header_name(unit)
+        if ukw not in ("METHOD", "PROPERTY", "ACTION"):
+            raise RpcError("IMPORT_FAILED", "a file holds one POU with its METHODs, PROPERTYs and ACTIONs; " + ukw + " " + str(uname) + " is a second POU: give it a file of its own")
+        if not uname:
+            raise RpcError("IMPORT_FAILED", "a " + ukw + " in " + owner + " has no name")
+        if uname.upper() in [p[1].upper() for p in plan]:
+            raise RpcError("IMPORT_FAILED", owner + " has two members named " + uname)
+        if ukw == "METHOD":
+            plan.append((ukw, uname, split_decl_impl(unit) + (return_type(unit),)))
+        elif ukw == "PROPERTY":
+            decl, accs = split_property(unit)
+            plan.append((ukw, uname, (decl, accs, return_type(unit))))
+        else:
+            head = re.search(r"^[ \t]*ACTION\s+[A-Za-z_][A-Za-z0-9_]*\s*:?[ \t]*\n?", unit, re.I | re.M)
+            # an action has no declaration: a comment above it would have nowhere to go in CODESYS
+            if unit[:head.start()].strip():
+                raise RpcError("IMPORT_FAILED", "the text above ACTION " + uname + " has no place in CODESYS (an action has no declaration); put it inside the action")
+            plan.append((ukw, uname, ensure_nl(unit[head.end():].strip("\n"))))
+    return plan
+
+
+def apply_units(obj, main, plan):
     decl, impl = split_decl_impl(main)
     set_text(obj.textual_declaration, decl)
     if getattr(obj, "has_textual_implementation", False):
         set_text(obj.textual_implementation, impl)
-    # methods, properties and actions: the file is the list; what it no longer has is removed
-    wanted = []
-    for ukw, unit in units[1:]:
-        uname = header_name(unit)
-        wanted.append(uname)
+    # methods, properties and actions: the file is the list; what it no longer has is removed (last)
+    for ukw, uname, parts in plan:
         child = [c for c in obj.get_children(False) if c.get_name() == uname]
         if ukw == "METHOD":
-            child = child[0] if child else obj.create_method(uname, return_type(unit))
-            d, i = split_decl_impl(unit)
+            d, i, rtype = parts
+            child = child[0] if child else obj.create_method(uname, rtype)
             set_text(child.textual_declaration, d)
             set_text(child.textual_implementation, i)
         elif ukw == "PROPERTY":
-            decl, accs = split_property(unit)
+            pdecl, accs, rtype = parts
             child = [c for c in child if is_property(c)]
             child = child[0] if child else None
             if child is not None and not set(accs) <= set(a.get_name().upper() for a in child.get_children(False)):
@@ -436,27 +508,76 @@ def import_object(addr, path, expected):
                 child.remove()
                 child = None
             if child is None:
-                child = obj.create_property(uname, return_type(unit))  # with a Get and a Set
-            set_text(child.textual_declaration, decl)
+                child = obj.create_property(uname, rtype)  # with a Get and a Set
+            set_text(child.textual_declaration, pdecl)
             for a in child.get_children(False):
-                name = a.get_name().upper()
-                if name not in accs:
+                aname = a.get_name().upper()
+                if aname not in accs:
                     a.remove()  # a property without SET is read-only
                     continue
-                d, i = accs[name]
+                d, i = accs[aname]
                 set_text(a.textual_declaration, d)
                 set_text(a.textual_implementation, i)
-        elif ukw == "ACTION":
-            head = re.search(r"^[ \t]*ACTION\s+[A-Za-z_][A-Za-z0-9_]*\s*:?[ \t]*\n?", unit, re.I | re.M)
-            # an action has no declaration: a comment above it would have nowhere to go in CODESYS
-            if unit[:head.start()].strip():
-                raise RpcError("IMPORT_FAILED", "the text above ACTION " + uname + " has no place in CODESYS (an action has no declaration); put it inside the action")
+        else:
             child = child[0] if child else obj.create_action(uname)
-            set_text(child.textual_implementation, ensure_nl(unit[head.end():].strip("\n")))
+            set_text(child.textual_implementation, parts)
+    wanted = [p[1] for p in plan]
     for c in obj.get_children(False):
         if (is_method(c) or is_property(c) or is_action(c)) and c.get_name() not in wanted:
             c.remove()
-    return obj, kind
+
+
+def texts(o):
+    return (text_of(o.textual_declaration) if getattr(o, "has_textual_declaration", False) else None,
+            text_of(o.textual_implementation) if getattr(o, "has_textual_implementation", False) else None)
+
+
+def put_texts(o, t):
+    if t[0] is not None:
+        set_text(o.textual_declaration, t[0])
+    if t[1] is not None and getattr(o, "has_textual_implementation", False):
+        set_text(o.textual_implementation, t[1])
+
+
+def snapshot(obj):
+    """What an import of a POU may change: its texts and those of its methods, properties (with accessors) and actions."""
+    kids = []
+    for c in obj.get_children(False):
+        if is_method(c):
+            kids.append(("METHOD", c.get_name(), texts(c), None))
+        elif is_property(c):
+            kids.append(("PROPERTY", c.get_name(), texts(c), dict((a.get_name().upper(), texts(a)) for a in c.get_children(False) if str(a.type).lower() == ACCESSOR_TYPE)))
+        elif is_action(c):
+            kids.append(("ACTION", c.get_name(), texts(c), None))
+    return texts(obj), kids
+
+
+def restore(obj, snap):
+    """Puts a POU back as snapshot() saw it: texts, members made by the failed import removed, removed ones made again."""
+    main, kids = snap
+    put_texts(obj, main)
+    names = [k[1] for k in kids]
+    for c in obj.get_children(False):
+        if (is_method(c) or is_property(c) or is_action(c)) and c.get_name() not in names:
+            c.remove()
+    for kind, name, t, accs in kids:
+        hit = [c for c in obj.get_children(False) if c.get_name() == name]
+        c = hit[0] if hit else None
+        if c is None:
+            if kind == "METHOD":
+                c = obj.create_method(name, return_type(t[0] or ""))
+            elif kind == "PROPERTY":
+                c = obj.create_property(name, return_type(t[0] or ""))
+            else:
+                c = obj.create_action(name)
+        put_texts(c, t)
+        if kind == "PROPERTY":
+            for a in c.get_children(False):
+                an = a.get_name().upper()
+                if an not in accs:
+                    a.remove()
+                else:
+                    put_texts(a, accs[an])
 
 
 # ------------------------------------------------------------------ build messages
@@ -602,17 +723,18 @@ def plc_download(params):
     full_ok = "stop-cpu" in allow
     base = {"device": devname, "errors": 0, "warnings": 0, "messages": [], "decisions": [], "needsAllow": []}
     # the application's state before: afterwards rung starts it only if it ran (and this download stopped it) or
-    # did not exist yet (a first download); one that was stopped stays stopped
-    before = None  # None: no application on the device yet
+    # did not exist yet (a first download); one that was stopped stays stopped, and so does one whose state rung
+    # could not read (it may have been stopped on purpose)
+    before = "unknown"
     try:
         if not oa.is_logged_in:
             oa.login(OnlineChangeOption.Keep, False)  # Keep: logs in, downloads nothing
         state = str(oa.application_state).lower()
         # ApplicationState.none: nothing loaded yet
-        before = "run" if "run" in state else None if "none" in state else "stop"
+        before = "run" if "run" in state else "none" if "none" in state else "stop"
         oa.logout()
     except Exception:
-        before = None
+        before = "unknown"
     try:
         oa.login(OnlineChangeOption.Try if full_ok else OnlineChangeOption.Force, "reset-module" in allow)
     except Exception as e:
@@ -630,10 +752,12 @@ def plc_download(params):
     running = "run" in str(oa.application_state).lower()
     # CODESYS's simulation loads its boot application stopped; there is no machine to keep still, so it runs
     simulated = str((params.get("target") or {}).get("mode", "")).lower() == "simulation"
-    if params.get("startAfter", True) and (before != "stop" or simulated) and not running:
+    if params.get("startAfter", True) and (before in ("run", "none") or simulated) and not running:
         oa.start()  # stopped by this download, loaded for the first time, or the simulation
     elif not running:
-        base["messages"].append("the application is stopped" + ("; it was stopped before the download, so rung leaves it" if before == "stop" else ""))
+        why = {"stop": "; it was stopped before the download, so rung leaves it",
+               "unknown": "; rung could not read its state before the download, so it does not start it: start it in CODESYS if it should run"}
+        base["messages"].append("the application is stopped" + why.get(before, ""))
     base.update({"state": "Success", "messages": base["messages"] + ["application " + str(oa.application_state)]})
     return base
 

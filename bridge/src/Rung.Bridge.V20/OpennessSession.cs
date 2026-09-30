@@ -629,29 +629,42 @@ namespace Rung.Bridge.V20
                 {
                     if (!isNew && Revision(r) != expectedTiaRevision) throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
                     if (!isNew && (r.Obj is PlcTagTable || r.Obj is PlcWatchTable)) backup = BackupTable(r, operationId);
-                    using (var tx = access.Transaction(_project, "rung import " + operationId))
+                    try
                     {
-                        if (isNew) r.ParentGroup = EnsureGroup(r);
-                        attempted = true;
-                        imported = ImportForm(r, form, path, operationId);
-                        var parts = AddressFormat.Parse(address);
-                        var want = Identity(parts.Name, parts.Namespace);
-                        if (imported.Count == 0)
-                            throw new RpcException(ErrorCodes.ImportFailed, "The file declares no block or type (empty, or only comments); it must declare \"" + want + "\". Nothing was changed");
-                        if (imported.Count != 1 || imported[0] != want)
-                            throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
-                        tx.CommitOnDispose();
+                        using (var tx = access.Transaction(_project, "rung import " + operationId))
+                        {
+                            if (isNew) r.ParentGroup = EnsureGroup(r);
+                            attempted = true;
+                            imported = ImportForm(r, form, path, operationId);
+                            var parts = AddressFormat.Parse(address);
+                            var want = Identity(parts.Name, parts.Namespace);
+                            if (imported.Count == 0)
+                                throw new RpcException(ErrorCodes.ImportFailed, "The file declares no block or type (empty, or only comments); it must declare \"" + want + "\". Nothing was changed");
+                            if (imported.Count != 1 || imported[0] != want)
+                                throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
+                            tx.CommitOnDispose();
+                        }
+                        // TIA Portal takes a table with an entry it cannot hold (seen live: a watch table entry with an
+                        // unknown tag) and then cannot export it any more. Still under the same exclusive access, such
+                        // a table is refused and the previous version put back.
+                        var broken = backup != null ? TableExportError(address) : null;
+                        if (broken != null)
+                            throw new RpcException(ErrorCodes.ImportFailed, "TIA Portal took the table but cannot export it any more (" + broken + "): an entry is probably something it cannot hold, such as an unknown tag or address.");
+                    }
+                    catch (Exception e) when (e is EngineeringException || e is RpcException)
+                    {
+                        // The failed transaction is rolled back by now. Only what this import may have changed is put
+                        // back (a refusal before it leaves the table alone), and still under the same exclusive
+                        // access: nobody can have changed the table between the backup and the restore.
+                        var note = attempted && backup != null ? RestoreTable(access, address, backup) : "";
+                        if (e is RpcException rpc) throw new RpcException(rpc.Code, rpc.Message + note);
+                        throw new RpcException(ErrorCodes.ImportFailed, e.Message + note);
                     }
                 }
             }
-            catch (Exception e) when (e is EngineeringException || e is RpcException)
+            catch (EngineeringException e)
             {
-                // only what this import may have changed is put back: a refusal before it (a stale revision) leaves
-                // the table, and whoever changed it, alone
-                var restored = attempted && backup != null && RestoreTable(address, backup);
-                var note = restored ? " TIA Portal had changed the table anyway; rung put the previous version back." : "";
-                if (e is RpcException rpc) throw new RpcException(rpc.Code, rpc.Message + note);
-                throw new RpcException(ErrorCodes.ImportFailed, e.Message + note);
+                throw new RpcException(ErrorCodes.ImportFailed, e.Message);
             }
             finally
             {
@@ -727,33 +740,69 @@ namespace Rung.Bridge.V20
             return f.FullName;
         }
 
-        /// <summary>After a failed import: if the table is no longer what the backup holds, imports the backup. True when it did.</summary>
-        bool RestoreTable(string address, string backupFile)
+        /// <summary>Null when the tag or watch table exports; else TIA Portal's reason.</summary>
+        string TableExportError(string address)
         {
             _index.Clear();
-            ObjectRef cur = null;
-            try { cur = Resolve(address); } catch (RpcException) { /* gone */ }
-            var before = File.ReadAllText(backupFile);
-            if (cur != null)
+            var dir = Path.Combine(Path.GetTempPath(), "rung-probe-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
             {
-                var probe = new FileInfo(Path.Combine(Path.GetDirectoryName(backupFile), "now.xml"));
-                if (cur.Obj is PlcTagTable ct) ct.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
-                else if (cur.Obj is PlcWatchTable cw) cw.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
-                if (File.ReadAllText(probe.FullName) == before) return false;
+                var cur = Resolve(address);
+                var f = new FileInfo(Path.Combine(dir, "table.xml"));
+                if (cur.Obj is PlcTagTable ct) ct.Export(f, ExportOptions.None, DocumentInfoOptions.None);
+                else if (cur.Obj is PlcWatchTable cw) cw.Export(f, ExportOptions.None, DocumentInfoOptions.None);
+                return null;
             }
-            var parts = AddressFormat.Parse(address);
-            var plc = Plc(parts.Device);
-            using (var access = _portal.ExclusiveAccess("rung: restoring " + parts.Name))
-            using (var tx = access.Transaction(_project, "rung restore " + parts.Name))
+            catch (EngineeringException e) { return TiaReason(e); }
+            finally
             {
-                var holder = new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind }, Plc = plc };
-                var group = EnsureGroup(holder);
-                if (group is PlcTagTableGroup tg) tg.TagTables.Import(new FileInfo(backupFile), ImportOptions.Override);
-                else if (group is PlcWatchAndForceTableGroup wg) wg.WatchTables.Import(new FileInfo(backupFile), ImportOptions.Override);
-                tx.CommitOnDispose();
+                _index.Clear();
+                try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            _index.Clear();
-            return true;
+        }
+
+        /// <summary>
+        /// After a failed import, under the import's exclusive access: if the table is no longer what the backup holds,
+        /// imports the backup. A note for the error message ("" when the table was untouched).
+        /// </summary>
+        string RestoreTable(ExclusiveAccess access, string address, string backupFile)
+        {
+            try
+            {
+                _index.Clear();
+                ObjectRef cur = null;
+                try { cur = Resolve(address); } catch (RpcException) { /* gone */ }
+                var before = File.ReadAllText(backupFile);
+                if (cur != null)
+                {
+                    var probe = new FileInfo(Path.Combine(Path.GetDirectoryName(backupFile), "now.xml"));
+                    try
+                    {
+                        if (cur.Obj is PlcTagTable ct) ct.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
+                        else if (cur.Obj is PlcWatchTable cw) cw.Export(probe, ExportOptions.None, DocumentInfoOptions.None);
+                        if (File.ReadAllText(probe.FullName) == before) return "";
+                    }
+                    catch (EngineeringException) { /* not exportable: certainly not the backup */ }
+                }
+                var parts = AddressFormat.Parse(address);
+                var plc = Plc(parts.Device);
+                using (var tx = access.Transaction(_project, "rung restore " + parts.Name))
+                {
+                    var holder = new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind }, Plc = plc };
+                    var group = EnsureGroup(holder);
+                    if (group is PlcTagTableGroup tg) tg.TagTables.Import(new FileInfo(backupFile), ImportOptions.Override);
+                    else if (group is PlcWatchAndForceTableGroup wg) wg.WatchTables.Import(new FileInfo(backupFile), ImportOptions.Override);
+                    tx.CommitOnDispose();
+                }
+                _index.Clear();
+                return " TIA Portal had changed the table anyway; rung put the previous version back.";
+            }
+            catch (Exception e) when (e is EngineeringException || e is RpcException || e is IOException)
+            {
+                _index.Clear();
+                return " TIA Portal may have changed the table anyway, and rung could not put the previous version back (" + e.Message.Trim() + "); check the table in TIA Portal. The previous version is in " + backupFile + ".";
+            }
         }
 
         /// <summary>Target for an object that does not exist yet; its folder is created inside the import transaction.</summary>

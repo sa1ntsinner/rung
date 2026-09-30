@@ -234,6 +234,8 @@ export interface UploadOutcome {
   /** PLCs of the new station (plc/<name>/ after a pull). */
   plcs: string[];
   messages: string[];
+  /** The station was uploaded but the project could not be saved: it is not kept. */
+  saveError?: string;
 }
 
 export interface BridgeEvent {

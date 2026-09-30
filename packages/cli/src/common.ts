@@ -73,10 +73,29 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   return client;
 }
 
-/** An argument for cmd.exe, the shell Windows' OpenSSH server runs commands in. */
-export function windowsArg(a: string): string {
-  return /^[A-Za-z0-9_\-.:\\/=@+]+$/.test(a) ? a : `"${a.replace(/"/g, '\\"')}"`;
+/**
+ * The bridge's arguments as one word that no shell on the way changes: Windows' OpenSSH server hands the command line
+ * to cmd.exe (or PowerShell), which would split, expand (%NAME%) or run (&, |) parts of a quoted project path.
+ * base64url of a JSON list has none of those characters; `rung bridge --args <word>` on the other PC decodes it.
+ */
+export function encodeArgs(args: readonly string[]): string {
+  return Buffer.from(JSON.stringify(args), "utf8").toString("base64url");
 }
+
+export function decodeArgs(word: string): string[] {
+  let list: unknown;
+  try {
+    if (!/^[A-Za-z0-9_-]*$/.test(word)) throw new Error("not base64url");
+    list = JSON.parse(Buffer.from(word, "base64url").toString("utf8"));
+  } catch {
+    list = undefined;
+  }
+  if (!Array.isArray(list) || !list.every((a) => typeof a === "string")) throw new WorkspaceError("BAD_ARGUMENT", "rung bridge --args: not an argument list from rung");
+  return list as string[];
+}
+
+/** An ssh destination (user@host, host, ssh://user@host:port); never something ssh would read as an option. */
+const SSH_HOST = /^[^\s"'`\u0000-\u001f-][^\s"'`\u0000-\u001f]*$/;
 
 /**
  * The bridge on the Windows PC that runs TIA Portal, over ssh (Linux, macOS): `rung bridge` there (rung installed on
@@ -84,12 +103,13 @@ export function windowsArg(a: string): string {
  * connection (BridgeClient remote).
  */
 export async function remoteBridge(host: string, command: string, args: string[], tia: "V20" | "V21", io: Io): Promise<BridgeClient> {
+  if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
   // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
   const ssh = io.env.RUNG_SSH ?? "ssh";
   const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
-  const line = [command || "rung bridge", ...(!command && tia === "V21" ? ["--tia", "V21"] : []), ...args.map(windowsArg)].join(" ");
+  const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia === "V21" ? ["--tia", "V21"] : []), ...args])}`;
   try {
-    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", host, line], env: cleanEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
+    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: cleanEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
   } catch (e) {
     throw new WorkspaceError(
       "BRIDGE_UNREACHABLE",

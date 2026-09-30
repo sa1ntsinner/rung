@@ -320,6 +320,10 @@ export function reportUpload(io: Io, r: UploadOutcome, address: string): number 
     io.stderr(`rung: nothing was uploaded from ${address} (${r.state})\n`);
     return 3;
   }
+  if (r.saveError) {
+    io.stderr(`rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}), so it is not kept. Free disk space or check the project folder's permissions, then upload again\n`);
+    return 3;
+  }
   io.stdout(`uploaded the station "${r.station}" from ${address}${r.plcs.length ? `: ${r.plcs.join(", ")}` : ""} (${r.state})\n`);
   return 0;
 }

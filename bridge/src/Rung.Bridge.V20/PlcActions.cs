@@ -370,7 +370,7 @@ namespace Rung.Bridge.V20
                 outcome.Station = station.Name;
                 outcome.Plcs = SoftwareOf(station.DeviceItems).OfType<Siemens.Engineering.SW.PlcSoftware>().Select(p => p.Name).ToArray();
                 try { _project.Save(); }
-                catch (EngineeringException e) { outcome.Messages.Add("Saving the project failed: " + e.Message); }
+                catch (EngineeringException e) { outcome.SaveError = e.Message.Trim(); }
             }
             _index.Clear();
             return outcome;

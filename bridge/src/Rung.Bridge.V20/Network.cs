@@ -152,21 +152,30 @@ namespace Rung.Bridge.V20
                         throw new RpcException(ErrorCodes.StaleRevision, address + " changed in TIA Portal since it was exported");
                     foreach (var w in want) Check(byKey[w.Key], w, now[w.Key]);
                     before = now;
-                    using (var tx = access.Transaction(_project, "rung import " + operationId))
+                    try
                     {
-                        attempted = true;
-                        foreach (var w in want) Apply(byKey[w.Key], w, before[w.Key]);
-                        tx.CommitOnDispose();
+                        using (var tx = access.Transaction(_project, "rung import " + operationId))
+                        {
+                            attempted = true;
+                            foreach (var w in want) Apply(byKey[w.Key], w, before[w.Key]);
+                            tx.CommitOnDispose();
+                        }
+                    }
+                    catch (Exception e) when (e is EngineeringException || e is RpcException)
+                    {
+                        // rolled back by now; what TIA Portal kept anyway is put back under the same exclusive access
+                        var reason = e is RpcException rpc ? rpc.Message : TiaReason((EngineeringException)e);
+                        throw new RpcException(e is RpcException rp ? rp.Code : ErrorCodes.ImportFailed, Sentence(reason) + RestoreNetwork(access, (DeviceItem)r.Obj, before));
                     }
                 }
             }
-            catch (RpcException e)
+            catch (RpcException e) when (!attempted)
             {
-                throw new RpcException(e.Code, Sentence(e.Message) + (attempted ? RestoreNetwork((DeviceItem)r.Obj, before) : " Nothing was changed."));
+                throw new RpcException(e.Code, Sentence(e.Message) + " Nothing was changed.");
             }
             catch (EngineeringException e)
             {
-                throw new RpcException(ErrorCodes.ImportFailed, Sentence(TiaReason(e)) + (attempted ? RestoreNetwork((DeviceItem)r.Obj, before) : " Nothing was changed."));
+                throw new RpcException(ErrorCodes.ImportFailed, Sentence(TiaReason(e)) + (attempted ? "" : " Nothing was changed."));
             }
             finally { _inImport = false; }
             _index.Clear();
@@ -266,8 +275,8 @@ namespace Rung.Bridge.V20
 
         static string Sentence(string s) => s.EndsWith(".", StringComparison.Ordinal) ? s : s + ".";
 
-        /// <summary>After a failed import: puts back the settings TIA Portal kept from it. A note for the error message.</summary>
-        string RestoreNetwork(DeviceItem cpu, Dictionary<string, InterfaceSettings> before)
+        /// <summary>After a failed import, under its exclusive access: puts back the settings TIA Portal kept from it. A note for the error message.</summary>
+        string RestoreNetwork(ExclusiveAccess access, DeviceItem cpu, Dictionary<string, InterfaceSettings> before)
         {
             try
             {
@@ -275,7 +284,6 @@ namespace Rung.Bridge.V20
                 var now = nodes.ToDictionary(n => n.Key, ReadSettings, StringComparer.Ordinal);
                 var changed = nodes.Where(n => before.ContainsKey(n.Key) && NetworkYaml.Render("", new[] { now[n.Key] }) != NetworkYaml.Render("", new[] { before[n.Key] })).ToList();
                 if (changed.Count == 0) return " Nothing was changed.";
-                using (var access = _portal.ExclusiveAccess("rung: restoring network settings"))
                 using (var tx = access.Transaction(_project, "rung restore network settings"))
                 {
                     foreach (var n in changed) Apply(n, before[n.Key], now[n.Key]);

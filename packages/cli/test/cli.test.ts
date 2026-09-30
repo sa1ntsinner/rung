@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { main } from "../src/main.js";
+import { decodeArgs } from "../src/common.js";
 
 const fakeScript = fileURLToPath(new URL("./fake-bridge.mjs", import.meta.url));
 const PROJECT = "C:\\fx\\RungFixture\\RungFixture.ap20";
@@ -56,8 +57,9 @@ describe("TIA Portal on another PC (Linux, macOS): the bridge over ssh", () => {
     expect(await t.run("init", "--host", "elmir@tia-pc", "--project", PROJECT)).toBe(0);
     expect(readFileSync(join(t.dir, "rung.toml"), "utf8")).toMatch(/\[bridge\][\s\S]*host = "elmir@tia-pc"/);
     const first = JSON.parse(readFileSync(log, "utf8").split("\n")[0]!) as string[];
-    expect(first.slice(0, 4)).toEqual(["-T", "-o", "BatchMode=yes", "elmir@tia-pc"]);
-    expect(first[4]).toBe(`rung bridge --project C:\\fx\\RungFixture\\RungFixture.ap20 --open-headless`);
+    expect(first.slice(0, 5)).toEqual(["-T", "-o", "BatchMode=yes", "--", "elmir@tia-pc"]);
+    expect(first[5]).toMatch(/^rung bridge --args [A-Za-z0-9_-]+$/);
+    expect(decodeArgs(first[5]!.split(" ")[3]!)).toEqual(["--project", PROJECT, "--open-headless"]);
 
     expect(await t.run("pull")).toBe(0);
     const motor = join(t.dir, "plc", "PLC_1", "blocks", "10_Drives", "Motors", "Fx_Motor.scl");
@@ -68,6 +70,27 @@ describe("TIA Portal on another PC (Linux, macOS): the bridge over ssh", () => {
     const db = JSON.parse(readFileSync(t.objects, "utf8"));
     expect(db.inline).toContain("export");
     expect(db.inline).toContain("import obj.scl");
+  });
+
+  it("a project path cmd.exe would expand or run arrives as it is; a host ssh would read as an option is refused", async () => {
+    const log = join(tmpdir(), `ssh-${Date.now()}-${Math.random()}.log`);
+    const t = setup({ RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_SSH_LOG: log });
+    const hostile = 'C:\\fx\\a" & whoami & rem "\\%USERNAME%\\Line^3.ap20';
+    await t.run("init", "--host", "elmir@tia-pc", "--project", hostile);
+    const first = JSON.parse(readFileSync(log, "utf8").split("\n")[0]!) as string[];
+    expect(decodeArgs(first[5]!.split(" ")[3]!)).toEqual(["--project", hostile, "--open-headless"]);
+    expect(await t.run("init", "--host=-oProxyCommand=calc", "--project", PROJECT)).toBe(1);
+    expect(t.err.join("")).toContain("is not an ssh destination");
+  });
+
+  it("--rebind saves the host the project was looked at on: a new --host replaces the old one, none binds here", async () => {
+    const ssh = { RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]) };
+    const t = setup(ssh);
+    expect(await t.run("init", "--host", "elmir@pc-a", "--project", PROJECT)).toBe(0);
+    expect(await t.run("init", "--rebind", "--host", "elmir@pc-b", "--project", PROJECT)).toBe(0);
+    expect(readFileSync(join(t.dir, "rung.toml"), "utf8")).toMatch(/host = "elmir@pc-b"/);
+    expect(await t.run("init", "--rebind", "--project", PROJECT)).toBe(0);
+    expect(readFileSync(join(t.dir, "rung.toml"), "utf8")).not.toMatch(/host =/);
   });
 
   it("says what to check when nothing answers on the other PC", async () => {
@@ -99,6 +122,23 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
     expect(t.out.join("")).toMatch(/uploaded the station "S7-1500 station_2"[\s\S]*Bound .* \(V20, devices: PLC_1, PLC_2\)/);
     expect(existsSync(join(t.dir, "rung.toml"))).toBe(true);
     expect(await setup().run("init", "--from-plc", "192.168.0.9")).toBe(1);
+  });
+
+  it("a station TIA Portal could not save is not a success: init --from-plc binds nothing", async () => {
+    const t = setup({ FAKE_SAVE_ERROR: "There is not enough space on the disk." });
+    expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT)).toBe(3);
+    expect(t.err.join("")).toContain("could not be saved (There is not enough space on the disk.), so it is not kept");
+    expect(existsSync(join(t.dir, "rung.toml"))).toBe(false);
+  });
+
+  it("rung init --from-plc checks its arguments before it uploads anything", async () => {
+    const t = setup();
+    expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT, "--tia", "V99")).toBe(1);
+    expect(t.err.join("")).toContain("unsupported version V99");
+    expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT, "--tia", "V21")).toBe(1);
+    expect(t.err.join("")).toContain("does not match");
+    const db = existsSync(t.objects) ? JSON.parse(readFileSync(t.objects, "utf8")) : {};
+    expect(db.uploads ?? []).toEqual([]);
   });
 });
 

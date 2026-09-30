@@ -275,6 +275,36 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         }
     }
 
+    [Fact] public void ARefusedWatchTableImportLeavesTheTableAsItWas()
+    {
+        const string address = "plc:PLC_1/watch/Fx_Watch";
+        if (!_fx.Session.ListObjects("PLC_1").Any(o => o.Address == address)) { Console.WriteLine("fixture without Fx_Watch (regenerate it): skipped"); return; }
+        var cur = _fx.Session.Export(address, "auto", Tmp());
+        var before = File.ReadAllText(cur.Files[0].Path);
+        // an entry TIA Portal cannot take: TIA may keep a half-imported table, which rung puts back under the same
+        // exclusive access as the import
+        const string entry = "      <SW.WatchAndForceTables.PlcWatchTableEntry ID=\"90\" CompositionName=\"Entries\">\n        <AttributeList>\n          <Name>\"Nope\".nothing</Name>\n          <Address>%ZZ99.9</Address>\n        </AttributeList>\n      </SW.WatchAndForceTables.PlcWatchTableEntry>\n";
+        var end = before.LastIndexOf("</ObjectList>", StringComparison.Ordinal);
+        var close = before.LastIndexOf("  </SW.WatchAndForceTables.PlcWatchTable>", StringComparison.Ordinal);
+        var bad = end > 0
+            ? before.Substring(0, end) + entry + before.Substring(end)
+            : before.Substring(0, close) + "    <ObjectList>\n" + entry + "    </ObjectList>\n" + before.Substring(close);
+        var file = Path.Combine(Tmp(), "obj.xml");
+        File.WriteAllText(file, bad);
+        try
+        {
+            _fx.Session.Import(address, "xml", file, cur.Fingerprint, Guid.NewGuid().ToString());
+            Console.WriteLine("TIA Portal took the entry; putting the table back");
+            var now = _fx.Session.Export(address, "auto", Tmp());
+            _fx.Session.Import(address, "xml", cur.Files[0].Path, now.Fingerprint, Guid.NewGuid().ToString());
+        }
+        catch (RpcException e)
+        {
+            Console.WriteLine("refused: " + e.Code + " " + e.Message);
+        }
+        Assert.Equal(before, File.ReadAllText(_fx.Session.Export(address, "auto", Tmp()).Files[0].Path));
+    }
+
     static string Tmp() => Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName;
 
     [Fact] public void TagTableIsATextListThatGoesBothWays()
