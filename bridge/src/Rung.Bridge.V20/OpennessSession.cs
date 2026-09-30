@@ -192,10 +192,12 @@ namespace Rung.Bridge.V20
                     WalkNetwork(plc, device, refs);
                     break;
                 }
-                catch (Exception e) when (attempt < 3 && (e is EngineeringObjectDisposedException || e is InvalidOperationException))
+                catch (Exception e) when (attempt < 5 && (e is EngineeringObjectDisposedException || e is InvalidOperationException || (e is EngineeringException && e.Message.Contains("was aborted"))))
                 {
                     // someone deleted, replaced or added an object while rung listed them (an edit in TIA, another
-                    // Openness client): "access to a disposed object", "collection was modified". List again.
+                    // Openness client): "access to a disposed object", "collection was modified", "invocation of
+                    // method 'MoveNext' … was aborted". List again once the other client is through.
+                    System.Threading.Thread.Sleep(200 * (attempt + 1));
                     plc = Plc(device);
                 }
             }
