@@ -1,0 +1,216 @@
+{
+    S7_Optimized := "TRUE";
+    S7_Language := "LAD";
+}
+FUNCTION_BLOCK "Fx_LadEdges"
+    VAR_INPUT 
+        "a" : Bool;
+        "b" : Bool;
+        "c" : Bool;
+    END_VAR
+    VAR_OUTPUT 
+        "pe" : Bool;
+        "ne" : Bool;
+        pc : Bool;
+        nc : Bool;
+        trig : Bool;
+        notOut : Bool;
+        inv : Bool;
+        orOut : Bool;
+        split1 : Bool;
+        split2 : Bool;
+        latch1 : Bool;
+        latch2 : Bool;
+        held : Bool;
+    END_VAR
+    VAR 
+        m1 : Bool;
+        m2 : Bool;
+        m3 : Bool;
+        m4 : Bool;
+        m5 : Bool;
+        sr : Bool;
+        rs : Bool;
+    END_VAR
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            P_Contact(
+                Top := #a, 
+                Bottom := #m1
+            )
+            Coil( #pe )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            N_Contact(
+                Top := #a, 
+                Bottom := #m2
+            )
+            Coil( #ne )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #b )
+            P_Coil(
+                Top => #pc, 
+                Bottom := #m3
+            )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #b )
+            N_Coil(
+                Top => #nc, 
+                Bottom := #m4
+            )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #c )
+            PBox( #m5 )
+            Coil( #trig )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #a )
+            Not()
+            Coil( #notOut )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            I_Contact( #b )
+            I_Coil( #inv )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #a )
+            wire#w1
+            Coil( #orOut )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #b )
+        END_RUNG wire#w1
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #a )
+            wire#w1
+            Coil( #split1 )
+        END_RUNG
+        RUNG wire#w1
+            Contact( #b )
+            Coil( #split2 )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #a )
+            S_SR(
+                Top := #sr, 
+                R1 := wire#w1
+            )
+            Coil( #latch1 )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #b )
+        END_RUNG wire#w1
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #b )
+            S_RS(
+                Top := #rs, 
+                S1 := wire#w1
+            )
+            Coil( #latch2 )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #a )
+        END_RUNG wire#w1
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #c )
+            S_Coil( #held )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #b )
+            R_Coil( #held )
+        END_RUNG
+
+    END_NETWORK
+
+END_FUNCTION_BLOCK

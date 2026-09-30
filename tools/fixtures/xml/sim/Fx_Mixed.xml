@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V20" />
+  <SW.Blocks.FB ID="0">
+    <AttributeList>
+      <Interface><Sections xmlns="http://www.siemens.com/automation/Openness/SW/Interface/v5">
+  <Section Name="Input">
+    <Member Name="a" Datatype="Int" />
+    <Member Name="b" Datatype="Bool" />
+  </Section>
+  <Section Name="Output">
+    <Member Name="q" Datatype="Int" />
+    <Member Name="r" Datatype="Bool" />
+    <Member Name="s" Datatype="Bool" />
+  </Section>
+  <Section Name="InOut" />
+  <Section Name="Static" />
+  <Section Name="Temp" />
+  <Section Name="Constant" />
+</Sections></Interface>
+      <MemoryLayout>Optimized</MemoryLayout>
+      <MemoryReserve>100</MemoryReserve>
+      <Name>Fx_Mixed</Name>
+      <Namespace />
+      <Number>3</Number>
+      <ProgrammingLanguage>LAD</ProgrammingLanguage>
+      <SetENOAutomatically>false</SetENOAutomatically>
+    </AttributeList>
+    <ObjectList>
+      <MultilingualText ID="1" CompositionName="Comment">
+        <ObjectList>
+          <MultilingualTextItem ID="2" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-US</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+      <SW.Blocks.CompileUnit ID="3" CompositionName="CompileUnits">
+        <AttributeList>
+          <NetworkSource><StructuredText xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/StructuredText/v4">
+  <Access Scope="LocalVariable" UId="21">
+    <Symbol UId="22">
+      <Component Name="q" UId="23" />
+    </Symbol>
+  </Access>
+  <Blank UId="24" />
+  <Token Text=":=" UId="25" />
+  <Blank UId="26" />
+  <Access Scope="LocalVariable" UId="27">
+    <Symbol UId="28">
+      <Component Name="a" UId="29" />
+    </Symbol>
+  </Access>
+  <Blank UId="30" />
+  <Token Text="*" UId="31" />
+  <Blank UId="32" />
+  <Access Scope="LiteralConstant" UId="33">
+    <Constant UId="34">
+      <ConstantValue UId="36">2</ConstantValue>
+    </Constant>
+  </Access>
+  <Token Text=";" UId="37" />
+</StructuredText></NetworkSource>
+          <ProgrammingLanguage>SCL</ProgrammingLanguage>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="4" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="5" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+          <MultilingualText ID="6" CompositionName="Title">
+            <ObjectList>
+              <MultilingualTextItem ID="7" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Blocks.CompileUnit>
+      <SW.Blocks.CompileUnit ID="8" CompositionName="CompileUnits">
+        <AttributeList>
+          <NetworkSource><StatementList xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/StatementList/v5">
+  <StlStatement UId="21">
+    <StlToken Text="A" />
+    <Access Scope="LocalVariable">
+      <Symbol>
+        <Component Name="b" />
+      </Symbol>
+    </Access>
+  </StlStatement>
+  <StlStatement UId="23">
+    <StlToken Text="AN" />
+    <Access Scope="LocalVariable">
+      <Symbol>
+        <Component Name="r" />
+      </Symbol>
+    </Access>
+  </StlStatement>
+  <StlStatement UId="25">
+    <StlToken Text="Assign" />
+    <Access Scope="LocalVariable">
+      <Symbol>
+        <Component Name="s" />
+      </Symbol>
+    </Access>
+  </StlStatement>
+</StatementList></NetworkSource>
+          <ProgrammingLanguage>STL</ProgrammingLanguage>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="9" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="A" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+          <MultilingualText ID="B" CompositionName="Title">
+            <ObjectList>
+              <MultilingualTextItem ID="C" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text />
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.Blocks.CompileUnit>
+      <MultilingualText ID="D" CompositionName="Title">
+        <ObjectList>
+          <MultilingualTextItem ID="E" CompositionName="Items">
+            <AttributeList>
+              <Culture>en-US</Culture>
+              <Text />
+            </AttributeList>
+          </MultilingualTextItem>
+        </ObjectList>
+      </MultilingualText>
+    </ObjectList>
+  </SW.Blocks.FB>
+</Document>

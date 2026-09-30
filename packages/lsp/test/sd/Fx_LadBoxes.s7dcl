@@ -1,0 +1,172 @@
+{
+    S7_Optimized := "TRUE";
+    S7_Language := "LAD";
+}
+FUNCTION_BLOCK "Fx_LadBoxes"
+    VAR_INPUT 
+        go : Bool;
+        rst : Bool;
+        n : Int;
+        x : Int;
+    END_VAR
+    VAR_OUTPUT 
+        late : Bool;
+        elapsed : Time;
+        full : Bool;
+        count : Int;
+        big : Bool;
+        within : Bool;
+        m1 : Int;
+        m2 : Int;
+        sum : Int;
+        "real" : Real;
+        ret : Int;
+        done : Bool;
+    END_VAR
+    VAR 
+        {
+             InstructionName := "TON_TIME";
+             LibVersion := "1.0";
+             S7_Setpoint := "False"
+        }
+        delay : TON_TIME;
+    END_VAR
+    VAR RETAIN
+        {
+             InstructionName := "CTU_INT";
+             LibVersion := "1.0";
+             S7_Setpoint := "False"
+        }
+        ctr : CTU_INT;
+    END_VAR
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #go )
+            #delay.TON{ time_type := Time }(
+                PT := T#50ms, 
+                ET => #elapsed
+            )
+            Coil( #late )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #go )
+            #ctr.CTU{ value_type := Int }(
+                R := #rst, 
+                PV := 3, 
+                CV => #count
+            )
+            Coil( #full )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #go )
+            Gt{ SrcType := Int }(
+                IN1 := #n, 
+                IN2 := 5
+            )
+            Coil( #big )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            InRange{ SrcType := Int }(
+                MIN := 1, 
+                IN := #n, 
+                MAX := 10
+            )
+            Coil( #within )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #go )
+            Move{
+                Card := 2; 
+                DisableENO := FALSE
+            }(
+                IN := #n, 
+                OUT1 => #m1, 
+                OUT2 => #m2
+            )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Add{
+                Card := 3; 
+                SrcType := Int; 
+                DisableENO := FALSE
+            }(
+                IN1 := #n, 
+                IN2 := #x, 
+                IN3 := 1, 
+                OUT => #sum
+            )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Convert{
+                SrcType := Int; 
+                DestType := Real; 
+                DisableENO := FALSE
+            }(
+                IN := #n, 
+                OUT => #real
+            )
+        END_RUNG
+
+    END_NETWORK
+
+    {
+      S7_Language := "LAD"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            "Fx_LadHelper"(
+                a := #n, 
+                Ret_Val => #ret
+            )
+            Coil( #done )
+        END_RUNG
+
+    END_NETWORK
+
+END_FUNCTION_BLOCK
