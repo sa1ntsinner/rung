@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT
+name: rung test
+description: Unit tests for SCL, LAD, FBD, STL and structured text blocks on rung's offline simulator; a failure shows on its step in the pull request.
+author: sa1ntsinner
+branding:
+  icon: check-square
+  color: green
+inputs:
+  version:
+    description: The rung release to use (a tag such as v1.0.0), or latest.
+    default: latest
+  dir:
+    description: The rung workspace (the folder with rung.toml or tests/).
+    default: .
+  filter:
+    description: Only the test files whose path contains this, or the tests of this block.
+    default: ""
+  junit:
+    description: Also write JUnit XML to this file.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - name: Get rung
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/rung"
+        if [ "$VERSION" = "latest" ]; then tag=(); else tag=("$VERSION"); fi
+        gh release download "${tag[@]}" --repo sa1ntsinner/rung --pattern rung.cjs --dir "$RUNNER_TEMP/rung" --clobber
+    - name: rung test
+      shell: bash
+      env:
+        DIR: ${{ inputs.dir }}
+        FILTER: ${{ inputs.filter }}
+        JUNIT: ${{ inputs.junit }}
+      run: |
+        args=(test "$DIR")
+        if [ -n "$FILTER" ]; then args+=(--filter "$FILTER"); fi
+        if [ -n "$JUNIT" ]; then args+=(--junit "$JUNIT"); fi
+        node "$RUNNER_TEMP/rung/rung.cjs" "${args[@]}"

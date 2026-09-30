@@ -5,7 +5,23 @@ Two kinds of jobs:
 1. **Anywhere (Linux or Windows, no TIA Portal):** the workspace is plain files, so parsing, unit tests and policy checks run on any runner.
 2. **Trusted Windows host with TIA Portal** (self-hosted runner): syncing with TIA Portal and compiling there. Never run untrusted pull-request code on this machine.
 
-## GitHub Actions example
+## Unit tests in three lines (GitHub Actions)
+
+```yaml
+name: plc
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sa1ntsinner/rung@v1        # rung test on the offline simulator
+        with: { junit: plc-tests.xml }   # optional: dir, filter, version (default: the latest release)
+```
+
+A failed expectation appears in the pull request on the line of its step in the test file (`rung test` writes GitHub annotations whenever it runs in GitHub Actions, with or without this action). Other CI systems read the JUnit file.
+
+## GitHub Actions example with review and compile
 
 ```yaml
 name: plc

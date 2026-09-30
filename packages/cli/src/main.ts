@@ -25,6 +25,7 @@ import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
 import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
+import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
 import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
@@ -470,6 +471,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
             if (!c.passed) failed++;
           }
         }
+        // in GitHub Actions a failure also shows in the pull request, on the line of its step
+        if (io.env.GITHUB_ACTIONS === "true") for (const a of githubAnnotations(results, ws, io.env.GITHUB_WORKSPACE ?? io.cwd)) io.stdout(`${a}\n`);
         const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
         if (!total) {
           // a test file named without .test is read by nobody: name it

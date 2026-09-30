@@ -278,6 +278,16 @@ describe("rung CLI", () => {
     ]);
   });
 
+  it("test in GitHub Actions puts every failure on its step in the pull request", async () => {
+    const t = setup({ GITHUB_ACTIONS: "true" });
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: stops, then\n    steps:\n      - set: { Start: false }\n      - { cycle: 1, expect: { Running: true } }\n");
+    expect(await t.run("test")).toBe(2);
+    expect(t.out.join("")).toContain("::error file=tests/run.test.yaml,line=6,title=rung test%3A Fx_Run%3A stops%2C then::step 2: Running expected true got false\n");
+  });
+
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
     expect(await t.run("test")).toBe(1);

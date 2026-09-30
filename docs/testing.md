@@ -10,6 +10,8 @@ rung test --junit report.xml    # JUnit XML for CI
 rung test --json                # every result with the line of its case and failing step (VS Code's Testing view uses it)
 ```
 
+In GitHub Actions, `rung test` also writes each failure as an annotation on the line of its step, so it shows in the pull request; `uses: sa1ntsinner/rung@v1` runs it in three lines ([CI](ci.md)).
+
 ## Test file
 
 ```yaml
