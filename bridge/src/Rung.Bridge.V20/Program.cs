@@ -64,6 +64,10 @@ namespace Rung.Bridge.V20
     {
         public static int Main(string[] args)
         {
+            // Ctrl+C in the terminal reaches every process there. rung stops and closes the bridge's input; the bridge
+            // then finishes the request TIA Portal is running, lets go of its events and ends. Stopped at once, it
+            // would leave TIA Portal handlers into a dead process (see OpennessSession.BeginRequest).
+            Console.CancelKeyPress += (s, e) => e.Cancel = true;
             BridgeArgs parsed;
             try { parsed = BridgeArgs.Parse(args); }
             catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 64; }

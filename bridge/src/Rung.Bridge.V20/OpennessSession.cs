@@ -45,17 +45,31 @@ namespace Rung.Bridge.V20
         readonly Dictionary<string, ObjectRef> _index = new Dictionary<string, ObjectRef>(StringComparer.Ordinal);
         volatile bool _disposed;
         volatile bool _inImport;
+        bool _listening;
 
         OpennessSession(TiaPortal portal, Project project, BridgeArgs args, Action<string, object> emit, int tiaPid)
         {
             _portal = portal; _project = project; _args = args; _emit = emit; _tiaPid = tiaPid;
-            portal.Disposed += (s, e) => { _disposed = true; emit("tia-disposed", new { }); };
-            portal.Notification += (s, e) =>
-            {
-                e.IsHandled = true;
-                emit("tia-notification", new { caption = e.Caption, text = e.Text, detail = e.DetailText });
-            };
-            portal.Confirmation += OnConfirmation;
+        }
+
+        /// <summary>
+        /// TIA Portal's questions and notifications, subscribed once, by the first request that changes something or goes
+        /// online, and kept for the bridge's life. A handler is a reference into this process: TIA Portal went down when
+        /// the process died while it was taking one in (seen live: a RemotingException in its Openness server, then it
+        /// ended). So as few as possible, and none at all in a bridge that only lists and exports (most sync passes).
+        /// </summary>
+        void Listen()
+        {
+            if (_listening) return;
+            _listening = true;
+            _portal.Notification += OnNotification;
+            _portal.Confirmation += OnConfirmation;
+        }
+
+        void OnNotification(object sender, NotificationEventArgs e)
+        {
+            e.IsHandled = true;
+            _emit("tia-notification", new { caption = e.Caption, text = e.Text, detail = e.DetailText });
         }
 
         /// <summary>Runs on a foreign thread; answers synchronously and never touches the owner thread.</summary>
@@ -595,6 +609,7 @@ namespace Rung.Bridge.V20
         public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId)
         {
             Alive();
+            Listen();
             using (OfflineFor(AddressFormat.Parse(address).Device))
                 return ImportOffline(address, form, path, expectedTiaRevision, operationId);
         }
@@ -1094,6 +1109,7 @@ namespace Rung.Bridge.V20
         public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
         {
             Alive();
+            Listen();
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             if (!Guid.TryParseExact(operationId, "D", out _)) throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
             newName = (newName ?? "").Trim();
@@ -1143,6 +1159,7 @@ namespace Rung.Bridge.V20
         public void Delete(string address, string expectedTiaRevision, string operationId)
         {
             Alive();
+            Listen();
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             if (!Guid.TryParseExact(operationId, "D", out _)) throw new RpcException(ErrorCodes.BadRequest, "operationId must be a UUID");
             var r = Resolve(address);
@@ -1178,6 +1195,7 @@ namespace Rung.Bridge.V20
         public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses)
         {
             Alive();
+            Listen();
             var plc = Plc(device);
             var byName = AddressesByName(device);
             var messages = new List<CompileMessage>();
@@ -1381,7 +1399,7 @@ namespace Rung.Bridge.V20
                 try { if (_args.SaveAfterImport) _project.Save(); } catch (Exception) { }
                 try { _project.Close(); } catch (Exception) { }
             }
-            try { _portal.Confirmation -= OnConfirmation; _portal.Dispose(); } catch (Exception) { }
+            try { if (_listening) { _portal.Notification -= OnNotification; _portal.Confirmation -= OnConfirmation; } _portal.Dispose(); } catch (Exception) { }
         }
     }
 }

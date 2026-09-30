@@ -45,6 +45,7 @@ namespace Rung.Bridge.V20
         public IReadOnlyList<CompileMessage> CompileHardware(string device)
         {
             Alive();
+            Listen();
             var compiler = StationCompiler(device);
             var messages = new List<CompileMessage>();
             using (OfflineFor(device))
@@ -58,6 +59,7 @@ namespace Rung.Bridge.V20
         public OnlineStatus Online(string device, string action, ConnectionTarget target)
         {
             Alive();
+            Listen();
             var provider = CpuItem(device).GetService<OnlineProvider>();
             if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
             string reached = null;
@@ -148,6 +150,7 @@ namespace Rung.Bridge.V20
         public CompareOutcome Compare(string device, ConnectionTarget target)
         {
             Alive();
+            Listen();
             var plc = Plc(device);
             var provider = CpuItem(device).GetService<OnlineProvider>();
             if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
@@ -238,6 +241,7 @@ namespace Rung.Bridge.V20
         {
             if (!_args.AllowDownload)
                 throw new RpcException(ErrorCodes.DownloadDisabled, "This bridge was not started for downloads: only rung download starts one that may download (--allow-download). Nothing was downloaded.");
+            Listen();
             Alive();
             var item = CpuItem(request.Device);
             var provider = item.GetService<DownloadProvider>();
@@ -312,6 +316,7 @@ namespace Rung.Bridge.V20
         public UploadOutcome UploadStation(UploadRequest request)
         {
             Alive();
+            Listen();
             // the project gains a station: a project change like an import
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             var provider = _project.GetService<StationUploadProvider>() ?? throw new RpcException(ErrorCodes.UnsupportedCapability, "This TIA Portal offers no station upload");

@@ -71,6 +71,11 @@ namespace Rung.Bridge.Core.Protocol
             {
                 return Error(hasId, id, e.Code, TiaText.Clean(e.Message));
             }
+            catch (Exception e) when (e.GetType().Name == "EngineeringObjectDisposedException" && (e.Message.Contains("Siemens.Engineering.Project") || e.Message.Contains("Siemens.Engineering.TiaPortal")))
+            {
+                // the bridge keeps no Disposed handler (see OpennessSession.Listen): a closed TIA Portal shows here
+                return Error(hasId, id, ErrorCodes.PortalDisposed, "TIA Portal was closed. " + TiaText.Clean(e.Message));
+            }
             catch (Exception e)
             {
                 Diagnostics.WriteLine(e.ToString());
