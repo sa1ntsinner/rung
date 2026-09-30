@@ -2,8 +2,11 @@
 // "Environment" view: what `rung check --json` finds on this PC (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS,
 // editors, agents) and how to get the rest. It needs no workspace.
 import * as vscode from "vscode";
+import { bundleBase, onPath } from "../bundled";
 import { parseCheck, type CheckItem } from "../core/args";
+import { findExecutable } from "../core/exec";
 import { RungCli } from "../runner/cli";
+import { isFile } from "../workspace";
 
 export type { CheckItem };
 
@@ -40,6 +43,19 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
       .then((r) => {
         this.items = parseCheck(r.output);
         this.error = this.items ? undefined : RungCli.summary(r.output) || "rung check gave no answer";
+        // the extension's own rung works here; terminals and agents need it on PATH
+        if (this.items && RungCli.bundled) {
+          const ok = onPath(bundleBase()) || !!findExecutable("rung", { platform: process.platform, env: process.env, isFile });
+          this.items.push({
+            id: "rung-command",
+            group: "base",
+            name: "rung command in terminals and agents",
+            status: ok ? "ok" : "missing",
+            ...(ok ? { detail: "on PATH" } : {}),
+            enables: "rung in a terminal and for AI agents (the extension has its own)",
+            ...(ok ? {} : { fix: "Click to put rung on your PATH" }),
+          });
+        }
       })
       .finally(() => {
         this.loading = undefined;
@@ -68,7 +84,8 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
     const md = new vscode.MarkdownString(`**${i.name}**${i.detail ? ` · ${i.detail}` : ""}\n\n${i.enables ? `For ${i.enables}.` : ""}${i.fix ? `\n\n${i.fix}` : ""}${i.link ? `\n\n${i.link}` : ""}`);
     t.tooltip = md;
     t.contextValue = `env.${i.status}${FIXES[i.id] ? ".fixable" : ""}${i.link ? ".link" : ""}`;
-    if (i.status !== "ok" && FIXES[i.id]) t.command = { command: "rung.env.fix", title: FIXES[i.id]!.label, arguments: [i] };
+    if (i.id === "rung-command" && i.status !== "ok") t.command = { command: "rung.installCommand", title: "Put rung on PATH" };
+    else if (i.status !== "ok" && FIXES[i.id]) t.command = { command: "rung.env.fix", title: FIXES[i.id]!.label, arguments: [i] };
     else if (i.status !== "ok" && i.link) t.command = { command: "vscode.open", title: "Open", arguments: [vscode.Uri.parse(i.link)] };
     return t;
   }

@@ -56,6 +56,11 @@ export function bundledSkills(env: Record<string, string | undefined>): SkillInf
 export function rungCommand(): { command: string; args: string[] } {
   const exe = process.execPath;
   if (/rung(\.exe)?$/i.test(exe)) return { command: exe, args: [] }; // the single-executable release
+  // the VS Code extension's rung runs in VS Code's executable: agents start it through its `rung` command
+  if (process.versions.electron && process.env.RUNG_HOME) {
+    const shim = join(dirname(resolve(process.env.RUNG_HOME)), process.platform === "win32" ? "rung.cmd" : "rung");
+    if (existsSync(shim)) return { command: shim, args: [] };
+  }
   return { command: exe, args: [resolve(process.argv[1] ?? "")] };
 }
 

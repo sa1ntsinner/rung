@@ -3,3 +3,4 @@ out/
 *.vsix
 test-e2e/out/
 .vscode-test/
+rung/

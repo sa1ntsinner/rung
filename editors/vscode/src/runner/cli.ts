@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Runs the rung CLI: in a terminal (the user watches) or in the background (the extension reads the result).
 import * as vscode from "vscode";
-import { buildInvocation, type Invocation } from "../core/exec";
+import { buildInvocation, findExecutable, type Invocation } from "../core/exec";
 import type { Output } from "../output";
 import { readSettings } from "../settings";
 import { isFile, type RungWorkspace } from "../workspace";
@@ -29,6 +29,8 @@ export interface Finished {
 }
 
 export class RungCli implements vscode.Disposable {
+  /** The rung that came with the extension (bundled.ts), used while rung.command is the default and no rung is on PATH. */
+  static bundled: string | undefined;
   private readonly finished = new vscode.EventEmitter<Finished>();
   /** Fires after every CLI command, so views can refresh. */
   readonly onDidFinish = this.finished.event;
@@ -40,7 +42,10 @@ export class RungCli implements vscode.Disposable {
   ) {}
 
   invocation(args: readonly string[]): Invocation {
-    return buildInvocation(readSettings().command, args, { platform: process.platform, env: process.env, isFile, ...(this.ws.root ? { cwd: this.ws.root } : {}) });
+    const r = { platform: process.platform, env: process.env, isFile, ...(this.ws.root ? { cwd: this.ws.root } : {}) };
+    const command = readSettings().command;
+    const bundled = RungCli.bundled && command.length === 1 && command[0] === "rung" && !findExecutable("rung", r) ? [RungCli.bundled] : command;
+    return buildInvocation(bundled, args, r);
   }
 
   /** Runs in a terminal the user can see; resolves when the command exits. */

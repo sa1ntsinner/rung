@@ -23,7 +23,9 @@ You do not have to set up a connection first. *Go online* runs `rung online`, wh
 
 ## Setup
 
-Install the CLI and put `rung` on PATH, or point the extension at it:
+Nothing else to install: the extension brings its own rung and runs it with VS Code's Node.js. It keeps a copy in `%LOCALAPPDATA%\rung` (`~/.local/share/rung` on Linux and macOS) that stays across updates. To use rung in a terminal or from an AI agent too, run **rung: Put rung on PATH** (or click it in the Environment view).
+
+A `rung` you installed yourself wins when it is on PATH. To use another one, point the extension at it:
 
 ```json
 "rung.command": ["node", "C:/path/to/rung/packages/cli/dist/index.js"]

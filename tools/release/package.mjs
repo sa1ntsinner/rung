@@ -3,6 +3,7 @@
 //   node tools/release/package.mjs [--skip-build]
 // Output: dist/release/rung-<version>-win-x64.zip (unsigned; signing and publishing are manual steps).
 import { execFileSync, execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +19,6 @@ if (!process.argv.includes("--skip-build")) {
   run(`"${process.execPath}" tools/release/bundle.mjs`);
   run(`"${process.execPath}" tools/release/sea.mjs`);
   run("dotnet build bridge/src/Rung.Bridge.V20 -c Release");
-  run("npm run package", join(root, "editors", "vscode"));
 }
 
 rmSync(stage, { recursive: true, force: true });
@@ -36,8 +36,6 @@ cpSync(join(root, "agents", "AGENTS.template.md"), join(stage, "AGENTS.template.
 cpSync(join(root, "tools", "openness", "Register-OpennessWhitelist.ps1"), join(stage, "tools", "Register-OpennessWhitelist.ps1"));
 cpSync(join(root, "agents", "claude-plugin"), join(stage, "agents", "claude-plugin"), { recursive: true });
 cpSync(join(root, "agents", ".claude-plugin"), join(stage, "agents", ".claude-plugin"), { recursive: true });
-const vsix = join(root, "editors", "vscode", "rung-scl.vsix");
-if (existsSync(vsix)) cpSync(vsix, join(stage, "editors", "rung-scl.vsix"));
 cpSync(join(root, "LICENSE"), join(stage, "LICENSE.txt"));
 cpSync(join(root, "LICENSES"), join(stage, "LICENSES"), { recursive: true });
 cpSync(join(out, "THIRD_PARTY_NOTICES.txt"), join(stage, "THIRD_PARTY_NOTICES.txt"));
@@ -57,6 +55,18 @@ writeFileSync(
 const walk = (d) => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : [join(d, f)]));
 const siemens = walk(stage).filter((f) => /siemens/i.test(relative(stage, f)));
 if (siemens.length) throw new Error(`Siemens files in the release: ${siemens.join(", ")}`);
+
+// The VS Code extension carries the same rung without rung.exe (VS Code's own Node.js runs rung.cjs), so installing
+// the extension is enough. VERSION changes with the content: the extension copies a new one into place.
+const inExt = join(root, "editors", "vscode", "rung");
+rmSync(inExt, { recursive: true, force: true });
+cpSync(stage, inExt, { recursive: true, filter: (src) => relative(stage, src) !== "rung.exe" });
+const digest = createHash("sha256");
+for (const f of walk(inExt).sort()) digest.update(relative(inExt, f)).update(readFileSync(f));
+writeFileSync(join(inExt, "VERSION"), `${version}+${digest.digest("hex").slice(0, 12)}\n`);
+if (!process.argv.includes("--skip-build")) run("npm run package", join(root, "editors", "vscode"));
+const vsix = join(root, "editors", "vscode", "rung-scl.vsix");
+if (existsSync(vsix)) cpSync(vsix, join(stage, "editors", "rung-scl.vsix"));
 
 const zip = join(out, `rung-${version}-win-x64.zip`);
 rmSync(zip, { force: true });

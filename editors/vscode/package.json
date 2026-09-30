@@ -76,6 +76,7 @@
       { "command": "rung.monitor.toggle", "title": "Monitor Values (Live)", "category": "rung", "icon": "$(eye)" },
       { "command": "rung.monitor.stop", "title": "Stop Monitoring", "category": "rung", "icon": "$(eye-closed)" },
       { "command": "rung.env.refresh", "title": "Check This PC Again", "category": "rung", "icon": "$(refresh)" },
+      { "command": "rung.installCommand", "title": "Put rung on PATH (for Terminals and Agents)", "category": "rung", "icon": "$(terminal)" },
       { "command": "rung.env.fix", "title": "Fix", "category": "rung" },
       { "command": "rung.setup", "title": "Set Up Editors and Agents…", "category": "rung", "icon": "$(tools)" },
       { "command": "rung.pull", "title": "Pull from TIA Portal", "category": "rung", "icon": "$(cloud-download)" },

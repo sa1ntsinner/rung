@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 export function installRoot(env: Record<string, string | undefined> = process.env): string | undefined {
   if (env.RUNG_HOME) return env.RUNG_HOME;
   const exe = basename(process.execPath).toLowerCase();
-  if (exe !== "node.exe" && exe !== "node") return dirname(process.execPath); // single executable application
+  // VS Code's executable running rung.cjs as Node.js (the extension's rung) is not a single executable application
+  if (exe !== "node.exe" && exe !== "node" && !process.versions.electron) return dirname(process.execPath); // single executable application
   const script = process.argv[1];
   if (script && /rung\.c?js$/i.test(script)) return dirname(script);
   return undefined;
