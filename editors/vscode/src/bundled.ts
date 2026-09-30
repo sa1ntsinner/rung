@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -89,11 +89,15 @@ export async function installBundledRung(extensionRoot: string, base: string, lo
   return shim;
 }
 
-/** Whether `dir` is on the user's PATH as this process sees it. */
-export function onPath(dir: string, env: Record<string, string | undefined> = process.env): boolean {
+/** Whether `dir` is on the user's PATH as this process sees it: letter case counts only where the filesystem's does. */
+export function onPath(dir: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  const windows = platform === "win32";
   const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
-  const norm = (p: string) => p.replace(/[\\/]+$/, "").toLowerCase();
-  return (env[key] ?? "").split(delimiter).some((p) => p && norm(p) === norm(dir));
+  const norm = (p: string) => {
+    const bare = (windows ? p.replace(/\//g, "\\") : p).replace(/[\\/]+$/, "");
+    return windows || platform === "darwin" ? bare.toLowerCase() : bare;
+  };
+  return (env[key] ?? "").split(windows ? ";" : ":").some((p) => p && norm(p) === norm(dir));
 }
 
 /**

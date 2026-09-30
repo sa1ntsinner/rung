@@ -52,9 +52,11 @@ describe("the rung that comes with the extension", () => {
     expect(await installBundledRung(mkdtempSync(join(tmpdir(), "rung-ext-")), base, () => {})).toBeUndefined();
   });
 
-  it("knows whether a folder is on PATH, whatever the letter case or trailing slash", () => {
-    const sep = process.platform === "win32" ? ";" : ":";
-    expect(onPath(join("C:", "Users", "a", "rung"), { Path: ["C:\\Windows", join("c:", "users", "a", "rung") + "\\"].join(sep) })).toBe(true);
-    expect(onPath(join("C:", "x"), { PATH: "C:\\Windows" })).toBe(false);
+  it("knows whether a folder is on PATH: on Windows whatever the letter case, slashes or trailing slash", () => {
+    expect(onPath("C:\\Users\\a\\rung", { Path: "C:\\Windows;c:/users/a/rung\\" }, "win32")).toBe(true);
+    expect(onPath("C:\\x", { PATH: "C:\\Windows" }, "win32")).toBe(false);
+    expect(onPath("/home/a/.local/bin", { PATH: "/usr/bin:/home/a/.local/bin/" }, "linux")).toBe(true);
+    expect(onPath("/home/a/.local/bin", { PATH: "/usr/bin:/home/A/.local/bin" }, "linux")).toBe(false);
+    expect(onPath("/Users/a/bin", { PATH: "/usr/bin:/users/a/bin" }, "darwin")).toBe(true);
   });
 });

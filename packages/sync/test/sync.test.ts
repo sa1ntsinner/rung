@@ -1083,6 +1083,21 @@ describe("syncOnce", () => {
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 12;");
   });
 
+  it.runIf(process.platform === "linux")("a file renamed only by letter case on Linux creates nothing: TIA Portal would take it for the object it mirrors", async () => {
+    const t = setup();
+    await t.sync();
+    renameSync(t.f(pA), t.f("plc/PLC_1/blocks/fx_a.scl"));
+    const r = await t.sync(2000);
+    expect([r.created, r.imported, t.bridge.imports.length]).toEqual([0, 0, 0]);
+    expect([...t.bridge.objects.keys()]).toEqual([A]);
+    expect(r.warnings.find((w) => w.code === "IGNORED_FILE")?.message).toBe("Fx_A is mirrored as plc/PLC_1/blocks/Fx_A.scl; a name that differs only in letter case is the same object (rename it in TIA Portal: rung rename)");
+    // the old name back: nothing to do
+    renameSync(t.f("plc/PLC_1/blocks/fx_a.scl"), t.f(pA));
+    const back = await t.sync(3000);
+    expect(back.imported + back.exported + back.created + back.conflicts + back.removed).toBe(0);
+    expect(await t.withState(async (s) => s.get(A)!.status)).toBe("synced");
+  });
+
   it("interoperates with pull state (pull then sync is quiet)", async () => {
     const t = setup();
     await t.withState((s) => pull(t.root, t.bridge, s, { config: t.config, now: () => 1 }));

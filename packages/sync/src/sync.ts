@@ -119,6 +119,8 @@ interface ImportJob {
 }
 
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
+/** TIA Portal's names ignore letter case on every platform, whatever the filesystem under the workspace does. */
+const nameKey = (p: string) => p.normalize("NFC").toLowerCase();
 /** The sends whose outcome was never recorded, newest first (a state written before operation ids: files only). */
 function sendsOf(st: ObjectState): { files: StateFile[]; op?: string }[] {
   const older = (st.sent ?? []).map((s) => (Array.isArray(s) ? { files: s as StateFile[] } : s));
@@ -356,25 +358,26 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     );
   const addresses = [...new Set([...items.keys(), ...state.all().map((s) => s.address).filter(bound), ...[...local.keys()].filter(bound)])].sort();
 
-  // Objects renamed in TIA Portal only by letter case map onto the same file on Windows and macOS: the new
-  // address takes over the old one's state (as in pull), instead of a conflict with its own file and a delete
+  // An object renamed in TIA Portal only by letter case is the same object (and, on Windows and macOS, the same
+  // file): the new address takes over the old one's state (as in pull), instead of a conflict with its own file
+  // and a delete. Its files then follow the new name.
   const orphans = new Map<string, ObjectState>();
-  for (const s of state.all()) if (!items.has(s.address) && bound(s.address) && !inv.skipped.has(s.address) && !inv.blocked.has(s.address)) orphans.set(pathKey(stemOf(s)), s);
+  for (const s of state.all()) if (!items.has(s.address) && bound(s.address) && !inv.skipped.has(s.address) && !inv.blocked.has(s.address)) orphans.set(nameKey(stemOf(s)), s);
   const adopted = new Set<string>();
   const adoptedFrom = new Set<string>();
   for (const i of inv.items) {
-    const o = i.stem && !state.get(i.entry.address) ? orphans.get(pathKey(i.stem)) : undefined;
+    const o = i.stem && !state.get(i.entry.address) ? orphans.get(nameKey(i.stem)) : undefined;
     if (!o || adoptedFrom.has(o.address) || o.status === "importing") continue;
     state.remove(o.address);
     state.upsert({ ...o, address: i.entry.address });
     adopted.add(i.entry.address);
     adoptedFrom.add(o.address);
   }
-  /** A mirrored object whose file is this one on a filesystem that ignores letter case (Fx_A for fx_a.scl). */
+  /** A mirrored object TIA Portal takes this file for, its name differing only in letter case (Fx_A for fx_a.scl). */
   const caseTwin = (address: string, file: LocalFile): { name: string; path: string } | undefined => {
-    const s = state.all().find((x) => x.address !== address && pathKey(x.path) === pathKey(file.path));
+    const s = state.all().find((x) => x.address !== address && nameKey(x.path) === nameKey(file.path));
     if (s) return { name: parseAddress(s.address).name, path: s.path };
-    const i = inv.items.find((x) => x.entry.address !== address && x.stem && pathKey(x.stem) === pathKey(file.stem));
+    const i = inv.items.find((x) => x.entry.address !== address && x.stem && nameKey(x.stem) === nameKey(file.stem));
     return i ? { name: i.address.name, path: `${i.stem}.${file.form}` } : undefined;
   };
 
