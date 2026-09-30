@@ -247,6 +247,7 @@ function looseOr(e: string): boolean {
 }
 // the left side is usually the AND chain built so far: it only needs parentheses around a top-level OR
 const and = (a: string, b: string) => (a === "TRUE" ? b : `${looseOr(a) ? `(${a})` : a} AND ${wrap(b)}`);
+export { and as andFlow, wrap as wrapFlow };
 
 function network(rungs: Rung[], unsupported: string[]): string[] {
   // split rungs into segments at the wires they pass through

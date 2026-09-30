@@ -173,9 +173,9 @@ describe("Simulator QA regressions", () => {
     expect(errorOf(() => run(s, "Syn"))).toMatch(/Syntax error in Syn \(line 7\)/);
   });
 
-  it("uses XML (SimaticML) DB start values and tag-table constants; XML code blocks are reported as not simulated", () => {
+  it("uses XML (SimaticML) DB start values and tag-table constants; XML blocks in a language it does not run (GRAPH) are reported as not simulated", () => {
     const xmlDb = '<?xml version="1.0"?>\n<Document><SW.Blocks.GlobalDB ID="0"><AttributeList><Interface><Sections><Section Name="Static"><Member Name="Speed" Datatype="Real"><StartValue>2.5</StartValue></Member></Section></Sections></Interface><Name>XDb</Name></AttributeList></SW.Blocks.GlobalDB></Document>';
-    const xmlFb = '<?xml version="1.0"?>\n<Document><SW.Blocks.FB ID="0"><AttributeList><Interface><Sections><Section Name="Input"><Member Name="Go" Datatype="Bool" /></Section></Sections></Interface><Name>XFb</Name><ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList></SW.Blocks.FB></Document>';
+    const xmlFb = '<?xml version="1.0"?>\n<Document><SW.Blocks.FB ID="0"><AttributeList><Interface><Sections><Section Name="Input"><Member Name="Go" Datatype="Bool" /></Section></Sections></Interface><Name>XFb</Name><ProgrammingLanguage>GRAPH</ProgrammingLanguage></AttributeList></SW.Blocks.FB></Document>';
     const tags = '<Document><SW.Tags.PlcTagTable ID="0"><AttributeList><Name>T</Name></AttributeList><ObjectList><SW.Tags.PlcUserConstant ID="1"><AttributeList><DataTypeName>Int</DataTypeName><Name>C_N</Name><Value>3</Value></AttributeList></SW.Tags.PlcUserConstant></ObjectList></SW.Tags.PlcTagTable></Document>';
     const s = sim({
       "file:///w/Program blocks/XDb.xml": xmlDb,
@@ -186,7 +186,7 @@ describe("Simulator QA regressions", () => {
     const i = s.newInstance("U");
     s.callBlock(i);
     expect([i.mem.R, (i.mem.A as unknown as { items: unknown[] }).items.length]).toEqual([7.5, 3]);
-    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"XFb" is kept as SimaticML XML .*not simulated/);
+    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"XFb" is kept as SimaticML XML in a language the simulator does not run/);
   });
 
   it("writes FC IN_OUT parameters back to the caller, named or positional", () => {

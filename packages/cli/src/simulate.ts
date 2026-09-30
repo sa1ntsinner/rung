@@ -41,7 +41,7 @@ export async function startVirtualPlc(root: string, opts: { host: string; port: 
   const pick = opts.block
     ? index.global(opts.block)
     : globals.find((g) => g.kind === "OB" && /^(main|ob1|program[_ ]?cycle)$/i.test(g.name)) ?? globals.find((g) => g.kind === "OB");
-  if (!pick?.block) throw new WorkspaceError("NOT_MIRRORED", opts.block ? `${opts.block} is not an SCL block in the workspace` : "no SCL organization block to run (LAD OBs cannot be simulated); choose an FB or FC with --block");
+  if (!pick?.block) throw new WorkspaceError("NOT_MIRRORED", opts.block ? `${opts.block} is not a block with code in the workspace` : "no organization block to run; choose an FB or FC with --block");
   const instance: Instance | undefined = pick.block.kind === "FB" ? sim.newInstance(pick.block.name) : undefined;
   // an FB runs in an instance DB named like TIA's default one: "Fx_Counter_DB".Count
   if (instance) (sim.globals as Record<string, Value>)[`${pick.block.name}_DB`.toUpperCase()] = instance;

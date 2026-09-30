@@ -5,7 +5,7 @@ description: Use when testing PLC logic in a rung workspace: writing tests/**/*.
 
 # Testing PLC logic with rung
 
-`rung test` runs FBs, FCs and PROGRAMs on an offline SCL simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no system instructions, no FBD/GRAPH/STL bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`).
+`rung test` runs FBs, FCs and PROGRAMs on an offline SCL simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no system instructions, no GRAPH/STL bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`), and LAD and FBD blocks kept as SimaticML `.xml`.
 
 ## A test file
 

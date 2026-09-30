@@ -1,0 +1,11 @@
+FUNCTION "Fx_LadHelper" : Int
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      a : Int;
+   END_VAR
+
+BEGIN
+	#Fx_LadHelper := #a * 2;
+END_FUNCTION
+

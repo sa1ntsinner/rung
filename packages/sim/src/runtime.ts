@@ -223,7 +223,7 @@ export class Simulator {
   private block(name: string): BlockModel {
     const g = this.index.global(name);
     if (g?.kind === "OBJECT") throw this.objectError(name);
-    if (!g?.block) throw new SimError(`Block "${name}" is not in the workspace (only SCL sources can be simulated)`);
+    if (!g?.block) throw new SimError(`Block "${name}" is not in the workspace, or has no code the simulator can run (know-how protected)`);
     return g.block;
   }
 
@@ -240,8 +240,8 @@ export class Simulator {
     let s = bodies.get(key);
     if (!s) {
       if (b.stl) throw new SimError(`"${b.name}" is an STL block; STL is not simulated`, b.name);
-      if (b.xml) throw new SimError(`"${b.name}" is kept as SimaticML XML (FBD, GRAPH, or LAD whose texts SD would lose); it is not simulated`, b.name);
-      if (b.ladUnsupported?.length) throw new SimError(`"${b.name}" uses LAD elements the simulator does not run yet: ${b.ladUnsupported.join("; ")}`, b.name);
+      if (b.ladUnsupported?.length) throw new SimError(`"${b.name}" uses ${b.xml ? "LAD/FBD" : "LAD"} elements the simulator does not run yet: ${b.ladUnsupported.join("; ")}`, b.name);
+      if (b.lad === undefined && b.xml) throw new SimError(`"${b.name}" is kept as SimaticML XML in a language the simulator does not run (GRAPH, or a data block)`, b.name);
       if (b.lad !== undefined) {
         try {
           s = parseBody(b.lad);
@@ -1174,6 +1174,7 @@ export class Simulator {
       const mem: Struct = this.structOf(b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut"), b);
       const temps: Struct = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
       Object.assign(temps, this.constants(b));
+      for (const t of b.ladTemps ?? []) temps[t.toUpperCase()] = false;
       this.bindInputs(mem, b, c.args, caller);
       const frame: Frame = { block: b, mem, temps };
       temps[b.name.toUpperCase()] = b.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }, b) : undefined;
@@ -1252,6 +1253,7 @@ export class Simulator {
       this.bindInputs(inst.mem, b, args, caller);
       const temps = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
       Object.assign(temps, this.constants(b));
+      for (const t of b.ladTemps ?? []) temps[t.toUpperCase()] = false;
       this.runBody(b, { block: b, mem: inst.mem, temps, inst });
       this.bindOutputs(inst.mem, b, args, caller);
     });

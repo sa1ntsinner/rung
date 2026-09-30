@@ -3,6 +3,7 @@
 // PLC data types and technology object names. Only what editors need is read; offsets point into the XML
 // so go-to-definition lands on the member's Name attribute.
 import type { BlockKind, BlockModel, Section, VarDecl } from "./parser.js";
+import { translateNetworks } from "./flgnet.js";
 
 interface XmlAttr {
   value: string;
@@ -199,6 +200,13 @@ export function parseSimaticMl(xml: string): SimaticMlUnit {
       }
     }
     if (kind === "FC" && !block.returnType) block.returnType = "Void";
+    if ((kind === "FB" || kind === "FC" || kind === "OB") && /^(LAD|FBD)$/.test(child(attrs, "ProgrammingLanguage")?.text.trim() ?? "")) {
+      const t = translateNetworks(n);
+      block.lad = t.scl;
+      if (t.unsupported.length) block.ladUnsupported = t.unsupported;
+      if (t.temps.length) block.ladTemps = t.temps;
+      block.refs.push(...t.refs);
+    }
     out.blocks.push(block);
   }
   return out;

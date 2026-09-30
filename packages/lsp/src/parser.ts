@@ -83,10 +83,12 @@ export interface BlockModel {
   stl?: boolean;
   /** Read from a SimaticML (XML) export: interface only, the body is LAD/FBD/GRAPH or not present. */
   xml?: boolean;
-  /** LAD block in SIMATIC SD text: its networks translated to SCL statements (for the simulator). */
+  /** LAD block in SIMATIC SD text, or LAD/FBD in SimaticML: its networks translated to SCL statements (for the simulator). */
   lad?: string;
-  /** LAD elements the translation does not cover; the simulator refuses the block with this list. */
+  /** Network elements the translation does not cover; the simulator refuses the block with this list. */
   ladUnsupported?: string[];
+  /** Bool temporaries the translated networks use besides the block's own. */
+  ladTemps?: string[];
   /** IEC enumeration type: its values in order, and the default when it is not the first. */
   enumValues?: { name: string; value: number }[];
   enumDefault?: string;

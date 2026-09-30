@@ -108,7 +108,7 @@ describe("rung simulate (virtual S7-1500)", () => {
   it("explains when there is nothing it can run", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rung-sim-"));
     mkdirSync(join(dir, "plc", "PLC_1", "blocks"), { recursive: true });
-    await expect(startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 })).rejects.toThrow(/no SCL organization block/);
+    await expect(startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 })).rejects.toThrow(/no organization block to run/);
   });
 
   it("rung live watch monitors a block like TIA Portal: which values show on which line, then the values", async () => {

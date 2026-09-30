@@ -165,8 +165,9 @@ function blockOf(index: WorkspaceIndex, name: string, plc: string | undefined, f
   if (devices.length > 1) return { error: `block ${name} is in several PLCs (${devices.join(", ")}): add \`plc: ${devices[0]}\` to the test, or put it in tests/${devices[0]}/` };
   const g = index.global(name);
   if (g?.block) return { symbol: g };
-  const typo = g ? undefined : near(); // a graphical object is not a typo: it is named as it is
-  return { error: `block ${name} not found (${typo ? `did you mean ${typo}?` : "only SCL sources can be simulated"})` };
+  if (g) return { error: `${name} has no code the simulator can run (a technology object or a know-how protected block)` };
+  const typo = near();
+  return { error: `block ${name} not found${typo ? ` (did you mean ${typo}?)` : ""}` };
 }
 
 /**
@@ -233,7 +234,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   const found = blockOf(index, blockName, spec.plc, file);
   if ("error" in found) return { file, block: blockName, cases: [], error: found.error };
   const g = found.symbol;
-  if (!g.block) return { file, block: blockName, cases: [], error: `block ${blockName} not found (only SCL sources can be simulated)` };
+  if (!g.block) return { file, block: blockName, cases: [], error: `${blockName} has no code the simulator can run (a technology object or a know-how protected block)` };
   const cycleMs = spec.cycle !== undefined ? toMs(spec.cycle) : 10;
   const results: CaseResult[] = [];
   for (const [ci, c] of (spec.cases ?? []).entries()) {
