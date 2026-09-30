@@ -32,6 +32,9 @@ export type Stmt =
   | { k: "for"; v: LRef; from: Expr; to: Expr; by?: Expr; body: Stmt[]; at: number }
   | { k: "while"; cond: Expr; body: Stmt[]; at: number }
   | { k: "repeat"; body: Stmt[]; until: Expr; at: number }
+  | { k: "goto"; label: string; at: number }
+  /** A jump label (`Fx_Done:`); the statement after it follows in the list. */
+  | { k: "label"; name: string; at: number }
   | { k: "exit" | "continue" | "return" | "empty"; at: number };
 
 export class SclSyntaxError extends Error {
@@ -228,7 +231,7 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
 
   function block(...until: string[]): Stmt[] {
     const out: Stmt[] = [];
-    while (peek().kind !== "eof" && !kw(peek(), ...until)) out.push(stmt());
+    while (peek().kind !== "eof" && !kw(peek(), ...until)) out.push(...stmts());
     return out;
   }
 
@@ -236,11 +239,37 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
     if (peek().text === ";") next();
   }
 
-  function stmt(): Stmt {
+  /** One statement; a REGION is its statements, in the list around it (so that a GOTO finds a label inside it). */
+  function stmts(): Stmt[] {
+    const s = stmt();
+    return Array.isArray(s) ? s : [s];
+  }
+
+  function stmt(): Stmt | Stmt[] {
     const t = peek();
     const at = t.start;
     if (t.text === ";") {
       next();
+      return { k: "empty", at };
+    }
+    if (kw(t, "GOTO")) {
+      next();
+      const label = next();
+      if (label.kind !== "ident") throw new SclSyntaxError(`GOTO needs a label, found '${label.text || "end of file"}'`, label.start);
+      semicolon();
+      return { k: "goto", label: label.text, at };
+    }
+    // a jump label: `Fx_Done:` in front of a statement
+    if (t.kind === "ident" && peek(1).text === ":") {
+      next();
+      next();
+      return { k: "label", name: t.text, at };
+    }
+    // Siemens library blocks describe themselves in a `(/* ... */)`: brackets around a comment, no code
+    if (t.text === "(" && peek(1).text === ")") {
+      next();
+      next();
+      semicolon();
       return { k: "empty", at };
     }
     if (kw(t, "IF")) {
@@ -283,7 +312,7 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
         expectOp(":");
         // statements until the next label ("<expr> :") or ELSE/END_CASE
         const body: Stmt[] = [];
-        while (!kw(peek(), "END_CASE", "ELSE") && peek().kind !== "eof" && !looksLikeLabel()) body.push(stmt());
+        while (!kw(peek(), "END_CASE", "ELSE") && peek().kind !== "eof" && !looksLikeLabel()) body.push(...stmts());
         items.push({ labels, body });
       }
       if (kw(peek(), "ELSE")) {
@@ -347,7 +376,7 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
       const eol2 = src.indexOf("\n", end.end);
       while (peek().kind !== "eof" && peek().start < (eol2 < 0 ? src.length : eol2) && peek().text !== ";") next();
       semicolon();
-      return { k: "if", branches: [{ cond: { k: "lit", value: true, type: "bool" }, body }], at };
+      return body;
     }
     if (t.kind === "local" || t.kind === "global" || t.kind === "ident") {
       next();
@@ -384,9 +413,33 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
         return { k: "if", branches: [{ cond, body: [{ k: "assign", target, value: { k: "lit", value: set, type: "bool" }, at }] }], at };
       }
       expectOp(":=");
+      // ENO := TRUE;: the block's enable output, for the EN/ENO chain of a LAD/FBD caller, which the simulator does not run
+      if (!opts.iec && t.kind === "ident" && t.upper === "ENO" && !target.path.length) {
+        expr();
+        semicolon();
+        return { k: "empty", at };
+      }
+      // multiple assignment, a := b := 0;: the value goes to the last target first, then leftwards
+      const targets = [target];
+      for (;;) {
+        const save = i;
+        const n = peek();
+        if (n.kind !== "local" && n.kind !== "global" && n.kind !== "ident") break;
+        next();
+        const more = lref(n);
+        if (peek().text !== ":=") {
+          i = save;
+          break;
+        }
+        next();
+        targets.push(more);
+      }
       const value = expr();
       semicolon();
-      return { k: "assign", target, value, at };
+      if (targets.length === 1) return { k: "assign", target, value, at };
+      const chain: Stmt[] = [{ k: "assign", target: targets[targets.length - 1]!, value, at }];
+      for (let j = targets.length - 2; j >= 0; j--) chain.push({ k: "assign", target: targets[j]!, value: { k: "ref", ref: targets[j + 1]! }, at });
+      return chain;
     }
     throw new SclSyntaxError(`Unexpected '${t.text || "end of file"}'`, t.start);
   }
@@ -407,7 +460,7 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
   const out: Stmt[] = [];
   while (peek().kind !== "eof") {
     if (kw(peek(), "END_FUNCTION_BLOCK", "END_FUNCTION", "END_ORGANIZATION_BLOCK", "END_DATA_BLOCK", "END_PROGRAM", "END_METHOD", "END_ACTION")) break;
-    out.push(stmt());
+    out.push(...stmts());
   }
   return out;
 }

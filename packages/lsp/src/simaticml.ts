@@ -151,7 +151,7 @@ function member(m: XmlNode, section: Section): VarDecl | undefined {
 export interface SimaticMlUnit {
   blocks: BlockModel[];
   /** Named objects without an interface the editor can use (technology objects). */
-  objects: { name: string; start: number; end: number }[];
+  objects: { name: string; start: number; end: number; type?: string; number?: string }[];
 }
 
 /** True when the text looks like a SimaticML export (checked before parsing large XML files). */
@@ -165,7 +165,9 @@ export function parseSimaticMl(xml: string): SimaticMlUnit {
     const attrs = child(n, "AttributeList");
     const nameNode = child(attrs, "Name");
     if (n.name.startsWith("SW.TechnologicalObjects.") && nameNode) {
-      out.objects.push({ name: nameNode.text.trim(), start: nameNode.textStart, end: nameNode.textStart + nameNode.textRawLength });
+      const type = child(attrs, "InstanceOfName")?.text.trim();
+      const number = child(attrs, "Number")?.text.trim();
+      out.objects.push({ name: nameNode.text.trim(), start: nameNode.textStart, end: nameNode.textStart + nameNode.textRawLength, ...(type ? { type } : {}), ...(number ? { number } : {}) });
       continue;
     }
     const kind = BLOCK_KINDS[n.name];

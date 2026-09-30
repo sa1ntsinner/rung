@@ -3,7 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { deviceOfUri, scopedTo, unscoped, type GlobalSymbol, type WorkspaceIndex } from "@rung/lsp";
+import { deviceOfUri, nearest, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { Simulator, SimError, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 
 /*
@@ -154,13 +154,69 @@ function blockOf(index: WorkspaceIndex, name: string, plc: string | undefined, f
   const devices = [...new Set(all.map((s) => deviceOfUri(s.uri)).filter((d): d is string => !!d))].sort();
   const folder = /^tests\/([^/]+)\//.exec(file)?.[1];
   const want = plc ?? (folder && devices.includes(folder) ? folder : undefined);
+  // a typo (block: Fx_Motr): the block a test can call whose name is closest
+  const near = (device?: string) =>
+    nearest(name, unscoped(index).allGlobals().filter((s) => s.block && /^(FB|FC|PRG)$/.test(s.block.kind) && (!device || deviceOfUri(s.uri) === device)).map((s) => s.name));
   if (want) {
     const hit = all.find((s) => deviceOfUri(s.uri) === want);
-    return hit ? { symbol: hit } : { error: `block ${name} is not in PLC ${want}${devices.length ? ` (it is in ${devices.join(", ")})` : ""}` };
+    const typo = devices.length ? undefined : near(want);
+    return hit ? { symbol: hit } : { error: `block ${name} is not in PLC ${want}${devices.length ? ` (it is in ${devices.join(", ")})` : typo ? ` (did you mean ${typo}?)` : ""}` };
   }
   if (devices.length > 1) return { error: `block ${name} is in several PLCs (${devices.join(", ")}): add \`plc: ${devices[0]}\` to the test, or put it in tests/${devices[0]}/` };
   const g = index.global(name);
-  return g?.block ? { symbol: g } : { error: `block ${name} not found (only SCL sources can be simulated)` };
+  if (g?.block) return { symbol: g };
+  const typo = g ? undefined : near(); // a graphical object is not a typo: it is named as it is
+  return { error: `block ${name} not found (${typo ? `did you mean ${typo}?` : "only SCL sources can be simulated"})` };
+}
+
+/**
+ * For a `set`/`expect` name the block does not have (Strat, "Fx_Dta".Level, Motor.Sped): the closest name there is,
+ * written as the test writes it; undefined when nothing is close or the name is there.
+ */
+function closestName(index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: "set" | "expect"): string | undefined {
+  const { global, root, path } = splitName(typed);
+  const b = g.block!;
+  const seen = scopedTo(index, g.uri);
+  const show = (r: string, p: Seg[]) => (global ? `"${r}"` : r) + p.map((s) => (typeof s === "string" ? `.${s}` : `[${s.join(",")}]`)).join("");
+  let members: Member[];
+  if (global) {
+    const target = seen.global(root);
+    if (!target) {
+      const near = nearest(root, seen.allGlobals().filter((s) => s.kind === "DB" || s.kind === "TAG").map((s) => s.name));
+      return near ? show(near, path) : undefined;
+    }
+    members = seen.membersOfType(target.name);
+  } else {
+    // what a test reaches in the block: an FB's interface and statics; an FC's inputs (set), outputs and return value (expect)
+    const fc = b.kind === "FC";
+    const sections = fc ? (op === "set" ? ["Input", "InOut"] : ["Input", "InOut", "Output"]) : ["Input", "Output", "InOut", "Static"];
+    const own = b.vars.filter((v) => sections.includes(v.section));
+    const decl = own.find((v) => v.name.toUpperCase() === root.toUpperCase());
+    if (!decl) {
+      if (fc && op === "expect" && root.toUpperCase() === b.name.toUpperCase()) return undefined;
+      const near = nearest(root, [...own.map((v) => v.name), ...(fc && op === "expect" ? [b.name] : [])]);
+      return near ? show(near, path) : undefined;
+    }
+    members = seen.membersOf({ ...decl, uri: g.uri });
+  }
+  for (const [i, seg] of path.entries()) {
+    if (typeof seg !== "string") continue; // an array element has the members of the array's type
+    const hit = members.find((m) => m.name.toUpperCase() === seg.toUpperCase());
+    if (hit) {
+      members = seen.membersOf(hit);
+      continue;
+    }
+    const near = nearest(seg, members.map((m) => m.name));
+    return near ? show(root, path.map((s, j) => (j === i ? near : s))) : undefined;
+  }
+  return undefined;
+}
+
+/** The error with the name the test most likely meant, when there is one. */
+function hinted(e: unknown, index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: "set" | "expect"): unknown {
+  if (!(e instanceof SimError)) return e;
+  const near = closestName(index, g, typed, op);
+  return near ? new SimError(`${e.message} (did you mean ${near}?)`, e.block, e.offset) : e;
 }
 
 export async function runTestFile(index: WorkspaceIndex, file: string, text: string): Promise<FileResult> {
@@ -262,7 +318,12 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
           switch (op) {
             case "set":
               for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
-                const target = resolve(k);
+                let target: ReturnType<typeof resolve>;
+                try {
+                  target = resolve(k);
+                } catch (e) {
+                  throw hinted(e, index, g, k, "set");
+                }
                 const value = normalizeExpected(v) as Value;
                 // a variable of the block itself is checked against its declared type, others against their value
                 const decl = /^[A-Za-z_]\w*$/.test(k) ? g.block.vars.find((x) => x.name.toUpperCase() === k.toUpperCase() && x.section !== "Temp" && !x.isArray && !x.members?.length) : undefined;
@@ -285,8 +346,11 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
                 try {
                   actual = resolve(k).get();
                 } catch (e) {
-                  actual = `<${(e as Error).message}>`;
+                  actual = `<${(hinted(e, index, g, k, "expect") as Error).message}>`;
                 }
+                // a name an FC does not have reads as nothing
+                const near = actual === undefined ? closestName(index, g, k, "expect") : undefined;
+                if (near) actual = `<${k} does not exist (did you mean ${near}?)>`;
                 const expected = normalizeExpected(v);
                 if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected, actual });
               }
@@ -295,7 +359,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         }
       }
       results.push({ name: c.name ?? `case ${ci + 1}`, passed: failures.length === 0, failures, ms: Date.now() - t0 });
-    } catch (e) {
+    } catch (err) {
+      // an FC input the test misspelt shows when the FC is called
+      const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
+      const e = input && input[2] === g.block.name ? hinted(err, index, g, input[1]!, "set") : err;
       const where = e instanceof SimError && e.block ? ` (in ${e.block}${e.offset !== undefined && !/\(line \d+\)/.test(e.message) ? `, line ${sim.lineOf(e.block, e.offset) ?? "?"}` : ""})` : "";
       results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0 });
     }

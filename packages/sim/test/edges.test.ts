@@ -36,6 +36,8 @@ describe("bit strings are unsigned, whatever their width", () => {
       "  #a := SHL(IN := BYTE#16#80, N := 1) = 0;\n  #b := NOT WORD#16#00FF = WORD#16#FF00;\n  #c := NOT W#16#0F0F = 16#F0F0;\n  #d := SHL(IN := INT_TO_WORD(1), N := 16) = 0;\n  #e := (NOT BYTE#16#0F AND BYTE#16#FF) = 16#F0;",
     );
     expect([m.A, m.B, m.C, m.D, m.E]).toEqual([true, true, true, true, true]);
+    const n = run("VAR\n  f : Bool;\nEND_VAR", "  #f := NOT SHL(IN := BYTE#16#01, N := 1) = BYTE#16#FD;");
+    expect(n.F).toBe(true);
   });
 
   it("inverts a WORD in its own width", () => {

@@ -45,7 +45,7 @@ args = ["mcp"]
 | `rung_compile` | compile objects (addresses or file paths) in TIA Portal |
 | `rung_explain` | an object's file, interface, status and users |
 | `rung_find_usages`, `rung_graph` | usages, callers/callees, impact, dependency paths |
-| `rung_assignments` | the assignment list: inputs, outputs and bit memory in use, overlaps |
+| `rung_assignments` | the assignment list: inputs, outputs, bit memory, timers and counters in use, overlaps |
 | `rung_diff` | file vs. last synced TIA version |
 | `rung_list` | objects by status or folder |
 | `rung_rename` | rename in TIA Portal; the files that use it follow |

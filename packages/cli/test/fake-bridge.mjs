@@ -141,7 +141,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       db.uploads = [...(db.uploads ?? []), { request: p.request, argv }];
       if (!db.project.devices.includes("PLC_2")) db.project.devices.push("PLC_2");
       save(db);
-      return reply({ state: "Success", station: "S7-1500 station_2", plcs: ["PLC_2"], messages: ["Upload completed"], ...(process.env.FAKE_SAVE_ERROR ? { saveError: process.env.FAKE_SAVE_ERROR } : {}) });
+      return reply({ state: "Success", station: "S7-1500 station_2", plcs: ["PLC_2"], messages: ["Upload completed"], ...(process.env.FAKE_SAVE_ERROR ? { saveError: process.env.FAKE_SAVE_ERROR, stationRemoved: true } : {}) });
     }
     case "objects.show":
       return fail("UNSUPPORTED_CAPABILITY", "TIA Portal was started without user interface");

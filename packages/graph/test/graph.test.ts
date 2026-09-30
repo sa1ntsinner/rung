@@ -89,6 +89,14 @@ END_ORGANIZATION_BLOCK
     expect(g.impact(g.key("Motor", "PLC_B")).map((i) => i.node.id)).toEqual(["PLC_B/MOTOR_DB"]);
   });
 
+  it("a PLC folder with a space is the same PLC in the graph as in workspace paths", () => {
+    const spaced = new WorkspaceIndex();
+    spaced.set("file:///w/plc/Line%20A/blocks/Motor.scl", 'FUNCTION_BLOCK "Motor"\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
+    spaced.set("file:///w/plc/Line%20B/blocks/Motor.scl", 'FUNCTION_BLOCK "Motor"\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
+    const gs = CodeGraph.fromIndex(spaced);
+    expect(gs.get(gs.key("Motor", "Line A"))?.device).toBe("Line A"); // "plc/Line A/blocks/Motor.scl" in a review
+  });
+
   it("a block of a PLC that has no other files left is never taken for another PLC's", () => {
     const only = new WorkspaceIndex();
     only.set("file:///w/plc/PLC_B/blocks/Motor.scl", 'FUNCTION_BLOCK "Motor"\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);

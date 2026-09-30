@@ -25,7 +25,7 @@ import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
 import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
-import { WorkspaceIndex, assignmentList } from "@rung/lsp";
+import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
 import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
@@ -62,7 +62,7 @@ Usage:
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
-  rung assignments [dir] [--json]     the assignment list: used inputs, outputs and bit memory, and overlaps
+  rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the library and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
@@ -272,19 +272,15 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
   }
 }
 
-/** The command a typo most likely meant: two letters off at most (pul → pull, asignments → assignments). */
-function nearest(typed: string, commands: string[]): string | undefined {
-  const distance = (a: string, b: string) => {
-    let row = Array.from({ length: b.length + 1 }, (_, j) => j);
-    for (let i = 1; i <= a.length; i++) {
-      const next = [i];
-      for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-      row = next;
-    }
-    return row[b.length]!;
-  };
-  const best = commands.map((c) => ({ c, d: distance(typed.toLowerCase(), c) })).sort((x, y) => x.d - y.d)[0];
-  return best && best.d <= 2 ? best.c : undefined;
+/**
+ * rung lsp and rung mcp typed in a terminal wait silently for an editor or an agent: one line on stderr says so
+ * (stdout is the protocol). A program that starts them passes pipes, not a terminal, and sees nothing.
+ */
+export function serverNote(cmd: string, terminal: boolean): string | undefined {
+  if (!terminal) return undefined;
+  if (cmd === "lsp") return "rung lsp is the language server your editor starts (rung setup --editors sets that up); it now waits for an editor on stdin, Ctrl+C stops it\n";
+  if (cmd === "mcp") return "rung mcp is the MCP server an AI agent starts (rung setup --agents sets that up); it now waits for an agent on stdin, Ctrl+C stops it\n";
+  return undefined;
 }
 
 /** rung init has no rung.toml yet: what to do next is about the project it was given, or should be given. */
@@ -331,7 +327,8 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
   const spec = COMMANDS[cmd];
   if (!spec) return undefined;
   const stray = Object.keys(v).filter((k) => v[k] !== undefined && k !== "help" && !spec.options.includes(k));
-  if (stray.length) return `rung ${cmd} has no ${stray.map((s) => "--" + s).join(", ")}`;
+  const near = stray.length === 1 ? nearest(stray[0]!, spec.options) : undefined;
+  if (stray.length) return `rung ${cmd} has no ${stray.map((s) => "--" + s).join(", ")}${near ? `; did you mean --${near}?` : ""}`;
   const extra = positionals.slice(1 + spec.positionals);
   if (extra.length) return `rung ${cmd} takes ${spec.positionals === 0 ? "no arguments" : spec.positionals === 1 ? "one argument" : `${spec.positionals} arguments`}; unexpected: ${extra.join(" ")}`;
   // compile --hw compiles the hardware only: the files it was given would be left out without a word
@@ -403,7 +400,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
       },
     });
   } catch (e) {
-    io.stderr(`rung: ${(e as Error).message}\n`);
+    // an option no command has (--dryrun): the command's option it most likely meant
+    const unknown = (e as { code?: string }).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? /'(-[^']*)'/.exec((e as Error).message)?.[1] : undefined;
+    if (unknown === undefined) {
+      io.stderr(`rung: ${(e as Error).message}\n`);
+      return 1;
+    }
+    const cmd = argv.find((a) => !a.startsWith("-"));
+    const spec = cmd ? COMMANDS[cmd] : undefined;
+    const near = nearest(unknown.replace(/^-+/, "").replace(/=.*$/, ""), new Set([...(spec ? spec.options : Object.values(COMMANDS).flatMap((c) => c.options)), "help", "version"]));
+    io.stderr(`rung: ${spec ? `rung ${cmd} has no ${unknown}` : `unknown option ${unknown}`}${near ? `; did you mean --${near}?` : ""} (rung --help)\n`);
     return 1;
   }
   const { values: v, positionals } = parsed;
@@ -421,6 +427,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
     io.stderr(`rung: ${wrong} (rung --help)\n`);
     return 1;
   }
+  const note = serverNote(cmd, !!process.stdin.isTTY);
+  if (note) io.stderr(note);
   if (cmd === "lsp") {
     startServer();
     await new Promise<void>(() => {}); // runs until the editor closes the connection
@@ -446,7 +454,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
             for (const x of c.failures) {
               // expect: { Running: "true" } is the text "true", never the BOOL the block has
               const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));
-              io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}${quoted ? ` (in quotes "${x.expected}" is text: write ${x.expected} without them)` : ""}\n`);
+              // <...> is what went wrong reading the name (it does not exist), not a value
+              const got = typeof x.actual === "string" && /^<.*>$/.test(x.actual) ? x.actual : JSON.stringify(x.actual);
+              io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${got}${quoted ? ` (in quotes "${x.expected}" is text: write ${x.expected} without them)` : ""}\n`);
             }
             if (!c.passed) failed++;
           }
@@ -552,7 +562,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.stdout(JSON.stringify({ items: r.items.map((a) => ({ ...a, uses: a.uses.map(where) })), overlaps: r.overlaps }, null, 2) + "\n");
           return r.overlaps.some((o) => !o.nested) ? 2 : 0;
         }
-        const heading: Record<string, string> = { I: "Inputs", Q: "Outputs", M: "Bit memory" };
+        const heading: Record<string, string> = { I: "Inputs", Q: "Outputs", M: "Bit memory", T: "Timers", C: "Counters" };
         // every PLC has its own inputs, outputs and bit memory: with several, each heading names its PLC
         const several = new Set(r.items.map((a) => a.device)).size > 1;
         const of = (device: string | undefined) => (several && device !== undefined ? ` of ${device}` : "");

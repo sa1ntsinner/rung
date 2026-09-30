@@ -79,8 +79,32 @@ describe("rung mcp tools", () => {
     const call = await connect(root);
     const d = await call("rung_diagnostics", { path: "plc\\PLC_1\\blocks\\Fx_Motor.scl" });
     expect(JSON.parse(d.text).source).toEqual([expect.objectContaining({ path: "plc/PLC_1/blocks/Fx_Motor.scl", code: "UNDECLARED" })]);
-    expect(await call("rung_diagnostics", { path: "plc/PLC_1/blocks/Fx_Motr.scl" })).toEqual({ isError: true, text: "plc/PLC_1/blocks/Fx_Motr.scl is not a file of this workspace (rung_list lists the mirrored objects)" });
+    expect(await call("rung_diagnostics", { path: "plc/PLC_1/blocks/Fx_Pump.scl" })).toEqual({ isError: true, text: "plc/PLC_1/blocks/Fx_Pump.scl is not a file of this workspace (rung_list lists the mirrored objects)" });
     expect((await call("rung_diff", { path: "plc\\PLC_1\\blocks\\Fx_Motor.scl" })).text).toBe("(no changes)");
+  });
+
+  it("name the path, address or object a mistyped one most likely meant", async () => {
+    const { root } = await workspace();
+    const call = await connect(root);
+    const typo = "plc/PLC_1/blocks/Fx_Motr.scl";
+    const meant = ": did you mean plc/PLC_1/blocks/Fx_Motor.scl?";
+    expect((await call("rung_diagnostics", { path: typo })).text).toBe(`${typo} is not a file of this workspace${meant} (rung_list lists the mirrored objects)`);
+    // the right file name in the wrong folder
+    expect((await call("rung_diff", { path: "plc/PLC_1/blocks/Drives/Fx_Motor.scl" })).text).toBe(`plc/PLC_1/blocks/Drives/Fx_Motor.scl not found${meant}`);
+    expect((await call("rung_compile", { addresses: [typo] })).text).toBe(`${typo} is not a mirrored object${meant} (rung_list lists them)`);
+    expect((await call("rung_rename", { address: "plc:PLC_1/blocks/Fx_Mtor", newName: "Fx_Drive" })).text).toBe("plc:PLC_1/blocks/Fx_Mtor is not a mirrored object: did you mean plc:PLC_1/blocks/Fx_Motor? (rung_list lists them)");
+    expect((await call("rung_resolve", { path: typo, mode: "theirs" })).text).toBe(`${typo} is not a mirrored file (rung_list with status conflicted lists the conflicts)`); // none in conflict: nothing to point at
+    expect((await call("rung_confirm_delete", { address: typo })).isError).toBe(true);
+    expect((await call("rung_explain", { name: "Fx_Motr" })).text).toBe("Fx_Motr is not in the workspace: did you mean Fx_Motor?");
+    expect((await call("rung_find_usages", { name: "PLC_1/Fx_Mootor" })).text).toBe("PLC_1/Fx_Mootor is not in the workspace graph: did you mean PLC_1/Fx_Motor?");
+  });
+
+  it("diagnostics give workspace paths as written, spaces and all", async () => {
+    const { root } = await workspace();
+    mkdirSync(join(root, "plc", "PLC_1", "tags"), { recursive: true });
+    writeFileSync(join(root, "plc", "PLC_1", "tags", "Fx inputs.tags.st"), "VAR_GLOBAL\n    Start : Bool;\nEND_VAR\n");
+    const d = JSON.parse((await (await connect(root))("rung_diagnostics")).text);
+    expect(d.source).toContainEqual(expect.objectContaining({ path: "plc/PLC_1/tags/Fx inputs.tags.st", code: "NO_ADDRESS" }));
   });
 
   it("compile and confirm_delete take a workspace path as well as an address", async () => {

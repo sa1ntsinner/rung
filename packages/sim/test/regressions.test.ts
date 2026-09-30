@@ -199,4 +199,37 @@ describe("Simulator QA regressions", () => {
     s.callBlock(i);
     expect([i.mem.A, i.mem.B]).toEqual([2, 2]);
   });
+
+  it("runs multiple assignments right to left and passes over a library block's (/* description */)", () => {
+    const s = sim({
+      M: fb("M", "VAR\n  a : Int;\n  b : Int;\n  c : Real;\n  done : Bool;\n  busy : Bool;\nEND_VAR", "  REGION DESCRIPTION\n  (/*\n  What the block does (and why).\n  */)\n  END_REGION\n  #a := #b := 7;\n  #done := #busy := #b > 5;\n  #c := #a := 3;"),
+    });
+    expect(run(s, "M")).toMatchObject({ A: 3, B: 7, C: 3, DONE: true, BUSY: true });
+  });
+
+  it("jumps with GOTO out of nested statements to a label, in a REGION too; ENO := is accepted", () => {
+    const body = [
+      "  ENO := TRUE;",
+      "  REGION CHECK",
+      "    IF #fault THEN",
+      "      FOR #i := 1 TO 3 DO",
+      "        #n := #n + 1;",
+      "        GOTO Fx_Done;",
+      "      END_FOR;",
+      "    END_IF;",
+      "  END_REGION",
+      "  #n := #n + 10;",
+      "  REGION REPORT",
+      "  Fx_Done:",
+      "    #reported := TRUE;",
+      "  END_REGION",
+    ].join("\n");
+    const s = sim({
+      G: fb("G", "VAR_INPUT\n  fault : Bool;\nEND_VAR\nVAR\n  n : Int;\n  reported : Bool;\nEND_VAR\nVAR_TEMP\n  i : Int;\nEND_VAR", body),
+      Lost: fb("Lost", "VAR\n  n : Int;\nEND_VAR", "  IF #n = 0 THEN\n    Fx_Inner:\n    #n := 1;\n  END_IF;\n  GOTO Fx_Inner;"),
+    });
+    expect(run(s, "G", { fault: true })).toMatchObject({ N: 1, REPORTED: true });
+    expect(run(s, "G", { fault: false })).toMatchObject({ N: 10, REPORTED: true });
+    expect(errorOf(() => run(s, "Lost"))).toMatch(/GOTO Fx_Inner: Lost has no label Fx_Inner: in a statement list around the GOTO/);
+  });
 });

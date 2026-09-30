@@ -63,6 +63,12 @@ interface Frame {
 class Exit {}
 class Continue {}
 class Return {}
+class Goto {
+  constructor(
+    readonly label: string,
+    readonly at: number,
+  ) {}
+}
 
 /** Rounds to the nearest integer; exact halves go to the even neighbour (IEEE 754 round-to-nearest-even, as the S7 FPU and TIA's ROUND do). */
 export function roundHalfEven(x: number): number {
@@ -273,26 +279,26 @@ export class Simulator {
       c = {};
       byAccessor.set(accessor ?? "", c);
       for (const v of scope.vars)
-        if (v.section === "Constant" && !v.isArray && !v.members?.length && (!v.accessor || v.accessor === accessor)) c[v.name.toUpperCase()] = this.defaultValue(v, scope);
+        if (v.section === "Constant" && !v.isArray && !v.members?.length && (!v.accessor || v.accessor === accessor)) c[v.name.toUpperCase()] = this.defaultValue(v, scope, accessor);
     }
     return c;
   }
 
-  private constFrame(scope: BlockModel | undefined): Frame {
+  private constFrame(scope: BlockModel | undefined, accessor?: "get" | "set"): Frame {
     const block: BlockModel = scope ?? { kind: "FC", name: "", nameStart: 0, nameEnd: 0, start: 0, end: 0, vars: [], regions: [], refs: [] };
-    const temps = { ...this.constants(scope) };
+    const temps = { ...this.constants(scope, accessor) };
     // inside a GVL, its constants are also reachable qualified: ARRAY[0..GVL_Cfg.N_ITEMS - 1]
     if (scope?.kind === "GVL") temps[scope.name.toUpperCase()] = this.constants(scope);
     return { block, mem: {}, temps };
   }
 
-  private constValue(text: string, scope: BlockModel | undefined): number {
+  private constValue(text: string, scope: BlockModel | undefined, accessor?: "get" | "set"): number {
     const t = text.trim();
     if (/^[-+]?\d+$/.test(t)) return Number(t);
     let v: Value;
     try {
       const [s] = parseBody(`#__c := ${t};`);
-      v = s?.k === "assign" ? this.eval(s.value, this.constFrame(scope)) : undefined;
+      v = s?.k === "assign" ? this.eval(s.value, this.constFrame(scope, accessor)) : undefined;
     } catch {
       v = undefined;
     }
@@ -300,30 +306,31 @@ export class Simulator {
     return v;
   }
 
-  private bounds(dim: string, scope: BlockModel | undefined): [number, number] {
+  private bounds(dim: string, scope: BlockModel | undefined, accessor?: "get" | "set"): [number, number] {
     const at = dim.indexOf("..");
     if (at < 0) {
       if (dim.trim() === "*") return [0, -1]; // Array[*] parameter: sized by the caller
       throw new SimError(`array dimension ${dim.trim()} is not a range`, scope?.name);
     }
-    return [this.constValue(dim.slice(0, at), scope), this.constValue(dim.slice(at + 2), scope)];
+    return [this.constValue(dim.slice(0, at), scope, accessor), this.constValue(dim.slice(at + 2), scope, accessor)];
   }
 
-  defaultValue(decl: Decl, scope?: BlockModel): Value {
+  /** With `accessor`: as a PROPERTY's GET or SET sees it (its own constants, for initial values and array bounds). */
+  defaultValue(decl: Decl, scope?: BlockModel, accessor?: "get" | "set"): Value {
     if (decl.isArray) {
       const shape = splitArrayType(decl.type);
       if (!shape) return { __array: true, lo: 0, items: [] };
-      const dims = shape.dims.map((d) => this.bounds(d, scope));
+      const dims = shape.dims.map((d) => this.bounds(d, scope, accessor));
       // the element keeps the struct members / named type; only the outer `Array[..] of` is removed
       const element: Decl = { type: shape.element, typeRef: decl.typeRef, isArray: /^array\b/i.test(shape.element), members: decl.members };
       const build = (k: number): Value => {
-        if (k === dims.length) return this.defaultValue(element, scope);
+        if (k === dims.length) return this.defaultValue(element, scope, accessor);
         const [lo, hi] = dims[k]!;
         return { __array: true, lo, items: Array.from({ length: Math.max(0, hi - lo + 1) }, () => build(k + 1)) };
       };
       return build(0);
     }
-    if (decl.members?.length) return this.structOf(decl.members, scope);
+    if (decl.members?.length) return this.structOf(decl.members, scope, accessor);
     let v: Value;
     const t = (decl.typeRef ?? decl.type).replace(/^"|"$/g, "");
     if (/^BOOL$/i.test(t)) v = false;
@@ -344,7 +351,7 @@ export class Simulator {
     if (decl.init !== undefined && !isInstance(v) && typeof v !== "object") {
       try {
         const [s] = parseBody(`#__init := ${decl.init};`);
-        if (s?.k === "assign") v = this.eval(s.value, this.constFrame(scope));
+        if (s?.k === "assign") v = this.eval(s.value, this.constFrame(scope, accessor));
       } catch {
         /* complex initializers (array lists) keep the default */
       }
@@ -352,9 +359,9 @@ export class Simulator {
     return v;
   }
 
-  private structOf(vars: VarDecl[], scope?: BlockModel): Struct {
+  private structOf(vars: VarDecl[], scope?: BlockModel, accessor?: "get" | "set"): Struct {
     const s: Struct = {};
-    for (const m of vars) s[m.name.toUpperCase()] = this.defaultValue(m, scope);
+    for (const m of vars) s[m.name.toUpperCase()] = this.defaultValue(m, scope, accessor);
     return s;
   }
 
@@ -540,7 +547,13 @@ export class Simulator {
       case "bin":
         return ["AND", "&", "OR", "XOR"].includes(e.op) ? (this.staticDecl(e.l, frame) ?? this.staticDecl(e.r, frame)) : undefined;
       case "call": {
-        const to = e.callee.path.length ? undefined : /_TO_([A-Z]+)$/i.exec(e.callee.root.name)?.[1]?.toUpperCase();
+        if (e.callee.path.length) return undefined;
+        // a shift or rotation has the width of its input: NOT SHL(IN := BYTE#16#01, N := 1) is a BYTE
+        if (/^(SHL|SHR|ROL|ROR)$/i.test(e.callee.root.name)) {
+          const input = e.args.find((a) => a.name?.toUpperCase() === "IN") ?? e.args.find((a) => !a.name);
+          return input ? this.staticDecl(input.value, frame) : undefined;
+        }
+        const to = /_TO_([A-Z]+)$/i.exec(e.callee.root.name)?.[1]?.toUpperCase();
         return to && INT_WIDTH[to] ? named(to) : undefined;
       }
       default:
@@ -873,6 +886,7 @@ export class Simulator {
     } catch (e) {
       if (e instanceof Return) return;
       if (e instanceof Exit || e instanceof Continue) throw new SimError(`${e instanceof Exit ? "EXIT" : "CONTINUE"} outside of a loop in ${b.name}`, b.name);
+      if (e instanceof Goto) throw new SimError(`GOTO ${e.label}: ${b.name} has no label ${e.label}: in a statement list around the GOTO`, b.name, e.at);
       throw e;
     }
   }
@@ -986,7 +1000,7 @@ export class Simulator {
     if (!prop.property?.[accessor])
       throw new SimError(`${prop.owner}.${prop.name} has no ${accessor.toUpperCase()}: it ${accessor === "set" ? "is read-only" : "can only be written"}`, prop.name);
     return this.enter(prop, () => {
-      const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop);
+      const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop, accessor);
       Object.assign(own, this.constants(prop, accessor));
       const key = prop.name.toUpperCase();
       own[key] = accessor === "set" ? value : this.defaultValue({ type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false }, prop);
@@ -1116,7 +1130,16 @@ export class Simulator {
   // ------------------------------------------------------------------ statements
 
   private exec(stmts: Stmt[], f: Frame) {
-    for (const s of stmts) this.stmt(s, f);
+    for (let i = 0; i < stmts.length; i++) {
+      try {
+        this.stmt(stmts[i]!, f);
+      } catch (e) {
+        // GOTO: on after the label when it is in this list; the jump leaves every list inside it
+        const to = e instanceof Goto ? stmts.findIndex((s) => s.k === "label" && s.name.toUpperCase() === e.label.toUpperCase()) : -1;
+        if (to < 0) throw e;
+        i = to;
+      }
+    }
   }
 
   /** Counts a statement or loop iteration against the per-call step budget. */
@@ -1201,6 +1224,10 @@ export class Simulator {
             }
           } while (!this.eval(s.until, f));
           return;
+        case "label":
+          return;
+        case "goto":
+          throw new Goto(s.label, s.at);
         case "exit":
           throw new Exit();
         case "continue":

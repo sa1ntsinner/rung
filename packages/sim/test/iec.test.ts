@@ -238,6 +238,14 @@ cases:
     const main = s.newInstance("PRG_S");
     s.runInstance(main);
     expect([main.mem.R, main.mem.W]).toEqual([2, 12]);
+    // a constant built from another of the same accessor
+    const dep = new WorkspaceIndex();
+    dep.set("file:///w/FB_D.st", "FUNCTION_BLOCK FB_D\nEND_FUNCTION_BLOCK\n\nPROPERTY P : INT\nGET\nVAR CONSTANT\n  scale : INT := 2;\n  doubled : INT := scale * 2;\nEND_VAR\nP := doubled;\nEND_GET\nEND_PROPERTY\n", 0);
+    dep.set("file:///w/PRG_D.st", "PROGRAM PRG_D\nVAR\n  f : FB_D;\n  r : INT;\nEND_VAR\nr := f.P;\nEND_PROGRAM\n", 0);
+    const sd = new Simulator(dep);
+    const md = sd.newInstance("PRG_D");
+    sd.runInstance(md);
+    expect(md.mem.R).toBe(4);
   });
 
   it("an ACTION in the POU's file (rung's CODESYS form) is the FB's code: no errors, and a call runs it", () => {

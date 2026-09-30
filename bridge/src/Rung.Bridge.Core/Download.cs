@@ -139,8 +139,10 @@ namespace Rung.Bridge.Core
         /// <summary>The PLCs of the uploaded station, as rung names them (plc/&lt;name&gt;/).</summary>
         public string[] Plcs = new string[0];
         public List<string> Messages = new List<string>();
-        /// <summary>Set when the station was uploaded but the project could not be saved: it is not kept.</summary>
+        /// <summary>Set when the station was uploaded but the project could not be saved.</summary>
         public string SaveError;
+        /// <summary>With SaveError: the station was taken out of the project again (the project is as before).</summary>
+        public bool StationRemoved;
     }
 
     public sealed class DownloadOutcome

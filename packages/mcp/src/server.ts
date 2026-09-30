@@ -10,7 +10,7 @@ import { z } from "zod";
 import { diffIndices } from "node-diff3";
 import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChecks, StateStore, type ObjectState } from "@rung/core";
 import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
-import { WorkspaceIndex, assignmentList, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
+import { WorkspaceIndex, assignmentList, nearest, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient, plainHttpRefusal } from "@rung/live";
 import { runTests } from "@rung/sim";
@@ -88,6 +88,25 @@ function workspacePath(root: string, p: string): string {
   return (isAbsolute(p) ? relative(root, p) : p).replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
+/**
+ * The path (or address) an agent most likely meant: a typo in the file name, or the file in another folder; of
+ * several files of that name, the one that shares most of the given path (its PLC, its folders).
+ */
+function nearestPath(given: string, candidates: readonly string[]): string | undefined {
+  const leaf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
+  const name = nearest(leaf(given), new Set(candidates.map(leaf)));
+  if (name === undefined) return undefined;
+  const shared = (c: string) => {
+    let i = 0;
+    while (i < c.length && i < given.length && c[i]!.toLowerCase() === given[i]!.toLowerCase()) i++;
+    return i;
+  };
+  return candidates.filter((c) => leaf(c) === name).sort((a, b) => shared(b) - shared(a))[0];
+}
+
+/** ": did you mean X?" when something is close. */
+const meant = (near: string | undefined) => (near ? `: did you mean ${near}?` : "");
+
 export function createMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer({ name: "rung", version: "0.1.0" }, { instructions: SAFETY_RULES });
   let cache: { at: number; index: WorkspaceIndex; graph: CodeGraph } | undefined;
@@ -115,6 +134,21 @@ export function createMcpServer(ctx: McpContext): McpServer {
   const objectOf = async (addressOrPath: string) => {
     const p = workspacePath(ctx.root, addressOrPath);
     return (await stateSnapshot(ctx.root)).find((s) => s.address === addressOrPath || s.path === p);
+  };
+  /** The workspace path of a file of the index (plc/PLC_1/tags/Default tag table.tags.st, not %20). */
+  const pathOf = (uri: string) => relative(ctx.root, fileURLToPath(uri)).split(sep).join("/");
+  /** ": did you mean X?" for an address or path that names no mirrored object (of those `which` keeps). */
+  const meantObject = async (given: string, which: (s: ObjectState) => boolean = () => true) => {
+    const states = (await stateSnapshot(ctx.root)).filter(which);
+    return meant(nearestPath(given.startsWith("plc:") ? given : workspacePath(ctx.root, given), states.map((s) => (given.startsWith("plc:") ? s.address : s.path))));
+  };
+  /** ": did you mean X?" for an object name (Fx_Motor, PLC_1/Fx_Motor), address or path the workspace does not have. */
+  const meantName = async (index: WorkspaceIndex, name: string) => {
+    const bare = name.replace(/^"|"$/g, "");
+    if (/^plc[:/]/.test(bare) || bare.includes("\\")) return meantObject(bare);
+    const slash = bare.lastIndexOf("/");
+    const near = nearest(bare.slice(slash + 1), new Set(index.allGlobals().map((s) => s.name)));
+    return meant(near === undefined ? undefined : bare.slice(0, slash + 1) + near);
   };
   /**
    * The PLC a tool means when none is named, as the CLI chooses it: the one rung.toml names, the one mirrored, or
@@ -190,13 +224,13 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const path = given === undefined ? undefined : workspacePath(ctx.root, given);
       // a mistyped path would look like a file without problems
       if (path !== undefined && !index.docs.has(uriOf(join(ctx.root, ...path.split("/")))) && !existsSync(join(ctx.root, ...path.split("/"))))
-        return fail(`${path} is not a file of this workspace (rung_list lists the mirrored objects)`);
+        return fail(`${path} is not a file of this workspace${meant(nearestPath(path, [...index.docs.keys()].map(pathOf)))} (rung_list lists the mirrored objects)`);
       const sync = (await syncDiagnostics(ctx.root)).filter((d) => !path || d.path === path);
       const files = path ? [uriOf(join(ctx.root, ...path.split("/")))] : [...index.docs.keys()];
       const parsed = files.flatMap((uri) => {
         const doc = index.docs.get(uri);
         if (!doc) return [];
-        return parseDiagnostics(index, uri).map((d) => ({ path: uri.slice(uriOf(ctx.root).length + 1), line: doc.lines.position(d.start).line + 1, severity: d.severity, code: d.code, message: d.message }));
+        return parseDiagnostics(index, uri).map((d) => ({ path: pathOf(uri), line: doc.lines.position(d.start).line + 1, severity: d.severity, code: d.code, message: d.message }));
       });
       return json({ sync, source: parsed });
     },
@@ -214,7 +248,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     const addresses: string[] = [];
     for (const a of given ?? []) {
       const s = await objectOf(a);
-      if (!s && !a.startsWith("plc:")) return fail(`${a} is not a mirrored object (rung_list lists them)`);
+      if (!s && !a.startsWith("plc:")) return fail(`${a} is not a mirrored object${await meantObject(a)} (rung_list lists them)`);
       addresses.push(s?.address ?? a);
     }
     const r = await withOwner((o) => o.request("compile", { addresses, device }));
@@ -269,7 +303,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_assignments",
-    { description: "The assignment list, like TIA Portal's: every input, output and bit memory address in use, with its tags and where the code uses it, and overlapping accesses (crossing ones are usually mistakes). Read before choosing a free address." },
+    { description: "The assignment list, like TIA Portal's: every input, output, bit memory, timer and counter address in use, with its tags and where the code uses it, and overlapping accesses (crossing ones are usually mistakes). Read before choosing a free address." },
     async () => {
       const { index } = await model();
       const r = assignmentList(index);
@@ -279,10 +313,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool("rung_find_usages", { description: "Every block that calls, instantiates, reads or writes a block, DB, UDT or tag (with the members touched).", inputSchema: { name: z.string().describe("object name, e.g. Fx_Global, or a workspace path") } }, async ({ name }) => {
-    const { graph } = await model();
+    const { index, graph } = await model();
     const r = await resolveNode(graph, name);
     if ("error" in r) return fail(r.error);
-    if (!graph.get(r.ref)) return fail(`${name} is not in the workspace graph`);
+    if (!graph.get(r.ref)) return fail(`${name} is not in the workspace graph${await meantName(index, name)}`);
     return json(graph.usages(r.ref).map((u) => ({ by: graph.label(u.node), kind: u.node.kind, how: u.kind, count: u.count, ...(u.members ? { members: u.members } : {}) })));
   });
 
@@ -290,11 +324,11 @@ export function createMcpServer(ctx: McpContext): McpServer {
     "rung_graph",
     { description: "Dependency queries over the code graph: callers, callees, impact (transitive dependants) or path (from name to `to`).", inputSchema: { query: z.enum(["callers", "callees", "impact", "path"]), name: z.string(), to: z.string().optional() } },
     async ({ query, name, to }) => {
-      const { graph } = await model();
+      const { index, graph } = await model();
       const r = await resolveNode(graph, name);
       if ("error" in r) return fail(r.error);
       const n = r.ref;
-      if (!graph.get(n)) return fail(`${name} is not in the workspace graph`);
+      if (!graph.get(n)) return fail(`${name} is not in the workspace graph${await meantName(index, name)}`);
       switch (query) {
         case "callers":
           return json(graph.callers(n).map((x) => graph.label(x)));
@@ -319,7 +353,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     if ("error" in r) return fail(r.error);
     // seen from a file of that PLC, the name is that PLC's object
     const g = index.global(r.name, r.device ? uriOf(join(ctx.root, "plc", r.device, "_")) : undefined);
-    if (!g) return fail(`${name} is not in the workspace`);
+    if (!g) return fail(`${name} is not in the workspace${await meantName(index, name)}`);
     const st = (await stateSnapshot(ctx.root)).find((s) => uriOf(join(ctx.root, ...s.path.split("/"))) === g.uri);
     const b = g.block;
     return json({
@@ -341,7 +375,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     const path = workspacePath(ctx.root, given);
     const st = (await stateSnapshot(ctx.root)).find((s) => s.path === path);
     const current = await readFile(join(ctx.root, ...path.split("/")), "utf8").catch(() => null);
-    if (!st) return current === null ? fail(`${path} not found`) : text(`${path} is new (not in TIA Portal yet)`);
+    if (!st) return current === null ? fail(`${path} not found${await meantObject(path)}`) : text(`${path} is new (not in TIA Portal yet)`);
     const primary = st.files.find((f) => f.role === "primary")!;
     const base = (await new BlobStore(ctx.root).get(primary.hash)).toString("utf8");
     return text(unifiedDiff(normalizeText(base), current === null ? "" : normalizeText(current), `${path} (TIA, last sync)`, `${path} (workspace)`));
@@ -363,6 +397,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       if (none) return none;
       // the file itself, or one of the helper files a conflict writes next to it
       const path = workspacePath(ctx.root, given).replace(/\.(conflict|tia)$/, "");
+      if (!(await objectOf(path))) return fail(`${path} is not a mirrored file${await meantObject(path, (s) => s.status === "conflicted" || s.status === "recoveryRequired")} (rung_list with status conflicted lists the conflicts)`);
       const viaOwner = await withOwner((o) => o.request("resolve", { path, mode }));
       if (viaOwner === undefined) {
         const config = await loadConfig(ctx.root);
@@ -388,7 +423,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const none = noWorkspace();
       if (none) return none;
       const target = (await objectOf(address))?.address;
-      if (!target) return fail(`${address} is not a mirrored object (rung_list lists them)`);
+      if (!target) return fail(`${address} is not a mirrored object${await meantObject(address)} (rung_list lists them)`);
       const viaOwner = await withOwner((o) => o.request<RenameReport>("rename", { address: target, newName }));
       if (viaOwner !== undefined) return json(viaOwner);
       if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is available.");
@@ -410,7 +445,9 @@ export function createMcpServer(ctx: McpContext): McpServer {
   server.registerTool("rung_confirm_delete", { description: "Delete an object in TIA Portal after its files were deleted in the workspace. Only for objects in pendingDelete; refuses if TIA changed meanwhile.", inputSchema: { address: z.string().describe("address or workspace path of the deleted object") } }, async ({ address: given }) => {
     const none = noWorkspace();
     if (none) return none;
-    const address = (await objectOf(given))?.address ?? given;
+    const found = (await objectOf(given))?.address;
+    if (!found && !given.startsWith("plc:")) return fail(`${given} is not a mirrored object${await meantObject(given, (s) => s.status === "pendingDelete")} (rung_list with status pendingDelete lists what waits for it)`);
+    const address = found ?? given;
     const viaOwner = await withOwner((o) => o.request("confirmDelete", { address }));
     if (viaOwner !== undefined) return text(`deleted ${address}`);
     if (!ctx.bridgeFactory) return fail("No rung watch is running; start it first.");

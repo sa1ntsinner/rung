@@ -372,7 +372,14 @@ namespace Rung.Bridge.V20
                 outcome.Station = station.Name;
                 outcome.Plcs = SoftwareOf(station.DeviceItems).OfType<Siemens.Engineering.SW.PlcSoftware>().Select(p => p.Name).ToArray();
                 try { _project.Save(); }
-                catch (EngineeringException e) { outcome.SaveError = e.Message.Trim(); }
+                catch (EngineeringException e)
+                {
+                    outcome.SaveError = e.Message.Trim();
+                    // not kept half: the station comes out again, so a later save (or TIA's own) keeps no station
+                    // rung reported as failed, and uploading again adds no second one
+                    try { station.Delete(); outcome.StationRemoved = true; }
+                    catch (EngineeringException) { }
+                }
             }
             _index.Clear();
             return outcome;

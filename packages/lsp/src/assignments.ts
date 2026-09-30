@@ -3,18 +3,20 @@
 // tag and where the code uses an address directly, and which of them overlap (%MW10 and %M10.3 share byte 10).
 import { deviceOfUri, type WorkspaceIndex } from "./workspace.js";
 
-export type Area = "I" | "Q" | "M";
+/** Inputs, outputs, bit memory, and the S5 timers and counters of older code. */
+export type Area = "I" | "Q" | "M" | "T" | "C";
 
 export interface Assignment {
   /** The PLC (plc/<PLC>/ of a rung workspace); every PLC has its own inputs, outputs and bit memory. */
   device?: string;
-  /** As written, normalised: %I0.0, %MW10, %QB4 */
+  /** As written, normalised: %I0.0, %MW10, %QB4, %T5 */
   address: string;
   area: Area;
+  /** The byte; for a timer or counter, its number. */
   byte: number;
   /** For a single bit. */
   bit?: number;
-  /** 1, 8, 16, 32 or 64 */
+  /** 1, 8, 16, 32 or 64 (a timer or counter: 16) */
   bits: number;
   /** Peripheral access (:P): straight to the module, not through the process image. */
   peripheral?: boolean;
@@ -44,10 +46,16 @@ export const TYPE_BITS: Readonly<Record<string, number>> = {
 };
 
 const ADDRESS = /^%([IEQAM])([XBWDL])?(\d+)(?:\.([0-7]))?(:P)?$/i;
+const TIMER_OR_COUNTER = /^%([TCZ])(\d+)$/i;
 const SIZE: Record<string, number> = { X: 1, B: 8, W: 16, D: 32, L: 64 };
 
-/** An absolute address of the process image or the bit memory; German mnemonics (%E, %A) too. */
+/** An absolute address of the process image, the bit memory or an S5 timer or counter; German mnemonics (%E, %A, %Z) too. */
 export function parseAbsolute(text: string): Omit<Assignment, "tags" | "uses"> | undefined {
+  const tc = TIMER_OR_COUNTER.exec(text.trim());
+  if (tc) {
+    const area = tc[1]!.toUpperCase() === "T" ? "T" : "C";
+    return { address: `%${area}${Number(tc[2])}`, area, byte: Number(tc[2]), bits: 16 };
+  }
   const m = ADDRESS.exec(text.trim());
   if (!m) return undefined;
   const area = ({ I: "I", E: "I", Q: "Q", A: "Q", M: "M" } as const)[m[1]!.toUpperCase() as "I" | "E" | "Q" | "A" | "M"];
@@ -115,7 +123,7 @@ export function assignmentList(index: WorkspaceIndex, device?: string): { items:
         if (a) a.uses.push({ uri: doc.uri, line: doc.lines.position(r.start).line });
       }
   }
-  const areaOrder: Record<Area, number> = { I: 0, Q: 1, M: 2 };
+  const areaOrder: Record<Area, number> = { I: 0, Q: 1, M: 2, T: 3, C: 4 };
   const plcOrder = (a: Assignment) => a.device ?? "";
   const items = [...byAddress.values()].sort(
     (x, y) => (plcOrder(x) < plcOrder(y) ? -1 : plcOrder(x) > plcOrder(y) ? 1 : 0) || areaOrder[x.area] - areaOrder[y.area] || x.byte - y.byte || (x.bit ?? -1) - (y.bit ?? -1) || x.bits - y.bits,
@@ -128,7 +136,7 @@ export function assignmentList(index: WorkspaceIndex, device?: string): { items:
       const a = items[i]!;
       const b = items[j]!;
       if (a.device !== b.device || a.area !== b.area || !!a.peripheral !== !!b.peripheral) continue;
-      if (a.bits === 1 && b.bits === 1) continue;
+      if ((a.bits === 1 && b.bits === 1) || a.area === "T" || a.area === "C") continue; // %T5 and %T6 are two timers
       const sa = span(a);
       const sb = span(b);
       const shared = sa.filter((x) => sb.includes(x));

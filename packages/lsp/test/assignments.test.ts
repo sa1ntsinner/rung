@@ -51,6 +51,23 @@ describe("assignment list", () => {
     expect([parseAbsolute("%MW10.3"), parseAbsolute("%M10"), parseAbsolute("%DB1.DBX0.0")]).toEqual([undefined, undefined, undefined]);
   });
 
+  it("lists S5 timers and counters (German %Z too) by number, apart from the bit memory", () => {
+    expect(parseAbsolute("%Z3")).toMatchObject({ address: "%C3", area: "C", byte: 3 });
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/tags/Timers.tags.st", "VAR_GLOBAL\n    Fx_Delay AT %T5 : Timer;\n    Fx_Next AT %T6 : Timer;\n    Fx_Parts AT %C2 : Counter;\n    Fx_Flag AT %M5.0 : Bool;\nEND_VAR\n", 0);
+    const src = 'FUNCTION "Fx_A" : Void\nVAR_TEMP\n   q : Bool;\nEND_VAR\nBEGIN\n   #q := S_ODT(T_NO := "Fx_Delay", S := TRUE, TV := S5T#2s);\n   #q := S_CU(C_NO := %C3, CU := #q);\nEND_FUNCTION\n';
+    idx.set("file:///w/plc/P/blocks/Fx_A.scl", src, 0);
+    const r = assignmentList(idx);
+    expect(r.items.map((a) => `${a.address} ${a.tags.map((t) => t.name).join(",")} ${a.uses.map((u) => u.line + 1).join(",")}`)).toEqual([
+      "%M5.0 Fx_Flag ",
+      "%T5 Fx_Delay 6",
+      "%T6 Fx_Next ",
+      "%C2 Fx_Parts ",
+      "%C3  7",
+    ]);
+    expect(r.overlaps).toEqual([]);
+  });
+
   it("lists addresses with their tags and uses, and tells crossing overlaps from nested ones", () => {
     const idx = new WorkspaceIndex();
     idx.set("file:///w/plc/P/tags/IO.tags.xml", tags("IO", [["Start", "Bool", "%I0.0"], ["Status", "Byte", "%IB2"], ["Speed", "Int", "%MW10"], ["Speed2", "Int", "%MW11"]]), 0);

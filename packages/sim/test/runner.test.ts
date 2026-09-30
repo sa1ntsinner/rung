@@ -85,6 +85,24 @@ describe("rung test runner", () => {
     expect(bad.cases[0]!.error).toMatch(/unknown step "expct"/);
   });
 
+  it("names the block, variable or member a misspelt name most likely meant", async () => {
+    const idx = index();
+    idx.set("file:///w/plc/P/blocks/Fx_Drive.scl", 'FUNCTION_BLOCK "Fx_Drive"\nVAR\n  drive : Struct\n    speed : Int;\n  END_STRUCT;\n  axes : Array[1..2] of "Fx_Types";\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
+    const one = (steps: string, block = "Fx_Motor") => runTestFile(idx, "t.yaml", `block: ${block}\ncases:\n  - steps:\n${steps}`);
+    expect((await runTestFile(index(), "t.yaml", "block: Fx_Motr\ncases: []\n")).error).toBe("block Fx_Motr not found (did you mean Fx_Motor?)");
+    expect((await one("      - set: { Strat: true }\n")).cases[0]!.error).toBe("Strat does not exist (did you mean Start?)");
+    expect((await one("      - cycle: 1\n      - expect: { Runing: false }\n")).cases[0]!.failures[0]!.actual).toBe("<Runing does not exist (did you mean Running?)>");
+    expect((await one("      - set: { '\"Fx_Global\".Cout': 1 }\n")).cases[0]!.error).toBe('"Fx_Global".Cout does not exist (did you mean "Fx_Global".Count?)');
+    expect((await one("      - set: { '\"Fx_Globl\".Count': 1 }\n")).cases[0]!.error).toMatch(/ \(did you mean "Fx_Global"\.Count\?\)$/);
+    expect((await one("      - set: { drive.sped: 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("drive.sped does not exist (did you mean drive.speed?)");
+    expect((await one("      - set: { 'axes[2].Mdoe': 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("axes[2].Mdoe does not exist (did you mean axes[2].Mode?)");
+    // an FC: inputs for set, outputs for expect
+    expect((await one("      - set: { Enabel: true }\n      - cycle: 1\n", "Fx_Valve")).cases[0]!.error).toBe("Enabel is not an input of Fx_Valve (did you mean Enable?)");
+    expect((await one("      - cycle: 1\n      - expect: { Opn: true }\n", "Fx_Valve")).cases[0]!.failures[0]!.actual).toBe("<Opn does not exist (did you mean Open?)>");
+    // nothing close: the message stays as it was
+    expect((await one("      - set: { Throttle: 1 }\n")).cases[0]!.error).toBe("Throttle does not exist");
+  });
+
   it("addresses array elements in set/expect and keeps FC IN_OUT values between cycles", async () => {
     const idx = index();
     idx.set("file:///w/plc/P/blocks/Arr.scl", 'FUNCTION_BLOCK "Arr"\nVAR\n  pts : Array[1..3] of "Fx_Types";\n  grid : Array[0..1, 0..2] of Int;\n  sum : Int;\nEND_VAR\nBEGIN\n  #sum := #pts[2].Mode + #grid[1, 2];\nEND_FUNCTION_BLOCK\n', 0);

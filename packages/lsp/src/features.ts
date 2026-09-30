@@ -39,7 +39,7 @@ export interface OutlineSymbol {
   children: OutlineSymbol[];
 }
 
-const SECTION_LABEL: Record<string, string> = { Input: "VAR_INPUT", Output: "VAR_OUTPUT", InOut: "VAR_IN_OUT", Static: "VAR", Temp: "VAR_TEMP", Constant: "VAR CONSTANT" };
+const SECTION_LABEL: Record<string, string> = { Input: "VAR_INPUT", Output: "VAR_OUTPUT", InOut: "VAR_IN_OUT", Static: "VAR", Temp: "VAR_TEMP", Constant: "VAR CONSTANT", Return: "Return value" };
 
 /** A variable of `block` by name; with `at`, as the code at that offset sees it (a PROPERTY accessor's own locals). */
 function localDecl(block: BlockModel, name: string, at?: number): VarDecl | undefined {
@@ -61,6 +61,9 @@ export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel,
   const own = localDecl(block, name, at);
   if (own) return { ...own, uri };
   const u = name.toUpperCase();
+  // an FC (IEC: a METHOD, a PROPERTY accessor) sets its return value through its own name: #Fx_Scale := 1.0;
+  if (u === block.name.toUpperCase() && block.returnType && !/^void$/i.test(block.returnType))
+    return { name: block.name, type: block.returnType, typeRef: block.returnType.replace(/^"|"$/g, ""), isArray: false, section: "Return", uri, start: block.nameStart, end: block.nameEnd };
   if (block.owner) {
     const g = index.global(block.owner);
     const v = g?.block?.vars.find((x) => x.name.toUpperCase() === u);
@@ -138,7 +141,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
           const a = parseAbsolute(v.at);
           const bits = TYPE_BITS[v.type.toUpperCase()];
           // 64-bit tags: TIA Portal has no L size and writes them at a bit address, %I1000.0
-          const fits = !a || !bits || a.bits === bits || (bits === 64 && a.bit === 0);
+          const fits = !a || !bits || a.bits === bits || (bits === 64 && a.bit === 0) || a.area === "T" || a.area === "C";
           if (a && bits && !fits) flag(v, "ADDRESS_SIZE", `${v.name} is a ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`);
         }
       }
@@ -156,6 +159,8 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
     for (const ref of block.refs) {
       if (ref.kind === "local") {
         const known = scopeDecl(index, uri, block, ref.name, ref.start) || ref.name.toUpperCase() === block.name.toUpperCase();
+        // the start values of a DB of an FB or UDT the workspace does not have (a library or system FB): no verdict
+        if (!known && block.kind === "DB" && block.dbOf && !index.membersOfType(block.dbOf).length) continue;
         if (!known) {
           out.push({ start: ref.start, end: ref.end, severity: "warning", message: `#${ref.name} is not declared in ${block.name}`, code: "UNDECLARED" });
           continue;
@@ -318,7 +323,10 @@ export function hover(index: WorkspaceIndex, uri: string, offset: number): { mar
     return undefined;
   }
   const g = index.global(ref.name);
+  if (!g && ref.name.includes("~")) return { markdown: `Hardware identifier **${ref.name}** (a system constant of the device configuration)`, start: ref.start, end: ref.end };
   if (!g) return undefined;
+  const to = g.techObject;
+  if (to) return { markdown: `Technology object **${g.name}**${to.type ? ` : \`${to.type}\`` : ""}${to.number ? ` (DB ${to.number})` : ""}`, start: ref.start, end: ref.end };
   if (g.tag?.value !== undefined) return { markdown: `PLC constant **${g.name}** : \`${g.tag.dataType}\` = \`${g.tag.value}\` (table ${g.tag.table})`, start: ref.start, end: ref.end };
   if (g.tag) return { markdown: `PLC tag **${g.name}** : \`${g.tag.dataType}\`${g.tag.address ? ` at \`${g.tag.address}\`` : ""} (table ${g.tag.table})`, start: ref.start, end: ref.end };
   const b = g.block;

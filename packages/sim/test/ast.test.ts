@@ -37,9 +37,9 @@ describe("parseBody", () => {
         WHILE #n > 0 DO #n := #n - 1; END_WHILE;
         REPEAT #n := #n + 1; UNTIL #n >= 3 END_REPEAT;
       END_REGION`);
-    const region = body[0] as { k: "if"; branches: { body: { k: string; items?: { body: unknown[] }[] }[] }[] };
-    expect(region.branches[0]!.body.map((s) => s.k)).toEqual(["if", "case", "for", "while", "repeat"]);
-    expect(region.branches[0]!.body[1]!.items!.map((i) => i.body.length)).toEqual([1, 2]);
+    // a REGION's statements are in the list around it (a GOTO outside finds a label inside)
+    expect(body.map((s) => s.k)).toEqual(["if", "case", "for", "while", "repeat"]);
+    expect((body[1] as { items: { body: unknown[] }[] }).items.map((i) => i.body.length)).toEqual([1, 2]);
   });
 
   it("parses literals of every kind", () => {

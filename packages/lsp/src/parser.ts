@@ -334,7 +334,9 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     while (peek().kind !== "eof" && !isKw(peek(), endKw) && !(iec && isHeaderAt(peek()))) {
       const t = next();
       if (t.kind === "local" || t.kind === "global") {
-        collectRef(t, block, tokens[i - 2]);
+        // a DB's start value of a member with a quoted name ("Valve 1".Delay := T#2s;) is the DB's own, like Counter := 0;
+        const dbStart = block.kind === "DB" && t.kind === "global" && (tokens[i - 2]?.text === ";" || isKw(tokens[i - 2]!, "BEGIN"));
+        collectRef(t, block, tokens[i - 2], dbStart ? "local" : undefined);
         continue;
       }
       if (t.kind === "op") {

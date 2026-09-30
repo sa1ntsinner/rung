@@ -23,6 +23,17 @@ export interface GlobalSymbol {
   tag?: { dataType: string; address?: string; table: string; value?: string };
   /** For GVAR: the variable declaration and its list. */
   gvar?: { decl: VarDecl; list: string };
+  /** For a technology object: its type (TO_SpeedAxis, TO_PositioningAxis) and DB number, when known. */
+  techObject?: { type?: string; number?: string };
+}
+
+/** A technology object known by name (from its XML export or the `rung views` YAML of its PLC). */
+export interface NamedObject {
+  name: string;
+  start: number;
+  end: number;
+  type?: string;
+  number?: string;
 }
 
 export interface Doc {
@@ -35,8 +46,8 @@ export interface Doc {
   version: number;
   /** SimaticML tag table (rung `*.tags.xml`, VCI `PLC tags/*.xml`). */
   tagTable?: boolean;
-  /** Named objects from XML without a usable interface (technology objects). */
-  objects?: { name: string; start: number; end: number }[];
+  /** Named objects without a usable interface (technology objects). */
+  objects?: NamedObject[];
 }
 
 /** Member view of a type: variables with their declarations (uri/offset) or catalog parameters. */
@@ -63,6 +74,8 @@ const XML = /\.xml$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".rung", ".vci", "_Boot", "_CompileInfo", "_Libraries", "bin", "obj", "dist", "views"]);
 const OTHER = /\.(s7dcl|xml|protected\.yaml)$/i;
 const SD = /\.s7dcl$/i;
+/** A PLC's technology objects as `rung views` lists them. */
+const TECH_VIEW = /\/views\/techobjects\/[^/]+\.yaml$/i;
 /** Top-level folders of a TIA Portal VCI (version control interface) export. */
 const VCI_DIRS = new Set(["program blocks", "plc tags", "plc data types", "technology objects", ".vci"]);
 
@@ -78,8 +91,9 @@ export class WorkspaceIndex {
   layout?: WorkspaceLayout;
 
   /**
-   * Loads <root>/plc of a rung workspace; otherwise every source under root: TIA VCI exports (`Program blocks/`,
-   * `PLC tags/`, `PLC data types/`, `Technology objects/`), TwinCAT/CODESYS projects and loose SCL/ST files.
+   * Loads <root>/plc of a rung workspace and the technology objects of its views; otherwise every source under
+   * root: TIA VCI exports (`Program blocks/`, `PLC tags/`, `PLC data types/`, `Technology objects/`),
+   * TwinCAT/CODESYS projects and loose SCL/ST files.
    */
   async load(root: string): Promise<void> {
     if (!(await isRungLayout(root))) return this.loadTree(root);
@@ -99,6 +113,10 @@ export class WorkspaceIndex {
       }
     };
     await walk(join(root, "plc"));
+    // TIA Portal exports no text of a technology object: the code names them, `rung views` lists them
+    const views = join(root, "views", "techobjects");
+    const files = await readdir(views).catch(() => [] as string[]);
+    for (const f of files) if (f.endsWith(".yaml")) this.set(uriOf(join(views, f)), await readFile(join(views, f), "utf8"), 0);
   }
 
   private async loadTree(root: string): Promise<void> {
@@ -141,7 +159,8 @@ export class WorkspaceIndex {
       const unit = extractTwinCat(text);
       doc.code = unit.code;
       doc.parsed = parse(unit.code, { dialect: "iec", ...(unit.name ? { unitName: unit.name } : {}) });
-    } else if (XML.test(uri)) {
+    } else if (TECH_VIEW.test(uri)) doc.objects = techObjectsOfView(text);
+    else if (XML.test(uri)) {
       doc.tagTable = uri.endsWith(".tags.xml") || /<SW\.Tags\.PlcTagTable\b/.test(text);
       if (!doc.tagTable && isSimaticMl(text)) {
         // LAD/FBD/GRAPH blocks, DBs and PLC data types exported as SimaticML: their interface is indexed
@@ -176,8 +195,10 @@ export class WorkspaceIndex {
           if (b.kind === "GVL") for (const v of b.vars) add({ name: v.name, kind: "GVAR", uri: d.uri, start: v.start, end: v.end, gvar: { decl: v, list: b.name } });
         }
       else if (d.tagTable) for (const t of parseTags(d.text, d.uri)) add(t);
-      else if (d.objects?.length) for (const o of d.objects) add({ name: o.name, kind: "OBJECT", uri: d.uri, start: o.start, end: o.end });
-      else {
+      else if (d.objects) {
+        // (a PLC without technology objects has a view without any: it is not an object named after the PLC)
+        for (const o of d.objects) add({ name: o.name, kind: "OBJECT", uri: d.uri, start: o.start, end: o.end, techObject: { ...(o.type ? { type: o.type } : {}), ...(o.number ? { number: o.number } : {}) } });
+      } else {
         // LAD/FBD/GRAPH/protected objects: known by name only
         const leaf = decodeURIComponent(d.uri.split("/").pop()!).replace(/\.(s7dcl|xml|protected\.yaml)$/i, "");
         const name = leaf.includes("~") ? leaf.split("~").pop()! : leaf;
@@ -309,11 +330,72 @@ async function isRungLayout(root: string): Promise<boolean> {
   return false;
 }
 
-/** Extracts tags from a SimaticML tag-table export (regex-based; the files are machine-generated). */
-/** The PLC of a rung workspace file (…/plc/<PLC>/…), undefined elsewhere. */
+/** The PLC of a rung workspace file (…/plc/<PLC>/…, views/techobjects/<PLC>.yaml), undefined elsewhere. */
 export function deviceOfUri(uri: string): string | undefined {
-  return /\/plc\/([^/]+)\//.exec(uri)?.[1];
+  // the PLC's folder name as on disk (rung's workspace spelling of the PLC name), not its URI encoding
+  // (plc/Line A/ is "Line A", not "Line%20A"): the same name workspace paths, test folders and reviews use
+  const raw = /\/plc\/([^/]+)\//.exec(uri)?.[1] ?? /\/views\/techobjects\/([^/]+)\.yaml$/i.exec(uri)?.[1];
+  if (raw === undefined) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
+
+/**
+ * The technology objects of a `rung views` YAML (views/techobjects/<PLC>.yaml): every `- type:
+ * TechnologicalInstanceDB` entry with its name, InstanceOfName and Number, in groups too. Line-based: the file
+ * is machine-written, one key per line.
+ */
+function techObjectsOfView(text: string): NamedObject[] {
+  const out: NamedObject[] = [];
+  const scalar = (raw: string) => {
+    if (!raw.startsWith('"')) return raw;
+    try {
+      return String(JSON.parse(raw));
+    } catch {
+      return raw;
+    }
+  };
+  let current: NamedObject | undefined;
+  let depth = -1; // indent of the current entry's "- "
+  let offset = 0;
+  for (const full of text.split("\n")) {
+    const line = full.replace(/\r$/, "");
+    const at = offset;
+    offset += full.length + 1;
+    const indent = line.length - line.trimStart().length;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const entry = /^\s*- type: (.*)$/.exec(line);
+    if (entry || indent <= depth) {
+      if (current) out.push(current);
+      current = undefined;
+      depth = -1;
+    }
+    if (entry) {
+      const type = scalar(entry[1]!.trim());
+      if (/^Technological\w*$/.test(type) && !/Group$/.test(type)) {
+        current = { name: "", start: 0, end: 0 };
+        depth = indent;
+      }
+      continue;
+    }
+    if (!current) continue;
+    const kv = /^(\s*)([A-Za-z]+): (.*)$/.exec(line);
+    if (!kv) continue;
+    const value = kv[3]!.trim();
+    if (kv[2] === "name" && indent === depth + 2) {
+      current.name = scalar(value);
+      current.start = at + line.indexOf(value, kv[1]!.length + "name: ".length) + (value.startsWith('"') ? 1 : 0);
+      current.end = current.start + (value.startsWith('"') ? value.length - 2 : value.length);
+    } else if (kv[2] === "InstanceOfName") current.type = scalar(value);
+    else if (kv[2] === "Number") current.number = scalar(value);
+  }
+  if (current) out.push(current);
+  return out.filter((o) => o.name);
+}
+
 
 /**
  * The index as seen from one file: every lookup by name finds that file's PLC's object (WorkspaceIndex.global
@@ -375,6 +457,7 @@ export function tagsOfText(d: Doc): GlobalSymbol[] {
   );
 }
 
+/** Extracts tags from a SimaticML tag-table export (regex-based; the files are machine-generated). */
 export function parseTags(xml: string, uri: string): GlobalSymbol[] {
   const out: GlobalSymbol[] = [];
   const table = /<SW\.Tags\.PlcTagTable[\s\S]*?<Name>([^<]*)<\/Name>/.exec(xml)?.[1] ?? "";

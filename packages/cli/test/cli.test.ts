@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMMANDS, HELP, main } from "../src/main.js";
+import { COMMANDS, HELP, main, serverNote } from "../src/main.js";
 import { decodeArgs } from "../src/common.js";
 import { StateStore } from "@rung/core";
 import { OwnerServer } from "@rung/sync";
@@ -130,7 +130,7 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
     const t = setup({ FAKE_SAVE_ERROR: "There is not enough space on the disk." });
     expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT)).toBe(3);
     expect(t.err.join("")).toContain("could not be saved (There is not enough space on the disk.)");
-    expect(t.err.join("")).toContain("rather than uploading again");
+    expect(t.err.join("")).toContain("rung took the station out again: the project is as it was");
     expect(existsSync(join(t.dir, "rung.toml"))).toBe(false);
   });
 
@@ -199,6 +199,18 @@ describe("rung CLI", () => {
     expect(t.err.join("")).toMatch(/rung status takes one argument; unexpected: b/);
     expect(await t.run("resolve", "x.scl", "--ours", "--theirs")).toBe(1);
     expect(t.err.join("")).toMatch(/--ours and --theirs exclude each other/);
+    // a typo: the option of that command it most likely meant
+    t.err.length = 0;
+    expect(await t.run("setup", "--dryrun")).toBe(1);
+    expect(await t.run("test", "--filer", "Fx_Motor")).toBe(1);
+    expect(await t.run("setup", "--dry-run", "--agent", "claude")).toBe(1);
+    expect(await t.run("--verison")).toBe(1);
+    expect(t.err).toEqual([
+      "rung: rung setup has no --dryrun; did you mean --dry-run? (rung --help)\n",
+      "rung: rung test has no --filer; did you mean --filter? (rung --help)\n",
+      "rung: rung setup has no --agent; did you mean --agents? (rung --help)\n",
+      "rung: unknown option --verison; did you mean --version? (rung --help)\n",
+    ]);
   });
 
   it("assignments lists each PLC of the workspace on its own; two PLCs' addresses never overlap", async () => {
@@ -213,6 +225,22 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toBe("Bit memory of PLC_1\n  %MW10      Speed : Int (IO)\n\nBit memory of PLC_2\n  %MW11      Level : Int (IO)\n");
   });
 
+  it("lsp and mcp typed in a terminal say what they are for; started by an editor or agent, nothing", () => {
+    expect(serverNote("lsp", true)).toBe("rung lsp is the language server your editor starts (rung setup --editors sets that up); it now waits for an editor on stdin, Ctrl+C stops it\n");
+    expect(serverNote("mcp", true)).toBe("rung mcp is the MCP server an AI agent starts (rung setup --agents sets that up); it now waits for an agent on stdin, Ctrl+C stops it\n");
+    expect([serverNote("lsp", false), serverNote("mcp", false), serverNote("status", true)]).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("assignments lists S5 timers and counters under their own headings", async () => {
+    const t = setup();
+    await t.run("init");
+    mkdirSync(join(t.dir, "plc", "PLC_1", "tags"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "tags", "Old.tags.st"), "VAR_GLOBAL\n    Fx_Delay AT %T5 : Timer;\n    Fx_Parts AT %Z2 : Counter;\nEND_VAR\n");
+    t.out.length = 0;
+    expect(await t.run("assignments")).toBe(0);
+    expect(t.out.join("")).toBe("Timers\n  %T5        Fx_Delay : Timer (Old)\n\nCounters\n  %C2        Fx_Parts : Counter (Old)\n");
+  });
+
   it("test says when an expected value is text in quotes but the value is a BOOL or a number", async () => {
     const t = setup();
     mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
@@ -223,6 +251,18 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toContain(
       '       step 3: Running expected "false" got true (in quotes "false" is text: write false without them)\n       step 3: Count expected "3" got 2 (in quotes "3" is text: write 3 without them)\n',
     );
+  });
+
+  it("test says which name a misspelt one most likely meant", async () => {
+    const t = setup();
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n      - expect: { Runing: false }\n");
+    writeFileSync(join(t.dir, "tests", "typo.test.yaml"), "block: Fx_Rn\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n");
+    expect(await t.run("test")).toBe(2);
+    expect(t.out.join("")).toContain("FAIL Fx_Run: runs\n       step 2: Runing expected false got <Runing does not exist (did you mean Running?)>\n");
+    expect(t.out.join("")).toContain("FAIL tests/typo.test.yaml: block Fx_Rn not found (did you mean Fx_Run?)\n");
   });
 
   it("test says so when there are no tests instead of 0/0 passed", async () => {

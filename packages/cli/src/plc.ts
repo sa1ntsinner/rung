@@ -335,9 +335,9 @@ export function reportUpload(io: Io, r: UploadOutcome, address: string): number 
   }
   if (r.saveError) {
     io.stderr(
-      `rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}). ` +
-        `If your TIA Portal has the project open, the station is in it unsaved: fix the cause (disk space, the folder's permissions) and save the project there, rather than uploading again, which would add a second station. ` +
-        `If rung opened the project itself, nothing was kept; upload again once the cause is fixed.\n`,
+      r.stationRemoved
+        ? `rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}), so rung took the station out again: the project is as it was. Fix the cause (disk space, the folder's permissions) and upload again.\n`
+        : `rung: the station "${r.station}" was read from ${address}, but the project could not be saved (${r.saveError}), and rung could not take the station out again. It is in the project unsaved: look at the project in TIA Portal before uploading again, which would add a second station.\n`,
     );
     return 3;
   }

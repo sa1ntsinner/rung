@@ -4,7 +4,9 @@ import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readdirSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WorkspaceIndex, uriOf, diagnostics, definition, references, hover, complete, rename, outline } from "../src/index.js";
+import { toYaml } from "@rung/core";
+import { VIEW_HEADER, toView } from "@rung/sync";
+import { WorkspaceIndex, uriOf, diagnostics, definition, references, hover, complete, rename, outline, nearest } from "../src/index.js";
 
 const fixtures = fileURLToPath(new URL("../../../tools/fixtures/scl/", import.meta.url));
 let root: string;
@@ -217,5 +219,91 @@ END_FUNCTION_BLOCK
     expect(plug.map((r) => r.uri.split("/").pop())).toEqual(["Q_Fb.scl", "Q_Start.db"]);
     const year = references(q, "file:///q/plc/P/types/Q_Stat.udt", UDT.indexOf("lastSync") + 1, false);
     expect(year.map((r) => q.docs.get(r.uri)!.text.slice(r.start, r.end))).toEqual(["lastSync", "lastSync", "lastSync"]);
+  });
+});
+
+describe("nearest", () => {
+  it("finds the name a typo meant: two letters off at most, one for short names, any letter case", () => {
+    expect(nearest("Strat", ["Stop", "Start"])).toBe("Start");
+    expect(nearest("FX_MOTR", ["Fx_Motor"])).toBe("Fx_Motor");
+    expect(nearest("ab", ["xy", "abc"])).toBe("abc");
+    expect(nearest("ab", ["xy"])).toBeUndefined();
+    expect(nearest("Throttle", ["Start", "Stop"])).toBeUndefined();
+  });
+});
+
+describe("names of a real project that no mirrored file declares", () => {
+  type Node = Parameters<typeof toView>[0];
+  const node = (type: string, name: string, attributes: Record<string, string> = {}, children: Record<string, Node[]> = {}): Node => ({ type, name, attributes, children });
+
+  it("knows the technology objects of `rung views`, each PLC its own", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "rung-lsp-to-"));
+    const src = 'FUNCTION "Fx_Count" : DInt\nBEGIN\n\t#Fx_Count := "Fx_Lift".Position;\n\t"Fx Axis".Enable := TRUE;\nEND_FUNCTION\n';
+    for (const plc of ["PLC_A", "PLC_B"]) {
+      mkdirSync(join(ws, "plc", plc, "blocks"), { recursive: true });
+      writeFileSync(join(ws, "plc", plc, "blocks", "Fx_Count.scl"), src);
+    }
+    const axes = node("TechnologicalInstanceDBUserGroup", "Drives", {}, { TechnologicalObjects: [node("TechnologicalInstanceDB", "Fx Axis", { InstanceOfName: "TO_SpeedAxis", Number: "7" })] });
+    const plcA = node("TechnologicalInstanceDBGroup", "PLC_A", {}, { TechnologicalObjects: [node("TechnologicalInstanceDB", "Fx_Lift", { InstanceOfName: "TO_PositioningAxis", Number: "5" })], Groups: [axes] });
+    mkdirSync(join(ws, "views", "techobjects"), { recursive: true });
+    writeFileSync(join(ws, "views", "techobjects", "PLC_A.yaml"), toYaml(toView(plcA), VIEW_HEADER));
+    writeFileSync(join(ws, "views", "techobjects", "PLC_B.yaml"), toYaml(toView(node("TechnologicalInstanceDBGroup", "PLC_B")), VIEW_HEADER));
+    const w = new WorkspaceIndex();
+    await w.load(ws);
+    const a = uriOf(join(ws, "plc", "PLC_A", "blocks", "Fx_Count.scl"));
+    const b = uriOf(join(ws, "plc", "PLC_B", "blocks", "Fx_Count.scl"));
+    expect(diagnostics(w, a)).toEqual([]);
+    expect(hover(w, a, src.indexOf('"Fx_Lift"') + 1)?.markdown).toBe("Technology object **Fx_Lift** : `TO_PositioningAxis` (DB 5)");
+    const def = definition(w, a, src.indexOf('"Fx Axis"') + 1)!;
+    expect(w.docs.get(def.uri)!.text.slice(def.start, def.end)).toBe("Fx Axis");
+    // PLC_B has none: the names stay unknown there, and its empty view is no object of its own
+    expect(diagnostics(w, b).map((d) => d.code)).toEqual(["UNKNOWN_GLOBAL", "UNKNOWN_GLOBAL"]);
+    expect(w.global("PLC_B")).toBeUndefined();
+  });
+
+  it("reads a DB's start values of quoted members as the DB's own", () => {
+    const db = 'DATA_BLOCK "Fx_Valves"\nVERSION : 0.1\n   VAR\n      "Valve 1" : Struct\n         "Open, delay" : Time;\n      END_STRUCT;\n   END_VAR\nBEGIN\n   "Valve 1"."Open, delay" := T#2s;\nEND_DATA_BLOCK\n';
+    const w = new WorkspaceIndex();
+    const uri = "file:///w/plc/P/blocks/Fx_Valves.db";
+    w.set(uri, db, 0);
+    const use = db.lastIndexOf('"Valve 1"') + 1;
+    expect(diagnostics(w, uri)).toEqual([]);
+    expect(hover(w, uri, use)?.markdown).toMatch(/\*\*Valve 1\*\* : `Struct`/);
+    expect(hover(w, uri, db.lastIndexOf('"Open, delay"') + 1)?.markdown).toMatch(/\*\*Open, delay\*\* : `Time`/);
+    expect(definition(w, uri, use)?.start).toBe(db.indexOf('"Valve 1"'));
+  });
+
+  it("gives no verdict on the start values of an instance DB whose FB is not in the workspace", () => {
+    const db = 'DATA_BLOCK "Fx_Pump_Inst"\nVERSION : 0.1\nNON_RETAIN\n"Lib_Pump"\n\nBEGIN\n   "Start delay" := T#2s;\n   Speed := 1.0;\nEND_DATA_BLOCK\n';
+    const w = new WorkspaceIndex();
+    const uri = "file:///w/plc/P/blocks/Fx_Pump_Inst.db";
+    w.set(uri, db, 0);
+    expect(diagnostics(w, uri)).toEqual([]);
+  });
+
+  it("knows an FC's return value by the FC's name", () => {
+    const udt = 'TYPE "Fx_Motor_Data"\nVERSION : 0.1\n   STRUCT\n      Speed : Real;\n   END_STRUCT;\nEND_TYPE\n';
+    const scale = 'FUNCTION "Fx_Scale" : Real\nVAR_INPUT\n   raw : Int;\nEND_VAR\nBEGIN\n   #Fx_Scale := INT_TO_REAL(#raw) / 10.0;\nEND_FUNCTION\n';
+    const make = 'FUNCTION "Fx_Make" : "Fx_Motor_Data"\nBEGIN\n   #Fx_Make.Speed := 1.0;\n   #Fx_Make.Nope := 2.0;\nEND_FUNCTION\n';
+    const w = new WorkspaceIndex();
+    const u = (n: string) => `file:///w/plc/P/blocks/${n}`;
+    w.set("file:///w/plc/P/types/Fx_Motor_Data.udt", udt, 0);
+    w.set(u("Fx_Scale.scl"), scale, 0);
+    w.set(u("Fx_Make.scl"), make, 0);
+    const at = scale.indexOf("#Fx_Scale") + 1;
+    expect(hover(w, u("Fx_Scale.scl"), at)?.markdown).toBe("Return value **Fx_Scale** : `Real`");
+    const g = w.global("Fx_Scale")!;
+    expect(definition(w, u("Fx_Scale.scl"), at)).toEqual({ uri: u("Fx_Scale.scl"), start: g.start, end: g.end });
+    expect(hover(w, u("Fx_Make.scl"), make.indexOf("Speed") + 1)?.markdown).toMatch(/\*\*Speed\*\* : `Real`/);
+    expect(diagnostics(w, u("Fx_Make.scl")).map((d) => [d.code, make.slice(d.start, d.end)])).toEqual([["UNKNOWN_MEMBER", "Nope"]]);
+  });
+
+  it("says what a hardware identifier is", () => {
+    const src = 'FUNCTION "Fx_Io" : Void\nVAR_TEMP\n   id : HW_IO;\nEND_VAR\nBEGIN\n   #id := "Rack_1~Valve_Module";\nEND_FUNCTION\n';
+    const w = new WorkspaceIndex();
+    const uri = "file:///w/plc/P/blocks/Fx_Io.scl";
+    w.set(uri, src, 0);
+    expect(diagnostics(w, uri)).toEqual([]);
+    expect(hover(w, uri, src.indexOf("Rack_1") + 1)?.markdown).toBe("Hardware identifier **Rack_1~Valve_Module** (a system constant of the device configuration)");
   });
 });
