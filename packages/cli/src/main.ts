@@ -57,7 +57,7 @@ Usage:
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <file|address> [--dir <workspace>]
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
-  rung test [dir] [--junit <file>] [--filter <text>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD)
+  rung test [dir] [--junit <file>] [--filter <text>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
@@ -302,7 +302,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
   "confirm-delete": { options: ["dir"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
-  test: { options: ["junit", "filter"], positionals: 1 },
+  test: { options: ["junit", "filter", "json"], positionals: 1 },
   live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
@@ -442,6 +442,15 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const index = new WorkspaceIndex();
         await index.load(ws);
         const results = await runTests(ws, index, v.filter as string | undefined);
+        if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
+        const count = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.length);
+        const failedOf = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.filter((c) => !c.passed).length);
+        if (v.json) {
+          // for editors (the VS Code test explorer): results with the line of every case and failing step
+          io.stdout(JSON.stringify({ files: results }, null, 2) + "\n");
+          const n = results.reduce((k, f) => k + count(f), 0);
+          return n ? (results.some((f) => failedOf(f)) ? 2 : 0) : 1;
+        }
         let failed = 0;
         for (const f of results) {
           if (f.error) {
@@ -461,7 +470,6 @@ export async function main(argv: string[], io: Io): Promise<number> {
             if (!c.passed) failed++;
           }
         }
-        if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         const total = results.reduce((n, f) => n + (f.error ? 1 : f.cases.length), 0);
         if (!total) {
           // a test file named without .test is read by nobody: name it

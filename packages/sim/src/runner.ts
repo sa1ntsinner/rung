@@ -2,7 +2,7 @@
 // rung test: YAML unit tests for SCL blocks, run on the offline simulator.
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { LineCounter, isMap, isSeq, parse as parseYaml, parseDocument } from "yaml";
 import { deviceOfUri, nearest, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { Simulator, SimError, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 
@@ -26,6 +26,8 @@ export interface TestFailure {
   name: string;
   expected: unknown;
   actual: unknown;
+  /** Line of the step in the test file (from 1). */
+  line?: number;
 }
 
 export interface CaseResult {
@@ -34,6 +36,8 @@ export interface CaseResult {
   failures: TestFailure[];
   error?: string;
   ms: number;
+  /** Line of the case in the test file (from 1). */
+  line?: number;
 }
 
 export interface FileResult {
@@ -369,7 +373,35 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     }
   }
   const plc = deviceOfUri(g.uri);
+  const at = testPositions(text);
+  for (const [ci, r] of results.entries()) {
+    const p = at[ci];
+    if (!p) continue;
+    r.line = p.line;
+    for (const f of r.failures) if (p.steps[f.step - 1]) f.line = p.steps[f.step - 1];
+  }
   return { file, block: blockName, ...(plc ? { plc } : {}), cases: results };
+}
+
+/** Where each case and each of its steps starts in a test file (lines from 1), for editors. */
+export function testPositions(text: string): { line: number; steps: number[] }[] {
+  const lines = new LineCounter();
+  let doc;
+  try {
+    doc = parseDocument(text, { lineCounter: lines });
+  } catch {
+    return [];
+  }
+  const lineOf = (n: unknown) => {
+    const range = (n as { range?: [number, number, number] | null } | null)?.range;
+    return range ? lines.linePos(range[0]).line : 0;
+  };
+  const cases = isMap(doc.contents) ? doc.contents.get("cases", true) : undefined;
+  if (!isSeq(cases)) return [];
+  return cases.items.map((c) => {
+    const steps = isMap(c) ? c.get("steps", true) : undefined;
+    return { line: lineOf(c), steps: isSeq(steps) ? steps.items.map(lineOf) : [] };
+  });
 }
 
 /** Runs every tests/**\/*.test.yaml in the workspace (or the given files). */

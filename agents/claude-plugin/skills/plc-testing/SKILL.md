@@ -1,11 +1,11 @@
 ---
 name: plc-testing
-description: Use when testing PLC logic in a rung workspace: writing tests/**/*.test.yaml for rung test (offline SCL simulator), checking a fix, reproducing a machine fault in simulation, or trying live-value features against rung simulate.
+description: Use when testing PLC logic in a rung workspace: writing tests/**/*.test.yaml for rung test (offline simulator), checking a fix, reproducing a machine fault in simulation, or trying live-value features against rung simulate.
 ---
 
 # Testing PLC logic with rung
 
-`rung test` runs FBs, FCs and PROGRAMs on an offline SCL simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no system instructions, no GRAPH/STL bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`), and LAD and FBD blocks kept as SimaticML `.xml`.
+`rung test` runs FBs, FCs and PROGRAMs on an offline simulator with virtual time: IEC timers and counters, edge detection, DB start values. It is fast, repeatable and runs in CI. It is not the PLC: no hardware timing, no communication, no GRAPH bodies. LAD blocks in `.s7dcl` run too (see `lad-in-text`), LAD and FBD blocks kept as SimaticML `.xml`, and STL blocks (`.awl`) with bit logic, L/T, integer and REAL arithmetic, compares, JU/JC/JCN and SD timers, following the STL manual's status-word rules (checked by unit tests, not on a PLC); anything else in an STL block is refused with the list of what is missing.
 
 ## A test file
 

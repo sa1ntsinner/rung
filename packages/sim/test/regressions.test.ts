@@ -99,14 +99,14 @@ describe("Simulator QA regressions", () => {
     expect([m.N, m.R, m.B3, m.W, m.B0, m.HI, m.LO, m.DW, m.WS, m.S, m.C]).toEqual([7, 0.25, true, 0xabf9, 0xf9, 0x12, 0x5678, 0xffffffff, "wide", "it's", "z"]);
   });
 
-  it("fails calls of STL blocks and technology objects with a clear message", () => {
+  it("fails calls of STL blocks the simulator does not run and of technology objects with a clear message", () => {
     const s = sim({
-      "file:///w/plc/P/blocks/Stl.awl": 'FUNCTION "Stl" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = x\n      A #a;\n      = #a;\nEND_FUNCTION\n',
+      "file:///w/plc/P/blocks/Stl.awl": 'FUNCTION "Stl" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = x\n      A #a;\n      = #a;\n      TAK;\nEND_FUNCTION\n',
       "file:///w/plc/P/technology/Axis_1.xml": "<to/>",
       U: fb("U", "VAR\n  p : MC_POWER;\n  mode : Int;\nEND_VAR", '  CASE #mode OF\n    1: "Stl"(a := TRUE);\n    2: #p(Axis := "Axis_1", Enable := TRUE);\n    3: #mode := "Axis_1".StatusWord;\n  END_CASE;'),
     });
     const i = s.newInstance("U");
-    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"Stl" is an STL block.*not simulated/);
+    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"Stl" uses STL instructions the simulator does not run yet: TAK/);
     expect(errorOf(() => s.callBlock(i, { mode: 2 }))).toMatch(/MC_POWER.*not simulated/);
     expect(errorOf(() => s.callBlock(i, { mode: 3 }))).toMatch(/"Axis_1" is a technology object.*not simulated/);
   });
@@ -121,6 +121,14 @@ describe("Simulator QA regressions", () => {
     expect(s.callBlock("Use").returnValue).toBe(200 + 16 + 5);
     expect((s.globals.D as { PLUG: { DELAY: number } }).PLUG.DELAY).toBe(1000);
     expect(((s.globals.INST as Instance).mem.T1 as Instance).mem.PT).toBe(2000);
+  });
+
+  it("applies a DB's start values of members with quoted names", () => {
+    const s = sim({
+      "file:///w/plc/P/blocks/Fx_Valves.db": 'DATA_BLOCK "Fx_Valves"\nVAR\n  "Valve 1" : Struct\n    "Open, delay" : Time;\n  END_STRUCT;\nEND_VAR\nBEGIN\n  "Valve 1"."Open, delay" := T#2s;\nEND_DATA_BLOCK\n',
+      Use: 'FUNCTION "Use" : Time\nBEGIN\n  #Use := "Fx_Valves"."Valve 1"."Open, delay";\nEND_FUNCTION\n',
+    });
+    expect(s.callBlock("Use").returnValue).toBe(2000);
   });
 
   it("runs IEC_TIMER / IEC_COUNTER instances and CTU_INT-style counters", () => {

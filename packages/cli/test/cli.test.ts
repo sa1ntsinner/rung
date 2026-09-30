@@ -265,6 +265,19 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toContain("FAIL tests/typo.test.yaml: block Fx_Rn not found (did you mean Fx_Run?)\n");
   });
 
+  it("test --json gives editors every result with the line of its case and failing step", async () => {
+    const t = setup();
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: starts\n    steps:\n      - { set: { Start: true }, cycle: 1, expect: { Running: true } }\n  - name: stops\n    steps:\n      - set: { Start: false }\n      - cycle: 1\n      - expect: { Running: true }\n");
+    expect(await t.run("test", "--json")).toBe(2);
+    const r = JSON.parse(t.out.join("")) as { files: { file: string; cases: { name: string; passed: boolean; line: number; failures: { step: number; line: number }[] }[] }[] };
+    expect(r.files.map((f) => [f.file, f.cases.map((c) => [c.name, c.passed, c.line, c.failures.map((x) => [x.step, x.line])])])).toEqual([
+      ["tests/run.test.yaml", [["starts", true, 3, []], ["stops", false, 6, [[3, 10]]]]],
+    ]);
+  });
+
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
     expect(await t.run("test")).toBe(1);

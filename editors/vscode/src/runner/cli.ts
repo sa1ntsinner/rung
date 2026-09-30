@@ -21,6 +21,8 @@ export interface CaptureOptions {
   timeoutMs?: number;
   /** Log only with verbosity "verbose" unless it fails (background refreshes). */
   quiet?: boolean;
+  /** Stops the process when cancelled (a test run the person stopped). */
+  token?: vscode.CancellationToken;
 }
 
 export interface Finished {
@@ -80,7 +82,7 @@ export class RungCli implements vscode.Disposable {
     };
     const result = opts.progress
       ? await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: opts.progress, cancellable: !!opts.cancellable }, (_p, token) => exec(token))
-      : await exec();
+      : await exec(opts.token);
     this.report(inv, result);
     if (!opts.quiet || result.code !== 0) this.out.block(result.output, result.code !== 0);
     this.finished.fire({ args, result });

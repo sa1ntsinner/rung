@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: MIT
+// The test explorer's model of tests/**/*.test.yaml: the cases a file lists (found without running rung), and
+// the results `rung test --json` prints, with the line of every case and of every step that failed.
+
+export interface CaseEntry {
+  name: string;
+  /** Line of the case in the file, from 0. */
+  line: number;
+}
+
+export interface TestFailure {
+  step: number;
+  name: string;
+  expected: unknown;
+  actual: unknown;
+  /** Line of the step, from 1 (as rung prints it). */
+  line?: number;
+}
+
+export interface CaseResult {
+  name: string;
+  passed: boolean;
+  failures: TestFailure[];
+  error?: string;
+  ms: number;
+  line?: number;
+}
+
+export interface FileResult {
+  file: string;
+  block: string;
+  plc?: string;
+  cases: CaseResult[];
+  error?: string;
+}
+
+/**
+ * The cases of a test file, read line by line (the file may be half-written while it is edited; the run
+ * brings rung's own reading of it): `- name: …` entries under `cases:`, and cases without a name as "case N".
+ */
+export function casesIn(text: string): CaseEntry[] {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^cases\s*:/.test(l));
+  if (start < 0) return [];
+  const out: CaseEntry[] = [];
+  let indent: number | undefined;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i]!;
+    if (/^\S/.test(l) && !/^-/.test(l)) break; // the next top-level key
+    const m = /^(\s*)-\s*(\{\s*)?(.*)$/.exec(l);
+    if (!m) continue;
+    const depth = m[1]!.length;
+    indent ??= depth;
+    if (depth !== indent) continue; // a step or a list inside a case
+    // - name: starts, latches and stops   /   - { name: stops, steps: [...] }
+    const rest = m[3]!;
+    const name = m[2] ? /(?:^|[\s,])name\s*:\s*("[^"]*"|'[^']*'|[^,}#]*)/.exec(rest)?.[1]?.trim() : /^name\s*:\s*("[^"]*"|'[^']*'|.*?)\s*(?:\s#.*)?$/.exec(rest)?.[1];
+    out.push({ name: name ? unquote(name) : `case ${out.length + 1}`, line: i });
+  }
+  return out;
+}
+
+const unquote = (s: string) => (/^(["']).*\1$/.test(s) ? s.slice(1, -1) : s);
+
+/** The JSON `rung test --json` printed, out of everything the process wrote (warnings may come before it). */
+export function parseResults(output: string): FileResult[] | undefined {
+  const start = output.indexOf('{\n  "files"');
+  const from = start >= 0 ? start : output.indexOf("{");
+  const end = output.lastIndexOf("}");
+  if (from < 0 || end < from) return undefined;
+  try {
+    const r = JSON.parse(output.slice(from, end + 1)) as { files?: FileResult[] };
+    return Array.isArray(r.files) ? r.files : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A failure as the explorer shows it: which step and name, and the two values to compare. */
+export function failureText(f: TestFailure): { message: string; expected: string; actual: string } {
+  const show = (v: unknown) => (typeof v === "string" && /^<.*>$/.test(v) ? v : JSON.stringify(v));
+  return { message: `step ${f.step}: ${f.name} expected ${JSON.stringify(f.expected)} got ${show(f.actual)}`, expected: show(f.expected), actual: show(f.actual) };
+}

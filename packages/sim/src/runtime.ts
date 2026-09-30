@@ -2,7 +2,8 @@
 // Offline SCL simulator: executes FB/FC bodies with virtual time for unit tests.
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
 // (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
-import { STANDARD_BY_NAME, SYSTEM_TYPES, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
+import { STANDARD_BY_NAME, SYSTEM_TYPES, parseAbsolute, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
+import { parseStl, runStl, type S5Timer, type StlProgram } from "./stl.js";
 import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
 import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
@@ -212,6 +213,9 @@ export class Simulator {
   private readonly bodies = new WeakMap<BlockModel, Map<string, Stmt[]>>();
   private readonly consts = new WeakMap<BlockModel, Map<string, Struct>>();
   private blockUris = new WeakMap<BlockModel, string>();
+  private readonly stlPrograms = new WeakMap<BlockModel, StlProgram>();
+  /** The S5 timers STL starts with SD, by the timer tag. */
+  private readonly s5timers = new Map<string, S5Timer>();
   private steps = 0;
   private depth = 0;
 
@@ -434,9 +438,11 @@ export class Simulator {
   /** DB start values from the BEGIN part (`cnt := 200;`, `T1.PT := T#2s;`) override declared defaults. */
   private applyStartValues(b: BlockModel, value: Value) {
     if (b.bodyStart === undefined) return;
-    const stmts = this.body(b);
-    if (!stmts.length) return;
     const mem = isInstance(value) ? value.mem : (value as Struct);
+    // "Valve 1".delay := T#2s; names the DB's own member, as Counter := 0; does
+    const own = (s: Stmt): Stmt => (s.k === "assign" && s.target.root.kind === "global" && s.target.root.name.toUpperCase() in mem ? { ...s, target: { ...s.target, root: { kind: "ident", name: s.target.root.name } } } : s);
+    const stmts = this.body(b).map(own);
+    if (!stmts.length) return;
     this.exec(stmts, { block: b, mem, temps: {} });
   }
 
@@ -1159,6 +1165,7 @@ export class Simulator {
 
   /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
   private runBody(b: BlockModel, frame: Frame, accessor?: "get" | "set") {
+    if (b.stl) return this.runStlBody(b, frame);
     try {
       this.exec(this.body(b, accessor), frame);
     } catch (e) {
@@ -1167,6 +1174,43 @@ export class Simulator {
       if (e instanceof Goto) throw new SimError(`GOTO ${e.label}: ${b.name} has no label ${e.label}: in a statement list around the GOTO`, b.name, e.at);
       throw e;
     }
+  }
+
+  /** An STL block (stl.ts): parsed once, and refused before it runs when it uses instructions outside the subset. */
+  private runStlBody(b: BlockModel, frame: Frame) {
+    let p = this.stlPrograms.get(b);
+    if (!p) {
+      p = parseStl(this.index.docs.get(this.uriOf(b))!.text, b.bodyStart ?? b.start, b.end);
+      // an FC's return value is #RET_VAL in STL
+      if (b.returnType && !b.vars.some((v) => v.name.toUpperCase() === "RET_VAL"))
+        for (const c of p.code) if (c.operand.kind === "var" && c.operand.ref.root.kind === "local" && c.operand.ref.root.name.toUpperCase() === "RET_VAL") c.operand.ref = { ...c.operand.ref, root: { kind: "local", name: b.name } };
+      this.stlPrograms.set(b, p);
+    }
+    if (p.missing.length) throw new SimError(`"${b.name}" uses STL instructions the simulator does not run yet: ${p.missing.join(", ")}`, b.name);
+    const at = (ref: LRef) => `${ref.root.kind === "global" ? `"${ref.root.name}"` : ref.root.name}${JSON.stringify(ref.path)}`.toUpperCase();
+    runStl(p, {
+      read: (ref) => this.read(ref, frame),
+      write: (ref, v) => this.write(ref, v, frame),
+      typeOf: (ref) => {
+        const d = this.declOf(ref, frame);
+        return d && !d.isArray && !d.members?.length ? (d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase() : undefined;
+      },
+      tagAt: (address) => {
+        const a = parseAbsolute(address)?.address;
+        const g = a ? this.index.allGlobals().find((s) => s.tag?.address && parseAbsolute(s.tag.address)?.address === a) : undefined;
+        return g ? { root: { kind: "global", name: g.name }, path: [], start: 0 } : undefined;
+      },
+      now: () => this.time,
+      timer: (ref) => {
+        let t = this.s5timers.get(at(ref));
+        if (!t) this.s5timers.set(at(ref), (t = { running: false, start: 0, preset: 0, last: false }));
+        return t;
+      },
+      tick: (offset) => this.tick(frame, offset),
+      fail: (message, offset) => {
+        throw new SimError(message, b.name, offset);
+      },
+    });
   }
 
   private callFc(b: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null, capture?: Struct): Value {

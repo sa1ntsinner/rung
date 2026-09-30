@@ -1,12 +1,13 @@
-# Unit tests for SCL and LAD blocks (`rung test`)
+# Unit tests for SCL, LAD, FBD and STL blocks (`rung test`)
 
-rung runs unit tests for SCL and LAD function blocks and functions on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
+rung runs unit tests for SCL, LAD, FBD and STL function blocks and functions on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
 
 ```
 rung test                       # all tests/**/*.test.yaml
 rung test --filter motor        # only files whose path contains "motor"
 rung test --filter Fx_Motor     # only the tests of the block Fx_Motor
 rung test --junit report.xml    # JUnit XML for CI
+rung test --json                # every result with the line of its case and failing step (VS Code's Testing view uses it)
 ```
 
 ## Test file
@@ -51,7 +52,15 @@ cases:
   - Where the PLC's result is not modelled, the test stops and says why instead of guessing: a TIME beyond ±24 days, a TOD past midnight, overlapping or too long block moves, VAL_STRG into the middle of a string or wider than SIZE, an ARRAY of BOOL for CountOfElements, TypeOf of an ARRAY (use TypeOfElements), copies between two data types, multi-dimensional arrays for MOVE_BLK_VARIANT.
 - LAD blocks mirrored as SIMATIC SD (`.s7dcl`): contacts, negated contacts, coils, set/reset coils, parallel branches, IEC timer/counter/trigger boxes, comparisons, MOVE, ADD/SUB/MUL/DIV/MOD and calls of FBs and FCs. A block with anything else (edge contacts, for example) is refused with the list of what is missing.
 - LAD and FBD blocks kept as SimaticML (`.xml`: every LAD block with network titles or comments, and every FBD block), read network by network from TIA Portal's export: contacts (negated, P and N edge contacts), coils (negated, set, reset, P and N coils), P_TRIG/N_TRIG, NOT, parallel branches and branches that split, FBD AND/OR/XOR with negated inputs, SR and RS, comparisons, IN_RANGE/OUT_RANGE, MOVE, ADD/SUB/MUL/DIV/MOD/NEG, ABS/SQRT/SQR/LN/EXP and the trigonometric functions, MIN/MAX/LIMIT/SEL, SHL/SHR, CONVERT/ROUND/TRUNC/CEIL/FLOOR, INC/DEC, IEC timers, counters and triggers, and calls of FBs and FCs with EN and ENO. Where a branch splits, the power flow is taken once, as the PLC does. A network with anything else, and an SCL or STL network inside such a block, is refused with the network and what it holds.
+- STL blocks (`.awl`), interpreted with the status word (RLO, /FC, OR, the nesting stack) and the two accumulators as the S7-300/400 STL reference manual describes them. This is checked by unit tests (truth tables, accumulator widths, timer timing), not against a PLC.
+  - Bit logic: `A`, `AN`, `O`, `ON`, `O` without an operand, `A(`, `AN(`, `O(`, `ON(`, `)` (at most 7 levels), `=`, `S`, `R`, `SET`, `CLR`, `FP`, `FN`.
+  - Load and transfer: `L`, `T` of Byte, Word, Int, UInt, DWord, DInt, UDInt, Real, Time, TOD and S5Time variables and constants (`5`, `L#70000`, `16#FF`, `W#16#1234`, `1.5`, `T#2s`, `S5T#2s`). L clears ACCU1 first, so an Int of -1 is 16#0000FFFF until `ITD`.
+  - Accumulator: `+I`, `-I`, `*I`, `/I`, `+D`, `-D`, `*D`, `/D`, `+R`, `-R`, `*R`, `/R`, `ITD`, `DTR`, `RND` (half way to the even number), `TRUNC`, `CAW`, `CAD`; compares `==I`, `<>I`, `>I`, `<I`, `>=I`, `<=I` and the same for D and R.
+  - Jumps and ends: `JU`, `JC`, `JCN` to labels (RLO = 1 afterwards, jump or not), `NOP`, `BE`, `BEU`.
+  - Timers: `SD`, the S5 on-delay timer, on a PLC tag of type Timer (%T), with its S5TIME from a constant, a Word (time base and BCD) or an S5Time variable, on virtual time; `A`, `AN`, `O`, `ON` read its status.
+  - Operands: locals, DB members, PLC tags, and absolute addresses (`%I0.0`) that have a PLC tag; an FC's `#RET_VAL` is its return value.
+  - Refused before the block runs, with the list: everything else (CALL, TAK/PUSH/POP, OPN and absolute DB addresses, AR1/AR2, indirect addressing, pointers, and any instruction that reads CC0, CC1, OV, OS or BR). Refused when reached, where the manual leaves the result open: a compare inside a running logic string (start the string with it or put it in `A( … )`), a jump inside `A( … )`, and a network that starts while the logic string of the one before is still open.
 
 ## What it does not do
 
-It is a logic simulator, not an emulation of the S7-1500 runtime: no other system instructions (communication such as TSEND, TRCV, MB_CLIENT; motion and technology objects; diagnostics such as RDREC, WRREC; data logging; `S_CONV`, `STRG_VAL`, `T_CONV`, `T_COMBINE` and VAL_STRG in exponential notation), which stop the test with their name; no GRAPH or STL blocks, no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS), and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.
+It is a logic simulator, not an emulation of the S7-1500 runtime: no other system instructions (communication such as TSEND, TRCV, MB_CLIENT; motion and technology objects; diagnostics such as RDREC, WRREC; data logging; `S_CONV`, `STRG_VAL`, `T_CONV`, `T_COMBINE` and VAL_STRG in exponential notation), which stop the test with their name; no GRAPH blocks, no STL beyond the instructions above (nor STL blocks TIA Portal keeps as SimaticML), no OB scheduling or interrupts, no pointer arithmetic, no FB inheritance (EXTENDS), and timing is exactly the virtual cycle you configure. Use it for logic regression tests; validate timing and hardware behaviour in PLCSIM or on the machine.

@@ -18,6 +18,7 @@ import { TerminalPool } from "./runner/terminal";
 import { WatchController } from "./runner/watch";
 import { readSettings } from "./settings";
 import { StatusBar } from "./statusBar";
+import { registerTests } from "./testing";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -117,6 +118,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     }),
   );
   registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp });
+  registerTests(context, ws, cli);
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
   context.subscriptions.push(

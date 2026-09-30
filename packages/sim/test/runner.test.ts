@@ -48,7 +48,7 @@ describe("rung test runner", () => {
       ["clamps the setpoint", true],
       ["a wrong expectation fails with details", false],
     ]);
-    expect(r.cases[2]!.failures).toEqual([{ step: 3, name: "Running", expected: false, actual: true }]);
+    expect(r.cases[2]!.failures).toEqual([{ step: 3, name: "Running", expected: false, actual: true, line: 24 }]);
   });
 
   it("uses virtual time for timers (advance) and TIME literals in expectations", async () => {
@@ -80,7 +80,7 @@ describe("rung test runner", () => {
       [true, undefined],
       [false, undefined],
     ]);
-    expect(r.cases[1]!.failures).toEqual([{ step: 1, name: "Running", expected: true, actual: false }]);
+    expect(r.cases[1]!.failures).toEqual([{ step: 1, name: "Running", expected: true, actual: false, line: 8 }]);
     const bad = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - cycle: 1\n        expct: { Running: true }\n");
     expect(bad.cases[0]!.error).toMatch(/unknown step "expct"/);
   });
@@ -101,6 +101,31 @@ describe("rung test runner", () => {
     expect((await one("      - cycle: 1\n      - expect: { Opn: true }\n", "Fx_Valve")).cases[0]!.failures[0]!.actual).toBe("<Opn does not exist (did you mean Open?)>");
     // nothing close: the message stays as it was
     expect((await one("      - set: { Throttle: 1 }\n")).cases[0]!.error).toBe("Throttle does not exist");
+  });
+
+  it("runs an STL FC: set the globals it reads, advance virtual time, expect what it wrote", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/tags/Fx_Tags.tags.st", "VAR_GLOBAL\n    Fx_Delay AT %T3 : Timer;\nEND_VAR\n", 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Io.db", 'DATA_BLOCK "Fx_Io"\nVERSION : 0.1\n   VAR\n      start : Bool;\n      lamp : Bool;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n', 0);
+    const stl = 'FUNCTION "Fx_Lamp" : Void\n{ S7_Optimized_Access := \'TRUE\' }\nVERSION : 0.1\nBEGIN\nNETWORK\nTITLE = delay\n      A     "Fx_Io".start;\n      L     S5T#1S;\n      SD    "Fx_Delay";\nNETWORK\nTITLE = lamp\n      A     "Fx_Delay";\n      =     "Fx_Io".lamp;\nEND_FUNCTION\n';
+    idx.set("file:///w/plc/P/blocks/Fx_Lamp.awl", stl, 0);
+    const yaml = [
+      "block: Fx_Lamp",
+      "cycle: 100ms",
+      "cases:",
+      "  - name: lights one second after start, goes out with it",
+      "    steps:",
+      "      - set: { '\"Fx_Io\".start': true }",
+      "      - advance: 900ms",
+      "      - expect: { '\"Fx_Io\".lamp': false }",
+      "      - advance: 200ms",
+      "      - expect: { '\"Fx_Io\".lamp': true }",
+      "      - set: { '\"Fx_Io\".start': false }",
+      "      - cycle: 1",
+      "      - expect: { '\"Fx_Io\".lamp': false }",
+    ].join("\n");
+    const r = await runTestFile(idx, "tests/lamp.test.yaml", yaml);
+    expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
   });
 
   it("addresses array elements in set/expect and keeps FC IN_OUT values between cycles", async () => {

@@ -17,7 +17,7 @@ Where rung is different:
 
 - One workflow for several vendors. The same file format, language server, test runner and agent tools for TIA Portal and CODESYS projects, and for TwinCAT sources.
 - The mirror keeps running. Edits in both places merge, SCL by line and LAD or FBD network by network, a real conflict stops for a person, and an interrupted sync picks up where it stopped.
-- Tests run without the engineering software or a PLC licence, in seconds, so every pull request can run them.
+- Tests run without the engineering software or a PLC licence, in seconds, so every pull request can run them: SCL, LAD, FBD, STL and structured text, with a list of what the simulator does not model instead of a guess.
 - It does not pick your editor, your agent or your Git host. The workspace is plain files in an open format.
 
 What rung is not: a replacement for TIA Portal or CODESYS, or a way around their licences. Downloads to a PLC are always started by a person.
