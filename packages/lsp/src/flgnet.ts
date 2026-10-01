@@ -611,6 +611,41 @@ function operandText(a: XmlNode): string {
     .join("");
 }
 
+function stlOperandText(a: XmlNode): string {
+  const text = operandText(a);
+  if (!/^(LiteralConstant|TypedConstant)$/.test(a.attrs.Scope?.value ?? "")) return text;
+  const c = kid(a, "Constant");
+  const type = kid(c, "ConstantType")?.text.trim().toUpperCase() ?? "";
+  const raw = kid(c, "ConstantValue")?.text.trim() ?? "";
+  const value = raw.toUpperCase().startsWith(`${type}#`) ? raw.slice(type.length + 1) : raw;
+  switch (type) {
+    case "DINT":
+      return /^L#/i.test(value) ? value : `L#${value}`;
+    case "REAL":
+      return /^[+-]?[\d_]+$/.test(value) ? `${value}.0` : value;
+    case "TIME":
+      return /^T#/i.test(value) ? value : `T#${value}`;
+    case "S5TIME":
+      return /^S5T#/i.test(value) ? value : `S5T#${value}`;
+    case "BYTE":
+    case "WORD":
+    case "DWORD": {
+      const prefix = type === "BYTE" ? "B" : type === "WORD" ? "W" : "DW";
+      if (new RegExp(`^${prefix}#`, "i").test(value)) return value;
+      return `${prefix}#${/^(2|8|16)#/i.test(value) ? value : `16#${Number(value.replace(/_/g, "")).toString(16).toUpperCase()}`}`;
+    }
+    case "CHAR":
+      return value.startsWith("'") ? value : `'${value.replace(/'/g, "$'")}'`;
+    case "BOOL":
+      return /^(true|1)$/i.test(value) ? "TRUE" : "FALSE";
+    case "LREAL":
+      // The STL interpreter has 32-bit ACCUs; keep the type so it refuses a wider constant instead of narrowing it.
+      return `LREAL#${value}`;
+    default:
+      return text;
+  }
+}
+
 /** STL tokens of SimaticML whose names are not the mnemonics (TIA Portal writes = as Assign); an empty line is none. */
 const STL_TOKEN: Record<string, string> = { ASSIGN: "=", ADD: "+", EMPTY_LINE: "" };
 /** Mnemonics that write their operand (FP and FN their edge memory). */
@@ -659,9 +694,7 @@ function stlNetwork(list: XmlNode): { text: string; missing: string[]; refs: Ref
         operand = params.length ? `${head} (${params.join(", ")})` : head;
       } else if (access) {
         accessRefs(access, STL_WRITES.has(op.toUpperCase()) ? "write" : "read", refs);
-        operand = operandText(access);
-        // + of a 32-bit constant: L#
-        if (op === "+" && /^dint$/i.test(kid(kid(access, "Constant"), "ConstantType")?.text.trim() ?? "")) operand = `L#${operand}`;
+        operand = stlOperandText(access);
       }
     } catch (e) {
       missing.add((e as Error).message);

@@ -32,7 +32,9 @@ runs:
       run: |
         mkdir -p "$RUNNER_TEMP/rung"
         if [ "$VERSION" = "latest" ]; then tag=(); else tag=("$VERSION"); fi
-        gh release download "${tag[@]}" --repo sa1ntsinner/rung --pattern rung.cjs --dir "$RUNNER_TEMP/rung" --clobber
+        gh release download "${tag[@]}" --repo sa1ntsinner/rung --pattern rung.cjs --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/rung" --clobber
+        # against the release's own checksum list: a damaged or replaced rung.cjs stops here
+        node "$GITHUB_ACTION_PATH/tools/release/verify.mjs" "$RUNNER_TEMP/rung" rung.cjs
     - name: rung test
       shell: bash
       env:

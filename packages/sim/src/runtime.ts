@@ -3,7 +3,7 @@
 // It models SCL semantics closely enough for logic tests; it is not a bit-exact TIA/PLCSIM emulation
 // (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, parseAbsolute, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
-import { parseStl, runStl, type S5Timer, type StlCall, type StlHost, type StlProgram } from "./stl.js";
+import { parseStl, runStl, stlState, type S5Timer, type StlCall, type StlHost, type StlProgram, type StlState } from "./stl.js";
 import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
 import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
@@ -82,6 +82,7 @@ interface Frame {
   inst?: Instance;
   /** The accessor of a PROPERTY that runs: its own locals, not the other accessor's. */
   accessor?: "get" | "set";
+  stl?: { network: number; state: StlState };
 }
 
 class Exit {}
@@ -146,7 +147,7 @@ function sliceSet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }
   const mask = ((1n << width) - 1n) << shift;
   const v = BigInt(typeof base === "boolean" ? (base ? 1 : 0) : Math.trunc(Number(base ?? 0)));
   const nv = (BigInt(s.slice === "X" ? (value ? 1 : 0) : Math.trunc(Number(value ?? 0))) << shift) & mask;
-  return Number((v & ~mask) | nv);
+  return exactInteger((v & ~mask) | nv);
 }
 
 /** The declaration of what a POINTER TO / REFERENCE TO points at. */
@@ -1333,8 +1334,18 @@ export class Simulator {
     const p = this.stlProgram(b, String(n), () => parseStl(net.source, 0, net.source.length));
     const fail = (message: string) => new SimError(`STL network ${net.network}: ${message}`, b.name);
     if (p.missing.length) throw fail(`uses STL instructions the simulator does not run yet: ${p.missing.join(", ")}`);
-    // each STL network runs with a status word of its own; one whose logic string would go on into the next network is refused
-    runStl(p, this.stlHost(b, frame, fail), net.last ? {} : { endOpen: "the logic string is still open at the end of the network (on the PLC it goes on in the next one): not simulated" });
+    const previous = frame.stl;
+    // SCL/LAD compiler code is not executed as STL, so its ACCUs and RLO are unknown; a new string starts with /FC = 0.
+    const state = previous?.network === net.network - 1 ? previous.state : stlState(net.network === 1);
+    frame.stl = { network: net.network, state };
+    const next = b.stlNetworks?.[n + 1];
+    // a string still open at the end of the block ends with it, as in an .awl block
+    const goesOn = net.last || next?.network === net.network + 1;
+    const ended = runStl(p, this.stlHost(b, frame, fail), {
+      state,
+      endOpen: goesOn ? undefined : "the logic string is still open at the end of the network and cannot continue in STL: not simulated",
+    });
+    if (ended) throw new Return();
   }
 
   /** The parsed STL of a block (key: "" for an .awl body, the network for a SimaticML block), with #RET_VAL as the FC's return value. */
@@ -1466,14 +1477,15 @@ export class Simulator {
 
   private bindReference(e: Expr, caller: Frame | null): Pointer {
     if (e.k === "ref") {
-      const at = this.locate(e.ref, caller, true);
+      // the array indices evaluated once, as the PLC evaluates an actual parameter once (an index may call an FC)
+      const ref = { ...e.ref, path: e.ref.path.map((s) => ("index" in s ? { index: s.index.map((x): Expr => ({ k: "lit", value: Number(this.eval(x, caller)), type: "int" })) } : s)) };
+      const at = this.locate(ref, caller, true);
       const raw = (at.obj as Struct)[at.key as string] ?? (at.obj as Value[])[at.key as number];
       if (isPointer(raw) && raw.variant) return raw;
       const decl = this.declOf(e.ref, caller);
-      // found again from its root at every use, its array indices as they are now: an assignment to the structure
-      // or array around it ("DB".point := "DB".other) replaces the storage, not the variable
-      const via = { ref: { ...e.ref, path: e.ref.path.map((s) => ("index" in s ? { index: s.index.map((x): Expr => ({ k: "lit", value: Number(this.eval(x, caller)), type: "int" })) } : s)) }, frame: caller };
-      return { __ptr: this.locate(e.ref, caller), ref: true, variant: decl ? { decl } : {}, via };
+      // found again from its root at every use, with those indices: an assignment to the structure or array around
+      // it ("DB".point := "DB".other) replaces the storage, not the variable
+      return { __ptr: this.locate(ref, caller), ref: true, variant: decl ? { decl } : {}, via: { ref, frame: caller } };
     }
     const decl = this.staticDecl(e, caller);
     return { __ptr: { obj: [this.eval(e, caller)], key: 0 }, ref: true, variant: decl ? { decl } : {} };

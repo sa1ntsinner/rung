@@ -81,6 +81,15 @@ describe("VARIANT parameters", () => {
     expect(errorOf(() => run(s, "Wrong"))).toBe("VARIANTPUT: SRC is Int and DST is Real: it copies between one data type only");
   });
 
+  it("binds an array element whose index has a side effect once, to the element it picked", () => {
+    const s = sim({
+      Next: fc("Next", "Int", "VAR_IN_OUT\n  c : Int;\nEND_VAR", "  #c := #c + 1;\n  #Next := #c;"),
+      Put: fc("Put", "Void", "VAR_IN_OUT\n  v : Variant;\nEND_VAR\nVAR_TEMP\n  x : Int;\nEND_VAR", "  #x := 42;\n  VariantPut(SRC := #x, DST := #v);"),
+      Caller: fb("Caller", "VAR\n  a : Array[1..3] of Int;\n  n : Int;\nEND_VAR", '  "Put"(v := #a["Next"(c := #n)]);'),
+    });
+    expect(run(s, "Caller")).toMatchObject({ N: 1, A: { items: [42, 0, 0] } });
+  });
+
   it("MOVE_BLK_VARIANT copies elements by 0-based index, into an array or a single variable, and returns 0", () => {
     // the pattern of a min search over any array: one element at a time into a variable of the element type
     const minOf = fc(

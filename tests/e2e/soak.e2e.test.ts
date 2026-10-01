@@ -123,6 +123,25 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         if (/\bat .+\.(js|ts):\d+/.test(r.out)) problems.push(`${what}: a stack trace\n${r.out}`);
         return r;
       };
+      // after a pass that ran to its end, both people's last values are in the file and in TIA Portal: checked at the
+      // end only, a later edit could hide a value lost in between
+      const kept = async (what: string, r: { killed: boolean; code: number | null }, skip: string[] = []) => {
+        if (r.killed || r.code === null || r.code > 2) return;
+        for (const n of NAMES) {
+          if (!exists.get(n) || skip.includes(n)) continue;
+          const file = join(ws, ...rel(n).split("/"));
+          const texts: [string, string][] = [["the file", existsSync(file) ? readFileSync(file, "utf8") : ""], ["TIA Portal", ""]];
+          try {
+            const x = await user.exportObject(addr(n), "auto", mkdtempSync(join(tmpdir(), "rung-soak-tia-")));
+            texts[1]![1] = readFileSync(x.files.find((f) => f.role === "primary")!.path, "utf8");
+          } catch (e) {
+            if (!(e instanceof BridgeError && e.code === "NOT_FOUND")) throw e;
+          }
+          for (const [where, text] of texts)
+            for (const line of [`#l1 := ${l1.get(n)};`, `#l4 := ${l4.get(n)};`])
+              if (!text.includes(line)) problems.push(`${what}: ${line} of ${n} is not in ${where} after the pass\n${text}`);
+        }
+      };
 
       const deadline = Date.now() + minutes * 60_000;
       let step = 0;
@@ -141,17 +160,17 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
           exists.set(n, true);
           l1.set(n, v);
           l4.set(n, 0);
-          await sync(label, rand() < 0.5 ? 200 + Math.floor(rand() * 3300) : undefined);
+          await kept(label, await sync(label, rand() < 0.5 ? 200 + Math.floor(rand() * 3300) : undefined));
         } else if (action === "file") {
           fileEdit(n, v);
-          await sync(label);
+          await kept(label, await sync(label));
         } else if (action === "tia") {
           await tiaEdit(n, v);
-          await sync(label);
+          await kept(label, await sync(label));
         } else if (action === "both") {
           fileEdit(n, v);
           await tiaEdit(n, v);
-          await sync(label);
+          await kept(label, await sync(label));
         } else if (action === "concurrent") {
           fileEdit(n, v);
           const other = pick(present);
@@ -160,11 +179,11 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         } else if (action === "kill") {
           fileEdit(n, v);
           if (rand() < 0.5) await tiaEdit(pick(present), counter++);
-          await sync(label, 200 + Math.floor(rand() * 3300)); // a sync of the fixture takes 1.5–3 s
+          await kept(label, await sync(label, 200 + Math.floor(rand() * 3300))); // a sync of the fixture takes 1.5–3 s
         } else if (action === "delete") {
-          await sync(`${label} (before)`);
+          await kept(`${label} (before)`, await sync(`${label} (before)`));
           unlinkSync(join(ws, ...rel(n).split("/")));
-          await sync(label);
+          await kept(label, await sync(label), [n]); // n waits in TIA Portal for confirm-delete
           if (existsSync(join(ws, ...rel(n).split("/")))) {
             log(`${label}: the file came back (TIA changed it meanwhile)`);
             continue;

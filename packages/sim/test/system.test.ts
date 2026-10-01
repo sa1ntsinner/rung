@@ -54,6 +54,10 @@ describe("system instructions", () => {
       Big: fb("Big", "VAR\n  o : LWord;\nEND_VAR", "  #o := LWORD#16#FFFF_FFFF_FFFF_FFFF;"),
       // 2^55 / 5 is 7205759403792793.6: the quotient of two doubles rounds up to ...94 before it is cut
       Div: fb("Div", "VAR\n  l : LInt := 36028797018963968;\n  o : LInt;\nEND_VAR", "  #o := #l / 5;"),
+      // a bit or a byte into a 64-bit value: 2^53 + 1 has no double, 2^53 + 2 has one
+      Bit0: fb("Bit0", "VAR\n  w : LWord := 9007199254740992;\nEND_VAR", "  #w.%X0 := TRUE;"),
+      Bit1: fb("Bit1", "VAR\n  w : LWord := 9007199254740992;\nEND_VAR", "  #w.%X1 := TRUE;"),
+      Byte0: fb("Byte0", "VAR\n  w : LWord := 9007199254740992;\nEND_VAR", "  #w.%B0 := 16#03;"),
     });
     expect(run(s, "Wide")).toMatchObject({ SW: Number(0xff00_0000_0000_0000n), SHL64: 0, SHL63: 2 ** 63, RIGHT: 1, BOTH: Number(0xf000_0000_0000_0000n) });
     expect(run(s, "Div")).toMatchObject({ O: 7205759403792793 });
@@ -61,6 +65,9 @@ describe("system instructions", () => {
     expect(errorOf(() => run(s, "Not0"))).toBe("the 64-bit value 16#FFFFFFFFFFFFFFFF cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them");
     expect(errorOf(() => run(s, "Sum"))).toMatch(/^the 64-bit value 16#20000000000001 cannot be held exactly/);
     expect(errorOf(() => run(s, "Big"))).toMatch(/LWORD#16#FFFF_FFFF_FFFF_FFFF cannot be held exactly/);
+    expect(run(s, "Bit1")).toMatchObject({ W: 2 ** 53 + 2 });
+    expect(errorOf(() => run(s, "Bit0"))).toMatch(/^the 64-bit value 16#20000000000001 cannot be held exactly/);
+    expect(errorOf(() => run(s, "Byte0"))).toMatch(/^the 64-bit value 16#20000000000003 cannot be held exactly/);
   });
 
   it("RD_SYS_T and RD_LOC_T read the virtual clock: 2024-01-01 00:00 (a Monday) plus the virtual time", () => {

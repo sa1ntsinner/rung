@@ -28,12 +28,26 @@ function exportTo(o, dir) {
 /** Files named and carried, as the bridge answers a client on another machine. */
 const inline = (r) => ({ ...r, files: r.files.map((f) => ({ ...f, content: readFileSync(f.path, "utf8"), path: basename(f.path) })) });
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+const rl = createInterface({ input: process.stdin });
+// a client that closes the bridge ends its input
+rl.on("close", () => {
+  try {
+    const db = load();
+    db.exits = (db.exits ?? 0) + 1;
+    save(db);
+  } catch {
+    // a test that already removed its files
+  }
+});
+rl.on("line", (line) => {
   const req = JSON.parse(line);
   const reply = (result) => out({ id: req.id, result });
   const fail = (code, message) => out({ id: req.id, error: { code, message } });
   const p = req.params ?? {};
   const db = load();
+  // every request in order: tests check what a read-only command asked for
+  db.methods = [...(db.methods ?? []), req.method === "plc.online" ? `plc.online ${p.action}` : req.method];
+  save(db);
   if (req.method !== "bridge.hello" && process.env.FAKE_ACCESS_DENIED) return fail("ACCESS_DENIED", "not in group Siemens TIA Openness");
   if (req.method !== "bridge.hello" && projectArg && projectArg.toLowerCase() !== db.project.path.toLowerCase())
     return fail("NO_PROJECT", "Project is not open in any TIA Portal instance: " + projectArg);
@@ -103,11 +117,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return reply({ address: o.address });
     }
     case "plc.online": {
+      if (process.env.FAKE_ONLINE_ERROR && p.action === "online") return fail("NO_TARGET", process.env.FAKE_ONLINE_ERROR);
       db.online = p.action === "online" ? "Online" : p.action === "offline" ? "Offline" : (db.online ?? "Offline");
       if (p.action === "online") db.onlineTarget = p.target ?? null;
       save(db);
       return reply({ device: p.device, state: db.online });
     }
+    case "plc.read":
+      // db.values: expression -> value; one it does not have reads as an error, as CODESYS answers it
+      if (db.online !== "Online") return fail("NOT_ONLINE", `${p.device} is not online; rung online first`);
+      return reply(p.expressions.map((name) => (name in (db.values ?? {}) ? { name, value: db.values[name] } : { name, error: `${name} is unknown` })));
     case "plc.compare": {
       // db.compare: items to report; default: one mirrored block differs
       db.compareTarget = p.target ?? null;

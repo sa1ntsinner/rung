@@ -99,6 +99,12 @@ const lo16 = (acc: number, v: number) => ((acc & 0xffff0000) | (v & 0xffff)) >>>
 
 /** A constant operand of L (or +) as a 32-bit accumulator value; undefined for a form the simulator does not load. */
 function constant(text: string): { value: number; wide: boolean } | undefined {
+  if (/^(TRUE|FALSE)$/i.test(text)) return { value: /^TRUE$/i.test(text) ? 1 : 0, wide: false };
+  if (text.startsWith("'")) {
+    const e = expression(text);
+    if (e?.k === "lit" && typeof e.value === "string" && e.value.length === 1 && e.value.charCodeAt(0) <= 255) return { value: e.value.charCodeAt(0), wide: false };
+    return undefined;
+  }
   const t = text.replace(/_/g, "");
   const typed = /^([A-Za-z0-9]+)#(.*)$/.exec(t);
   if (typed) {
@@ -240,6 +246,8 @@ export function parseStl(src: string, from: number, to: number): StlProgram {
       // %I0.0 / I 0.0: the PLC tag at that address
       const a = arg.replace(/\s+/g, "").replace(/^%?/, "%").toUpperCase();
       operand = { kind: "absolute", address: a };
+    } else if (kind === "bit" && /^(TRUE|FALSE)$/i.test(arg)) {
+      operand = { kind: "const", value: /^TRUE$/i.test(arg) ? 1 : 0 };
     } else if (kind === "load" && !/^[#"]/.test(arg)) {
       const v = constant(arg);
       if (v === undefined) missing.add(`L ${arg.replace(/#.*$/, "#")} constants`);
@@ -305,6 +313,27 @@ export interface StlHost {
   fail(message: string, at: number): never;
 }
 
+interface LogicState {
+  fc: boolean;
+  orb: boolean;
+  grp: boolean;
+  fresh: boolean;
+  rlo: boolean;
+  rloKnown: boolean;
+}
+
+export interface StlState extends LogicState {
+  stack: (LogicState & { op: string })[];
+  accu1: number;
+  accu2: number;
+  accu1Known: boolean;
+  accu2Known: boolean;
+}
+
+export function stlState(known = true): StlState {
+  return { fc: false, orb: false, grp: false, fresh: false, rlo: false, rloKnown: known, stack: [], accu1: 0, accu2: 0, accu1Known: known, accu2Known: known };
+}
+
 /**
  * Runs an STL program once, with the status word of the STL manual:
  * - a first check (/FC = 0) starts a logic string; A, AN, X, XN and O, ON combine the test result with the RLO
@@ -314,21 +343,27 @@ export interface StlHost {
  *   inside, the OR bit included for AND (§1.9-1.15);
  * - =, S, R, SD and CALL end the string (/FC = 0) and keep the RLO; JC and JCN leave RLO = 1 and /FC = 0 whether they
  *   jump or not (§6.4, §6.5); a network does not end a string (§1.22).
- * With `endOpen`, a string still open at the end is refused (an STL network of a SimaticML block: on the PLC it goes
- * on in the next network).
+ * With `state`, consecutive STL networks share their accumulators and logic string. With `endOpen`, an open
+ * string is refused where it cannot continue in STL. Returns true when BE/BEU ends the block.
  */
-export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } = {}): void {
-  let fc = false; // /FC: 0 = the next check is a first check
-  let orb = false; // the OR bit: the AND terms before an O without operand, together
-  let grp = false; // the current AND term
-  let fresh = false; // after O without operand: the next check starts a term
-  let rlo = false; // the RLO once the string is ended
-  const stack: { op: string; fc: boolean; orb: boolean; grp: boolean; fresh: boolean; rlo: boolean }[] = [];
-  let accu1 = 0;
-  let accu2 = 0;
-  const RLO = () => (fc ? orb || grp : rlo);
+export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; state?: StlState } = {}): boolean {
+  const state = opts.state ?? stlState();
+  let { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known } = state;
+  const stack = state.stack;
+  let at = 0;
+  const save = () => Object.assign(state, { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known });
+  const RLO = () => {
+    if (!fc && !rloKnown) host.fail("RLO is undefined after a non-STL network: start a logic string or use SET/CLR first", at);
+    return fc ? orb || grp : rlo;
+  };
+  const needAccu = (second = false) => {
+    if (!accu1Known || (second && !accu2Known)) host.fail(`ACCU ${!accu1Known ? 1 : 2} is undefined after a non-STL network: load it first`, at);
+  };
   const end = () => {
-    rlo = RLO();
+    if (fc) {
+      rlo = orb || grp;
+      rloKnown = true;
+    }
     fc = false;
     orb = false;
     fresh = false;
@@ -355,6 +390,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
     return host.fail(`${c.op} needs a variable`, c.at);
   };
   const bit = (c: StlInstr): boolean => {
+    if (c.operand.kind === "const") return !!c.operand.value;
     const ref = location(c);
     const t = host.typeOf(ref);
     if (t === "TIMER") {
@@ -378,6 +414,8 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
     const t = host.typeOf(ref);
     const v = host.read(ref);
     switch (t) {
+      case "CHAR":
+        return String(v).charCodeAt(0) & 0xff;
       case "BYTE":
       case "USINT":
         return Number(v) & 0xff;
@@ -403,10 +441,14 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
     }
   };
   const transfer = (c: StlInstr) => {
+    needAccu();
     const ref = location(c);
     const t = host.typeOf(ref);
     let v: Value;
     switch (t) {
+      case "CHAR":
+        v = String.fromCharCode(accu1 & 0xff);
+        break;
       case "BYTE":
       case "USINT":
         v = accu1 & 0xff;
@@ -441,6 +483,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
   };
   const arith = (c: StlInstr) => {
     const op = c.op;
+    needAccu(/^[+*/-][IDR]$/.test(op));
     if (op.endsWith("I") && op.length === 2) {
       const a = s16(accu2);
       const b = s16(accu1);
@@ -495,6 +538,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
     }
   };
   const compare = (c: StlInstr): boolean => {
+    needAccu(true);
     const type = c.op.slice(-1);
     const rel = c.op.slice(0, -1);
     const [a, b] = type === "I" ? [s16(accu2), s16(accu1)] : type === "D" ? [accu2 | 0, accu1 | 0] : [realOfBits(accu2), realOfBits(accu1)];
@@ -504,6 +548,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
 
   for (let i = 0; i < p.code.length; i++) {
     const c = p.code[i]!;
+    at = c.at;
     host.tick(c.at);
     switch (SUBSET[c.op]!) {
       case "bit": {
@@ -520,6 +565,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
         break;
       }
       case "not":
+        RLO();
         // NOT negates the RLO and leaves /FC and the OR bit (§1.19): with an AND term waiting in the OR bit that is left open
         if (fc && orb) host.fail("NOT after O without an operand is not simulated", c.at);
         if (fc) grp = !grp;
@@ -527,7 +573,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
         break;
       case "nest":
         if (stack.length === 7) host.fail("more than 7 nested A( / O( ...", c.at);
-        stack.push({ op: c.op.slice(0, -1), fc, orb, grp, fresh, rlo });
+        stack.push({ op: c.op.slice(0, -1), fc, orb, grp, fresh, rlo, rloKnown });
         fc = false;
         orb = false;
         fresh = false;
@@ -535,7 +581,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
       case "close": {
         const e = stack.pop() ?? host.fail(") without A( or O( before it", c.at);
         const inner = RLO();
-        ({ fc, orb, grp, fresh, rlo } = e);
+        ({ fc, orb, grp, fresh, rlo, rloKnown } = e);
         check(e.op[0]!, e.op.endsWith("N") ? !inner : inner, c.at);
         break;
       }
@@ -563,13 +609,16 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
       }
       case "set":
         rlo = c.op === "SET";
+        rloKnown = true;
         fc = false;
         orb = false;
         fresh = false;
         break;
       case "load":
         accu2 = accu1;
+        accu2Known = accu1Known;
         accu1 = load(c);
+        accu1Known = true;
         break;
       case "transfer":
         transfer(c);
@@ -579,6 +628,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
         break;
       case "add": {
         // + <constant>: a 16-bit constant to ACCU1-L, a 32-bit one (L#) to ACCU1; the status word stays (§7.7)
+        needAccu();
         const k = c.operand as { value: number; wide?: boolean };
         accu1 = k.wide ? ((accu1 | 0) + (k.value | 0)) >>> 0 : lo16(accu1, s16(accu1) + s16(k.value));
         break;
@@ -592,11 +642,12 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
       }
       case "jump": {
         if (stack.length) host.fail(`${c.op} inside A( ... ) is not simulated`, c.at);
-        const r = RLO();
         let go = true;
         if (c.op !== "JU") {
+          const r = RLO();
           go = c.op === "JC" ? r : !r;
           rlo = true;
+          rloKnown = true;
           fc = false;
           orb = false;
           fresh = false;
@@ -611,6 +662,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
         const s = host.timer(ref);
         const r = RLO();
         if (r && !s.last) {
+          needAccu();
           s.preset = s5timeToMs(accu1 & 0xffff) ?? host.fail(`SD: 16#${(accu1 & 0xffff).toString(16)} in ACCU1 is not an S5TIME (BCD digits 0 to 9)`, c.at);
           s.start = host.now();
           s.running = true;
@@ -627,10 +679,13 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string } 
         end();
         break;
       case "end":
-        return;
+        save();
+        return true;
       case "nop":
         break;
     }
   }
   if (opts.endOpen && (fc || stack.length)) host.fail(opts.endOpen, p.code[p.code.length - 1]?.at ?? 0);
+  save();
+  return false;
 }
