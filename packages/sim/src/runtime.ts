@@ -141,13 +141,15 @@ function sliceGet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }
   return s.slice === "X" ? bits === 1n : Number(bits);
 }
 
-function sliceSet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }, value: Value): number {
+/** `of`: the variable's own width, applied before the result must fit a double (an LInt with its top bit set is negative). */
+function sliceSet(base: Value, s: { slice: keyof typeof SLICE_WIDTH; n: number }, value: Value, of?: [bits: number, signed: boolean]): number {
   const width = BigInt(SLICE_WIDTH[s.slice]);
   const shift = BigInt(s.n) * width;
   const mask = ((1n << width) - 1n) << shift;
   const v = BigInt(typeof base === "boolean" ? (base ? 1 : 0) : Math.trunc(Number(base ?? 0)));
   const nv = (BigInt(s.slice === "X" ? (value ? 1 : 0) : Math.trunc(Number(value ?? 0))) << shift) & mask;
-  return exactInteger((v & ~mask) | nv);
+  const r = (v & ~mask) | nv;
+  return exactInteger(of ? (of[1] ? BigInt.asIntN(of[0], r) : BigInt.asUintN(of[0], r)) : r);
 }
 
 /** The declaration of what a POINTER TO / REFERENCE TO points at. */
@@ -665,7 +667,9 @@ export class Simulator {
     const last = ref.path[ref.path.length - 1];
     if (last && "slice" in last) {
       const base = { ...ref, path: ref.path.slice(0, -1) };
-      this.write(base, sliceSet(this.read(base, frame), last, value), frame);
+      const d = this.declOf(base, frame);
+      const of = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()] : undefined;
+      this.write(base, sliceSet(this.read(base, frame), last, value, of), frame);
       return;
     }
     const p = this.propertyAt(ref, frame);

@@ -444,8 +444,11 @@ export function complete(index: WorkspaceIndex, uri: string, offset: number, sni
   const templates = snippetSupport && /\.scl$/i.test(uri) && block?.bodyStart !== undefined && offset >= block.bodyStart;
   const template = (c: Completion, callee: CallSite["callee"] | undefined): Completion => {
     if (!templates || !callee) return c;
-    const args = orderedParams(callee).map((p, i) => `${p.name} ${p.section === "Output" ? "=>" : ":="} \${${i + 1}}`).join(", ");
-    return { ...c, insertText: `${c.insertText ?? c.label}(${args})`, snippet: true };
+    // a name that is no plain identifier is written quoted; $ } and \ of names are text, not snippet syntax
+    const text = (s: string) => s.replace(/[\\$}]/g, "\\$&");
+    const param = (name: string) => (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(name) ? name : `"${name}"`);
+    const args = orderedParams(callee).map((p, i) => `${text(param(p.name))} ${p.section === "Output" ? "=>" : ":="} \${${i + 1}}`).join(", ");
+    return { ...c, insertText: `${text(c.insertText ?? c.label)}(${args})`, snippet: true };
   };
   // an instance is called where a statement starts, as TIA Portal inserts it; inside an expression it is read (#t.Q)
   const statementStart = /(^|;|\b(?:THEN|ELSE|DO|REPEAT)\b)\s*(#[\p{L}\p{N}_]*|"[^"]*|[\p{L}\p{N}_]*)$/iu.test(line);
@@ -513,15 +516,16 @@ export interface TextEdit {
 }
 
 /** The block, data type or DB named at offset (its header or a use of it): TIA Portal renames those, not the editor. */
-export function renameTarget(index: WorkspaceIndex, uri: string, offset: number): GlobalSymbol | undefined {
+export function renameTarget(index: WorkspaceIndex, uri: string, offset: number): { uri: string; name: string } | undefined {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const block = index.blockAt(uri, offset);
   if (!block) return undefined;
-  if (offset >= block.nameStart && offset <= block.nameEnd) return /\.(scl|db|udt)$/i.test(uri) ? index.global(block.name) : undefined;
+  // a header names the object of its own file, whatever it says now (an unsaved edit may name another block)
+  if (offset >= block.nameStart && offset <= block.nameEnd) return /\.(scl|db|udt)$/i.test(uri) && deviceOfUri(uri) !== undefined ? { uri, name: block.name } : undefined;
   const hit = refAt(index, uri, offset);
   if (!hit || hit.ref.kind !== "global" || hit.member >= 0) return undefined;
   const g = index.global(hit.ref.name);
-  return g?.block && /\.(scl|db|udt|s7dcl|xml|awl)$/i.test(g.uri) && deviceOfUri(g.uri) !== undefined ? g : undefined;
+  return g?.block && /\.(scl|db|udt|s7dcl|xml|awl)$/i.test(g.uri) && deviceOfUri(g.uri) !== undefined ? { uri: g.uri, name: g.name } : undefined;
 }
 
 /** Renames a block-local variable (declaration and every #reference). Other renames are refused. */

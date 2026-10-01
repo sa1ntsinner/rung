@@ -261,7 +261,9 @@ namespace Rung.Bridge.V20
                     plc = Plc(device);
                 }
             }
-            foreach (var key in _index.Keys.Where(k => k.StartsWith("plc:" + AddressFormat.EscapeSegment(device) + "/", StringComparison.Ordinal)).ToList()) _index.Remove(key);
+            var prefix = "plc:" + AddressFormat.EscapeSegment(device) + "/";
+            _revisions.EndList(a => a.StartsWith(prefix, StringComparison.Ordinal));
+            foreach (var key in _index.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList()) _index.Remove(key);
             foreach (var r in refs) _index[r.Entry.Address] = r;
             timing.Done("list " + device + ": " + refs.Count + " objects, " + (_revisions.Computed - computed) + " revisions read");
             return refs.Select(r => r.Entry).ToList();

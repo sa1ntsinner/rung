@@ -43,9 +43,11 @@ export const FATAL_BRIDGE_CODES = new Set(["TIA_NOT_RUNNING", "PORTAL_DISPOSED",
  * was checked longer ago than that.
  */
 export function isFresh(entryFp: string, prev: ObjectState, now: number, weakVerifyMs: number, unversionedMs = 0): boolean {
-  if (entryFp === "none") return now - (prev.verifiedAt ?? 0) < unversionedMs;
+  // a check from the future (the clock was put back since) is of unknown age: checked again
+  const age = now - (prev.verifiedAt ?? 0);
+  if (entryFp === "none") return age >= 0 && age < unversionedMs;
   if (isStrong(entryFp)) return prev.tiaFingerprint === entryFp;
-  return prev.tiaFingerprint === entryFp && now - (prev.verifiedAt ?? 0) < weakVerifyMs;
+  return prev.tiaFingerprint === entryFp && age >= 0 && age < weakVerifyMs;
 }
 
 export async function pull(root: string, bridge: BridgeLike, state: StateStore, opts: PullOptions): Promise<PullReport> {

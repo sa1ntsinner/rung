@@ -61,6 +61,28 @@ describe("rename through TIA Portal", () => {
     await expect(rename(s, s.uri, 0, 18, "Drive")).rejects.toThrow('"Motor" is renamed in TIA Portal: rung rename "Motor" Drive');
   });
 
+  it("renames the object of the file whose header it is, and nothing while an open file has unsaved changes", async () => {
+    const calls: [string, string][] = [];
+    const s = await boot({
+      rename: async (fileUri, newName) => {
+        calls.push([fileUri, newName]);
+        return { users: 0 };
+      },
+    });
+    const line = s.uri.replace("Motor.scl", "Line.scl");
+    // the header of Line.scl edited, unsaved, to name another block: F2 there must never rename Motor
+    await s.open(line, CALLER);
+    await s.client.sendNotification("textDocument/didChange", { textDocument: { uri: line, version: 2 }, contentChanges: [{ text: CALLER.replace('"Line"', '"Motor"') }] });
+    await expect(rename(s, line, 0, 18, "Drive")).rejects.toThrow(/Save .*Line\.scl.* first/);
+    // a caller with unsaved changes would lose them when rung rewrites it
+    await expect(rename(s, s.uri, 0, 18, "Drive")).rejects.toThrow(/Save .*Line\.scl.* first/);
+    expect(calls).toEqual([]);
+    // saved again: the header names this file's own block
+    await s.client.sendNotification("textDocument/didChange", { textDocument: { uri: line, version: 3 }, contentChanges: [{ text: CALLER }] });
+    await rename(s, line, 0, 18, "Conveyor");
+    expect(calls).toEqual([[line, "Conveyor"]]);
+  });
+
   it("reports what TIA Portal refused", async () => {
     const s = await boot({ rename: async () => { throw new Error("Drive already exists at plc:PLC_1/blocks/Drive"); } });
     await expect(rename(s, s.uri, 0, 18, "Drive")).rejects.toThrow("Drive already exists");

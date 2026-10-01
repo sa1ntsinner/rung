@@ -397,6 +397,41 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         }
     }
 
+    [Fact] public void ADataTypeAndATagTableOfASoftwareUnitLiveInTheUnitsOwnFolders()
+    {
+        var id = Guid.NewGuid().ToString("N").Substring(0, 6);
+        var udt = "plc:PLC_1/units/Fx_Unit/types/Fx_UnitType_" + id;
+        var table = "plc:PLC_1/units/Fx_Unit/tags/Fx_UnitTags_" + id;
+        var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName;
+        var udtFile = Path.Combine(dir, "obj.udt");
+        var tagFile = Path.Combine(dir, "obj.tags.st");
+        File.WriteAllText(udtFile, "TYPE \"Fx_UnitType_" + id + "\"\nVERSION : 0.1\n   STRUCT\n      a : Bool;\n   END_STRUCT;\n\nEND_TYPE\n");
+        File.WriteAllText(tagFile, "VAR_GLOBAL\n    UnitTag_" + id + " AT %M90.0 : Bool;\nEND_VAR\n");
+        foreach (var old in _fx.Session.ListObjects("PLC_1").Where(o => o.Address.Contains("/units/Fx_Unit/types/Fx_UnitType_") || o.Address.Contains("/units/Fx_Unit/tags/Fx_UnitTags_")).ToList())
+            _fx.Session.Delete(old.Address, old.Fingerprint, Guid.NewGuid().ToString());
+        try
+        {
+            var t = _fx.Session.Import(udt, "udt", udtFile, "absent", Guid.NewGuid().ToString());
+            var g = _fx.Session.Import(table, "tags.st", tagFile, "absent", Guid.NewGuid().ToString());
+            var listed = _fx.Session.ListObjects("PLC_1");
+            Assert.Contains(listed, o => o.Address == udt && o.Unit == "Fx_Unit" && o.Kind == "type");
+            Assert.Contains(listed, o => o.Address == table && o.Unit == "Fx_Unit" && o.Kind == "tagtable");
+            // a data type's name is taken PLC-wide: the same name in the PLC's own types is refused
+            Assert.Equal("NAME_TAKEN", Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/types/Fx_UnitType_" + id, "udt", udtFile, "absent", Guid.NewGuid().ToString())).Code);
+            File.WriteAllText(tagFile, "VAR_GLOBAL\n    UnitTag_" + id + " AT %M90.1 : Bool;  // moved\nEND_VAR\n");
+            g = _fx.Session.Import(table, "tags.st", tagFile, g.Fingerprint, Guid.NewGuid().ToString());
+            Assert.Contains("%M90.1", File.ReadAllText(_fx.Session.Export(table, "auto", Tmp()).Files[0].Path));
+            _fx.Session.Delete(table, g.Fingerprint, Guid.NewGuid().ToString());
+            _fx.Session.Delete(udt, t.Fingerprint, Guid.NewGuid().ToString());
+            Assert.DoesNotContain(_fx.Session.ListObjects("PLC_1"), o => o.Address == udt || o.Address == table);
+        }
+        finally
+        {
+            foreach (var left in _fx.Session.ListObjects("PLC_1").Where(o => o.Address == udt || o.Address == table).ToList())
+                _fx.Session.Delete(left.Address, left.Fingerprint, Guid.NewGuid().ToString());
+        }
+    }
+
     [Fact] public void RepeatedInventoriesReuseFingerprintsButSeeChanges()
     {
         // an idle watch must not recompute every fingerprint on every pass

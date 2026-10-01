@@ -294,6 +294,14 @@ describe("syncOnce", () => {
     await pass(70_000, 60_000);
     expect(exports()).toBe(3);
     expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<Watch><Entry/></Watch>\n");
+    // the clock was put back: a check "from the future" counts as none, for rung sync and rung watch alike
+    t.bridge.edit(W, { ".xml": "<Watch><Entry/><Entry/></Watch>\n" });
+    await pass(10_000);
+    expect(exports()).toBe(4);
+    t.bridge.edit(W, { ".xml": "<Watch/>\n" });
+    await pass(5_000, 60_000);
+    expect(exports()).toBe(5);
+    expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<Watch/>\n");
   });
 
   it("creates a new file in a software unit's folder in that unit, and then stays quiet", async () => {

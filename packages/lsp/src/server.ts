@@ -237,6 +237,14 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (target) {
       // a block, data type or DB: renamed in TIA Portal, so its uses there follow too, and rung writes the files
       if (!options.renamer) throw new Error(`"${target.name}" is renamed in TIA Portal: rung rename "${target.name}" ${p.newName}`);
+      // rung renames what is on disk and rewrites the files that follow: an unsaved buffer would name another
+      // object, or overwrite that rewrite when saved
+      const unsaved: string[] = [];
+      for (const d of documents.all()) {
+        const disk = await readFile(fileURLToPath(d.uri), "utf8").catch(() => undefined);
+        if (disk !== d.getText()) unsaved.push(relPath(d.uri) || fileURLToPath(d.uri));
+      }
+      if (unsaved.length) throw new Error(`Save ${unsaved.join(", ")} first: rung renames "${target.name}" in TIA Portal and in the files on disk`);
       const done = await options.renamer.rename(target.uri, p.newName);
       const followed = done.users ? `; ${done.users} ${done.users === 1 ? "file that uses it follows" : "files that use it follow"}` : "";
       void connection.sendNotification("window/showMessage", { type: MessageType.Info, message: `Renamed "${target.name}" to "${p.newName}" in TIA Portal${followed}` }).catch(() => undefined);

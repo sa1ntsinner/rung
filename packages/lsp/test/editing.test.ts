@@ -79,6 +79,15 @@ describe("call completion", () => {
     expect(at('   #x := "Motor|').find((c) => c.label === "Motor_DB")?.snippet).toBeUndefined();
   });
 
+  it("quotes a parameter name that needs it, and keeps $ and } of a name out of the snippet's syntax", () => {
+    const index = new WorkspaceIndex();
+    index.set("file:///w/plc/P/blocks/Odd.scl", 'FUNCTION "Odd" : Void\nVAR_INPUT\n   "Start motor" : Bool;\n   "a$}b" : Int;\nEND_VAR\nBEGIN\nEND_FUNCTION\n', 0);
+    const text = 'FUNCTION "User" : Void\nBEGIN\n   "Od\nEND_FUNCTION\n';
+    index.set(URI, text, 0);
+    const item = complete(index, URI, text.indexOf('"Od') + 3, true).find((c) => c.label === "Odd")!;
+    expect(item.insertText).toBe('"Odd"("Start motor" := ${1}, "a\\$\\}b" := ${2})');
+  });
+
   it("leaves completion in declarations alone even with snippet support", () => {
     const { index } = setup(";");
     const text = USER.replace("x : Int;", "x : TO").replace("BODY", ";");

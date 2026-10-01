@@ -61,6 +61,32 @@ public class RevisionCacheTests
     }
 
     [Fact]
+    public void ObjectsThatAreGoneDoNotTakeTheRefreshBudgetForever()
+    {
+        var c = new RevisionCache();
+        var p = RevisionCache.RefreshPerList;
+        List(c, p + 10, T0);
+        // TIA Portal deleted the oldest ones: a complete listing sees only the rest
+        var survivors = Enumerable.Range(p, 10).Select(i => "o" + i).ToList();
+        List<string> ListSurvivors(DateTime at, IReadOnlyDictionary<string, KnownRevision> known = null)
+        {
+            _read.Clear();
+            c.BeginList(known, at);
+            foreach (var a in survivors) c.Get(a, "k", at, Read(a, "fp"));
+            c.EndList(a => a.StartsWith("o", StringComparison.Ordinal));
+            return _read.ToList();
+        }
+        var later = T0 + RevisionCache.Refresh + TimeSpan.FromMinutes(1);
+        Assert.Empty(ListSurvivors(later)); // the gone ones were due this time, and are forgotten
+        Assert.Equal(survivors, ListSurvivors(later.AddMinutes(1)));
+        // a client that still sends a gone one: forgotten again at the end of that listing
+        var known = new Dictionary<string, KnownRevision> { ["o0"] = new KnownRevision { Key = "k", Fingerprint = "fp", At = T0.ToString("o") } };
+        var again = later + RevisionCache.Refresh + TimeSpan.FromMinutes(2);
+        Assert.Equal(survivors, ListSurvivors(again, known));
+        Assert.Empty(ListSurvivors(again.AddMinutes(1)));
+    }
+
+    [Fact]
     public void ReadsOneOlderThanMaxAgeOrFromTheFutureWhateverTheBudget()
     {
         var c = new RevisionCache();

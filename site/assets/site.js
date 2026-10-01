@@ -770,7 +770,9 @@ if (play) {
         settle(value);
       };
       const timer = setTimeout(() => {
-        stopWorker();
+        // this run's worker only: a newer one may have taken its place
+        w.terminate();
+        if (worker === w) worker = null;
         finish(reject, Object.assign(new Error(`The simulator was stopped after ${BUDGET_MS / 1000} s.`), { overtime: true }));
       }, BUDGET_MS);
       w.onmessage = (e) => (e.data.error === undefined ? finish(resolve, e.data.ok) : finish(reject, new Error(e.data.error)));
@@ -781,6 +783,8 @@ if (play) {
       w.postMessage({ file, source, test });
     });
   async function run() {
+    // one run at a time: Ctrl+Enter reaches here while the button is disabled
+    if (runBtn.disabled) return;
     runBtn.disabled = true;
     idle(worker ? "Running…" : "Loading the simulator…");
     try {

@@ -32,6 +32,7 @@ namespace Rung.Bridge.Core
 
         readonly Dictionary<string, Revision> _byAddress = new Dictionary<string, Revision>(StringComparer.Ordinal);
         HashSet<string> _due = new HashSet<string>(StringComparer.Ordinal);
+        readonly HashSet<string> _seen = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>How many revisions were read from TIA Portal so far (the rest came from the cache).</summary>
         public int Computed { get; private set; }
@@ -42,6 +43,7 @@ namespace Rung.Bridge.Core
         /// </summary>
         public void BeginList(IReadOnlyDictionary<string, KnownRevision> known, DateTime now)
         {
+            _seen.Clear();
             if (known != null)
                 foreach (var k in known)
                 {
@@ -58,6 +60,7 @@ namespace Rung.Bridge.Core
         /// <summary>The revision of the object at address whose dates and consistency are key: kept, or read now.</summary>
         public Revision Get(string address, string key, DateTime now, Func<(string Fingerprint, string LibraryType)> read)
         {
+            _seen.Add(address);
             if (_byAddress.TryGetValue(address, out var r) && r.Key == key && !_due.Contains(address))
             {
                 var age = now - r.At;
@@ -67,6 +70,15 @@ namespace Rung.Bridge.Core
             var (fingerprint, libraryType) = read();
             Computed++;
             return _byAddress[address] = new Revision { Key = key, Fingerprint = fingerprint, LibraryType = libraryType, At = now };
+        }
+
+        /// <summary>
+        /// After a complete listing: the objects of it (listed says which addresses it covered) that it did not see
+        /// are gone, and forgotten; else the oldest of them would take the refresh budget of every listing.
+        /// </summary>
+        public void EndList(Func<string, bool> listed)
+        {
+            foreach (var address in _byAddress.Keys.Where(a => listed(a) && !_seen.Contains(a)).ToList()) _byAddress.Remove(address);
         }
     }
 }
