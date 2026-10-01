@@ -3,7 +3,7 @@
 // edits the same blocks in TIA Portal (a second Openness client), rung sync runs after every step and is
 // killed at random moments (Ctrl+C, a crash). Nothing typed on either side may get lost, no conflict may
 // appear (the two people never touch the same line), and the workspace ends quiet and equal to TIA Portal.
-//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] pnpm vitest run tests/e2e/soak.e2e.test.ts
+//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] [RUNG_SOAK_KIND=tags] pnpm vitest run tests/e2e/soak.e2e.test.ts
 import { describe, it, expect } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -22,13 +22,23 @@ const cli = join(repo, "packages", "cli", "dist", "index.js");
 const bridgeExe = join(repo, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48", "rung-bridge-v20.exe");
 
 const NAMES = ["A", "B", "C", "D", "E", "F"];
-// RUNG_SOAK_UNIT=Fx_Unit runs it in a software unit of the fixture instead
-const folder = `PLC_1/${process.env.RUNG_SOAK_UNIT ? `units/${process.env.RUNG_SOAK_UNIT}/` : ""}blocks/90_Soak`;
-const addr = (n: string) => `plc:${folder}/Fx_Soak_${n}`;
-const rel = (n: string) => `plc/${folder}/Fx_Soak_${n}.scl`;
+// RUNG_SOAK_UNIT=Fx_Unit runs it in a software unit of the fixture; RUNG_SOAK_KIND=tags on tag tables (.tags.st,
+// one tag per line, the two people editing the comments of two tags) instead of SCL blocks
+const tags = process.env.RUNG_SOAK_KIND === "tags";
+const folder = `PLC_1/${process.env.RUNG_SOAK_UNIT ? `units/${process.env.RUNG_SOAK_UNIT}/` : ""}${tags ? "tags" : "blocks"}/90_Soak`;
+const leaf = (n: string) => (tags ? `Fx_SoakTags_${n}` : `Fx_Soak_${n}`);
+const form = tags ? "tags.st" : "scl";
+const addr = (n: string) => `plc:${folder}/${leaf(n)}`;
+const rel = (n: string) => `plc/${folder}/${leaf(n)}.${form}`;
+// the file person writes line 1, the person in TIA Portal line 4
+const line = (n: string, which: 1 | 4, v: number) =>
+  tags ? `Soak_${n}_${which} AT %M${200 + NAMES.indexOf(n)}.${which - 1} : Bool;  // ${v}` : `#l${which} := ${v};`;
+const lineAt = (n: string, which: 1 | 4) => (tags ? new RegExp(`Soak_${n}_${which} AT %M\\d+\\.\\d : Bool;(  // -?\\d+)?`) : new RegExp(`#l${which} := -?\\d+;`));
 const source = (n: string, l1: number) =>
-  `FUNCTION "Fx_Soak_${n}" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n      l2 : Int;\n      l3 : Int;\n      l4 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${l1};\n\t#l2 := 2;\n\t#l3 := 3;\n\t#l4 := 0;\nEND_FUNCTION\n`;
-// #l2 and #l3 keep the two people's lines apart: a line merge, like git's, joins changes on neighbouring lines
+  tags
+    ? `VAR_GLOBAL\n    ${line(n, 1, l1)}\n    Soak_${n}_2 AT %M${200 + NAMES.indexOf(n)}.1 : Bool;\n    Soak_${n}_3 AT %M${200 + NAMES.indexOf(n)}.2 : Bool;\n    ${line(n, 4, 0)}\nEND_VAR\n`
+    : `FUNCTION "Fx_Soak_${n}" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n      l2 : Int;\n      l3 : Int;\n      l4 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${l1};\n\t#l2 := 2;\n\t#l3 := 3;\n\t#l4 := 0;\nEND_FUNCTION\n`;
+// lines 2 and 3 keep the two people's lines apart: a line merge, like git's, joins changes on neighbouring lines
 const counts = (out: string) => {
   const m = /exported (\d+)\s+imported (\d+)\s+created (\d+)\s+merged (\d+)\s+conflicts (\d+)/.exec(out);
   return m ? { exported: +m[1]!, imported: +m[2]!, created: +m[3]!, merged: +m[4]!, conflicts: +m[5]! } : undefined;
@@ -99,9 +109,9 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
             throw e;
           }
           const p = r.files.find((f) => f.role === "primary")!.path;
-          writeFileSync(p, readFileSync(p, "utf8").replace(/#l4 := -?\d+;/, `#l4 := ${v};`));
+          writeFileSync(p, readFileSync(p, "utf8").replace(lineAt(n, 4), line(n, 4, v)));
           try {
-            await user.importObject(addr(n), "scl", p, r.fingerprint, randomUUID());
+            await user.importObject(addr(n), r.form, p, r.fingerprint, randomUUID());
             l4.set(n, v);
             return true;
           } catch (e) {
@@ -113,7 +123,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
       };
       const fileEdit = (n: string, v: number) => {
         const p = join(ws, ...rel(n).split("/"));
-        writeFileSync(p, readFileSync(p, "utf8").replace(/#l1 := -?\d+;/, `#l1 := ${v};`));
+        writeFileSync(p, readFileSync(p, "utf8").replace(lineAt(n, 1), line(n, 1, v)));
         l1.set(n, v);
       };
       const sync = async (what: string, killAfterMs?: number) => {
@@ -140,8 +150,8 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
             if (!(e instanceof BridgeError && e.code === "NOT_FOUND")) throw e;
           }
           for (const [where, text] of texts)
-            for (const line of [`#l1 := ${l1.get(n)};`, `#l4 := ${l4.get(n)};`])
-              if (!text.includes(line)) problems.push(`${what}: ${line} of ${n} is not in ${where} after the pass\n${text}`);
+            for (const expected of [line(n, 1, l1.get(n)!), line(n, 4, l4.get(n)!)])
+              if (!text.includes(expected)) problems.push(`${what}: ${expected} of ${n} is not in ${where} after the pass\n${text}`);
         }
       };
 
@@ -226,8 +236,8 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         const tia = readFileSync(r.files.find((f) => f.role === "primary")!.path, "utf8");
         const mine = readFileSync(file, "utf8");
         if (mine !== tia) problems.push(`${n}: the file differs from TIA Portal\n--- file\n${mine}\n--- TIA\n${tia}`);
-        if (!mine.includes(`#l1 := ${l1.get(n)};`)) problems.push(`${n}: the file edit #l1 := ${l1.get(n)} got lost\n${mine}`);
-        if (!mine.includes(`#l4 := ${l4.get(n)};`)) problems.push(`${n}: the TIA edit #l4 := ${l4.get(n)} got lost\n${mine}`);
+        if (!mine.includes(line(n, 1, l1.get(n)!))) problems.push(`${n}: the file edit ${line(n, 1, l1.get(n)!)} got lost\n${mine}`);
+        if (!mine.includes(line(n, 4, l4.get(n)!))) problems.push(`${n}: the TIA edit ${line(n, 4, l4.get(n)!)} got lost\n${mine}`);
       }
       const leftovers: string[] = [];
       const walk = (d: string) => {

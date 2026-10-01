@@ -304,6 +304,83 @@ describe("syncOnce", () => {
     expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<Watch/>\n");
   });
 
+  it.each(["landed", "lost"])("an import whose answer was lost when the bridge stopped (%s) is finished on the next pass with the receipts", async (how) => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 2;"));
+    if (how === "landed") t.bridge.failAfter = "OUTCOME_UNKNOWN"; // TIA Portal took it; the answer never came
+    else t.bridge.hangImport = true; // it never reached TIA Portal
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.failAfter = undefined;
+    t.bridge.hangImport = false;
+    t.write(pA, srcA.replace("#x := 1;", "#x := 3;"));
+    const r = await t.sync();
+    expect(r.warnings.map((w) => w.code)).not.toContain("RECOVERY_REQUIRED");
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 3;");
+    expect((await t.sync()).imported).toBe(0);
+  });
+
+  it.each(["landed", "lost"])("a create whose answer was lost when the bridge stopped (%s) is finished on the next pass", async (how) => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    if (how === "landed") t.bridge.failAfter = "OUTCOME_UNKNOWN";
+    else t.bridge.hangImport = true;
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.failAfter = undefined;
+    t.bridge.hangImport = false;
+    const r = await t.sync();
+    expect(r.warnings.map((w) => w.code)).not.toContain("RECOVERY_REQUIRED");
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toBe(srcA);
+    const idle = await t.sync();
+    expect(idle.imported + idle.created + idle.conflicts).toBe(0);
+  });
+
+  it("finds a landed send in TIA Portal's layout of it (TIA ends its sources with a blank line), so no false conflict", async () => {
+    const t = setup((b) => b.add(A, { content: srcA + "\n" }));
+    t.bridge.canon = (s) => (s.endsWith("\n\n") ? s : s + "\n");
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 2;")); // the person's layout: no blank line at the end
+    t.bridge.failAfter = "OUTCOME_UNKNOWN";
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.failAfter = undefined;
+    t.write(pA, srcA.replace("#x := 1;", "#x := 3;"));
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 3;");
+  });
+
+  it("without receipts an import with an unknown outcome waits for rung resolve", async () => {
+    const t = setup();
+    t.bridge.landed = undefined;
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 2;"));
+    t.bridge.failAfter = "OUTCOME_UNKNOWN";
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.failAfter = undefined;
+    expect((await t.sync()).warnings.map((w) => w.code)).toContain("RECOVERY_REQUIRED");
+  });
+
+  it("an import refused as stale is merged on the next pass even while the listing still shows the old fingerprint", async () => {
+    const t = setup();
+    await t.sync();
+    const old = t.bridge.objects.get(A)!.entry.fingerprint;
+    // a TIA edit the listing does not show (its fingerprint kept by modification dates)
+    t.bridge.edit(A, { ".scl": srcA.replace("#z := 3;", "#z := 30;") });
+    const list = t.bridge.listObjects.bind(t.bridge);
+    t.bridge.listObjects = async (device: string) => (await list(device)).map((e) => (e.address === A ? { ...e, fingerprint: old } : e));
+    t.write(pA, srcA.replace("#x := 1;", "#x := 5;"));
+    const refused = await t.sync();
+    expect(refused.warnings.map((w) => w.code)).toContain("STALE_REVISION");
+    await t.sync();
+    const tia = t.bridge.objects.get(A)!.files[".scl"]!;
+    expect(tia).toContain("#x := 5;");
+    expect(tia).toContain("#z := 30;");
+    expect(t.read(pA)).toContain("#z := 30;");
+  });
+
   it("creates a new file in a software unit's folder in that unit, and then stays quiet", async () => {
     const t = setup(() => {});
     await t.sync();
@@ -455,8 +532,9 @@ describe("syncOnce", () => {
     expect(JSON.parse(readFileSync(join(t.root, ".rung", "diagnostics.json"), "utf8")).items).toEqual([]);
   });
 
-  it("keeps the file dirty and stops on an unknown import outcome, never retrying automatically", async () => {
+  it("without receipts keeps the file dirty and stops on an unknown import outcome, never retrying automatically", async () => {
     const t = setup();
+    t.bridge.landed = undefined; // a bridge that keeps no receipts: nothing tells whether TIA Portal took it
     await t.sync();
     t.write(pA, srcA.replace("#x := 1;", "#x := 11;"));
     t.bridge.hangImport = true;
@@ -469,8 +547,10 @@ describe("syncOnce", () => {
   });
 
   describe("rung resolve after an import whose outcome is unknown", () => {
+    // with a bridge that keeps no receipts (with receipts the next pass settles it by itself)
     const timedOut = async (tiaGotIt: boolean) => {
       const t = setup();
+      t.bridge.landed = undefined;
       await t.sync();
       t.write(pA, srcA.replace("#x := 1;", "#x := 11;"));
       const orig = t.bridge.importObject.bind(t.bridge);
@@ -513,6 +593,7 @@ describe("syncOnce", () => {
 
     it("--ours creates a new object again when TIA Portal never got it", async () => {
       const t = setup(() => {});
+      t.bridge.landed = undefined;
       await t.sync();
       t.write(pA, srcA);
       t.bridge.hangImport = true;

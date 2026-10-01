@@ -439,6 +439,13 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       const loc = local.get(address);
       if (item && !item.stem) continue; // path collision, already warned
 
+      if (st?.status === "recoveryRequired" && st.sendingOp && bridge.receipts && (await bridge.receipts([st.sendingOp])) !== undefined) {
+        // the bridge (or TIA Portal) stopped during an import while rung waited for the answer: with its receipts this
+        // pass tells whether TIA Portal took what was sent, as after an interrupted send; what rung resolve would do
+        st = st.tiaFingerprint === "absent" ? { ...st, status: "importing" } : { ...st, status: "fileDirty", tiaFingerprint: st.tiaFingerprint.startsWith("stale:") ? st.tiaFingerprint : `stale:${st.tiaFingerprint}` };
+        state.upsert(st);
+      }
+
       if (st?.status === "importing") {
         // a create interrupted (Ctrl+C, a crash) before rung recorded how it ended
         const untouched = (await localStatus(root, st.files)) === "clean";
@@ -598,7 +605,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           for (const { files } of candidates) {
             const from = await baseBundle(root, stemOf(cur), files);
             const probe = mergeBundle(cur.form, base, from, tia);
-            if (probe.kind !== "conflict" && sameTexts(probe.files, tia)) {
+            // in TIA Portal's own layout of it (it ends a source with a blank line the sent file may not have)
+            if (probe.kind !== "conflict" && sameLayoutFree(probe.files, tia)) {
               m = mergeBundle(cur.form, from, bundle, tia);
               break;
             }
@@ -803,9 +811,13 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (e.code === "STALE_REVISION") warn(job.address, e.code, "TIA Portal changed meanwhile; merging on the next pass");
       else diag({ address: job.address, path: primaryPath, severity: "error", code: e.code, message: e.message });
       // what was sent stays known: an error can come after TIA Portal took the import (another Openness client
-      // replaced the block before the answer was read)
-      if (st) state.upsert({ ...(state.get(job.address) ?? st), status: "fileDirty" });
-      else state.remove(job.address); // refused: still just a new file
+      // replaced the block before the answer was read). After a stale refusal the listing's fingerprint is no proof
+      // (the bridge may keep one by modification dates): the next pass exports TIA Portal's version and merges.
+      if (st) {
+        const cur = state.get(job.address) ?? st;
+        const stale = e.code === "STALE_REVISION" && !cur.tiaFingerprint.startsWith("stale:");
+        state.upsert({ ...cur, status: "fileDirty", ...(stale ? { tiaFingerprint: `stale:${cur.tiaFingerprint}` } : {}) });
+      } else state.remove(job.address); // refused: still just a new file
       continue;
     } finally {
       await rm(stage.dir, { recursive: true, force: true });

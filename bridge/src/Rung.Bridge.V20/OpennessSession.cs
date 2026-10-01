@@ -891,6 +891,8 @@ namespace Rung.Bridge.V20
                         // else (the prompt guard's Dispose alone waits up to 200 ms): a stop in between left a landed
                         // import without its receipt, and the next pass took the send for lost (seen in the soak)
                         Receipts.Write(operationId, address);
+                        // end-to-end tests only: stop as if killed, a committed import whose answer never left
+                        if (Environment.GetEnvironmentVariable("RUNG_BRIDGE_TEST_STOP") == "after-commit") Environment.Exit(3);
                         // TIA Portal takes a table with an entry it cannot hold (seen live: a watch table entry with an
                         // unknown tag) and then cannot export it any more. Still under the same exclusive access, such
                         // a table is refused and the previous version put back.

@@ -68,6 +68,34 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
     expect(await main(["confirm-delete", "plc:PLC_1/blocks/30_E2E/Fx_E2E", "--dir", dir], io)).toBe(0);
   }, 600_000);
 
+  it("a sync stopped right after TIA Portal committed its import: the next one sends the newer edit, no conflict", async () => {
+    const file = join(dir, "plc", "PLC_1", "blocks", "30_E2E", "Fx_E2E_Stop.scl");
+    const src = (n: number) => `FUNCTION "Fx_E2E_Stop" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${n};\nEND_FUNCTION\n`;
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, src(1));
+    await main(["sync"], io);
+    writeFileSync(file, src(2));
+    process.env.RUNG_BRIDGE_TEST_STOP = "after-commit";
+    try {
+      await main(["sync"], io); // the bridge stops after TIA Portal took #l1 := 2: rung never hears the answer
+    } finally {
+      delete process.env.RUNG_BRIDGE_TEST_STOP;
+    }
+    writeFileSync(file, readFileSync(file, "utf8").replace(/#l1 := \d+;/, "#l1 := 3;"));
+    out.length = 0;
+    expect([0, 2]).toContain(await main(["sync"], io));
+    expect(out.join("")).not.toMatch(/CONFLICT/);
+    // sent as an import, or merged with TIA Portal's layout of what the stopped sync sent
+    expect(out.join("")).toMatch(/imported 1|merged 1/);
+    out.length = 0;
+    await main(["sync"], io);
+    expect(out.join("")).toMatch(/exported 0 +imported 0 /);
+    expect(readFileSync(file, "utf8")).toContain("#l1 := 3;");
+    unlinkSync(file);
+    await main(["sync"], io);
+    expect(await main(["confirm-delete", "plc:PLC_1/blocks/30_E2E/Fx_E2E_Stop", "--dir", dir], io)).toBe(0);
+  }, 600_000);
+
   it("a software unit is a folder: a new file there creates the block in the unit, an edit goes there, a delete too", async () => {
     const inUnit = join(dir, "plc", "PLC_1", "units", "Fx_Unit", "blocks", "30_E2E", "Fx_E2E_Unit.scl");
     mkdirSync(join(inUnit, ".."), { recursive: true });
