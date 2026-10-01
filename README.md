@@ -29,7 +29,7 @@ rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text 
 | | |
 |---|---|
 | **Two-way sync** | Save a file: rung imports it through Openness, compiles it and writes TIA's version back. Changes made in TIA Portal come back. Both sides changed: a three-way merge, SCL by line, LAD and FBD by network. |
-| **An editor for SCL** | A language server for VS Code, Zed and Neovim: completion, definitions through DBs, UDTs and instances, references, rename, TIA's compile errors on their line, live values. |
+| **An editor for SCL** | A language server for VS Code, Zed and Neovim: completion, definitions through DBs, UDTs and instances, references, rename through TIA Portal, any block or tag by name, TIA's compile errors on their line, live values. |
 | **Tests without a PLC** | `rung test` runs YAML tests on an offline simulator: SCL, LAD, FBD, STL and structured text, with virtual time. Any CI runner, Linux too, no TIA Portal or PLCSIM. |
 | **Coding agents** | An MCP server and skills. Agents edit the files, rung carries the change into TIA Portal, a person starts every download. |
 | **Change review** <sub>Pro</sub> | Interfaces, attributes, logic per region and network, and what a change affects. A gate in your CI and a FAT/SAT record. |
@@ -62,7 +62,7 @@ One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `netw
 
 | Two 20-minute runs, two people, syncs killed at random | One production program | On every change |
 |---|---|---|
-| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([explore](https://sa1ntsinner.github.io/rung/#evidence)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 34/34 bridge tests on TIA Portal V20, 700+ TypeScript and 234 .NET tests, Windows and Linux |
+| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([explore](https://sa1ntsinner.github.io/rung/#evidence)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 35/35 bridge tests on TIA Portal V20, 800+ TypeScript and 242 .NET tests, Windows and Linux |
 
 ## Quick start
 

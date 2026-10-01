@@ -67,4 +67,24 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
     expect(out.join("")).toMatch(/DELETE_PENDING/);
     expect(await main(["confirm-delete", "plc:PLC_1/blocks/30_E2E/Fx_E2E", "--dir", dir], io)).toBe(0);
   }, 600_000);
+
+  it("a software unit is a folder: a new file there creates the block in the unit, an edit goes there, a delete too", async () => {
+    const inUnit = join(dir, "plc", "PLC_1", "units", "Fx_Unit", "blocks", "30_E2E", "Fx_E2E_Unit.scl");
+    mkdirSync(join(inUnit, ".."), { recursive: true });
+    writeFileSync(inUnit, 'FUNCTION "Fx_E2E_Unit" : Void\n{ S7_Optimized_Access := \'TRUE\' }\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION\n');
+    out.length = 0;
+    await main(["sync"], io);
+    expect(out.join("")).toMatch(/created 1/);
+    expect(out.join("")).not.toMatch(/UNSUPPORTED_UNIT|BAD_ADDRESS/);
+    writeFileSync(inUnit, readFileSync(inUnit, "utf8").replace("\t;", "\t; // in the unit"));
+    out.length = 0;
+    await main(["sync"], io);
+    expect(out.join("")).toMatch(/imported 1/);
+    expect(readFileSync(inUnit, "utf8")).toContain("// in the unit");
+    unlinkSync(inUnit);
+    out.length = 0;
+    await main(["sync"], io);
+    expect(out.join("")).toMatch(/DELETE_PENDING/);
+    expect(await main(["confirm-delete", "plc:PLC_1/units/Fx_Unit/blocks/30_E2E/Fx_E2E_Unit", "--dir", dir], io)).toBe(0);
+  }, 600_000);
 });
