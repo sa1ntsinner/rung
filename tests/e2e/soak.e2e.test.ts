@@ -3,7 +3,7 @@
 // edits the same blocks in TIA Portal (a second Openness client), rung sync runs after every step and is
 // killed at random moments (Ctrl+C, a crash). Nothing typed on either side may get lost, no conflict may
 // appear (the two people never touch the same line), and the workspace ends quiet and equal to TIA Portal.
-//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] [RUNG_SOAK_KIND=tags] pnpm vitest run tests/e2e/soak.e2e.test.ts
+//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] [RUNG_SOAK_KIND=tags|db] pnpm vitest run tests/e2e/soak.e2e.test.ts
 import { describe, it, expect } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -22,22 +22,30 @@ const cli = join(repo, "packages", "cli", "dist", "index.js");
 const bridgeExe = join(repo, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48", "rung-bridge-v20.exe");
 
 const NAMES = ["A", "B", "C", "D", "E", "F"];
-// RUNG_SOAK_UNIT=Fx_Unit runs it in a software unit of the fixture; RUNG_SOAK_KIND=tags on tag tables (.tags.st,
-// one tag per line, the two people editing the comments of two tags) instead of SCL blocks
-const tags = process.env.RUNG_SOAK_KIND === "tags";
+// RUNG_SOAK_UNIT=Fx_Unit runs it in a software unit of the fixture. RUNG_SOAK_KIND: scl (SCL blocks, the default),
+// tags (tag tables as .tags.st, the two people editing the comments of two tags) or db (global DBs, the start values
+// of two members)
+const kind = process.env.RUNG_SOAK_KIND ?? "scl";
+const tags = kind === "tags";
+const db = kind === "db";
 const folder = `PLC_1/${process.env.RUNG_SOAK_UNIT ? `units/${process.env.RUNG_SOAK_UNIT}/` : ""}${tags ? "tags" : "blocks"}/90_Soak`;
-const leaf = (n: string) => (tags ? `Fx_SoakTags_${n}` : `Fx_Soak_${n}`);
-const form = tags ? "tags.st" : "scl";
+const leaf = (n: string) => (tags ? `Fx_SoakTags_${n}` : db ? `Fx_SoakDb_${n}` : `Fx_Soak_${n}`);
+const form = tags ? "tags.st" : db ? "db" : "scl";
 const addr = (n: string) => `plc:${folder}/${leaf(n)}`;
 const rel = (n: string) => `plc/${folder}/${leaf(n)}.${form}`;
-// the file person writes line 1, the person in TIA Portal line 4
+// the file person writes line 1, the person in TIA Portal line 4. A DB's start values are written as TIA Portal
+// writes them: after BEGIN, not in the declaration, and a value equal to the default not at all (so none is 0)
 const line = (n: string, which: 1 | 4, v: number) =>
-  tags ? `Soak_${n}_${which} AT %M${200 + NAMES.indexOf(n)}.${which - 1} : Bool;  // ${v}` : `#l${which} := ${v};`;
-const lineAt = (n: string, which: 1 | 4) => (tags ? new RegExp(`Soak_${n}_${which} AT %M\\d+\\.\\d : Bool;(  // -?\\d+)?`) : new RegExp(`#l${which} := -?\\d+;`));
+  tags ? `Soak_${n}_${which} AT %M${200 + NAMES.indexOf(n)}.${which - 1} : Bool;  // ${v}` : db ? `v${which} := ${v};` : `#l${which} := ${v};`;
+const lineAt = (n: string, which: 1 | 4) =>
+  tags ? new RegExp(`Soak_${n}_${which} AT %M\\d+\\.\\d : Bool;(  // -?\\d+)?`) : db ? new RegExp(`v${which} := -?\\d+;`) : new RegExp(`#l${which} := -?\\d+;`);
+const START4 = db ? 7 : 0;
 const source = (n: string, l1: number) =>
   tags
-    ? `VAR_GLOBAL\n    ${line(n, 1, l1)}\n    Soak_${n}_2 AT %M${200 + NAMES.indexOf(n)}.1 : Bool;\n    Soak_${n}_3 AT %M${200 + NAMES.indexOf(n)}.2 : Bool;\n    ${line(n, 4, 0)}\nEND_VAR\n`
-    : `FUNCTION "Fx_Soak_${n}" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n      l2 : Int;\n      l3 : Int;\n      l4 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${l1};\n\t#l2 := 2;\n\t#l3 := 3;\n\t#l4 := 0;\nEND_FUNCTION\n`;
+    ? `VAR_GLOBAL\n    ${line(n, 1, l1)}\n    Soak_${n}_2 AT %M${200 + NAMES.indexOf(n)}.1 : Bool;\n    Soak_${n}_3 AT %M${200 + NAMES.indexOf(n)}.2 : Bool;\n    ${line(n, 4, START4)}\nEND_VAR\n`
+    : db
+      ? `DATA_BLOCK "${leaf(n)}"\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\nNON_RETAIN\n   VAR \n      v1 : Int;\n      v2 : Int;\n      v3 : Int;\n      v4 : Int;\n   END_VAR\n\n\nBEGIN\n   ${line(n, 1, l1)}\n   v2 := 2;\n   v3 := 3;\n   ${line(n, 4, START4)}\n\nEND_DATA_BLOCK\n`
+      : `FUNCTION "Fx_Soak_${n}" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n      l2 : Int;\n      l3 : Int;\n      l4 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${l1};\n\t#l2 := 2;\n\t#l3 := 3;\n\t#l4 := ${START4};\nEND_FUNCTION\n`;
 // lines 2 and 3 keep the two people's lines apart: a line merge, like git's, joins changes on neighbouring lines
 const counts = (out: string) => {
   const m = /exported (\d+)\s+imported (\d+)\s+created (\d+)\s+merged (\d+)\s+conflicts (\d+)/.exec(out);
@@ -171,7 +179,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
           writeFileSync(join(ws, ...rel(n).split("/")), source(n, v));
           exists.set(n, true);
           l1.set(n, v);
-          l4.set(n, 0);
+          l4.set(n, START4);
           await kept(label, await sync(label, rand() < 0.5 ? 200 + Math.floor(rand() * 3300) : undefined));
         } else if (action === "file") {
           fileEdit(n, v);
