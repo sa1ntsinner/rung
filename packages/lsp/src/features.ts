@@ -3,7 +3,7 @@
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
 import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
-import { callSites, missingParams, unknownArgs } from "./calls.js";
+import { callSites, missingParams, orderedParams, paramsOf, unknownArgs, type CallSite } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
 
 export interface Location {
@@ -28,6 +28,8 @@ export interface Completion {
   detail?: string;
   insertText?: string;
   documentation?: string;
+  snippet?: boolean;
+  replaceStart?: number;
 }
 
 export interface OutlineSymbol {
@@ -265,9 +267,9 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   const out: Location[] = [];
-  // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), or a declaration in a DB/UDT/FB
+  // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), or a declaration (in an FC: its own uses)
   const onDecl = !hit ? declAt(index.blockAt(uri, offset)?.vars ?? [], offset) : undefined;
-  const memberTarget = hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset) : onDecl && index.blockAt(uri, offset)?.kind !== "FC" ? { uri, start: onDecl.start, end: onDecl.end } : undefined;
+  const memberTarget = hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset) : onDecl ? { uri, start: onDecl.start, end: onDecl.end } : undefined;
   if (memberTarget) return memberReferences(index, memberTarget, includeDeclaration);
   if (hit && hit.member < 0 && hit.ref.kind === "local") {
     const u = hit.ref.name.toUpperCase();
@@ -297,6 +299,68 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
     }
   }
   return out;
+}
+
+export interface SignatureHelp {
+  signatures: { label: string; documentation?: string; parameters: { label: string; documentation: string }[] }[];
+  activeSignature: number;
+  activeParameter: number;
+}
+
+export function signatureHelp(index: WorkspaceIndex, uri: string, offset: number): SignatureHelp | undefined {
+  const doc = index.docs.get(uri);
+  if (!doc?.parsed) return undefined;
+  const parsed = doc.parsed;
+  if (parsed.tokens.some((t) => {
+    if (t.kind !== "string" && t.kind !== "comment" && t.kind !== "pragma") return false;
+    const open = (t.kind === "comment" && t.text.startsWith("//")) || parsed.diagnostics.some((d) => d.start === t.start && d.message.startsWith("Unterminated"));
+    return offset >= t.start && (offset < t.end || (open && offset === t.end));
+  })) return undefined;
+  const site = callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n), true)
+    .filter((s) => offset > s.open && offset <= s.close).sort((a, b) => b.open - a.open)[0];
+  if (!site) return undefined;
+  let depth = 0;
+  let argument = 0;
+  for (const t of doc.parsed.tokens) {
+    if (t.start <= site.open || t.start >= offset || t.kind !== "op") continue;
+    if (t.text === "(" || t.text === "[") depth++;
+    else if (t.text === ")" || t.text === "]") depth--;
+    else if (t.text === "," && depth === 0) argument++;
+  }
+  const params = orderedParams(site.callee);
+  const name = site.args[argument]?.name;
+  const named = name ? params.findIndex((p) => p.name.toUpperCase() === name.toUpperCase()) : -1;
+  const parameters = params.map((p) => ({
+    label: `${p.name} ${p.section === "Output" ? "=>" : ":"} ${p.type}`,
+    documentation: `${p.section} : ${p.type}${p.documentation ? ` — ${p.documentation}` : ""}`,
+  }));
+  const returns = site.callee.returnType;
+  return {
+    signatures: [{ label: `${doc.text.slice(site.ref.start, site.ref.end)}(${parameters.map((p) => p.label).join(", ")})${returns && !/^void$/i.test(returns) ? ` : ${returns}` : ""}`, documentation: site.callee.documentation, parameters }],
+    activeSignature: 0,
+    activeParameter: Math.max(0, Math.min(named >= 0 ? named : argument, params.length - 1)),
+  };
+}
+
+export function documentHighlights(index: WorkspaceIndex, uri: string, offset: number): (Location & { kind: "read" | "write" })[] {
+  const doc = index.docs.get(uri);
+  if (!doc?.parsed) return [];
+  const writes = new Set<Ref>();
+  const refs = doc.parsed.blocks.flatMap((b) => b.refs);
+  for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n), true)) {
+    site.args.forEach((a, i) => {
+      const param = a.name ? site.callee.params.find((p) => p.name.toUpperCase() === a.name!.toUpperCase()) : orderedParams(site.callee)[i];
+      if (!a.out && param?.section !== "Output" && param?.section !== "InOut") return;
+      // Only the destination is written; an index used to select it is read.
+      const target = refs.filter((r) => r.start >= (a.nameEnd ?? a.start) && r.end <= a.end).sort((x, y) => x.start - y.start)[0];
+      if (target) writes.add(target);
+    });
+  }
+  return references(index, uri, offset, false).filter((r) => r.uri === uri).map((r) => {
+    const ref = refs.find((x) => x.start === r.start || x.members.some((m) => m.start === r.start));
+    const kind: "read" | "write" = ref?.access === "write" || (ref && writes.has(ref)) ? "write" : "read";
+    return { ...r, kind };
+  });
 }
 
 const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section] ?? m.section} ` : ""}**${m.name}** : \`${m.type}\`${m.comment ? ` — ${m.comment}` : ""}`;
@@ -371,12 +435,26 @@ function typeHover(index: WorkspaceIndex, uri: string, offset: number): { markdo
 }
 
 /** Completions for the text before the cursor. */
-export function complete(index: WorkspaceIndex, uri: string, offset: number): Completion[] {
+export function complete(index: WorkspaceIndex, uri: string, offset: number, snippetSupport = false): Completion[] {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc) return [];
   const line = doc.text.slice(doc.text.lastIndexOf("\n", offset - 1) + 1, offset);
   const block = index.blockAt(uri, offset);
+  const templates = snippetSupport && /\.scl$/i.test(uri) && block?.bodyStart !== undefined && offset >= block.bodyStart;
+  const template = (c: Completion, callee: CallSite["callee"] | undefined): Completion => {
+    if (!templates || !callee) return c;
+    const args = orderedParams(callee).map((p, i) => `${p.name} ${p.section === "Output" ? "=>" : ":="} \${${i + 1}}`).join(", ");
+    return { ...c, insertText: `${c.insertText ?? c.label}(${args})`, snippet: true };
+  };
+  // an instance is called where a statement starts, as TIA Portal inserts it; inside an expression it is read (#t.Q)
+  const statementStart = /(^|;|\b(?:THEN|ELSE|DO|REPEAT)\b)\s*(#[\p{L}\p{N}_]*|"[^"]*|[\p{L}\p{N}_]*)$/iu.test(line);
+  const instance = (v: VarDecl) => {
+    if (!statementStart) return undefined;
+    const name = (v.typeRef ?? v.type).replace(/^"|"$/g, "");
+    const callee = paramsOf(index, name);
+    return callee?.kind === "FB" || STANDARD_BY_NAME.get(name.toUpperCase())?.kind === "functionBlock" ? callee : undefined;
+  };
   const memberCtx = /(#"[^"]+"|#[\p{L}\p{N}_]+|"[^"]+"|(?<![\p{L}\p{N}_#"])[\p{L}_][\p{L}\p{N}_]*)((?:\.[\p{L}\p{N}_"]+)*)\.([\p{L}\p{N}_]*)$/u.exec(line);
   if (memberCtx) {
     const head = memberCtx[1]!;
@@ -397,10 +475,19 @@ export function complete(index: WorkspaceIndex, uri: string, offset: number): Co
     return scope.map((m) => ({ label: m.name, kind: "field", detail: m.type, ...(m.comment ? { documentation: m.comment } : {}) }));
   }
   if (/#[\p{L}\p{N}_]*$/u.test(line) && block) {
-    return block.vars.map((v) => ({ label: v.name, kind: "variable" as const, detail: `${SECTION_LABEL[v.section] ?? v.section} : ${v.type}` }));
+    const start = offset - /#[\p{L}\p{N}_]*$/u.exec(line)![0].length;
+    return block.vars.map((v) => {
+      const c = template({ label: v.name, kind: "variable", detail: `${SECTION_LABEL[v.section] ?? v.section} : ${v.type}` }, instance(v));
+      return c.snippet ? { ...c, insertText: "#" + c.insertText, replaceStart: start } : c;
+    });
   }
-  if (/"[^"]*$/.test(line)) {
-    return index.allGlobals().map((g) => ({ label: g.name, kind: g.kind === "TAG" ? "constant" : g.kind === "UDT" ? "type" : g.kind === "DB" ? "module" : "class", detail: g.tag ? `${g.tag.dataType}${g.tag.address ? " " + g.tag.address : ""}` : g.kind, insertText: g.name + '"' }));
+  const globalCtx = /"[^"]*$/.exec(line);
+  if (globalCtx) {
+    return index.allGlobals().map((g) => {
+      const callee = g.kind === "FC" ? paramsOf(index, g.name) : g.kind === "DB" && g.block?.dbOf && statementStart ? paramsOf(index, g.block.dbOf) : undefined;
+      const c = template({ label: g.name, kind: g.kind === "TAG" ? "constant" : g.kind === "UDT" ? "type" : g.kind === "DB" ? "module" : "class", detail: g.tag ? `${g.tag.dataType}${g.tag.address ? " " + g.tag.address : ""}` : g.kind, insertText: g.name + '"' }, callee);
+      return c.snippet ? { ...c, insertText: '"' + c.insertText, replaceStart: offset - globalCtx[0].length } : c;
+    });
   }
   const inType = /:\s*[\p{L}\p{N}_]*$/u.test(line) && block && (block.bodyStart === undefined || offset < block.bodyStart);
   if (inType) {
@@ -412,8 +499,9 @@ export function complete(index: WorkspaceIndex, uri: string, offset: number): Co
   }
   return [
     ...KEYWORDS.map((k) => ({ label: k, kind: "keyword" as const })),
-    ...STANDARD.map((s) => ({ label: s.name, kind: "function" as const, detail: `${s.name}(${s.params.map((p) => p.name).join(", ")})`, documentation: s.doc })),
-    ...(block?.vars ?? []).map((v) => ({ label: "#" + v.name, kind: "variable" as const, detail: v.type })),
+    // an FB type such as TON is called through its instance (completed from #… or "…"), not by its type name
+    ...STANDARD.map((s) => template({ label: s.name, kind: "function", detail: `${s.name}(${s.params.map((p) => p.name).join(", ")})`, documentation: s.doc }, s.kind === "function" ? paramsOf(index, s.name) : undefined)),
+    ...(block?.vars ?? []).map((v) => template({ label: "#" + v.name, kind: "variable", detail: v.type }, instance(v))),
   ];
 }
 

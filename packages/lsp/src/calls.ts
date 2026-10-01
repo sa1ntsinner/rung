@@ -10,6 +10,7 @@ export interface CallParam {
   name: string;
   section: "Input" | "Output" | "InOut";
   type: string;
+  documentation?: string;
 }
 
 export interface CallArg {
@@ -24,8 +25,9 @@ export interface CallArg {
 
 export interface CallSite {
   ref: Ref;
-  callee: { name: string; kind: "FC" | "FB" | "std"; params: CallParam[] };
-  /** Offset of the closing parenthesis. */
+  callee: { name: string; kind: "FC" | "FB" | "std"; params: CallParam[]; returnType?: string; documentation?: string };
+  open: number;
+  /** Offset of the closing parenthesis, or the end of an unfinished call. */
   close: number;
   args: CallArg[];
 }
@@ -33,14 +35,14 @@ export interface CallSite {
 const SECTIONS = new Set(["Input", "Output", "InOut"]);
 const ALWAYS = new Set(["EN", "ENO"]);
 
-function paramsOf(index: WorkspaceIndex, typeName: string): CallSite["callee"] | undefined {
+export function paramsOf(index: WorkspaceIndex, typeName: string): CallSite["callee"] | undefined {
   const g = index.global(typeName);
   const b: BlockModel | undefined = g?.block;
   if (b && (b.kind === "FC" || b.kind === "FB"))
-    return { name: b.name, kind: b.kind, params: b.vars.filter((v) => SECTIONS.has(v.section)).map((v) => ({ name: v.name, section: v.section as CallParam["section"], type: v.type })) };
+    return { name: b.name, kind: b.kind, returnType: b.returnType, documentation: b.comment, params: b.vars.filter((v) => SECTIONS.has(v.section)).map((v) => ({ name: v.name, section: v.section as CallParam["section"], type: v.type, documentation: v.comment })) };
   const std = STANDARD_BY_NAME.get(typeName.toUpperCase());
   if (std)
-    return { name: std.name, kind: "std", params: std.params.map((p) => ({ name: p.name, section: p.dir === "in" ? "Input" : p.dir === "out" ? "Output" : "InOut", type: p.type })) };
+    return { name: std.name, kind: "std", returnType: std.returns, documentation: std.doc, params: std.params.map((p) => ({ name: p.name, section: p.dir === "in" ? "Input" : p.dir === "out" ? "Output" : "InOut", type: p.type, documentation: p.note })) };
   return undefined;
 }
 
@@ -61,15 +63,21 @@ function calleeOf(index: WorkspaceIndex, block: BlockModel, ref: Ref, decl: (nam
 }
 
 /** The argument list after a call reference, split at top-level commas. */
-function argsAfter(tokens: Token[], from: number): { close: number; args: CallArg[] } | undefined {
+function argsAfter(tokens: Token[], from: number, incomplete: boolean): { open: number; close: number; args: CallArg[] } | undefined {
   let i = tokens.findIndex((t) => t.start >= from);
   if (i < 0 || tokens[i]!.text !== "(") return undefined;
   const args: CallArg[] = [];
+  const open = tokens[i]!.start;
+  let slotStart = tokens[i]!.end;
   let depth = 0;
   let cur: CallArg | undefined;
   let prevEnd = tokens[i]!.end;
   for (; i < tokens.length; i++) {
     const t = tokens[i]!;
+    if (incomplete && (t.kind === "eof" || t.text === ";" || /^END_/.test(t.upper))) {
+      args.push({ ...(cur ?? { start: slotStart }), end: t.start });
+      return { open, close: t.start, args };
+    }
     if (t.text === "(" || t.text === "[") {
       depth++;
       if (depth === 1) {
@@ -79,12 +87,13 @@ function argsAfter(tokens: Token[], from: number): { close: number; args: CallAr
     } else if (t.text === ")" || t.text === "]") {
       depth--;
       if (depth === 0) {
-        if (cur) args.push({ ...cur, end: prevEnd });
-        return { close: t.start, args };
+        if (cur || incomplete) args.push({ ...(cur ?? { start: slotStart }), end: incomplete ? t.start : prevEnd });
+        return { open, close: t.start, args };
       }
     } else if (depth === 1 && t.text === ",") {
-      if (cur) args.push({ ...cur, end: prevEnd });
+      if (cur || incomplete) args.push({ ...(cur ?? { start: slotStart }), end: incomplete ? t.start : prevEnd });
       cur = undefined;
+      slotStart = t.end;
       prevEnd = t.end;
       continue;
     }
@@ -92,7 +101,7 @@ function argsAfter(tokens: Token[], from: number): { close: number; args: CallAr
       if (!cur) {
         cur = { start: t.start, end: t.end };
         const next = tokens[i + 1];
-        if (depth === 1 && t.kind === "ident" && (next?.text === ":=" || next?.text === "=>")) Object.assign(cur, { name: t.text, nameStart: t.start, nameEnd: t.end, out: next.text === "=>" });
+        if (depth === 1 && t.kind === "ident" && (next?.text === ":=" || next?.text === "=>" || (incomplete && next?.text === ":"))) Object.assign(cur, { name: t.text, nameStart: t.start, nameEnd: t.end, out: next!.text === "=>" });
       }
       prevEnd = t.end;
     }
@@ -100,7 +109,7 @@ function argsAfter(tokens: Token[], from: number): { close: number; args: CallAr
   return undefined;
 }
 
-export function callSites(index: WorkspaceIndex, uri: string, decl: (block: BlockModel, name: string) => { type: string; typeRef?: string } | undefined): CallSite[] {
+export function callSites(index: WorkspaceIndex, uri: string, decl: (block: BlockModel, name: string) => { type: string; typeRef?: string } | undefined, incomplete = false): CallSite[] {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
   if (!doc?.parsed || !/\.scl$/i.test(uri)) return [];
@@ -111,10 +120,14 @@ export function callSites(index: WorkspaceIndex, uri: string, decl: (block: Bloc
       if (ref.access !== "call") continue;
       const callee = calleeOf(index, block, ref, (n) => decl(block, n));
       if (!callee) continue;
-      const a = argsAfter(tokens, ref.end);
-      if (a) out.push({ ref, callee, close: a.close, args: a.args });
+      const a = argsAfter(tokens, ref.end, incomplete);
+      if (a) out.push({ ref, callee, ...a });
     }
   return out;
+}
+
+export function orderedParams(callee: CallSite["callee"]): CallParam[] {
+  return ["Input", "InOut", "Output"].flatMap((section) => callee.params.filter((p) => p.section === section));
 }
 
 /** Parameters an FC call must supply but does not (named calls only; a positional call is left alone). */

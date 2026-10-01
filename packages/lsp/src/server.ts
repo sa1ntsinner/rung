@@ -16,6 +16,8 @@ import {
   TextDocuments,
   TextDocumentSyncKind,
   CompletionItemKind,
+  DocumentHighlightKind,
+  InsertTextFormat,
   type Connection,
   type Diagnostic as LspDiagnostic,
   type MessageReader,
@@ -25,7 +27,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
-import { complete, definition, diagnostics, hover, outline, references, rename, renameTarget, type CompletionKind, type OutlineSymbol } from "./features.js";
+import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, type CompletionKind, type OutlineSymbol } from "./features.js";
 import { codeActions } from "./actions.js";
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
@@ -79,6 +81,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   let pollTimer: NodeJS.Timeout | undefined;
   const timers = new Map<string, NodeJS.Timeout>();
   let refreshSupport = false;
+  let snippetSupport = false;
   let monitor = options.monitor ? new Monitoring(index, options.monitor, () => {
     if (refreshSupport) void connection.languages.inlayHint.refresh().catch(() => undefined);
   }, (message) => void connection.sendNotification("window/showMessage", { type: MessageType.Error, message }).catch(() => undefined)) : undefined;
@@ -126,6 +129,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
 
   connection.onInitialize(async (params) => {
     refreshSupport = params.capabilities.workspace?.inlayHint?.refreshSupport === true;
+    snippetSupport = params.capabilities.textDocument?.completion?.completionItem?.snippetSupport === true;
     // an editor with monitoring of its own (rung's VS Code extension) turns this one off
     if ((params.initializationOptions as { monitor?: boolean } | undefined)?.monitor === false) monitor = undefined;
     const folder = params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? undefined;
@@ -138,6 +142,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
         completionProvider: { triggerCharacters: ["#", '"', "."] },
+        signatureHelpProvider: { triggerCharacters: ["(", ","], retriggerCharacters: [":"] },
+        documentHighlightProvider: true,
         hoverProvider: true,
         definitionProvider: true,
         referencesProvider: true,
@@ -196,14 +202,21 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   });
 
   connection.onCompletion((p) =>
-    complete(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position)).map((c) => ({
+    complete(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position), snippetSupport).map((c) => ({
       label: c.label,
       kind: COMPLETION_KIND[c.kind],
       ...(c.detail ? { detail: c.detail } : {}),
       ...(c.insertText ? { insertText: c.insertText } : {}),
+      ...(c.snippet ? { insertTextFormat: InsertTextFormat.Snippet } : {}),
+      ...(c.replaceStart !== undefined ? { textEdit: { range: range(p.textDocument.uri, c.replaceStart, offsetOf(p.textDocument.uri, p.position)), newText: c.insertText! } } : {}),
       ...(c.documentation ? { documentation: c.documentation } : {}),
     })),
   );
+  connection.onSignatureHelp((p) => signatureHelp(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position)) ?? null);
+  connection.onDocumentHighlight((p) => documentHighlights(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position)).map((h) => ({
+    range: range(p.textDocument.uri, h.start, h.end),
+    kind: h.kind === "write" ? DocumentHighlightKind.Write : DocumentHighlightKind.Read,
+  })));
   connection.onHover((p) => {
     const h = hover(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position));
     return h ? { contents: { kind: MarkupKind.Markdown, value: h.markdown }, range: range(p.textDocument.uri, h.start, h.end) } : null;
