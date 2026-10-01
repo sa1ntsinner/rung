@@ -67,10 +67,6 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
     throw new WorkspaceError("BINDING_MISMATCH", `${info.path} is open in TIA Portal ${info.tiaVersion}; rung.toml says tiaVersion = "${config.project.tiaVersion}"`);
   const devices = config.devices.length ? config.devices : info.devices;
   for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BINDING_MISMATCH", `device ${d} not found in project`);
-  for (const u of info.units ?? []) {
-    const [dev, unit] = u.split("/");
-    if (dev && unit && devices.includes(dev)) w(`plc:${dev}/units/${unit}`, "UNSUPPORTED_UNIT", "software units are not mirrored yet");
-  }
 
   await sweepTempFiles(root);
   const recovery = await recoverJournal(root);
@@ -100,11 +96,6 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
       }
       if ((entry.namespace ?? undefined) !== address.namespace || (entry.unit ?? undefined) !== address.unit) {
         w(entry.address, "BAD_ADDRESS", "namespace/unit metadata does not match the address");
-        skipped.add(entry.address);
-        continue;
-      }
-      if (address.unit !== undefined) {
-        w(entry.address, "UNSUPPORTED_UNIT", "software units are not mirrored yet");
         skipped.add(entry.address);
         continue;
       }

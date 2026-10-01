@@ -362,6 +362,41 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         }
     }
 
+    [Fact] public void ABlockOfASoftwareUnitIsCreatedListedEditedAndDeletedThere()
+    {
+        var name = "Fx_InUnit_" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        var address = "plc:PLC_1/units/Fx_Unit/blocks/Unit_Folder/" + name;
+        var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "rung-it", Guid.NewGuid().ToString("N"))).FullName;
+        var src = Path.Combine(dir, "obj.scl");
+        var text = "FUNCTION \"" + name + "\" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION\n";
+        File.WriteAllText(src, text);
+        foreach (var old in _fx.Session.ListObjects("PLC_1").Where(o => o.Address.StartsWith("plc:PLC_1/units/Fx_Unit/blocks/Unit_Folder/Fx_InUnit_", StringComparison.Ordinal)).ToList())
+            _fx.Session.Delete(old.Address, old.Fingerprint, Guid.NewGuid().ToString());
+        try
+        {
+            var created = _fx.Session.Import(address, "scl", src, "absent", Guid.NewGuid().ToString());
+            Assert.Equal(address, created.Address);
+            Assert.Contains(_fx.Session.ListObjects("PLC_1"), o => o.Address == address && o.Unit == "Fx_Unit" && o.Fingerprint == created.Fingerprint);
+            // the PLC's names are taken across its units: the same name next to the PLC's own blocks is refused
+            var clash = Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/blocks/" + name, "scl", src, "absent", Guid.NewGuid().ToString()));
+            Assert.Equal("NAME_TAKEN", clash.Code);
+            Assert.Contains(address, clash.Message);
+            // edited through the unit's own sources, found again in the unit after the import
+            File.WriteAllText(src, text.Replace("\t;", "\t; // edited"));
+            var edited = _fx.Session.Import(address, "scl", src, created.Fingerprint, Guid.NewGuid().ToString());
+            Assert.Contains("// edited", File.ReadAllText(_fx.Session.Export(address, "auto", Tmp()).Files[0].Path));
+            Assert.DoesNotContain(_fx.Session.Compile("PLC_1", new[] { address }), m => m.Severity == "error");
+            _fx.Session.Delete(address, edited.Fingerprint, Guid.NewGuid().ToString());
+            Assert.DoesNotContain(_fx.Session.ListObjects("PLC_1"), o => o.Address == address);
+            Assert.Equal("NOT_FOUND", Assert.Throws<RpcException>(() => _fx.Session.Import("plc:PLC_1/units/No_Unit/blocks/" + name, "scl", src, "absent", Guid.NewGuid().ToString())).Code);
+        }
+        finally
+        {
+            var left = _fx.Session.ListObjects("PLC_1").FirstOrDefault(o => o.Address == address);
+            if (left != null) _fx.Session.Delete(address, left.Fingerprint, Guid.NewGuid().ToString());
+        }
+    }
+
     [Fact] public void RepeatedInventoriesReuseFingerprintsButSeeChanges()
     {
         // an idle watch must not recompute every fingerprint on every pass

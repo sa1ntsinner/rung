@@ -279,6 +279,18 @@ describe("syncOnce", () => {
     expect(idle.created + idle.imported).toBe(0);
   });
 
+  it("creates a new file in a software unit's folder in that unit, and then stays quiet", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write("plc/PLC_1/units/Fx_Unit/blocks/Drives/Fx_InUnit.scl", 'FUNCTION "Fx_InUnit" : Void\nBEGIN\nEND_FUNCTION\n');
+    const r = await t.sync();
+    expect(r.created).toBe(1);
+    expect(t.bridge.imports.map((i) => [i.address, i.expected])).toEqual([["plc:PLC_1/units/Fx_Unit/blocks/Drives/Fx_InUnit", "absent"]]);
+    const idle = await t.sync();
+    expect(idle.created + idle.imported + idle.exported).toBe(0);
+    expect(idle.warnings).toEqual([]);
+  });
+
   it("does not create objects when imports are manual", async () => {
     const t = setup(() => {}, (c) => (c.sync.import = "manual"));
     await t.sync();

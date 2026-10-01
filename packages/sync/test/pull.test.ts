@@ -191,21 +191,24 @@ describe("pull", () => {
     expect(existsSync(t.file("plc/PLC_1/blocks/Other.scl"))).toBe(true);
   });
 
-  it("skips software-unit objects with UNSUPPORTED_UNIT and system blocks with UNSUPPORTED_OBJECT", async () => {
+  it("mirrors a software unit's objects into its own folder and skips system blocks with UNSUPPORTED_OBJECT", async () => {
     const t = setup((b) => {
-      b.add("plc:PLC_1/units/Fx_Unit/blocks/Fx_Fc", { unit: "Fx_Unit" });
+      b.add("plc:PLC_1/units/Fx_Unit/blocks/Drives/Fx_Fc", { unit: "Fx_Unit" });
+      b.add("plc:PLC_1/units/Fx_Unit/types/Fx_UnitType", { unit: "Fx_Unit", kind: "type", form: "udt" });
       b.add("plc:PLC_1/blocks/Sys", { isSystem: true });
     });
-    const r = await t.run();
-    expect(r.warnings.map((w) => w.code).sort()).toEqual(["UNSUPPORTED_OBJECT", "UNSUPPORTED_UNIT"]);
-    expect(r.exported).toBe(0);
-  });
-
-  it("warns once per software unit reported by the project", async () => {
-    const t = setup();
     t.bridge.info = { ...t.bridge.info, units: ["PLC_1/Fx_Unit"] };
     const r = await t.run();
-    expect(r.warnings).toContainEqual(expect.objectContaining({ address: "plc:PLC_1/units/Fx_Unit", code: "UNSUPPORTED_UNIT" }));
+    expect(r.warnings.map((w) => w.code)).toEqual(["UNSUPPORTED_OBJECT"]);
+    expect(r.exported).toBe(2);
+    expect(existsSync(t.file("plc/PLC_1/units/Fx_Unit/blocks/Drives/Fx_Fc.scl"))).toBe(true);
+    expect(existsSync(t.file("plc/PLC_1/units/Fx_Unit/types/Fx_UnitType.udt"))).toBe(true);
+  });
+
+  it("rejects entries whose unit metadata contradicts the address", async () => {
+    const t = setup((b) => b.add("plc:PLC_1/units/Fx_Unit/blocks/Fx_Fc", { unit: "Other" }));
+    const r = await t.run();
+    expect(r.warnings).toContainEqual(expect.objectContaining({ code: "BAD_ADDRESS" }));
   });
 
   it("rejects entries whose namespace metadata contradicts the address", async () => {

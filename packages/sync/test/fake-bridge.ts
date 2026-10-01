@@ -27,10 +27,12 @@ export class FakeBridge {
     const form = opts.form ?? "scl";
     const files = opts.files ?? { ["." + form]: opts.content ?? `// ${address}\n` };
     const { form: _f, content: _c, files: _fs, ...rest } = opts;
+    // like the bridge, an object of a software unit names its unit
+    const unit = /^plc:[^/]+\/units\/([^/]+)\//.exec(address)?.[1];
     this.objects.set(address, {
       form,
       files,
-      entry: { address, kind: "block", language: "SCL", blockType: "FC", knowHowProtected: false, isFailsafe: false, isSystem: false, fingerprint: "fp:" + sha(JSON.stringify(files)).slice(0, 8), ...rest },
+      entry: { address, kind: "block", language: "SCL", blockType: "FC", knowHowProtected: false, isFailsafe: false, isSystem: false, fingerprint: "fp:" + sha(JSON.stringify(files)).slice(0, 8), ...(unit ? { unit } : {}), ...rest },
     });
     return this;
   }

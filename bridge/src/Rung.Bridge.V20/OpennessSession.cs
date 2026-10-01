@@ -29,6 +29,28 @@ namespace Rung.Bridge.V20
         public IEngineeringObject Obj;
         public object ParentGroup;   // PlcBlockGroup | PlcTypeGroup | PlcTagTableGroup | PlcWatchAndForceTableGroup
         public PlcSoftware Plc;
+        /// <summary>The PLC's own program or the software unit the object is in (null for hardware).</summary>
+        public SoftwareRoot Root;
+    }
+
+    /// <summary>
+    /// The PLC's own program or one of its software units: each has its own blocks, PLC data types, tag tables and
+    /// external sources (a block of a unit is generated from the unit's sources). Watch tables are the PLC's only.
+    /// </summary>
+    sealed class SoftwareRoot
+    {
+        public PlcSoftware Plc;
+        public string Device;
+        /// <summary>Null for the PLC's own program.</summary>
+        public string Unit;
+        public PlcBlockGroup Blocks;
+        public PlcTypeGroup Types;
+        public PlcTagTableGroup Tags;
+        public PlcWatchAndForceTableGroup Watch;
+        public PlcExternalSourceSystemGroup Sources;
+
+        public string Addr(string kind, List<string> groups, string name, string ns) =>
+            AddressFormat.Format(new AddressParts { Device = Device, Unit = Unit, Kind = kind, Groups = groups.ToArray(), Name = name, Namespace = string.IsNullOrEmpty(ns) ? null : ns });
     }
 
     public sealed partial class OpennessSession : ITiaSession, IDisposable
@@ -163,6 +185,22 @@ namespace Rung.Bridge.V20
             return matches[0];
         }
 
+        /// <summary>The PLC's own program, then its software units (safety units stay in TIA Portal: their blocks are F-blocks).</summary>
+        static IEnumerable<SoftwareRoot> Roots(PlcSoftware plc, string device)
+        {
+            yield return new SoftwareRoot { Plc = plc, Device = device, Blocks = plc.BlockGroup, Types = plc.TypeGroup, Tags = plc.TagTableGroup, Watch = plc.WatchAndForceTableGroup, Sources = plc.ExternalSourceGroup };
+            PlcUnitComposition units = null;
+            try { units = plc.GetService<PlcUnitProvider>()?.UnitGroup.Units; }
+            catch (EngineeringException) { }
+            if (units == null) yield break;
+            foreach (PlcUnit u in units)
+                yield return new SoftwareRoot { Plc = plc, Device = device, Unit = u.Name, Blocks = u.BlockGroup, Types = u.TypeGroup, Tags = u.TagTableGroup, Sources = u.ExternalSourceGroup };
+        }
+
+        static SoftwareRoot RootOf(PlcSoftware plc, string device, string unit) =>
+            Roots(plc, device).FirstOrDefault(r => r.Unit == unit)
+            ?? throw new RpcException(ErrorCodes.NotFound, "No software unit \"" + unit + "\" in " + device + "; units are created in TIA Portal");
+
         static string[] UnitNames(PlcSoftware plc)
         {
             try
@@ -202,13 +240,14 @@ namespace Rung.Bridge.V20
                 try
                 {
                     refs.Clear();
-                    WalkBlocks(plc, device, plc.BlockGroup, new List<string>(), refs);
+                    var roots = Roots(plc, device).ToList();
+                    foreach (var root in roots) WalkBlocks(root, root.Blocks, new List<string>(), refs);
                     timing.Lap("blocks");
-                    WalkTypes(plc, device, plc.TypeGroup, new List<string>(), refs);
+                    foreach (var root in roots) WalkTypes(root, root.Types, new List<string>(), refs);
                     timing.Lap("types");
-                    WalkTags(plc, device, plc.TagTableGroup, new List<string>(), refs);
+                    foreach (var root in roots) WalkTags(root, root.Tags, new List<string>(), refs);
                     timing.Lap("tags");
-                    WalkWatch(plc, device, plc.WatchAndForceTableGroup, new List<string>(), refs);
+                    WalkWatch(roots[0], roots[0].Watch, new List<string>(), refs);
                     WalkNetwork(plc, device, refs);
                     timing.Lap("other");
                     break;
@@ -293,24 +332,24 @@ namespace Rung.Bridge.V20
             return fallback();
         }
 
-        void LibraryInstances(string device, PlcBlockGroup group, List<string> path, Dictionary<string, List<string>> into)
+        void LibraryInstances(SoftwareRoot root, PlcBlockGroup group, List<string> path, Dictionary<string, List<string>> into)
         {
             foreach (PlcBlock b in group.Blocks)
             {
-                var address = Addr(device, "block", path, b.Name, b.Namespace);
+                var address = root.Addr("block", path, b.Name, b.Namespace);
                 AddInstance(into, CachedLibraryType(address, b, Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate)), address);
             }
-            foreach (PlcBlockUserGroup g in group.Groups) LibraryInstances(device, g, new List<string>(path) { g.Name }, into);
+            foreach (PlcBlockUserGroup g in group.Groups) LibraryInstances(root, g, new List<string>(path) { g.Name }, into);
         }
 
-        void LibraryInstances(string device, PlcTypeGroup group, List<string> path, Dictionary<string, List<string>> into)
+        void LibraryInstances(SoftwareRoot root, PlcTypeGroup group, List<string> path, Dictionary<string, List<string>> into)
         {
             foreach (PlcType t in group.Types)
             {
-                var address = Addr(device, "type", path, t.Name, t.Namespace);
+                var address = root.Addr("type", path, t.Name, t.Namespace);
                 AddInstance(into, CachedLibraryType(address, t, Dates(t.ModifiedDate, t.InterfaceModifiedDate)), address);
             }
-            foreach (PlcTypeUserGroup g in group.Groups) LibraryInstances(device, g, new List<string>(path) { g.Name }, into);
+            foreach (PlcTypeUserGroup g in group.Groups) LibraryInstances(root, g, new List<string>(path) { g.Name }, into);
         }
 
         static void AddInstance(Dictionary<string, List<string>> into, string type, string address)
@@ -333,14 +372,14 @@ namespace Rung.Bridge.V20
 
         static bool IsFailsafeLanguage(ProgrammingLanguage l) => l.ToString().StartsWith("F_", StringComparison.Ordinal);
 
-        void WalkBlocks(PlcSoftware plc, string device, PlcBlockGroup group, List<string> path, List<ObjectRef> refs)
+        void WalkBlocks(SoftwareRoot root, PlcBlockGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcBlock b in group.Blocks) refs.Add(BlockRef(plc, device, group, path, b));
+            foreach (PlcBlock b in group.Blocks) refs.Add(BlockRef(root, group, path, b));
             foreach (PlcBlockUserGroup g in group.Groups)
-                WalkBlocks(plc, device, g, new List<string>(path) { g.Name }, refs);
+                WalkBlocks(root, g, new List<string>(path) { g.Name }, refs);
         }
 
-        ObjectRef BlockRef(PlcSoftware plc, string device, PlcBlockGroup group, List<string> path, PlcBlock b)
+        ObjectRef BlockRef(SoftwareRoot root, PlcBlockGroup group, List<string> path, PlcBlock b)
         {
             var a = Attributes(b, BlockAttributes)
                 ?? new object[] { b.Name, b.Namespace, b.ProgrammingLanguage, b.Number, b.IsKnowHowProtected, b.IsConsistent, b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate };
@@ -348,8 +387,9 @@ namespace Rung.Bridge.V20
             var lang = (ProgrammingLanguage)a[2];
             var entry = new ObjectEntry
             {
-                Address = Addr(device, "block", path, (string)a[0], ns),
+                Address = root.Addr("block", path, (string)a[0], ns),
                 Kind = "block",
+                Unit = root.Unit,
                 Language = lang.ToString(),
                 BlockType = BlockTypeOf(b),
                 Number = (int)a[3],
@@ -359,24 +399,25 @@ namespace Rung.Bridge.V20
                 IsConsistent = (bool)a[5],
             };
             Revise(entry, b, Dates((DateTime)a[6], (DateTime)a[7], (DateTime)a[8]));
-            return new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = plc };
+            return new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = root.Plc, Root = root };
         }
 
-        void WalkTypes(PlcSoftware plc, string device, PlcTypeGroup group, List<string> path, List<ObjectRef> refs)
+        void WalkTypes(SoftwareRoot root, PlcTypeGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcType t in group.Types) refs.Add(TypeRef(plc, device, group, path, t));
+            foreach (PlcType t in group.Types) refs.Add(TypeRef(root, group, path, t));
             foreach (PlcTypeUserGroup g in group.Groups)
-                WalkTypes(plc, device, g, new List<string>(path) { g.Name }, refs);
+                WalkTypes(root, g, new List<string>(path) { g.Name }, refs);
         }
 
-        ObjectRef TypeRef(PlcSoftware plc, string device, PlcTypeGroup group, List<string> path, PlcType t)
+        ObjectRef TypeRef(SoftwareRoot root, PlcTypeGroup group, List<string> path, PlcType t)
         {
             var a = Attributes(t, TypeAttributes) ?? new object[] { t.Name, t.Namespace, t.IsKnowHowProtected, t.IsConsistent, t.ModifiedDate, t.InterfaceModifiedDate };
             var ns = (string)a[1];
             var entry = new ObjectEntry
             {
-                Address = Addr(device, "type", path, (string)a[0], ns),
+                Address = root.Addr("type", path, (string)a[0], ns),
                 Kind = "type",
+                Unit = root.Unit,
                 Language = "UDT",
                 Namespace = string.IsNullOrEmpty(ns) ? null : ns,
                 KnowHowProtected = (bool)a[2],
@@ -384,72 +425,74 @@ namespace Rung.Bridge.V20
                 IsConsistent = (bool)a[3],
             };
             Revise(entry, t, Dates((DateTime)a[4], (DateTime)a[5]));
-            return new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc };
+            return new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = root.Plc, Root = root };
         }
 
-        void WalkTags(PlcSoftware plc, string device, PlcTagTableGroup group, List<string> path, List<ObjectRef> refs)
+        void WalkTags(SoftwareRoot root, PlcTagTableGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcTagTable t in group.TagTables) refs.Add(TagTableRef(plc, device, group, path, t));
+            foreach (PlcTagTable t in group.TagTables) refs.Add(TagTableRef(root, group, path, t));
             foreach (PlcTagTableUserGroup g in group.Groups)
-                WalkTags(plc, device, g, new List<string>(path) { g.Name }, refs);
+                WalkTags(root, g, new List<string>(path) { g.Name }, refs);
         }
 
         // ModifiedTimeStamp is weak: "dt:" makes rung verify it by hash periodically.
-        static ObjectRef TagTableRef(PlcSoftware plc, string device, PlcTagTableGroup group, List<string> path, PlcTagTable t) =>
-            new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "tagtable", path, t.Name, null), Kind = "tagtable", Fingerprint = Dates(t.ModifiedTimeStamp) }, Obj = t, ParentGroup = group, Plc = plc };
+        static ObjectRef TagTableRef(SoftwareRoot root, PlcTagTableGroup group, List<string> path, PlcTagTable t) =>
+            new ObjectRef { Entry = new ObjectEntry { Address = root.Addr("tagtable", path, t.Name, null), Kind = "tagtable", Unit = root.Unit, Fingerprint = Dates(t.ModifiedTimeStamp) }, Obj = t, ParentGroup = group, Plc = root.Plc, Root = root };
 
-        void WalkWatch(PlcSoftware plc, string device, PlcWatchAndForceTableGroup group, List<string> path, List<ObjectRef> refs)
+        void WalkWatch(SoftwareRoot root, PlcWatchAndForceTableGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcWatchTable t in group.WatchTables) refs.Add(WatchTableRef(plc, device, group, path, t));
+            foreach (PlcWatchTable t in group.WatchTables) refs.Add(WatchTableRef(root, group, path, t));
             foreach (PlcForceTable t in group.ForceTables)
-                refs.Add(new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "forcetable", path, t.Name, null), Kind = "forcetable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = plc });
+                refs.Add(new ObjectRef { Entry = new ObjectEntry { Address = root.Addr("forcetable", path, t.Name, null), Kind = "forcetable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = root.Plc, Root = root });
             foreach (PlcWatchAndForceTableUserGroup g in group.Groups)
-                WalkWatch(plc, device, g, new List<string>(path) { g.Name }, refs);
+                WalkWatch(root, g, new List<string>(path) { g.Name }, refs);
         }
 
-        static ObjectRef WatchTableRef(PlcSoftware plc, string device, PlcWatchAndForceTableGroup group, List<string> path, PlcWatchTable t) =>
-            new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "watchtable", path, t.Name, null), Kind = "watchtable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = plc };
+        static ObjectRef WatchTableRef(SoftwareRoot root, PlcWatchAndForceTableGroup group, List<string> path, PlcWatchTable t) =>
+            new ObjectRef { Entry = new ObjectEntry { Address = root.Addr("watchtable", path, t.Name, null), Kind = "watchtable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = root.Plc, Root = root };
 
         /// <summary>
         /// The one object at this address, looked up in its group, or null where only a full listing can tell
-        /// (software units, namespaces, other kinds). TIA Portal replaces an object on import and compile, so a
-        /// reference from before is no use; listing the whole PLC again costs seconds in a large project.
+        /// (namespaces, other kinds). TIA Portal replaces an object on import and compile, so a reference from
+        /// before is no use; listing the whole PLC again costs seconds in a large project.
         /// </summary>
         ObjectRef Lookup(string address)
         {
             var parts = AddressFormat.Parse(address);
-            if (parts.Unit != null || parts.Namespace != null) return null;
-            var plc = Plc(parts.Device);
+            if (parts.Namespace != null) return null;
+            var root = Roots(Plc(parts.Device), parts.Device).FirstOrDefault(r => r.Unit == parts.Unit);
+            if (root == null) return null;
             var path = new List<string>(parts.Groups);
             switch (parts.Kind)
             {
                 case "block":
                 {
-                    PlcBlockGroup g = plc.BlockGroup;
+                    PlcBlockGroup g = root.Blocks;
                     foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
                     var b = g.Blocks.Find(parts.Name);
-                    return b == null ? null : BlockRef(plc, parts.Device, g, path, b);
+                    return b == null ? null : BlockRef(root, g, path, b);
                 }
                 case "type":
                 {
-                    PlcTypeGroup g = plc.TypeGroup;
+                    PlcTypeGroup g = root.Types;
                     foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
                     var t = g.Types.Find(parts.Name);
-                    return t == null ? null : TypeRef(plc, parts.Device, g, path, t);
+                    return t == null ? null : TypeRef(root, g, path, t);
                 }
                 case "tagtable":
                 {
-                    PlcTagTableGroup g = plc.TagTableGroup;
+                    PlcTagTableGroup g = root.Tags;
                     foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
                     var t = g.TagTables.Find(parts.Name);
-                    return t == null ? null : TagTableRef(plc, parts.Device, g, path, t);
+                    return t == null ? null : TagTableRef(root, g, path, t);
                 }
                 case "watchtable":
                 {
-                    PlcWatchAndForceTableGroup g = plc.WatchAndForceTableGroup;
+                    PlcWatchAndForceTableGroup g = root.Watch;
+                    if (g == null) return null;
                     foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
                     var t = g.WatchTables.Find(parts.Name);
-                    return t == null ? null : WatchTableRef(plc, parts.Device, g, path, t);
+                    return t == null ? null : WatchTableRef(root, g, path, t);
                 }
                 default:
                     return null;
@@ -479,37 +522,47 @@ namespace Rung.Bridge.V20
         /// </summary>
         string FindName(PlcSoftware plc, string device, string kind, string name)
         {
+            foreach (var root in Roots(plc, device))
+            {
+                var hit = FindName(root, kind, name);
+                if (hit != null) return hit;
+            }
+            return null;
+        }
+
+        static string FindName(SoftwareRoot root, string kind, string name)
+        {
             string Blocks(PlcBlockGroup g, List<string> path)
             {
                 var b = g.Blocks.Find(name);
-                if (b != null) return Addr(device, "block", path, b.Name, b.Namespace);
+                if (b != null) return root.Addr("block", path, b.Name, b.Namespace);
                 foreach (PlcBlockUserGroup u in g.Groups) { var hit = Blocks(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
                 return null;
             }
             string Types(PlcTypeGroup g, List<string> path)
             {
                 var t = g.Types.Find(name);
-                if (t != null) return Addr(device, "type", path, t.Name, t.Namespace);
+                if (t != null) return root.Addr("type", path, t.Name, t.Namespace);
                 foreach (PlcTypeUserGroup u in g.Groups) { var hit = Types(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
                 return null;
             }
             string Tags(PlcTagTableGroup g, List<string> path)
             {
                 var t = g.TagTables.Find(name);
-                if (t != null) return Addr(device, "tagtable", path, t.Name, null);
+                if (t != null) return root.Addr("tagtable", path, t.Name, null);
                 foreach (PlcTagTableUserGroup u in g.Groups) { var hit = Tags(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
                 return null;
             }
             string Watch(PlcWatchAndForceTableGroup g, List<string> path)
             {
                 var t = g.WatchTables.Find(name);
-                if (t != null) return Addr(device, "watchtable", path, t.Name, null);
+                if (t != null) return root.Addr("watchtable", path, t.Name, null);
                 foreach (PlcWatchAndForceTableUserGroup u in g.Groups) { var hit = Watch(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
                 return null;
             }
-            if (kind == "block" || kind == "type") return Blocks(plc.BlockGroup, new List<string>()) ?? Types(plc.TypeGroup, new List<string>());
-            if (kind == "tagtable") return Tags(plc.TagTableGroup, new List<string>());
-            if (kind == "watchtable") return Watch(plc.WatchAndForceTableGroup, new List<string>());
+            if (kind == "block" || kind == "type") return Blocks(root.Blocks, new List<string>()) ?? Types(root.Types, new List<string>());
+            if (kind == "tagtable") return Tags(root.Tags, new List<string>());
+            if (kind == "watchtable" && root.Watch != null) return Watch(root.Watch, new List<string>());
             return null;
         }
 
@@ -520,29 +573,32 @@ namespace Rung.Bridge.V20
         List<KeyValuePair<string, string>> Names(PlcSoftware plc, string device, string kind)
         {
             var names = new List<KeyValuePair<string, string>>();
-            void Blocks(PlcBlockGroup g, List<string> path)
+            foreach (var root in Roots(plc, device))
             {
-                foreach (PlcBlock b in g.Blocks) { var ns = b.Namespace; names.Add(new KeyValuePair<string, string>(Addr(device, "block", path, b.Name, ns), Identity(b.Name, ns))); }
-                foreach (PlcBlockUserGroup u in g.Groups) Blocks(u, new List<string>(path) { u.Name });
+                void Blocks(PlcBlockGroup g, List<string> path)
+                {
+                    foreach (PlcBlock b in g.Blocks) { var ns = b.Namespace; names.Add(new KeyValuePair<string, string>(root.Addr("block", path, b.Name, ns), Identity(b.Name, ns))); }
+                    foreach (PlcBlockUserGroup u in g.Groups) Blocks(u, new List<string>(path) { u.Name });
+                }
+                void Types(PlcTypeGroup g, List<string> path)
+                {
+                    foreach (PlcType t in g.Types) { var ns = t.Namespace; names.Add(new KeyValuePair<string, string>(root.Addr("type", path, t.Name, ns), Identity(t.Name, ns))); }
+                    foreach (PlcTypeUserGroup u in g.Groups) Types(u, new List<string>(path) { u.Name });
+                }
+                void Tags(PlcTagTableGroup g, List<string> path)
+                {
+                    foreach (PlcTagTable t in g.TagTables) names.Add(new KeyValuePair<string, string>(root.Addr("tagtable", path, t.Name, null), t.Name));
+                    foreach (PlcTagTableUserGroup u in g.Groups) Tags(u, new List<string>(path) { u.Name });
+                }
+                void Watch(PlcWatchAndForceTableGroup g, List<string> path)
+                {
+                    foreach (PlcWatchTable t in g.WatchTables) names.Add(new KeyValuePair<string, string>(root.Addr("watchtable", path, t.Name, null), t.Name));
+                    foreach (PlcWatchAndForceTableUserGroup u in g.Groups) Watch(u, new List<string>(path) { u.Name });
+                }
+                if (kind == "block" || kind == "type") { Blocks(root.Blocks, new List<string>()); Types(root.Types, new List<string>()); }
+                else if (kind == "tagtable") Tags(root.Tags, new List<string>());
+                else if (kind == "watchtable" && root.Watch != null) Watch(root.Watch, new List<string>());
             }
-            void Types(PlcTypeGroup g, List<string> path)
-            {
-                foreach (PlcType t in g.Types) { var ns = t.Namespace; names.Add(new KeyValuePair<string, string>(Addr(device, "type", path, t.Name, ns), Identity(t.Name, ns))); }
-                foreach (PlcTypeUserGroup u in g.Groups) Types(u, new List<string>(path) { u.Name });
-            }
-            void Tags(PlcTagTableGroup g, List<string> path)
-            {
-                foreach (PlcTagTable t in g.TagTables) names.Add(new KeyValuePair<string, string>(Addr(device, "tagtable", path, t.Name, null), t.Name));
-                foreach (PlcTagTableUserGroup u in g.Groups) Tags(u, new List<string>(path) { u.Name });
-            }
-            void Watch(PlcWatchAndForceTableGroup g, List<string> path)
-            {
-                foreach (PlcWatchTable t in g.WatchTables) names.Add(new KeyValuePair<string, string>(Addr(device, "watchtable", path, t.Name, null), t.Name));
-                foreach (PlcWatchAndForceTableUserGroup u in g.Groups) Watch(u, new List<string>(path) { u.Name });
-            }
-            if (kind == "block" || kind == "type") { Blocks(plc.BlockGroup, new List<string>()); Types(plc.TypeGroup, new List<string>()); }
-            else if (kind == "tagtable") Tags(plc.TagTableGroup, new List<string>());
-            else if (kind == "watchtable") Watch(plc.WatchAndForceTableGroup, new List<string>());
             return names;
         }
 
@@ -574,13 +630,16 @@ namespace Rung.Bridge.V20
                     else break;
                 }
                 var device = AddressFormat.Parse(r.Entry.Address).Device;
+                // the system folder at the top belongs to the PLC's software or to a software unit
+                var unit = (g as IEngineeringObject)?.Parent is PlcUnit u ? u.Name : null;
+                var root = new SoftwareRoot { Device = device, Unit = unit };
                 switch (r.Obj)
                 {
-                    case PlcBlock b: return Addr(device, "block", groups, b.Name, b.Namespace);
-                    case PlcType t: return Addr(device, "type", groups, t.Name, t.Namespace);
-                    case PlcTagTable tt: return Addr(device, "tagtable", groups, tt.Name, null);
-                    case PlcWatchTable w: return Addr(device, "watchtable", groups, w.Name, null);
-                    case PlcForceTable f: return Addr(device, "forcetable", groups, f.Name, null);
+                    case PlcBlock b: return root.Addr("block", groups, b.Name, b.Namespace);
+                    case PlcType t: return root.Addr("type", groups, t.Name, t.Namespace);
+                    case PlcTagTable tt: return root.Addr("tagtable", groups, tt.Name, null);
+                    case PlcWatchTable w: return root.Addr("watchtable", groups, w.Name, null);
+                    case PlcForceTable f: return root.Addr("forcetable", groups, f.Name, null);
                     case DeviceItem _ when r.Entry.Kind == "hardware": return Addr(device, "hardware", groups, NetworkLeaf, null);
                     default: return null;
                 }
@@ -682,7 +741,7 @@ namespace Rung.Bridge.V20
                     case "awl":
                     case "db":
                     case "udt":
-                        r.Plc.ExternalSourceGroup.GenerateSource(new[] { (IGenerateSource)r.Obj }, primary, GenerateOptions.None);
+                        (r.Root?.Sources ?? r.Plc.ExternalSourceGroup).GenerateSource(new[] { (IGenerateSource)r.Obj }, primary, GenerateOptions.None);
                         return form;
                     case "s7dcl":
                     {
@@ -983,7 +1042,7 @@ namespace Rung.Bridge.V20
                 var plc = Plc(parts.Device);
                 using (var tx = access.Transaction(_project, "rung restore " + parts.Name))
                 {
-                    var holder = new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind }, Plc = plc };
+                    var holder = new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind }, Plc = plc, Root = RootOf(plc, parts.Device, parts.Unit) };
                     var group = EnsureGroup(holder);
                     if (group is PlcTagTableGroup tg) tg.TagTables.Import(new FileInfo(backupFile), ImportOptions.Override);
                     else if (group is PlcWatchAndForceTableGroup wg) wg.WatchTables.Import(new FileInfo(backupFile), ImportOptions.Override);
@@ -1003,7 +1062,7 @@ namespace Rung.Bridge.V20
         ObjectRef NewObjectRef(string address, string form)
         {
             var parts = AddressFormat.Parse(address);
-            if (parts.Unit != null) throw new RpcException(ErrorCodes.UnsupportedObject, "Creating objects in software units is not supported yet");
+            if (parts.Unit != null && parts.Kind == "watchtable") throw new RpcException(ErrorCodes.UnsupportedObject, "Watch tables belong to the PLC, not to a software unit");
             // GenerateBlocksFromSource replaces a same-named block wherever it lives, so a file copied or moved
             // into another folder would overwrite the original. Names are unique per PLC across blocks and types.
             // TIA Portal as it is now, not the index: another client may have created the name a moment ago.
@@ -1032,7 +1091,8 @@ namespace Rung.Bridge.V20
                 : parts.Kind == "tagtable" ? new[] { "tags.st", "tags.xml" }
                 : parts.Kind == "watchtable" ? new[] { "xml" } : new string[0];
             if (Array.IndexOf(allowed, form) < 0) throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot create a " + parts.Kind + " from form " + form);
-            return new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind, Fingerprint = "absent" }, Plc = Plc(parts.Device) };
+            var at = Plc(parts.Device);
+            return new ObjectRef { Entry = new ObjectEntry { Address = address, Kind = parts.Kind, Fingerprint = "absent" }, Plc = at, Root = RootOf(at, parts.Device, parts.Unit) };
         }
 
         /// <summary>Finds or creates the user-group chain named in the address (called inside the transaction).</summary>
@@ -1043,25 +1103,25 @@ namespace Rung.Bridge.V20
             {
                 case "block":
                 {
-                    PlcBlockGroup g = r.Plc.BlockGroup;
+                    PlcBlockGroup g = r.Root.Blocks;
                     foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
                     return g;
                 }
                 case "type":
                 {
-                    PlcTypeGroup g = r.Plc.TypeGroup;
+                    PlcTypeGroup g = r.Root.Types;
                     foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
                     return g;
                 }
                 case "tagtable":
                 {
-                    PlcTagTableGroup g = r.Plc.TagTableGroup;
+                    PlcTagTableGroup g = r.Root.Tags;
                     foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
                     return g;
                 }
                 case "watchtable":
                 {
-                    PlcWatchAndForceTableGroup g = r.Plc.WatchAndForceTableGroup;
+                    PlcWatchAndForceTableGroup g = r.Root.Watch ?? throw new RpcException(ErrorCodes.UnsupportedObject, "Watch tables belong to the PLC, not to a software unit");
                     foreach (var name in parts.Groups) g = g.Groups.Find(name) ?? g.Groups.Create(name);
                     return g;
                 }
@@ -1125,10 +1185,11 @@ namespace Rung.Bridge.V20
                     // which blocks and PLC data types are instances of each version
                     var instances = new Dictionary<string, List<string>>(StringComparer.Ordinal);
                     foreach (var plc in Plcs())
-                    {
-                        LibraryInstances(plc.Name, plc.BlockGroup, new List<string>(), instances);
-                        LibraryInstances(plc.Name, plc.TypeGroup, new List<string>(), instances);
-                    }
+                        foreach (var sw in Roots(plc, plc.Name))
+                        {
+                            LibraryInstances(sw, sw.Blocks, new List<string>(), instances);
+                            LibraryInstances(sw, sw.Types, new List<string>(), instances);
+                        }
                     void Attach(DescribeNode n)
                     {
                         if (n.Attributes.TryGetValue("TypeObject", out var t) && n.Attributes.TryGetValue("VersionNumber", out var v)
@@ -1492,7 +1553,7 @@ namespace Rung.Bridge.V20
                     var tmp = Path.Combine(WorkDir(operationId, "src"), Stem + "." + form);
                     Directory.CreateDirectory(Path.GetDirectoryName(tmp));
                     File.WriteAllBytes(tmp, TextNormalizer.ForSourceImport(File.ReadAllBytes(path)));
-                    var source = r.Plc.ExternalSourceGroup.ExternalSources.CreateFromFile("rung_" + operationId.Replace("-", ""), tmp);
+                    var source = (r.Root?.Sources ?? r.Plc.ExternalSourceGroup).ExternalSources.CreateFromFile("rung_" + operationId.Replace("-", ""), tmp);
                     try
                     {
                         IList<IEngineeringObject> created;
