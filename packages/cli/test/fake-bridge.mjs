@@ -29,8 +29,11 @@ function exportTo(o, dir) {
 const inline = (r) => ({ ...r, files: r.files.map((f) => ({ ...f, content: readFileSync(f.path, "utf8"), path: basename(f.path) })) });
 
 const rl = createInterface({ input: process.stdin });
-// a client that closes the bridge ends its input
+// FAKE_LOG: what a read-only command asked for and that it ended its bridge (a client closes it by ending its
+// input); off by default, since every log rewrites the shared file
+const logging = !!process.env.FAKE_LOG;
 rl.on("close", () => {
+  if (!logging) return;
   try {
     const db = load();
     db.exits = (db.exits ?? 0) + 1;
@@ -45,9 +48,10 @@ rl.on("line", (line) => {
   const fail = (code, message) => out({ id: req.id, error: { code, message } });
   const p = req.params ?? {};
   const db = load();
-  // every request in order: tests check what a read-only command asked for
-  db.methods = [...(db.methods ?? []), req.method === "plc.online" ? `plc.online ${p.action}` : req.method];
-  save(db);
+  if (logging) {
+    db.methods = [...(db.methods ?? []), req.method === "plc.online" ? `plc.online ${p.action}` : req.method];
+    save(db);
+  }
   if (req.method !== "bridge.hello" && process.env.FAKE_ACCESS_DENIED) return fail("ACCESS_DENIED", "not in group Siemens TIA Openness");
   if (req.method !== "bridge.hello" && projectArg && projectArg.toLowerCase() !== db.project.path.toLowerCase())
     return fail("NO_PROJECT", "Project is not open in any TIA Portal instance: " + projectArg);

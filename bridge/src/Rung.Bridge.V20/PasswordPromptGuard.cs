@@ -24,7 +24,8 @@ namespace Rung.Bridge.V20
         readonly uint _pid;
         readonly Thread _thread;
         readonly HashSet<IntPtr> _seen = new HashSet<IntPtr>();
-        volatile bool _stop;
+        // set by Dispose: the guard ends at once, not after the rest of its 200 ms (every import and compile waited for it)
+        readonly ManualResetEventSlim _stop = new ManualResetEventSlim();
 
         public int Cancelled { get { lock (_seen) return _seen.Count; } }
 
@@ -37,11 +38,11 @@ namespace Rung.Bridge.V20
 
         void Run()
         {
-            while (!_stop)
+            do
             {
                 try { EnumWindows(Visit, IntPtr.Zero); } catch (Exception) { }
-                Thread.Sleep(200);
             }
+            while (!_stop.Wait(200));
         }
 
         bool Visit(IntPtr hwnd, IntPtr _)
@@ -58,8 +59,8 @@ namespace Rung.Bridge.V20
 
         public void Dispose()
         {
-            _stop = true;
-            _thread.Join(1000);
+            _stop.Set();
+            if (_thread.Join(1000)) _stop.Dispose();
         }
 
         const uint WM_CLOSE = 0x0010;

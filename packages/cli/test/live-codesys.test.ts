@@ -21,7 +21,7 @@ function setup(env: Record<string, string> = {}) {
   writeFileSync(file, "FUNCTION_BLOCK FB_Motor\nVAR\n    count : INT;\nEND_VAR\ncount := count + 1;\nEND_FUNCTION_BLOCK\n");
   const objects = join(dir, "..", `objects-${Date.now()}-${Math.random()}.json`);
   writeFileSync(objects, JSON.stringify({ project: { name: "Cds", path: PROJECT, tiaVersion: "CODESYS", devices: ["Device"], isLocalSession: true }, objects: [], values: { [COUNT]: 7 } }));
-  const io = { cwd: dir, stdout: () => {}, stderr: () => {}, env: { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: objects, ...env } };
+  const io = { cwd: dir, stdout: () => {}, stderr: () => {}, env: { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: objects, FAKE_LOG: "1", ...env } };
   const db = () => JSON.parse(readFileSync(objects, "utf8")) as { methods?: string[]; starts?: number; exits?: number; onlineTarget?: Record<string, unknown> };
   return { dir, uri: pathToFileURL(file).href, io, db };
 }

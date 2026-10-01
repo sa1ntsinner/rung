@@ -36,6 +36,16 @@ namespace Rung.Bridge.Core
             catch (UnauthorizedAccessException) { }
         }
 
+        /// <summary>An import that was committed and then undone (a table put back): it did not land.</summary>
+        public static void Remove(string operationId)
+        {
+            var path = FileOf(operationId);
+            if (path == null) return;
+            try { File.Delete(path); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
         /// <summary>The operations of these that TIA Portal committed.</summary>
         public static string[] Landed(IEnumerable<string> operationIds) =>
             (operationIds ?? Enumerable.Empty<string>()).Where(id => FileOf(id) is string p && File.Exists(p)).ToArray();

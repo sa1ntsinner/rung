@@ -20,6 +20,10 @@ public class ReceiptsTests
             var lost = Guid.NewGuid().ToString("D");
             Receipts.Write(landed, "plc:PLC_1/blocks/Fx_A");
             Assert.Equal(new[] { landed }, Receipts.Landed(new[] { lost, landed }));
+            // committed and then put back: not landed
+            Receipts.Remove(landed);
+            Assert.Empty(Receipts.Landed(new[] { landed }));
+            Receipts.Remove(lost);
             // not an operation id: never a path
             Receipts.Write("..\\escape", "x");
             Assert.Empty(Receipts.Landed(new[] { "..\\escape", "" }));

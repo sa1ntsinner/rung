@@ -826,12 +826,19 @@ namespace Rung.Bridge.V20
                                 throw new RpcException(ErrorCodes.ImportFailed, "The file declares " + string.Join(", ", imported.Select(n => "\"" + n + "\"")) + " but its name says \"" + want + "\"; a file holds exactly that one object. Nothing was changed");
                             tx.CommitOnDispose();
                         }
+                        // committed: a rung stopped from here on learns it on its next pass. Written before anything
+                        // else (the prompt guard's Dispose alone waits up to 200 ms): a stop in between left a landed
+                        // import without its receipt, and the next pass took the send for lost (seen in the soak)
+                        Receipts.Write(operationId, address);
                         // TIA Portal takes a table with an entry it cannot hold (seen live: a watch table entry with an
                         // unknown tag) and then cannot export it any more. Still under the same exclusive access, such
                         // a table is refused and the previous version put back.
                         var broken = backup != null ? TableExportError(address) : null;
                         if (broken != null)
+                        {
+                            Receipts.Remove(operationId);
                             throw new RpcException(ErrorCodes.ImportFailed, "TIA Portal took the table but cannot export it any more (" + broken + "): an entry is probably something it cannot hold, such as an unknown tag or address.");
+                        }
                     }
                     catch (Exception e) when (e is EngineeringException || e is RpcException)
                     {
@@ -854,9 +861,6 @@ namespace Rung.Bridge.V20
                 guard.Dispose();
                 try { Directory.Delete(WorkDir(operationId, "src"), true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            // committed: a rung stopped from here on (the compile takes seconds) learns it on its next pass
-            Receipts.Write(operationId, address);
-
             timing.Lap("import");
 
             // Compile outside the transaction (Siemens forbids compile inside it), then return the fresh export.
