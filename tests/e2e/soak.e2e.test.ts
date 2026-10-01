@@ -3,7 +3,7 @@
 // edits the same blocks in TIA Portal (a second Openness client), rung sync runs after every step and is
 // killed at random moments (Ctrl+C, a crash). Nothing typed on either side may get lost, no conflict may
 // appear (the two people never touch the same line), and the workspace ends quiet and equal to TIA Portal.
-//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] [RUNG_SOAK_KIND=tags|db] pnpm vitest run tests/e2e/soak.e2e.test.ts
+//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] [RUNG_SOAK_KIND=tags|db] [RUNG_SOAK_WATCH=1] pnpm vitest run tests/e2e/soak.e2e.test.ts
 import { describe, it, expect } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -27,6 +27,7 @@ const NAMES = ["A", "B", "C", "D", "E", "F"];
 // of two members)
 const kind = process.env.RUNG_SOAK_KIND ?? "scl";
 const tags = kind === "tags";
+const watchMode = process.env.RUNG_SOAK_WATCH === "1";
 const db = kind === "db";
 const folder = `PLC_1/${process.env.RUNG_SOAK_UNIT ? `units/${process.env.RUNG_SOAK_UNIT}/` : ""}${tags ? "tags" : "blocks"}/90_Soak`;
 const leaf = (n: string) => (tags ? `Fx_SoakTags_${n}` : db ? `Fx_SoakDb_${n}` : `Fx_Soak_${n}`);
@@ -89,6 +90,29 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         });
       });
 
+    // RUNG_SOAK_WATCH=1: rung watch runs all the time and each sync goes to it (as an editor's does); a kill stops rung
+    // watch itself, which then starts again
+    let watcher: ReturnType<typeof spawn> | undefined;
+    const startWatch = async () => {
+      const w = spawn(process.execPath, [cli, "watch"], { cwd: ws, windowsHide: true, stdio: "ignore", env: { ...process.env, RUNG_DEBUG: "" } });
+      watcher = w;
+      // ready once it owns the workspace (an owner file of a watch killed before names a dead process)
+      const ownerFile = join(ws, ".rung", "owner.json");
+      for (let i = 0; i < 1200; i++) {
+        try {
+          if ((JSON.parse(readFileSync(ownerFile, "utf8")) as { pid?: number }).pid === w.pid) return;
+        } catch {
+          // not there yet
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error("rung watch did not start within 2 minutes");
+    };
+    const killWatch = () => {
+      if (watcher?.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(watcher.pid)], { windowsHide: true });
+      watcher = undefined;
+    };
+
     // the other person, in TIA Portal
     const user = await BridgeClient.spawn({ command: bridgeExe, args: ["--project", project, "--allow-fixture-import"] });
     const problems: string[] = [];
@@ -103,6 +127,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
 
       expect((await run(["init", "--project", project])).code).toBe(0);
       expect([0, 2]).toContain((await run(["pull"])).code);
+      if (watchMode) await startWatch();
 
       const tiaEdit = async (n: string, v: number): Promise<boolean> => {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -135,7 +160,16 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         l1.set(n, v);
       };
       const sync = async (what: string, killAfterMs?: number) => {
-        const r = await run(["sync"], killAfterMs);
+        let r: Awaited<ReturnType<typeof run>>;
+        if (watchMode) {
+          const killer = killAfterMs !== undefined ? setTimeout(killWatch, killAfterMs) : undefined;
+          r = await run(["sync"]);
+          clearTimeout(killer);
+          if (!watcher) {
+            r = { ...r, killed: true };
+            await startWatch();
+          }
+        } else r = await run(["sync"], killAfterMs);
         const c = counts(r.out);
         log(`${what}: ${r.killed ? `killed after ${killAfterMs} ms` : `exit ${r.code}`} ${c ? JSON.stringify(c) : ""}`);
         if (!r.killed && (r.code === null || r.code > 2 || !c)) problems.push(`${what}: exit ${r.code}\n${r.out}`);
@@ -266,6 +300,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
       for (const e of await user.listObjects("PLC_1"))
         if (e.address.startsWith(`plc:${folder}/`)) await user.deleteObject(e.address, e.fingerprint, randomUUID()).catch(() => {});
     } finally {
+      killWatch();
       await user.close();
     }
   }, (minutes + 20) * 60_000);
