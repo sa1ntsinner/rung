@@ -8,6 +8,8 @@ export * from "./actions.js";
 export * from "./assignments.js";
 export * from "./calls.js";
 export * from "./nearest.js";
+export * from "./folding.js";
+export * from "./symbols.js";
 export { startServer, type ServerHandle, type ServerOptions, type MessageReader, type MessageWriter } from "./server.js";
 export * from "./twincat.js";
 export * from "./simaticml.js";

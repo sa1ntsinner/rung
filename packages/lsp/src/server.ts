@@ -27,6 +27,8 @@ import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, hover, outline, references, rename, type CompletionKind, type OutlineSymbol } from "./features.js";
 import { codeActions } from "./actions.js";
+import { foldingRanges } from "./folding.js";
+import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
@@ -41,6 +43,8 @@ const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
   module: CompletionItemKind.Module,
 };
 const OUTLINE_KIND = { block: SymbolKind.Class, section: SymbolKind.Namespace, variable: SymbolKind.Variable, region: SymbolKind.Namespace } as const;
+const GLOBAL_KIND = { FB: SymbolKind.Class, FC: SymbolKind.Function, OB: SymbolKind.Event, DB: SymbolKind.Module, UDT: SymbolKind.Struct, PRG: SymbolKind.Module, GVL: SymbolKind.Namespace, GVAR: SymbolKind.Variable, TAG: SymbolKind.Variable, OBJECT: SymbolKind.Object } as const;
+const globalKind = (s: FoundSymbol) => (s.constant ? SymbolKind.Constant : GLOBAL_KIND[s.kind]);
 
 export type { MessageReader, MessageWriter };
 
@@ -129,6 +133,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         referencesProvider: true,
         renameProvider: true,
         documentSymbolProvider: true,
+        workspaceSymbolProvider: true,
+        foldingRangeProvider: true,
         inlayHintProvider: !!monitor,
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
         executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
@@ -242,6 +248,13 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (!resolve(path).toLowerCase().startsWith(resolve(root, "plc").toLowerCase() + sep) || !/\.(scl|db|udt)$/i.test(path)) return;
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, text, { flag: "wx" }).catch(() => {}); // never over an existing file
+  });
+  connection.onWorkspaceSymbol((p) =>
+    workspaceSymbols(index, p.query).map((s) => ({ name: s.name, kind: globalKind(s), location: { uri: s.uri, range: range(s.uri, s.start, s.end) }, ...(s.container ? { containerName: s.container } : {}) })),
+  );
+  connection.onFoldingRanges((p) => {
+    const doc = index.docs.get(p.textDocument.uri);
+    return doc ? foldingRanges(doc) : [];
   });
   connection.onDocumentSymbol((p) => {
     const conv = (s: OutlineSymbol): DocumentSymbol => ({

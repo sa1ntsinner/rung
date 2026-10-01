@@ -67,6 +67,10 @@ describe("rung lsp", () => {
 
     const symbols = (await t.client.sendRequest("textDocument/documentSymbol", { textDocument: { uri: t.uri } })) as { name: string }[];
     expect(symbols[0]!.name).toBe("Fx_A");
+    const found = (await t.client.sendRequest("workspace/symbol", { query: "fx_a" })) as { name: string; kind: number; containerName: string; location: { uri: string } }[];
+    expect(found).toEqual([{ name: "Fx_A", kind: 5, containerName: "PLC_1", location: { uri: t.uri, range: { start: { line: 0, character: 15 }, end: expect.anything() } } }]); // at its name
+    const folds = (await t.client.sendRequest("textDocument/foldingRange", { textDocument: { uri: t.uri } })) as { startLine: number; endLine: number }[];
+    expect(folds).toEqual([{ startLine: 0, endLine: 6 }, { startLine: 1, endLine: 2 }]);
     t.server.dispose();
     t.client.dispose();
   });
