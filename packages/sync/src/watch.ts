@@ -22,6 +22,9 @@ export interface WatcherOptions {
   now?: () => number;
 }
 
+/** rung watch checks watch and force tables again (an export each) at most this often; file edits go at once. */
+const UNVERSIONED_MS = 60_000;
+
 export class Watcher {
   private bridge: ClosableBridge | null = null;
   private fsWatcher: FSWatcher | null = null;
@@ -107,7 +110,7 @@ export class Watcher {
     try {
       this.bridge ??= await this.opts.bridgeFactory();
       const t0 = Date.now();
-      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, refused: this.refused }).finally(() => {
+      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS }).finally(() => {
         this.lastPassMs = Date.now() - t0;
         this.lastPassEnd = (this.opts.now ?? Date.now)();
       });

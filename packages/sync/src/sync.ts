@@ -89,6 +89,12 @@ export interface SyncOptions {
    * rung sync passes none and always tries.
    */
   refused?: Map<string, Refusal>;
+  /**
+   * How long an object TIA Portal gives no revision for (watch and force tables, which it exports each time to
+   * compare) counts as checked: rung watch sets it so it does not export every table on every poll. Imports compare
+   * the real content first, so a TIA edit seen later is merged, never overwritten. A one-shot rung sync checks always.
+   */
+  unversionedMs?: number;
 }
 
 export interface Refusal {
@@ -498,7 +504,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         let staged: StagedExport | undefined;
         let tiaChanged = false;
         // an adopted state is written under the new name even when the object did not change
-        if (adopted.has(address) || !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs)) {
+        if (adopted.has(address) || !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs, opts.unversionedMs)) {
           staged = await stageExport(root, bridge, address, stem);
           tiaChanged = bundleHash(staged.files) !== st.fileHash;
           if (!tiaChanged) state.upsert({ ...st, tiaFingerprint: staged.result.fingerprint, verifiedAt: now() });

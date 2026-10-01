@@ -37,9 +37,13 @@ const EXPORT_HINTS: Readonly<Record<string, string>> = {
 /** Bridge failures after which every remaining call would fail or wait for its own timeout. */
 export const FATAL_BRIDGE_CODES = new Set(["TIA_NOT_RUNNING", "PORTAL_DISPOSED", "BRIDGE_EXITED", "ACCESS_DENIED", "TIMEOUT", "OUTCOME_UNKNOWN", "DIALOG_REQUIRED"]);
 
-/** A token-less or weak revision is fresh only if it matches and was verified recently. */
-export function isFresh(entryFp: string, prev: ObjectState, now: number, weakVerifyMs: number): boolean {
-  if (entryFp === "none") return false;
+/**
+ * A weak revision is fresh only if it matches and was verified recently. An object TIA Portal gives no revision
+ * for ("none": watch and force tables) is exported again each pass, or with unversionedMs (rung watch) once it
+ * was checked longer ago than that.
+ */
+export function isFresh(entryFp: string, prev: ObjectState, now: number, weakVerifyMs: number, unversionedMs = 0): boolean {
+  if (entryFp === "none") return now - (prev.verifiedAt ?? 0) < unversionedMs;
   if (isStrong(entryFp)) return prev.tiaFingerprint === entryFp;
   return prev.tiaFingerprint === entryFp && now - (prev.verifiedAt ?? 0) < weakVerifyMs;
 }

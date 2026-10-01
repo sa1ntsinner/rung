@@ -279,6 +279,23 @@ describe("syncOnce", () => {
     expect(idle.created + idle.imported).toBe(0);
   });
 
+  it("exports a watch table, which has no revision, every pass, or with rung watch's interval once a minute", async () => {
+    const W = "plc:PLC_1/watch/Fx_Watch";
+    const t = setup((b) => b.add(W, { kind: "watchtable", form: "xml", content: "<Watch/>\n", fingerprint: "none" }));
+    const pass = (now: number, unversionedMs?: number) => t.withState((s) => syncOnce(t.root, t.bridge, s, { config: t.config, now: () => now, ...(unversionedMs ? { unversionedMs } : {}) }));
+    await pass(1000);
+    const exports = () => t.bridge.exportCalls.filter((a) => a === W).length;
+    expect(exports()).toBe(1);
+    await pass(2000);
+    expect(exports()).toBe(2); // rung sync: every time
+    await pass(30_000, 60_000);
+    expect(exports()).toBe(2); // rung watch, checked 28 s ago
+    t.bridge.edit(W, { ".xml": "<Watch><Entry/></Watch>\n" });
+    await pass(70_000, 60_000);
+    expect(exports()).toBe(3);
+    expect(t.read("plc/PLC_1/watch/Fx_Watch.xml")).toBe("<Watch><Entry/></Watch>\n");
+  });
+
   it("creates a new file in a software unit's folder in that unit, and then stays quiet", async () => {
     const t = setup(() => {});
     await t.sync();
