@@ -54,6 +54,8 @@ describe("rung mcp", () => {
   it("reports status without a running watch and lists read-only objects", async () => {
     const s = await call("rung_status");
     expect(s.data).toMatchObject({ watching: false, objects: 4, readOnly: ["plc/PLC_1/blocks/Fx_Safety.xml"] });
+    // a workspace nobody turned writes on in: the agent learns it is the person's step
+    expect((s.data as { writes?: string }).writes).toBe("off: the person turns them on with rung writes on");
   });
 
   it("explains an object with its interface and users", async () => {

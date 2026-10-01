@@ -1,0 +1,64 @@
+block: FB_Conveyor
+cycle: 10ms
+cases:
+  - name: starts with the button and keeps running after it is released
+    steps:
+      - set: { Stop: true, EStopOk: true, Start: true }
+      - cycle: 1
+      - set: { Start: false, MotorRunning: true }
+      - advance: 5s
+      - expect: { Motor: true, Fault: false }
+
+  - name: stops with the stop button and with the emergency stop
+    steps:
+      - set: { Stop: true, EStopOk: true, Start: true, MotorRunning: true }
+      - cycle: 1
+      - set: { Start: false, Stop: false }
+      - cycle: 1
+      - expect: { Motor: false }
+      - set: { Stop: true, Start: true }
+      - cycle: 1
+      - set: { Start: false, EStopOk: false }
+      - cycle: 1
+      - expect: { Motor: false }
+
+  - name: a contactor that does not answer within 2 s is a fault until reset
+    steps:
+      - set: { Stop: true, EStopOk: true, Start: true }
+      - cycle: 1
+      - set: { Start: false }
+      - advance: 1900ms
+      - expect: { Motor: true, Fault: false }
+      - advance: 200ms
+      - expect: { Motor: false, Fault: true }
+      - set: { Start: true }
+      - cycle: 1
+      - expect: { Motor: false }           # no restart while the fault stands
+      - set: { Start: false, Reset: true }
+      - cycle: 2
+      - expect: { Fault: false }
+
+  - name: a part waiting at the end stops the belt, taking it away lets it start again
+    steps:
+      - set: { Stop: true, EStopOk: true, Start: true, MotorRunning: true }
+      - cycle: 1
+      - set: { Start: false, PartAtEnd: true }
+      - advance: 400ms
+      - expect: { Motor: true }
+      - advance: 200ms
+      - expect: { Motor: false, Parts: 1 }
+      - set: { PartAtEnd: false, Start: true }
+      - cycle: 1
+      - expect: { Motor: true }
+
+  - name: counts every part once
+    steps:
+      - set: { Stop: true, EStopOk: true, Start: true, MotorRunning: true }
+      - cycle: 1
+      - { set: { PartAtEnd: true }, advance: 100ms }
+      - { set: { PartAtEnd: false }, advance: 100ms }
+      - { set: { PartAtEnd: true }, advance: 100ms }
+      - { set: { PartAtEnd: false }, advance: 100ms }
+      - { set: { PartAtEnd: true }, advance: 100ms }
+      - { set: { PartAtEnd: false }, advance: 100ms }
+      - expect: { Parts: 3, Motor: true }

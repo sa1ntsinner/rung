@@ -10,9 +10,12 @@ import {
   StateStore,
   WorkspaceError,
   defaultConfig,
+  grantWrites,
   loadConfig,
+  readWrites,
   saveConfig,
   writeFileAtomic,
+  writesGranted,
   type EngineeringVersion,
   type RungConfig,
 } from "@rung/core";
@@ -27,7 +30,7 @@ import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
-import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch } from "./twoway.js";
+import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
@@ -46,14 +49,15 @@ Usage:
              [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
-  rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind]
+  rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
   rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
   rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
-  rung sync [dir]                      one two-way pass (imports need sync.import = "auto")
+  rung sync [dir]                      one two-way pass (your edits go to TIA Portal once writes are on)
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
+  rung writes [on|off] [--dir <ws>]    let this workspace write into its project (off after rung init), or stop it
   rung status [dir]
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <file|address> [--dir <workspace>]
@@ -174,7 +178,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     }
     // On --rebind keep the user's sync/bridge settings; only the binding changes, and the bridge runs where the
     // project was just looked at: on --host, or here when no --host was given
-    const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir).catch(() => undefined) : undefined;
+    const previous = v.rebind && (await exists(cfgPath)) ? await loadConfig(dir, { raw: true }).catch(() => undefined) : undefined;
     const rebound = previous && (({ host: _old, ...rest }) => (host ? { ...rest, host } : rest))(previous.bridge);
     const config = previous
       ? { ...previous, project: { path: info.path, tiaVersion: tia as EngineeringVersion }, devices, bridge: rebound! }
@@ -185,6 +189,8 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const state = await StateStore.open(dir, { projectPath: info.path, tiaVersion: tia, devices }, { rebind: !!v.rebind });
     try {
       await saveConfig(dir, config);
+      // writes into the project start off unless asked for: a rebind to another project or host leaves the old right behind
+      if (v.writes) await grantWrites(dir, config);
     } finally {
       await state.close();
     }
@@ -195,7 +201,11 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const bridgeExe = io.env.RUNG_BRIDGE ?? (config.bridge.command || bridge.command);
     const wl = /rung-bridge-v2\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe) : "unknown";
     if (wl === "missing" || wl === "stale") io.stderr(`rung: ${WHITELIST_HINT}\n`);
-    io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\nNext: rung pull\n`);
+    io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\n`);
+    const writing = config.sync.import === "auto" && writesGranted(await readWrites(dir), config);
+    if (!writing && config.sync.import === "auto")
+      io.stdout("Writes to TIA Portal are off: rung pull and rung watch bring the project into files, your edits stay in the files. When you want rung to send them: rung writes on\n");
+    io.stdout("Next: rung pull\n");
     return 0;
   } finally {
     await client.close();
@@ -295,7 +305,8 @@ function initHint(code: string, project: boolean): string | undefined {
 export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
-  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host"], positionals: 1 },
+  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
+  writes: { options: ["dir"], positionals: 1 },
   pull: { options: ["force"], positionals: 1 },
   sync: { options: [], positionals: 1 },
   watch: { options: [], positionals: 1 },
@@ -398,6 +409,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         ip: { type: "string" },
         "from-plc": { type: "string" },
         host: { type: "string" },
+        writes: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -603,6 +615,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdPull(await findWorkspace(dir), v, io);
       case "status":
         return await cmdStatus(await findWorkspace(dir), io);
+      case "writes":
+        return await cmdWrites(await findWorkspace(resolve(io.cwd, (v.dir as string | undefined) ?? ".")), target, io);
       case "doctor":
         return await cmdDoctor(await findWorkspace(dir), v, io);
       case "sync":

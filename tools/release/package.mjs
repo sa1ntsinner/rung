@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Builds the Windows release archive: rung.exe + bridge + editor packages + licences.
 //   node tools/release/package.mjs [--skip-build]
-// Output: dist/release/rung-<version>-win-x64.zip and SHA256SUMS.txt. The programs are not code-signed: the checksums
+// Output: dist/release/rung-<version>-win-x64.zip, the npm package rung-plc-cli-<version>.tgz and SHA256SUMS.txt. The programs are not code-signed: the checksums
 // on the release page are how a download is checked. Publishing is a manual step.
 import { execFileSync, execSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -69,13 +69,45 @@ if (!process.argv.includes("--skip-build")) run("npm run package", join(root, "e
 const vsix = join(root, "editors", "vscode", "rung-scl.vsix");
 if (existsSync(vsix)) cpSync(vsix, join(stage, "editors", "rung-scl.vsix"));
 
+// npm: @rung-plc/cli is the same folder without rung.exe and the editor packages, for Linux and macOS (the language
+// server, rung test, the bridge over ssh) and for CI. npm links bin entries straight to the file there, so it needs a #!.
+const npmStage = join(out, "npm");
+rmSync(npmStage, { recursive: true, force: true });
+cpSync(stage, npmStage, { recursive: true, filter: (src) => !["rung.exe", "editors", "README.txt"].includes(relative(stage, src)) });
+writeFileSync(join(npmStage, "rung.cjs"), "#!/usr/bin/env node\n" + readFileSync(join(stage, "rung.cjs"), "utf8"));
+writeFileSync(
+  join(npmStage, "package.json"),
+  JSON.stringify(
+    {
+      name: "@rung-plc/cli",
+      version,
+      description: "TIA Portal and CODESYS projects as plain text: two-way sync, an SCL language server, PLC tests without a PLC and tools for coding agents.",
+      license: "SEE LICENSE IN LICENSE.txt",
+      homepage: "https://sa1ntsinner.github.io/rung/",
+      repository: { type: "git", url: "git+https://github.com/sa1ntsinner/rung.git" },
+      bugs: "https://github.com/sa1ntsinner/rung/issues",
+      bin: { rung: "rung.cjs" },
+      engines: { node: ">=22" },
+      keywords: ["plc", "tia-portal", "siemens", "simatic", "scl", "s7-1500", "codesys", "structured-text", "iec-61131-3", "language-server", "mcp"],
+    },
+    null,
+    2,
+  ) + "\n",
+);
+writeFileSync(
+  join(npmStage, "README.md"),
+  `# rung\n\nTIA Portal and CODESYS projects as plain text: two-way sync, an SCL language server for VS Code, Zed and Neovim, tests without a PLC (\`rung test\`) and tools for coding agents.\n\n\`\`\`sh\nnpm install -g @rung-plc/cli\nrung check\n\`\`\`\n\nOn Windows next to TIA Portal V20 everything works; on Linux and macOS the language server, \`rung test\` and \`rung mcp\`, and sync through a Windows PC [over ssh](https://github.com/sa1ntsinner/rung/blob/main/docs/remote.md). In CI: \`npx -y @rung-plc/cli test\`.\n\n[Website](https://sa1ntsinner.github.io/rung/) · [Quickstart](https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md) · [Docs](https://github.com/sa1ntsinner/rung/tree/main/docs)\n\nLicence: the core is BUSL-1.1, free for individuals, education, non-commercial open source and organizations of up to 3 users; see LICENSE.txt. Not affiliated with Siemens AG.\n`,
+);
+const [{ filename: packed }] = JSON.parse(execSync(`npm pack --json --pack-destination "${out}"`, { cwd: npmStage, encoding: "utf8" }));
+const tarball = join(out, packed);
+
 const zip = join(out, `rung-${version}-win-x64.zip`);
 rmSync(zip, { force: true });
 // Windows ships bsdtar (zip-capable); GNU tar from Git is not.
 const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
 execFileSync(tar, ["-a", "-c", "-f", zip, "-C", out, `rung-${version}-win-x64`], { stdio: "inherit" });
 // what the release page lists, in the format of sha256sum (Get-FileHash on Windows shows the same hex)
-const sums = [zip, join(out, "rung.cjs"), join(out, "rung.exe"), join(stage, "editors", "rung-scl.vsix")]
+const sums = [zip, join(out, "rung.cjs"), join(out, "rung.exe"), join(stage, "editors", "rung-scl.vsix"), tarball]
   .filter((f) => existsSync(f))
   .map((f) => `${createHash("sha256").update(readFileSync(f)).digest("hex")}  ${f.split(/[\\/]/).pop()}`);
 writeFileSync(join(out, "SHA256SUMS.txt"), sums.join("\n") + "\n");

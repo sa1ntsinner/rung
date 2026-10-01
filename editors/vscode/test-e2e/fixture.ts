@@ -73,7 +73,7 @@ export function createFakeWorkspace(repo: string, base: string): FakeWorkspace {
   const objects = join(base, "fake-objects.json");
   writeObjects(objects);
   const env = fakeEnv(repo, objects);
-  for (const args of [["init"], ["pull"]]) {
+  for (const args of [["init", "--writes"], ["pull"]]) {
     const r = rungCli(repo, dir, env, ...args);
     if (r.code !== 0) throw new Error(`rung ${args.join(" ")} failed (${r.code}):\n${r.output}`);
   }

@@ -1,0 +1,63 @@
+FUNCTION_BLOCK "FB_Conveyor"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      Start : Bool;   // push button, NO
+      Stop : Bool;   // push button, NC: FALSE while pressed
+      EStopOk : Bool;   // safety relay feedback
+      MotorRunning : Bool;   // contactor feedback
+      PartAtEnd : Bool;   // light barrier at the end of the belt
+      Reset : Bool;
+   END_VAR
+
+   VAR_OUTPUT 
+      Motor : Bool;
+      Fault : Bool;
+      Parts : Int;
+   END_VAR
+
+   VAR 
+      FeedbackTimer {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      EndTimer {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      PartEdge {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+   END_VAR
+
+   VAR CONSTANT 
+      FEEDBACK_TIME : Time := T#2S;   // contactor must answer within this
+      END_TIME : Time := T#500MS;   // a part waiting at the end this long stops the belt
+   END_VAR
+
+
+BEGIN
+	REGION Fault
+	    // the contactor did not pull in (or dropped out) while the motor is commanded
+	    #FeedbackTimer(IN := #Motor AND NOT #MotorRunning,
+	                   PT := #FEEDBACK_TIME);
+	    IF #FeedbackTimer.Q THEN
+	        #Fault := TRUE;
+	    END_IF;
+	    IF #Reset AND NOT #FeedbackTimer.Q THEN
+	        #Fault := FALSE;
+	    END_IF;
+	END_REGION
+	
+	REGION Motor
+	    #EndTimer(IN := #PartAtEnd,
+	              PT := #END_TIME);
+	    IF #Start AND #Stop AND #EStopOk AND NOT #Fault AND NOT #EndTimer.Q THEN
+	        #Motor := TRUE;
+	    END_IF;
+	    IF NOT #Stop OR NOT #EStopOk OR #Fault OR #EndTimer.Q THEN
+	        #Motor := FALSE;
+	    END_IF;
+	END_REGION
+	
+	REGION Count
+	    #PartEdge(CLK := #PartAtEnd);
+	    IF #PartEdge.Q AND #Parts < 32767 THEN
+	        #Parts := #Parts + 1;
+	    END_IF;
+	END_REGION
+	
+END_FUNCTION_BLOCK
+

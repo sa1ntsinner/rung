@@ -1,6 +1,6 @@
 # Editor setup
 
-All editors use the same language server: `rung lsp --stdio` (run from the workspace folder, the one with `rung.toml`). It works offline on any OS; with `rung watch` running it also shows TIA Portal compile errors and sync conflicts.
+All editors use the same language server: `rung lsp --stdio` (run from the workspace folder, the one with `rung.toml`). It works offline on any OS; with `rung watch` running it also shows TIA Portal compile errors and sync conflicts. Neovim finds it as `rung` on PATH: the release folder, `npm install -g @rung-plc/cli` (Node.js 22+, also on Linux and macOS) or VS Code's **rung: Put rung on PATH**. VS Code and Zed bring their own when there is none.
 
 What it does in every editor: completion (locals, DB and UDT members, instructions; full call templates when the editor supports snippets), signature help inside calls (parameter types and directions, with the current argument selected), read/write highlights of a name's uses in the file, go to definition and references across files, rename (a local variable in the editor; a block, data type or DB in TIA Portal, like `rung rename`, so every use there and in your files follows), the block outline, finding any block, data type, DB or tag of the project by name (VS Code `Ctrl+T`, Zed `project symbols`, Neovim `vim.lsp.buf.workspace_symbol()`), folding of REGIONs, VAR sections, statements and comments, errors while typing, help on hover (an instruction's parameters, a data type's size and range, a PLC data type's members) and quick fixes like TIA Portal's: declare an undeclared `#tag` as a temporary or a static, define an unknown `"tag"` as a PLC tag (a line in the tag table at the next free bit memory), give an FB called without an instance a new instance DB or a multi-instance, and update a block call after its interface changed (remove stale arguments, add the FC parameters it leaves out). In a tag table (`.tags.st`) it flags what TIA Portal's import would refuse: a tag without an address or with a type that does not fit it, two tags on one line, a name used twice, a start value on a tag.
 
@@ -22,7 +22,7 @@ If `rung` is not on PATH, set in settings:
 
 The extension runs the rung CLI for everything; it only reads `rung.toml` and `.rung/state.json` itself.
 
-- **rung sidebar** (activity bar): *Project* lists the mirrored objects by PLC, kind and TIA folder (or by block type) with conflict, changed and read-only marks; right-click to compile, test, open in TIA Portal or resolve a conflict. *PLC* shows whether `rung watch` runs (start/stop), each PLC's online state and connection, and Go online, Go offline, Compile PLC, Compile hardware, Interfaces…, Download…. A folder without `rung.toml` gets *Initialize from a TIA Portal project* (`rung init --project`).
+- **rung sidebar** (activity bar): *Project* lists the mirrored objects by PLC, kind and TIA folder (or by block type) with conflict, changed and read-only marks; right-click to compile, test, open in TIA Portal or resolve a conflict. *PLC* shows whether `rung watch` runs (start/stop), whether this workspace may write into the project (*Writes to TIA Portal*: off after initializing, click to turn on; `rung writes on`), each PLC's online state and connection, and Go online, Go offline, Compile PLC, Compile hardware, Interfaces…, Download…. A folder without `rung.toml` gets *Initialize from a TIA Portal project* (`rung init --project`).
 - **Status bar**: watching / idle / conflicts / online PLCs; click for all actions.
 - **CodeLens** above every block header and editor title buttons: Compile, Test, Open in TIA Portal. Compile messages land in Problems.
 - **Testing view**: every `tests/**/*.test.yaml` and each of its cases, run on the offline simulator from there or from the ▶ next to a case. A failed expectation shows on the line of its step with the expected and the actual value side by side; a block the simulator refuses says why on the case.
@@ -51,7 +51,7 @@ TwinCAT and CODESYS `.st` files: install the **Structured Text** extension as we
 
 Zed extensions cannot add their own side panels or buttons, so there is no rung sidebar in Zed; VS Code has one.
 
-The tasks run `rung`, so it has to be on PATH (or point the language server at it, below). If `.scl` files open as another language, map them in settings: `"file_types": { "SCL": ["scl", "db", "udt"] }`.
+The language server is `rung` from PATH; without one, the extension installs `@rung-plc/cli` from npm into its own folder and runs it with Zed's Node.js (updated once a session). The tasks run `rung` in a terminal, so they need it on PATH. To point the language server somewhere else, see below. If `.scl` files open as another language, map them in settings: `"file_types": { "SCL": ["scl", "db", "udt"] }`.
 
 ```json
 {

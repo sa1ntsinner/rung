@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { formatPlcSection, parseRungToml, upsertPlcSection } from "../src/core/rungToml";
+import { formatPlcSection, parseRungToml, upsertPlcSection, writesState } from "../src/core/rungToml";
 
 const toml = `# rung workspace
 format = 1
@@ -79,5 +79,20 @@ describe("upsertPlcSection", () => {
 
   it("works on an empty file", () => {
     expect(parseRungToml(upsertPlcSection("", "P", conn)).plc.P).toEqual(conn);
+  });
+});
+
+describe("writesState", () => {
+  const ws = (extra = "") => parseRungToml(`format = 1\n[project]\npath = "D:/TIA/Line3.ap20"\ntiaVersion = "V20"\n${extra}`);
+  it("is on only with a grant for this project and host, like the CLI decides it", () => {
+    expect(writesState(ws(), "")).toBe("off");
+    expect(writesState(ws(), "{")).toBe("off");
+    expect(writesState(ws(), JSON.stringify({ project: "D:/TIA/Line3.ap20", since: "x" }))).toBe("on");
+    expect(writesState(ws(), JSON.stringify({ project: "d:/tia/line3.ap20", since: "x" }))).toBe("on");
+    expect(writesState(ws(), JSON.stringify({ project: "D:/TIA/Other.ap20", since: "x" }))).toBe("off");
+    expect(writesState(ws('[bridge]\nhost = "elmir@tia-pc"\n'), JSON.stringify({ project: "D:/TIA/Line3.ap20", since: "x" }))).toBe("off");
+    expect(writesState(ws('[bridge]\nhost = "elmir@tia-pc"\n'), JSON.stringify({ project: "D:/TIA/Line3.ap20", host: "elmir@tia-pc", since: "x" }))).toBe("on");
+    expect(writesState(ws('[sync]\nimport = "manual"\n'), JSON.stringify({ project: "D:/TIA/Line3.ap20", since: "x" }))).toBe("manual");
+    expect(writesState(undefined, "")).toBe("manual");
   });
 });

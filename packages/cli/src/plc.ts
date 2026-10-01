@@ -354,7 +354,8 @@ export async function cmdUpload(dir: string, v: Record<string, unknown>, io: Io)
   const request = uploadRequest(String(v.ip), v);
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
-  // the project gains a station: allowed where the workspace allows imports (sync.import = "auto")
+  // the project gains a station: allowed where the workspace may write into it (sync.import = "auto", writes on)
+  if (config.writesOff) throw new WorkspaceError("WRITES_OFF", "rung upload adds a station to the project, and writes to TIA Portal are off in this workspace: rung writes on first");
   const client = await bridgeFor(config, io, importFlags(config));
   try {
     io.stderr(`reading the station at ${request.address} into the project (the PLC is only read) …\n`);

@@ -27,6 +27,7 @@ export interface RungToml {
   plc: Record<string, PlcConnection>;
   download: DownloadDefaults;
   syncImport?: string;
+  bridgeHost?: string;
 }
 
 export const DOWNLOAD_DEFAULTS: Readonly<DownloadDefaults> = {
@@ -72,7 +73,27 @@ export function parseRungToml(text: string): RungToml {
   if (typeof project.tiaVersion === "string") out.tiaVersion = project.tiaVersion;
   const sync = table(raw.sync);
   if (typeof sync.import === "string") out.syncImport = sync.import;
+  const bridge = table(raw.bridge);
+  if (typeof bridge.host === "string") out.bridgeHost = bridge.host;
   return out;
+}
+
+/**
+ * Whether rung writes into the project from this copy of the workspace, as the CLI decides it: sync.import = "auto"
+ * in rung.toml and `rung writes on` given for this project and host (.rung/writes.json, text "" when missing).
+ */
+export function writesState(toml: RungToml | undefined, grantText: string): "on" | "off" | "manual" {
+  if (!toml || (toml.syncImport ?? "auto") !== "auto") return "manual";
+  let grant: { project?: unknown; host?: unknown } = {};
+  try {
+    grant = JSON.parse(grantText) as typeof grant;
+  } catch {
+    return "off";
+  }
+  const path = toml.projectPath ?? "";
+  const windows = /^([a-z]:|\\\\)/i.test(path);
+  const same = typeof grant.project === "string" && (windows ? grant.project.toLowerCase() === path.toLowerCase() : grant.project === path);
+  return same && (typeof grant.host === "string" ? grant.host : "") === (toml.bridgeHost ?? "") ? "on" : "off";
 }
 
 const BARE_KEY = /^[A-Za-z0-9_-]+$/;

@@ -96,7 +96,7 @@ describe.runIf(enabled)("e2e: a LAD block changed in the file and in TIA Portal 
     writeFileSync(src, block);
     await other.importObject(address, "xml", src, "absent", randomUUID());
 
-    expect(await main(["init", "--project", project], io)).toBe(0);
+    expect(await main(["init", "--project", project, "--writes"], io)).toBe(0);
     expect([0, 2]).toContain(await main(["pull"], io));
     const pulled = readFileSync(file, "utf8");
     expect(pulled).toContain("title of network 3");

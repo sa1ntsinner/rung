@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
-import { StateStore, WorkspaceError, loadConfig, parseAddress } from "@rung/core";
+import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, writesGranted, type RungConfig } from "@rung/core";
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type RenameReport, type SyncReport } from "@rung/sync";
 import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
@@ -123,7 +123,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return placeCompileMessages(dir, (a) => state.get(a)?.path, msgs, (f) => readFile(f, "utf8"));
     },
   });
-  io.stdout(`rung watch: ${dir} ⇄ ${config.project.path} (poll ${config.sync.pollMs} ms, import ${config.sync.import}). Ctrl+C to stop.\n`);
+  io.stdout(`rung watch: ${dir} ⇄ ${config.project.path} (poll ${config.sync.pollMs} ms, writes ${writesLabel(config)}). Ctrl+C to stop.\n`);
   watcher.start();
   await (io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r())));
   await watcher.stop();
@@ -149,6 +149,7 @@ function statusOf(state: StateStore, watcher?: Watcher) {
 }
 
 export async function cmdStatus(dir: string, io: Io): Promise<number> {
+  const config = await loadConfig(dir);
   const owner = await OwnerClient.connect(dir);
   let s: ReturnType<typeof statusOf>;
   if (owner) {
@@ -158,7 +159,6 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
       owner.close();
     }
   } else {
-    await loadConfig(dir);
     const state = await StateStore.open(dir, null);
     try {
       s = statusOf(state);
@@ -166,6 +166,7 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
       await state.close();
     }
   }
+  io.stdout(`writes to TIA Portal: ${writesLabel(config)}\n`);
   io.stdout(`${s.objects} object${s.objects === 1 ? "" : "s"}, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
   for (const [label, list] of [["conflicted", s.conflicted], ["file dirty", s.fileDirty], ["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
@@ -282,5 +283,33 @@ export async function cmdRename(dir: string, what: string, newName: string, io: 
   io.stdout(`renamed ${parseAddress(r.from).name} to ${newName}: ${r.oldPath} → ${r.newPath ?? "(not mirrored)"}\n`);
   if (r.users.length) io.stdout(`updated where it is used: ${r.users.join(", ")}\n`);
   printWarnings(io, r.pull.warnings);
+  return 0;
+}
+
+const writesLabel = (c: RungConfig) => (c.writesOff ? "off (rung writes on)" : c.sync.import === "auto" ? "on" : "off (sync.import = manual)");
+
+/** `rung writes [on|off]`: whether this copy of the workspace may write into its project (core writes.ts). */
+export async function cmdWrites(dir: string, what: string | undefined, io: Io): Promise<number> {
+  if (what !== undefined && what !== "on" && what !== "off") {
+    io.stderr("rung: usage: rung writes [on|off] [--dir <workspace>]\n");
+    return 1;
+  }
+  const config = await loadConfig(dir, { raw: true });
+  if (what === "on") await grantWrites(dir, config);
+  if (what === "off") await revokeWrites(dir);
+  const on = writesGranted(await readWrites(dir), config);
+  const where = `${config.project.path}${config.bridge.host ? ` on ${config.bridge.host}` : ""}`;
+  if (config.sync.import === "manual") io.stdout(`writes to TIA Portal: off for every copy of this workspace (sync.import = "manual" in rung.toml)${on ? `; this copy may write once it is "auto"` : ""}\n`);
+  else if (on)
+    io.stdout(`writes to TIA Portal: on for ${where}. rung sync and rung watch send your edits there, compile them and write TIA Portal's version back; rung rename and rung confirm-delete change it too. rung writes off stops that.\n`);
+  else io.stdout(`writes to TIA Portal: off. rung pull, rung sync and rung watch bring TIA Portal's changes into the files; your edits stay in the files. rung writes on lets rung send them to ${where}.\n`);
+  if (what) {
+    // a running owner started its bridge with the rights it had then
+    const owner = await OwnerClient.connect(dir);
+    if (owner) {
+      owner.close();
+      io.stdout("rung watch runs in this workspace: restart it (Ctrl+C there, then rung watch) for this to apply\n");
+    }
+  }
   return 0;
 }

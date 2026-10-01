@@ -127,6 +127,10 @@ interface ImportJob {
 const stemOf = (s: Pick<ObjectState, "path" | "form">) => s.path.slice(0, -(s.form.length + 1));
 /** TIA Portal's names ignore letter case on every platform, whatever the filesystem under the workspace does. */
 const nameKey = (p: string) => p.normalize("NFC").toLowerCase();
+
+/** Why a file edit stays in the workspace: writes not turned on for this copy, or sync.import = "manual". */
+const notSent = (cfg: RungConfig, what: string): [string, string] =>
+  cfg.writesOff ? ["WRITES_OFF", `${what} not sent to TIA Portal: writes are off in this workspace (rung writes on)`] : ["IMPORT_MANUAL", `${what} not sent to TIA (sync.import = manual)`];
 /** The sends whose outcome was never recorded, newest first (a state written before operation ids: files only). */
 function sendsOf(st: ObjectState): { files: StateFile[]; op?: string }[] {
   const older = (st.sent ?? []).map((s) => (Array.isArray(s) ? { files: s as StateFile[] } : s));
@@ -594,7 +598,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         if (cfg.sync.import === "manual") {
-          warn(address, "IMPORT_MANUAL", "local edit not sent to TIA (sync.import = manual)");
+          warn(address, ...notSent(cfg, "local edit"));
           continue;
         }
         const { bundle, captured } = await localBundle(root, stemOf(cur), cur.path);
@@ -692,7 +696,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 
       if (loc) {
         if (cfg.sync.import !== "auto") {
-          warn(address, "IMPORT_MANUAL", "new file not sent to TIA (sync.import = manual)");
+          warn(address, ...notSent(cfg, "new file"));
           continue;
         }
         if (!CREATABLE.has(loc.form)) {

@@ -90,6 +90,19 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.watch.stop", () => watch.stop());
   reg("rung.watch.toggle", inWs(() => watch.toggle()));
   reg("rung.watch.show", () => watch.show());
+  // writes into the project: off after rung init; a running watch started its bridge without them, so it restarts
+  const setWrites = (on: boolean) =>
+    inWs(async () => {
+      const r = await cli.run(["writes", on ? "on" : "off"]);
+      if (r.error || r.code !== 0) return;
+      await ws.reload();
+      if (watch.owned && watch.status === "running") {
+        await watch.stop();
+        await watch.start();
+      } else if (ws.watching) void vscode.window.showInformationMessage("rung watch runs outside VS Code: restart it there for this to apply.");
+    });
+  reg("rung.writes.on", setWrites(true));
+  reg("rung.writes.off", setWrites(false));
 
   // --- compile / test
   reg(

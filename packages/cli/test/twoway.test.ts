@@ -35,7 +35,7 @@ const until = async (cond: () => boolean, ms = 15_000) => {
 describe("two-way CLI", () => {
   it("sync imports a local edit and writes back TIA's canonical text", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     await t.run(["pull"]);
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
     expect(await t.run(["sync"])).toBe(0);
@@ -46,9 +46,46 @@ describe("two-way CLI", () => {
     expect(t.out.join("")).toMatch(/imported 0/);
   });
 
-  it("sync refuses imports when sync.import is manual", async () => {
+  it("after init nothing is written into TIA Portal until rung writes on; a rebind to another project turns it off again", async () => {
     const t = setup();
     await t.run(["init"]);
+    expect(t.out.join("")).toContain("Writes to TIA Portal are off");
+    await t.run(["pull"]);
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(t.file("plc", "PLC_1", "blocks", "Fx_New.scl"), 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    t.out.length = 0;
+    expect(await t.run(["sync"])).toBe(2);
+    expect(t.out.join("")).toContain("WRITES_OFF");
+    expect(t.out.join("")).toContain("local edit not sent to TIA Portal: writes are off in this workspace (rung writes on)");
+    expect(t.out.join("")).toContain("new file not sent to TIA Portal");
+    expect(t.db().objects.map((o) => o.address)).toEqual([MOTOR]);
+    expect(t.db().objects[0]!.content).not.toContain("#a := 2;");
+    expect(readFileSync(t.file(...motorFile), "utf8")).toContain("#a := 2;"); // the edit stays in the file
+    t.out.length = 0;
+    expect(await t.run(["status"])).toBe(0);
+    expect(t.out.join("")).toContain("writes to TIA Portal: off (rung writes on)");
+
+    t.out.length = 0;
+    expect(await t.run(["writes", "on"])).toBe(0);
+    expect(t.out.join("")).toContain(`writes to TIA Portal: on for ${PROJECT}`);
+    expect(await t.run(["sync"])).toBe(0);
+    expect(t.db().objects[0]!.content).toContain("#a := 2;");
+    expect(t.db().objects.map((o) => o.address)).toContain("plc:PLC_1/blocks/Fx_New");
+
+    // the right belongs to the project it was given for: another project starts without it
+    const db = t.db() as { project: { path: string } };
+    writeFileSync(t.objects, JSON.stringify({ ...db, project: { ...db.project, path: "C:\\fx\\Other\\Other.ap20" } }));
+    expect(await t.run(["init", "--rebind"])).toBe(0);
+    t.out.length = 0;
+    expect(await t.run(["writes"])).toBe(0);
+    expect(t.out.join("")).toContain("writes to TIA Portal: off.");
+    expect(await t.run(["writes", "maybe"])).toBe(1);
+    expect(await t.run(["writes", "off"])).toBe(0);
+  });
+
+  it("sync refuses imports when sync.import is manual", async () => {
+    const t = setup();
+    await t.run(["init", "--writes"]);
     const cfg = t.file("rung.toml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace('import = "auto"', 'import = "manual"'));
     await t.run(["pull"]);
@@ -60,7 +97,7 @@ describe("two-way CLI", () => {
 
   it("sync reports compile errors as diagnostics", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     await t.run(["pull"]);
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #undeclared := 1;\nEND_FUNCTION_BLOCK\n');
     expect(await t.run(["sync"])).toBe(2);
@@ -69,7 +106,7 @@ describe("two-way CLI", () => {
 
   it("delete needs confirmation, then confirm-delete removes the object in TIA", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     await t.run(["pull"]);
     unlinkSync(t.file(...motorFile));
     await t.run(["sync"]);
@@ -81,7 +118,7 @@ describe("two-way CLI", () => {
 
   it("resolve --theirs ends a conflict with the TIA version", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     await t.run(["pull"]);
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 5;\nEND_FUNCTION_BLOCK\n');
     const db = t.db();
@@ -96,7 +133,7 @@ describe("two-way CLI", () => {
 
   it("watch owns the workspace: status and sync go through its IPC, file edits are imported", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     const cfg = t.file("rung.toml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("pollMs = 2000", "pollMs = 500"));
     let stop!: () => void;
@@ -132,7 +169,7 @@ describe("two-way CLI", () => {
 
   it("watch prints what stays open once, not on every pass", async () => {
     const t = setup();
-    await t.run(["init"]);
+    await t.run(["init", "--writes"]);
     const cfg = t.file("rung.toml");
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace("pollMs = 2000", "pollMs = 250"));
     let stop!: () => void;

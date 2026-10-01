@@ -24,7 +24,9 @@ export type WorkspaceErrorCode =
   | "NO_INSTANCE"
   | "BRIDGE_UNREACHABLE"
   | "NOT_A_WORKSPACE"
-  | "READ_ONLY";
+  | "READ_ONLY"
+  /** this copy of the workspace was not given the right to write into its project (rung writes on) */
+  | "WRITES_OFF";
 
 export class WorkspaceError extends Error {
   override name = "WorkspaceError";

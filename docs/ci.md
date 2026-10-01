@@ -33,11 +33,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: |                 # the CLI for any OS (Node.js 22+), checked against the release's checksums
-          gh release download --repo sa1ntsinner/rung --pattern rung.cjs --pattern SHA256SUMS.txt
-          sha256sum --check --ignore-missing SHA256SUMS.txt
-        env: { GH_TOKEN: "${{ github.token }}" }
-      - run: node rung.cjs test --junit plc-tests.xml
+      - run: npm install -g @rung-plc/cli@0.1   # the CLI for any OS (Node.js 22+); pin the version you tested with
+      - run: rung test --junit plc-tests.xml
       - run: rung-pro check . --git origin/main      # rung Pro: rung.policy.toml gate
       - run: rung-pro review . --git origin/main --out review.md
       - uses: actions/upload-artifact@v4
@@ -48,7 +45,8 @@ jobs:
     runs-on: [self-hosted, windows, tia-v20]
     steps:
       - uses: actions/checkout@v4
-      - run: rung sync           # the workspace is bound to the CI copy of the project
+      - run: rung writes on      # the workspace is bound to the CI copy of the project; a fresh checkout starts with writes off
+      - run: rung sync
       - run: rung status
 ```
 

@@ -3,7 +3,7 @@ name = "Siemens SCL"
 version = "0.3.0"
 schema_version = 1
 authors = ["Elmir Mirzayev"]
-description = "Siemens SCL for TIA Portal projects with the rung language server: completion, definitions, references, rename, TIA compile errors on their line, run buttons for compile, test and download, and snippets. Needs rung on PATH."
+description = "Siemens SCL for TIA Portal projects with the rung language server: completion, definitions, references, rename, TIA compile errors on their line, run buttons for compile, test and download, and snippets. Uses rung from PATH, or installs it from npm (@rung-plc/cli)."
 repository = "https://github.com/sa1ntsinner/rung"
 snippets = ["./snippets/scl.json"]
 

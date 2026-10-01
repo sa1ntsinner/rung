@@ -33,7 +33,7 @@ A `rung` you installed yourself wins when it is on PATH. To use another one, poi
 "rung.command": ["node", "C:/path/to/rung/packages/cli/dist/index.js"]
 ```
 
-Open the folder with `rung.toml`. No `rung.toml` yet? The Project view offers *Initialize from a TIA Portal project*, which runs `rung init --project <file.ap20>` and then `rung pull`.
+Open the folder with `rung.toml`. No `rung.toml` yet? The Project view offers *Initialize from a TIA Portal project*, which runs `rung init --project <file.ap20>` and then `rung pull`. rung writes nothing into the project until you click *Writes to TIA Portal* in the PLC view (`rung writes on`); until then TIA Portal's changes come into the files and your edits stay in them.
 
 ## Keys
 

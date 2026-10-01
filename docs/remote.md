@@ -6,12 +6,13 @@ TIA Portal runs only on Windows. rung on Linux or macOS works with the TIA Porta
 ## On the Windows PC
 
 - TIA Portal V20 with Openness, and your Windows user in the group "Siemens TIA Openness".
-- rung, so that `rung bridge` runs in a new terminal (rung on the PATH). Run `rung setup openness` there once, so TIA Portal does not ask for Openness access.
+- rung, so that `rung bridge` runs in a new terminal (rung on the PATH; `npm install -g @rung-plc/cli` does it). Run `rung setup openness` there once, so TIA Portal does not ask for Openness access.
 - OpenSSH Server (Settings → System → Optional features → OpenSSH Server), with your public key in `C:\Users\<you>\.ssh\authorized_keys` (for an administrator account: `C:\ProgramData\ssh\administrators_authorized_keys`). rung logs in with the key only; it never waits for a password.
 
 ## On your machine
 
 ```
+npm install -g @rung-plc/cli          # Node.js 22 or newer
 ssh elmir@tia-pc rung --version       # logs in without a password and finds rung
 rung init --host elmir@tia-pc --project "D:\Projects\Line3\Line3.ap20"
 rung pull

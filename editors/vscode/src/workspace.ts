@@ -5,7 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { parseRungToml, type RungToml } from "./core/rungToml";
+import { parseRungToml, writesState, type RungToml } from "./core/rungToml";
 import { devicesInState, objectsOf, parseState, summarize, type ObjectInfo, type StateDoc } from "./core/state";
 import type { Output } from "./output";
 
@@ -40,6 +40,8 @@ export class RungWorkspace implements vscode.Disposable {
   state: StateDoc | undefined;
   objects: ObjectInfo[] = [];
   owner: OwnerInfo | undefined;
+  /** may rung write into the project from here (rung writes on; .rung/writes.json) */
+  writes: "on" | "off" | "manual" = "manual";
 
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
@@ -65,7 +67,7 @@ export class RungWorkspace implements vscode.Disposable {
       this.watcher?.dispose();
       this.watcher = undefined;
       if (root) {
-        this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "{rung.toml,.rung/state.json,.rung/owner.json}"));
+        this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "{rung.toml,.rung/state.json,.rung/owner.json,.rung/writes.json}"));
         const poke = () => this.scheduleReload();
         this.watcher.onDidChange(poke);
         this.watcher.onDidCreate(poke);
@@ -95,6 +97,7 @@ export class RungWorkspace implements vscode.Disposable {
       }
     }
     this.state = root ? parseState(await readFile(join(root, ".rung", "state.json"), "utf8").catch(() => "")) : undefined;
+    this.writes = writesState(this.config, root ? await readFile(join(root, ".rung", "writes.json"), "utf8").catch(() => "") : "");
     this.objects = objectsOf(this.state);
     this.readOwner();
     this.out.debug(`workspace: ${root ?? "(none)"}, rung.toml ${this.hasConfig ? "found" : "missing"}, ${this.objects.length} objects, watch ${this.owner ? `pid ${this.owner.pid}` : "not running"}`);

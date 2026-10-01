@@ -101,7 +101,7 @@
           <details class="log-box" open>
             <summary>Sync log</summary>
 <pre class="term" aria-live="off"><code><span class="p">$</span> rung watch
-rung watch: C:\work\line-3 ⇄ D:\TIA\Line3.ap20 (poll 2000 ms, import auto). Ctrl+C to stop.
+rung watch: C:\work\line-3 ⇄ D:\TIA\Line3.ap20 (poll 2000 ms, writes on). Ctrl+C to stop.
 <span class="log"></span></code></pre>
           </details>
         </figure>
@@ -554,11 +554,12 @@ rung test --junit report.xml</code></pre>
           <p class="avail">Pre-release: there is no public release yet. The quickstart describes the setup of the first one.</p>
           <div class="actions">
             <a class="btn primary" href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Read quickstart</a>
-            <button class="btn copy" type="button" data-copy="rung init --project D:\TIA\Line3.ap20&#10;rung pull&#10;rung watch">Copy commands</button>
+            <button class="btn copy" type="button" data-copy="rung init --project D:\TIA\Line3.ap20&#10;rung pull&#10;rung writes on&#10;rung watch">Copy commands</button>
           </div>
         </div>
 <pre class="cmds"><code><span class="p">$</span> rung init --project D:\TIA\Line3.ap20   <span class="c"># link the folder</span>
 <span class="p">$</span> rung pull                               <span class="c"># export to files</span>
+<span class="p">$</span> rung writes on                          <span class="c"># let your edits go to TIA Portal</span>
 <span class="p">$</span> rung watch                              <span class="c"># keep both sides in sync</span></code></pre>
       </div>
     </section>

@@ -69,6 +69,7 @@ One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `netw
 ```sh
 rung init --project D:\TIA\Line3.ap20   # link this folder to a project open in TIA Portal
 rung pull                               # blocks, types and tag tables as text
+rung writes on                          # when you want your edits to go to TIA Portal
 rung watch                              # keep both sides in sync
 ```
 

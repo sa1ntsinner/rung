@@ -7,6 +7,7 @@ import type { RungWorkspace } from "../workspace";
 
 type Node =
   | { type: "watch" }
+  | { type: "writes" }
   | { type: "plc"; device: string }
   | { type: "connection"; device: string }
   | { type: "action"; device: string; label: string; command: string; icon: string; tooltip: string };
@@ -68,7 +69,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
 
   getChildren(e?: PlcItem): PlcItem[] {
     if (!this.ws.hasConfig) return [];
-    if (!e) return [this.watchItem(), ...this.ws.devices().map((d) => this.plcItem(d))];
+    if (!e) return [this.watchItem(), this.writesItem(), ...this.ws.devices().map((d) => this.plcItem(d))];
     if (e.node.type === "plc") {
       const d = e.node.device;
       return [this.connectionItem(d), ...ACTIONS.map((a) => this.actionItem({ type: "action", device: d, ...a }))];
@@ -96,6 +97,23 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
         : "Start rung watch to keep files and TIA Portal in sync (two-way).";
     // start/stop are inline buttons; a click only brings up the watch terminal
     if (this.watch.owned) it.command = { command: "rung.watch.show", title: "Show watch terminal" };
+    return it;
+  }
+
+  private writesItem(): PlcItem {
+    const w = this.ws.writes;
+    const it = new PlcItem({ type: "writes" }, "Writes to TIA Portal", vscode.TreeItemCollapsibleState.None);
+    it.id = "writes";
+    it.description = w === "on" ? "on" : w === "off" ? "off · click to turn on" : "off (sync.import = manual)";
+    it.iconPath = new vscode.ThemeIcon(w === "on" ? "unlock" : "lock", w === "on" ? undefined : new vscode.ThemeColor("list.warningForeground"));
+    it.tooltip =
+      w === "on"
+        ? "Your edits go to TIA Portal: rung imports them, compiles them and writes TIA Portal's version back. Click to stop that (rung writes off)."
+        : w === "off"
+          ? "rung brings TIA Portal's changes into the files, but your edits stay in the files. Click to let rung send them to the project (rung writes on)."
+          : 'rung.toml has sync.import = "manual": no copy of this workspace writes into the project.';
+    if (w !== "manual") it.command = { command: w === "on" ? "rung.writes.off" : "rung.writes.on", title: w === "on" ? "Turn off writes" : "Turn on writes" };
+    it.contextValue = `rung.writes.${w}`;
     return it;
   }
 

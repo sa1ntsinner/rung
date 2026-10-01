@@ -56,7 +56,7 @@ describe("TIA Portal on another PC (Linux, macOS): the bridge over ssh", () => {
     const log = join(tmpdir(), `ssh-${Date.now()}-${Math.random()}.log`);
     const ssh = { RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_SSH_LOG: log };
     const t = setup(ssh);
-    expect(await t.run("init", "--host", "elmir@tia-pc", "--project", PROJECT)).toBe(0);
+    expect(await t.run("init", "--host", "elmir@tia-pc", "--project", PROJECT, "--writes")).toBe(0);
     expect(readFileSync(join(t.dir, "rung.toml"), "utf8")).toMatch(/\[bridge\][\s\S]*host = "elmir@tia-pc"/);
     const first = JSON.parse(readFileSync(log, "utf8").split("\n")[0]!) as string[];
     expect(first.slice(0, 5)).toEqual(["-T", "-o", "BatchMode=yes", "--", "elmir@tia-pc"]);
@@ -106,6 +106,11 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
   it("rung upload reads the PLC into the bound project as a new station", async () => {
     const t = setup();
     expect(await t.run("init")).toBe(0);
+    // writes into the project are off after init: an upload adds a station, so it waits for rung writes on
+    expect(await t.run("upload", "--ip", "192.168.0.9", "--use", "Intel(R) Ethernet")).toBe(1);
+    expect(t.err.join("")).toContain("WRITES_OFF");
+    expect(await t.run("writes", "on")).toBe(0);
+    t.err.length = 0;
     const code = await t.run("upload", "--ip", "192.168.0.9", "--use", "Intel(R) Ethernet");
     expect(t.err.join("")).toBe("reading the station at 192.168.0.9 into the project (the PLC is only read) …\n");
     expect(code).toBe(0);
@@ -458,6 +463,6 @@ describe("rung CLI", () => {
     await t.run("pull");
     t.out.length = 0;
     await t.run("status");
-    expect(t.out.join("")).toMatch(/^1 object, 1 synced, 0 read-only\n/);
+    expect(t.out.join("")).toMatch(/^writes to TIA Portal: off \(rung writes on\)\n1 object, 1 synced, 0 read-only\n/);
   });
 });

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultConfig, formatConfig, parseConfig, preflight, isContained, loadConfig, saveConfig } from "../src/index.js";
+import { defaultConfig, formatConfig, parseConfig, preflight, isContained, loadConfig, saveConfig, grantWrites, revokeWrites } from "../src/index.js";
 
 describe("config", () => {
   it("round-trips through TOML", () => {
@@ -36,7 +36,35 @@ describe("config", () => {
     const d = mkdtempSync(join(tmpdir(), "rung-cfg-"));
     const c = defaultConfig("C:\\p\\X.ap20", "V20", "bridge.exe");
     await saveConfig(d, c);
+    expect(await loadConfig(d, { raw: true })).toEqual(c);
+  });
+
+  it("reads sync.import as manual until this copy may write into exactly its project", async () => {
+    const d = mkdtempSync(join(tmpdir(), "rung-cfg-"));
+    const c = defaultConfig("C:\\p\\X.ap20", "V20");
+    await saveConfig(d, c);
+    // after rung init, and in a fresh clone: .rung/writes.json is not there
+    expect((await loadConfig(d)).sync.import).toBe("manual");
+    expect((await loadConfig(d)).writesOff).toBe(true);
+    await grantWrites(d, c);
     expect(await loadConfig(d)).toEqual(c);
+    // the same project in other letter case is the same file on Windows
+    await saveConfig(d, { ...c, project: { ...c.project, path: "c:\\P\\x.ap20" } });
+    expect((await loadConfig(d)).sync.import).toBe("auto");
+    // another project, or the same path on another PC over ssh: not the project the right was given for
+    await saveConfig(d, { ...c, project: { ...c.project, path: "C:\\p\\Y.ap20" } });
+    expect((await loadConfig(d)).writesOff).toBe(true);
+    await saveConfig(d, { ...c, bridge: { ...c.bridge, host: "elmir@tia-pc" } });
+    expect((await loadConfig(d)).writesOff).toBe(true);
+    // manual in rung.toml stays manual for everyone, without the mark
+    await saveConfig(d, { ...c, sync: { ...c.sync, import: "manual" } });
+    expect((await loadConfig(d)).writesOff).toBeUndefined();
+    await saveConfig(d, c);
+    await revokeWrites(d);
+    expect((await loadConfig(d)).writesOff).toBe(true);
+    // a damaged grant counts as none
+    writeFileSync(join(d, ".rung", "writes.json"), "{");
+    expect((await loadConfig(d)).writesOff).toBe(true);
   });
 });
 

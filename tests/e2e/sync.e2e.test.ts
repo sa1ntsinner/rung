@@ -18,7 +18,7 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
   const created = join(dir, "plc", "PLC_1", "blocks", "30_E2E", "Fx_E2E.scl");
 
   it("init + pull", async () => {
-    expect(await main(["init", "--project", project], io)).toBe(0);
+    expect(await main(["init", "--project", project, "--writes"], io)).toBe(0);
     expect([0, 2]).toContain(await main(["pull"], io));
     expect(existsSync(valve)).toBe(true);
   }, 600_000);

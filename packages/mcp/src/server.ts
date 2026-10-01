@@ -188,15 +188,21 @@ export function createMcpServer(ctx: McpContext): McpServer {
     return { ref: hits[0]?.id ?? bare, ...(hits[0]?.device ? { device: hits[0].device } : {}), name: hits[0]?.name ?? bare };
   };
 
-  server.registerTool("rung_status", { description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running." }, async () => {
-    const none = noWorkspace();
-    if (none) return none;
-    const live = await withOwner((o) => o.request("status"));
-    if (live) return json({ watching: true, ...(live as object) });
-    const all = await stateSnapshot(ctx.root);
-    const by = (s: string) => all.filter((o) => o.status === s).map((o) => o.path);
-    return json({ watching: false, objects: all.length, conflicted: by("conflicted"), fileDirty: by("fileDirty"), pendingDelete: by("pendingDelete"), recoveryRequired: by("recoveryRequired"), readOnly: all.filter((o) => o.readOnly).map((o) => o.path) });
-  });
+  server.registerTool(
+    "rung_status",
+    { description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running, whether writes to TIA Portal are on (the person turns them on; never you)." },
+    async () => {
+      const none = noWorkspace();
+      if (none) return none;
+      const config = await loadConfig(ctx.root).catch(() => undefined);
+      const writes = !config ? undefined : config.writesOff ? "off: the person turns them on with rung writes on" : config.sync.import === "auto" ? "on" : "off (sync.import = manual)";
+      const live = await withOwner((o) => o.request("status"));
+      if (live) return json({ watching: true, writes, ...(live as object) });
+      const all = await stateSnapshot(ctx.root);
+      const by = (s: string) => all.filter((o) => o.status === s).map((o) => o.path);
+      return json({ watching: false, writes, objects: all.length, conflicted: by("conflicted"), fileDirty: by("fileDirty"), pendingDelete: by("pendingDelete"), recoveryRequired: by("recoveryRequired"), readOnly: all.filter((o) => o.readOnly).map((o) => o.path) });
+    },
+  );
 
   server.registerTool("rung_sync", { description: "Run one two-way sync pass now: sends edited files to TIA Portal, brings TIA changes into files, compiles what was imported. Returns counts, warnings and diagnostics." }, async () => {
     const none = noWorkspace();

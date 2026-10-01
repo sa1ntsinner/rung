@@ -27,7 +27,7 @@ export const HINTS: Record<string, string> = {
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "Run rung init in this folder first.",
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
-  READ_ONLY: "Two-way sync needs sync.import = \"auto\" in rung.toml; protected, failsafe, system and GRAPH objects and library type instances are never imported.",
+  READ_ONLY: "Two-way sync needs writes turned on (rung writes on) and sync.import = \"auto\" in rung.toml; protected, failsafe, system and GRAPH objects and library type instances are never imported.",
 };
 
 export function defaultBridge(env: Io["env"]): { command: string; args: string[] } {

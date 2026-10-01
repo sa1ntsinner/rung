@@ -25,7 +25,7 @@ describe.runIf(enabled)("e2e: download to S7-PLCSIM", () => {
   };
 
   it("finds PLCSIM, downloads hardware and software, and the PLC then runs the project", async () => {
-    expect((await run(["init", "--project", project])).code).toBe(0);
+    expect((await run(["init", "--project", project, "--writes"])).code).toBe(0);
     expect([0, 2]).toContain((await run(["pull"])).code);
     // a download never finds its PLC by itself: rung connect finds PLCSIM and saves the connection
     const noTarget = await run(["download", "--yes"]);

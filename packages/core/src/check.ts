@@ -72,7 +72,7 @@ export async function runChecks(p: Probes): Promise<CheckItem[]> {
 
   // ---------------------------------------------------------------- base
   const [major] = p.nodeVersion.replace(/^v/, "").split(".").map(Number);
-  out.push({ id: "node", group: "base", name: "Node.js", status: (major ?? 0) >= 22 ? "ok" : "warn", detail: p.nodeVersion, enables: "runs rung from source (the rung.exe release brings its own)", ...((major ?? 0) >= 22 ? {} : { fix: "Install Node.js 22 or newer", link: LINKS.node }) });
+  out.push({ id: "node", group: "base", name: "Node.js", status: (major ?? 0) >= 22 ? "ok" : "warn", detail: p.nodeVersion, enables: "runs rung from npm (@rung-plc/cli) or from source; rung.exe brings its own", ...((major ?? 0) >= 22 ? {} : { fix: "Install Node.js 22 or newer", link: LINKS.node }) });
   const git = p.which("git");
   out.push({ id: "git", group: "base", name: "Git", status: git ? "ok" : "missing", ...(git ? { detail: git } : {}), enables: "history, review and rollback of PLC changes; download handovers list what changed", ...(git ? {} : { fix: "Install Git", link: LINKS.git }) });
 

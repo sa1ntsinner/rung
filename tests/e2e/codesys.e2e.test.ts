@@ -42,7 +42,7 @@ describe.runIf(enabled)("e2e: CODESYS", () => {
   }, 360_000);
 
   it("init and pull mirror POUs with their methods, DUTs and GVLs as .st files", async () => {
-    expect((await run("init", "--project", project)).code).toBe(0);
+    expect((await run("init", "--project", project, "--writes")).code).toBe(0);
     expect(readFileSync(file("rung.toml"), "utf8")).toContain('tiaVersion = "CODESYS"');
     expect([0, 2]).toContain((await run("pull")).code);
     expect(readFileSync(file("plc/Device/blocks/Motion/FB_Count.st"), "utf8")).toBe(

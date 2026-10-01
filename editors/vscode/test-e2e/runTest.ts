@@ -88,7 +88,7 @@ function tiaWorkspace(base: string): { folder?: string; why?: string } {
   if (!folder) {
     folder = join(base, "tia");
     mkdirSync(folder, { recursive: true });
-    const init = rungCli(repo, folder, {}, "init", "--project", FIXTURE);
+    const init = rungCli(repo, folder, {}, "init", "--project", FIXTURE, "--writes");
     if (init.code !== 0) return { why: `rung init on ${FIXTURE} failed: ${init.output.trim().split(/\r?\n/)[0]}` };
     const pull = rungCli(repo, folder, {}, "pull");
     if (pull.code !== 0 && pull.code !== 2) return { why: `rung pull failed: ${pull.output.trim().split(/\r?\n/).pop()}` };

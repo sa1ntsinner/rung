@@ -5,7 +5,7 @@ rung turns a Siemens TIA Portal project into a folder of text files that stays i
 ## 1. Install and check
 
 - Windows with **TIA Portal V20** and the Openness option (installed with TIA Portal). rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
-- Unzip `rung-<version>-win-x64.zip` and add the folder to `PATH`. Or install only the rung extension in VS Code: it brings rung with it, and **rung: Put rung on PATH** makes it a command in terminals too.
+- Unzip `rung-<version>-win-x64.zip` and add the folder to `PATH`. Or install only the rung extension in VS Code: it brings rung with it, and **rung: Put rung on PATH** makes it a command in terminals too. With Node.js 22 or newer, `npm install -g @rung-plc/cli` gives the same rung (bridge included) on Windows, and the language server, `rung test` and the ssh bridge on Linux and macOS.
 - rung is not code-signed. To check a download, compare `Get-FileHash rung-<version>-win-x64.zip` with its line in `SHA256SUMS.txt` on the release page. If Windows shows "Windows protected your PC" for rung.exe, choose **More info → Run anyway**; files unzipped from a download can be unblocked at once with `Get-ChildItem -Recurse | Unblock-File` in the rung folder. With Smart App Control turned on, Windows does not start unsigned programs at all.
 - Run `rung check`. It lists what is installed (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS, editors, agents) and says how to get what is missing:
 
@@ -46,9 +46,14 @@ If the project is not open, rung opens it in a TIA Portal without window (`[tia]
 
 ## 4. Work two-way
 
+Until you say so, rung writes nothing into the project: `rung pull`, `rung sync` and `rung watch` bring TIA Portal's changes into the files, and your edits stay in the files (`WRITES_OFF` in the report). Look around first, on a copy of the project if you like. Then:
+
 ```
+rung writes on     # this workspace may now write into D:\TIA\Line3.ap20
 rung watch         # keeps both sides in sync; Ctrl+C to stop
 ```
+
+The right is kept in `.rung/`, never in git, and names the project: a colleague who clones the folder, or a `rung init --rebind` to another project, starts with writes off again. `rung writes off` takes it back; in VS Code it is the *Writes to TIA Portal* line of the PLC view. `rung init --writes` turns it on right away, for scripts and CI.
 
 - Save `plc/PLC_1/blocks/.../Fx_Motor.scl` → rung imports it into TIA Portal, compiles it and writes TIA's formatting back. Compile errors appear on their line in the editor.
 - Change a block in TIA Portal → the file updates.

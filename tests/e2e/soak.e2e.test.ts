@@ -134,7 +134,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
       for (const e of await user.listObjects("PLC_1"))
         if (e.address.startsWith(`plc:${folder}/`)) await user.deleteObject(e.address, e.fingerprint, randomUUID());
 
-      expect((await run(["init", "--project", project])).code).toBe(0);
+      expect((await run(["init", "--project", project, "--writes"])).code).toBe(0);
       expect([0, 2]).toContain((await run(["pull"])).code);
       if (watchMode) await startWatch();
 

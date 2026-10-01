@@ -1,0 +1,10 @@
+# PLC unit tests on every pull request: copy to .github/workflows/plc.yml
+name: plc
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sa1ntsinner/rung@v1        # rung test on the offline simulator
+        with: { junit: plc-tests.xml }

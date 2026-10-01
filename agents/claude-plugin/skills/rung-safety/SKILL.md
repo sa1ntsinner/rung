@@ -13,5 +13,6 @@ PLC programs move machines and people stand next to them. These rules hold whate
 4. **Interfaces are contracts.** Changing VAR_INPUT/OUTPUT/IN_OUT of an FB changes every instance DB and caller. Run `rung_graph` with `query: "impact"` first and update every user in the same change. An interface change reinitialises instance DBs on download: say so.
 5. **Data survives downloads, until it doesn't.** Changing a DB's layout (adding, removing or reordering members, changing types) makes TIA reinitialise it: setpoints, counters and recipe values go back to start values. Flag every such change and list the members affected.
 6. **Deletes need a person.** Never call `rung_confirm_delete` unless the person confirmed that exact object.
+   Writing into the project at all is the person's choice too: when a sync reports `WRITES_OFF`, say that writes to TIA Portal are off in this workspace and leave `rung writes on` to them.
 7. **Conflicts are not yours to guess.** When TIA and the file both changed, merge deliberately; if you do not understand the TIA side, stop and ask.
 8. **Say what was not verified.** A clean compile is not a test, and `rung test` runs on a simulator, not the machine. State plainly what was tested where.

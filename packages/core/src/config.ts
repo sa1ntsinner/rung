@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { writeFileAtomic } from "./atomic.js";
 import { WorkspaceError } from "./errors.js";
+import { readWrites, writesGranted } from "./writes.js";
 
 export interface RungConfig {
   format: 1;
@@ -37,6 +38,11 @@ export interface RungConfig {
   download: DownloadSettings;
   /** Optional live-data sources (read-only). Passwords never live in rung.toml: RUNG_WEBAPI_PASSWORD. */
   live?: { webapi?: { url: string; user: string; insecure?: boolean } };
+  /**
+   * Not in rung.toml: set by loadConfig when sync.import is "auto" but this copy of the workspace was not given the
+   * right to write into its project (`rung writes on`, kept in .rung/writes.json); sync.import then reads "manual".
+   */
+  writesOff?: true;
 }
 
 export interface PlcConnection {
@@ -188,14 +194,20 @@ export function formatConfig(c: RungConfig): string {
   );
 }
 
-export async function loadConfig(root: string): Promise<RungConfig> {
+/**
+ * rung.toml as rung works with it: writes into TIA Portal (sync.import = "auto") only once this copy of the workspace
+ * was given the right for its project (writes.ts). `raw` reads the file as it is, for writing it back.
+ */
+export async function loadConfig(root: string, opts: { raw?: boolean } = {}): Promise<RungConfig> {
   let text: string;
   try {
     text = await readFile(join(root, CONFIG_FILE), "utf8");
   } catch {
     throw new WorkspaceError("NOT_A_WORKSPACE", `${root} has no ${CONFIG_FILE}; run rung init`);
   }
-  return parseConfig(text);
+  const config = parseConfig(text);
+  if (opts.raw || config.sync.import !== "auto" || writesGranted(await readWrites(root), config)) return config;
+  return { ...config, sync: { ...config.sync, import: "manual" }, writesOff: true };
 }
 
 export async function saveConfig(root: string, c: RungConfig): Promise<void> {
