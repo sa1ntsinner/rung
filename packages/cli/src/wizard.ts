@@ -118,7 +118,9 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
         break;
       case "zed":
         skillDirs.add(at(".agents/skills", ".agents/skills"));
-        actions.push({ kind: "note", text: "Zed agent: the rung extension provides the MCP server (context server \"rung\")." });
+        // Zed reads context servers from its settings; a project's own .zed/settings.json is plain JSON
+        if (c.scope === "project") actions.push({ kind: "json", file: join(c.root, ".zed", "settings.json"), path: ["context_servers", "rung"], value: { command: mcp.command, args: mcpArgs, env: {} }, why: "Zed agent: rung MCP server for this project" });
+        else actions.push({ kind: "note", text: `Zed agent: add to Zed's settings (zed: open settings): "context_servers": { "rung": { "command": ${JSON.stringify(mcp.command)}, "args": ${JSON.stringify(mcpArgs)} } }` });
         break;
     }
   }
@@ -129,7 +131,7 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
       const vsix = [installRoot(env) && join(installRoot(env)!, "editors", "rung-scl.vsix"), devPath("../../../editors/vscode/rung-scl.vsix")].find((f): f is string => !!f && existsSync(f));
       actions.push(vsix ? { kind: "run", command: "code", args: ["--install-extension", vsix, "--force"], why: "VS Code: install the rung extension" } : { kind: "note", text: "VS Code: rung-scl.vsix not found in this installation; see the editors guide." });
     }
-    if (e === "zed") actions.push({ kind: "note", text: "Zed: Extensions → Install Dev Extension → the rung editors/zed folder (needs Rust via rustup). Guide: " + LINKS.rungEditors });
+    if (e === "zed") actions.push({ kind: "note", text: "Zed: Extensions → install Siemens SCL (until it is listed: Install Dev Extension → the rung editors/zed folder, needs Rust via rustup). Guide: " + LINKS.rungEditors });
     if (e === "neovim") actions.push({ kind: "note", text: "Neovim: copy the lspconfig snippet from the editors guide: " + LINKS.rungEditors });
   }
   return actions;

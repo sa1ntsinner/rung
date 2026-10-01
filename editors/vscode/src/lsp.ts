@@ -33,6 +33,8 @@ export class Lsp implements vscode.Disposable {
       ],
       synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },
       outputChannel: this.out.channel,
+      // Monitor Values draws its own line ends here; the server's inlay hints are for editors without that
+      initializationOptions: { monitor: false },
     };
     this.out.debug(`language server: ${inv.display}`);
     try {

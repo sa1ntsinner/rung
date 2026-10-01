@@ -39,14 +39,15 @@ Keys: `alt+q` and then a letter, the same letters as in Zed below: `s` sync, `w`
 
 ## Zed
 
-Zed → Extensions → *Install Dev Extension* → choose `editors/zed` (needs Rust via rustup on PATH). The extension gives you:
+Zed → Extensions → install **Siemens SCL**. Until it is listed there: *Install Dev Extension* → choose `editors/zed` (needs Rust via rustup on PATH). The extension gives you:
 
 - SCL highlighting, outline and the rung language server for `.scl`, `.db`, `.udt` and `.s7dcl`.
-- The same for TwinCAT and CODESYS structured text in `.st` files, the language *Structured Text* (PROGRAM, FUNCTION_BLOCK with METHODs, PROPERTYs and ACTIONs, enumerations, pointers and references), with a run button that tests the POU on rung's simulator.
 - A run button (▶) in the gutter next to every block header: compile this block, test it, or open it in TIA Portal.
 - Tasks for everything else (*task: spawn*, or `ctrl-shift-r` in many setups): sync, watch, compile PLC, compile hardware, test, go online/offline, interfaces, download (it asks you to type the PLC name first), open in TIA Portal, pull, views, resolve conflicts.
 - Snippets: `fb`, `fc`, `db`, `udt`, `if`, `ife`, `case`, `for`, `while`, `region`, `ton`, `rtrig`, `seq`.
-- rung's MCP tools in Zed's agent panel (context server `rung`).
+- Live values at the end of each line (below).
+
+TwinCAT and CODESYS `.st` files: install the **Structured Text** extension as well; rung's language server serves its files too. rung's MCP tools in Zed's agent panel: `rung setup --agents zed` writes them into the project's `.zed/settings.json` (`context_servers.rung`).
 
 Zed extensions cannot add their own side panels or buttons, so there is no rung sidebar in Zed; VS Code has one.
 
@@ -57,6 +58,15 @@ The tasks run `rung`, so it has to be on PATH (or point the language server at i
   "lsp": {
     "rung": { "binary": { "path": "C:/Program Files/nodejs/node.exe", "arguments": ["C:/path/to/rung/packages/cli/dist/index.js", "lsp", "--stdio"] } }
   }
+}
+```
+
+**Live values**, like TIA Portal's *Monitoring on*: in an open block, choose **Monitor values** from the code actions (an FB with several instance DBs offers one per instance). The values appear at the line ends twice a second, read only; **Stop monitoring**, editing or closing the block ends it. It needs `[live.webapi]` in `rung.toml` (or `rung simulate` as the PLC), inlay hints on, and the Web API password in the language server's environment:
+
+```json
+{
+  "inlay_hints": { "enabled": true },
+  "lsp": { "rung": { "binary": { "env": { "RUNG_WEBAPI_PASSWORD": "…" } } } }
 }
 ```
 
@@ -104,6 +114,8 @@ parsers.scl = {
   filetype = "scl",
 }
 ```
+
+**Live values**: `vim.lsp.inlay_hint.enable(true)`, then `vim.lsp.buf.code_action()` → **Monitor values** (or the action naming the FB's instance DB); **Stop monitoring**, an edit or closing the block ends it. As in Zed it needs `[live.webapi]` in `rung.toml` and `RUNG_WEBAPI_PASSWORD` for the language server, e.g. `cmd_env = { RUNG_WEBAPI_PASSWORD = vim.env.RUNG_WEBAPI_PASSWORD }` in `vim.lsp.config`.
 
 Copy `grammars/tree-sitter-scl/queries/*.scm` to `~/.config/nvim/queries/scl/`.
 

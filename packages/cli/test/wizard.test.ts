@@ -61,6 +61,18 @@ describe("rung setup", () => {
     expect(plan).toContainEqual(expect.objectContaining({ kind: "copy-skill", to: join(home, ".claude", "skills", "plc-engineer") }));
   });
 
+  it("gives Zed's agent the MCP server through the project's .zed/settings.json, and says what to add for all projects", async () => {
+    const root = tmp();
+    mkdirSync(join(root, ".zed"));
+    writeFileSync(join(root, ".zed", "settings.json"), JSON.stringify({ tab_size: 3 }));
+    for (const a of planSetup({ root, scope: "project", platforms: [], agents: ["zed"], skills: [], editors: [] }, {}, root)) await applyAction(a);
+    const settings = JSON.parse(readFileSync(join(root, ".zed", "settings.json"), "utf8"));
+    expect(settings.tab_size).toBe(3);
+    expect(settings.context_servers.rung).toEqual(expect.objectContaining({ args: expect.arrayContaining(["mcp"]), env: {} }));
+    const global = planSetup({ root: tmp(), scope: "global", platforms: [], agents: ["zed"], skills: [], editors: [] }, {}, tmp());
+    expect(global).toContainEqual(expect.objectContaining({ kind: "note", text: expect.stringContaining('"context_servers": { "rung": {') }));
+  });
+
   it("merges into existing configs instead of replacing them", async () => {
     const root = tmp();
     writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { other: { command: "x" } } }));

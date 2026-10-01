@@ -44,10 +44,7 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
 
   let inst: string | undefined;
   if (block.kind === "FB") {
-    const dbs = index
-      .allGlobals()
-      .filter((g) => samePlc(g.uri, uri) && g.block?.kind === "DB" && g.block.dbOf?.toUpperCase() === block.name.toUpperCase())
-      .map((g) => g.name);
+    const dbs = monitorInstances(index, uri);
     inst = instance ? (/^"/.test(instance.trim()) ? instance.trim() : quoted(instance.trim())) : dbs.length === 1 ? quoted(dbs[0]!) : undefined;
     if (!inst)
       throw new WorkspaceError(
@@ -111,10 +108,7 @@ export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: st
   let base: string | undefined;
   if (block.kind === "PRG" || block.kind === "GVL") base = block.name;
   else if (block.kind === "FB") {
-    const uses = index
-      .allGlobals()
-      .filter((g) => samePlc(g.uri, uri) && g.block?.kind === "PRG")
-      .flatMap((g) => g.block!.vars.filter((v) => !v.isArray && (v.typeRef ?? v.type).toUpperCase() === block.name.toUpperCase()).map((v) => `${g.name}.${v.name}`));
+    const uses = monitorInstances(index, uri);
     base = instance?.trim() || (uses.length === 1 ? uses[0] : undefined);
     if (!base)
       throw new WorkspaceError(
@@ -146,3 +140,17 @@ export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: st
   }
   return { block: block.name, kind: block.kind, ...(block.kind === "FB" ? { instance: base! } : {}), vars, lines };
 }
+
+export function monitorInstances(index: WorkspaceIndex, uri: string): string[] {
+  index = scopedTo(index, uri);
+  const block = index.docs.get(uri)?.parsed?.blocks[0];
+  if (block?.kind !== "FB") return [];
+  const globals = index.allGlobals().filter((g) => samePlc(g.uri, uri));
+  if (isIecMonitor(uri))
+    return globals.filter((g) => g.block?.kind === "PRG").flatMap((g) =>
+      g.block!.vars.filter((v) => !v.isArray && (v.typeRef ?? v.type).toUpperCase() === block.name.toUpperCase()).map((v) => g.name + "." + v.name),
+    );
+  return globals.filter((g) => g.block?.kind === "DB" && g.block.dbOf?.toUpperCase() === block.name.toUpperCase()).map((g) => g.name);
+}
+
+export const isIecMonitor = (uri: string) => /\.(st|TcPOU|TcGVL|TcDUT)$/i.test(uri);

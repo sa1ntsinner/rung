@@ -10,6 +10,7 @@ import {
   DiagnosticSeverity,
   DocumentSymbol,
   MarkupKind,
+  MessageType,
   ProposedFeatures,
   SymbolKind,
   TextDocuments,
@@ -26,6 +27,7 @@ import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, hover, outline, references, rename, type CompletionKind, type OutlineSymbol } from "./features.js";
 import { codeActions } from "./actions.js";
+import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
 const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
@@ -40,13 +42,19 @@ const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
 };
 const OUTLINE_KIND = { block: SymbolKind.Class, section: SymbolKind.Namespace, variable: SymbolKind.Variable, region: SymbolKind.Namespace } as const;
 
+export type { MessageReader, MessageWriter };
+
 export interface ServerHandle {
   connection: Connection;
   index: WorkspaceIndex;
   dispose(): void;
 }
 
-export function startServer(reader?: MessageReader, writer?: MessageWriter): ServerHandle {
+export interface ServerOptions {
+  monitor?: MonitorProvider;
+}
+
+export function startServer(reader?: MessageReader, writer?: MessageWriter, options: ServerOptions = {}): ServerHandle {
   const connection = reader && writer ? createConnection(ProposedFeatures.all, reader, writer) : createConnection(ProposedFeatures.all, process.stdin, process.stdout);
   const documents = new TextDocuments(TextDocument);
   const index = new WorkspaceIndex();
@@ -56,6 +64,10 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
   let owner: OwnerClient | null = null;
   let pollTimer: NodeJS.Timeout | undefined;
   const timers = new Map<string, NodeJS.Timeout>();
+  let refreshSupport = false;
+  let monitor = options.monitor ? new Monitoring(index, options.monitor, () => {
+    if (refreshSupport) void connection.languages.inlayHint.refresh().catch(() => undefined);
+  }, (message) => void connection.sendNotification("window/showMessage", { type: MessageType.Error, message }).catch(() => undefined)) : undefined;
 
   const pos = (uri: string, offset: number) => index.docs.get(uri)!.lines.position(offset);
   const range = (uri: string, start: number, end: number) => ({ start: pos(uri, start), end: pos(uri, end) });
@@ -99,6 +111,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
   }
 
   connection.onInitialize(async (params) => {
+    refreshSupport = params.capabilities.workspace?.inlayHint?.refreshSupport === true;
+    // an editor with monitoring of its own (rung's VS Code extension) turns this one off
+    if ((params.initializationOptions as { monitor?: boolean } | undefined)?.monitor === false) monitor = undefined;
     const folder = params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? undefined;
     if (folder) {
       root = fileURLToPath(folder);
@@ -114,8 +129,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
         referencesProvider: true,
         renameProvider: true,
         documentSymbolProvider: true,
-        codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
-        executeCommandProvider: { commands: ["rung.lsp.createFile"] },
+        inlayHintProvider: !!monitor,
+        codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
+        executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
       },
       serverInfo: { name: "rung", version: "0.1.0" },
     };
@@ -150,10 +166,12 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
   });
 
   documents.onDidChangeContent((e) => {
+    monitor?.stop(e.document.uri);
     index.set(e.document.uri, e.document.getText(), e.document.version);
     schedule(e.document.uri);
   });
   documents.onDidClose(async (e) => {
+    monitor?.stop(e.document.uri);
     try {
       index.set(e.document.uri, await readFile(fileURLToPath(e.document.uri), "utf8"), 0);
     } catch {
@@ -192,7 +210,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
   });
   connection.onCodeAction((p) => {
     const uri = p.textDocument.uri;
-    return codeActions(index, uri, offsetOf(uri, p.range.start), offsetOf(uri, p.range.end)).map((f) => {
+    const fixes = codeActions(index, uri, offsetOf(uri, p.range.start), offsetOf(uri, p.range.end)).map((f) => {
       const byUri = new Map<string, { range: ReturnType<typeof range>; newText: string }[]>();
       for (const e of f.edits) byUri.set(e.uri, [...(byUri.get(e.uri) ?? []), { range: range(e.uri, e.start, e.end), newText: e.newText }]);
       const documentChanges = [...byUri].map(([u, edits]) => ({ textDocument: { uri: u, version: documents.get(u)?.version ?? null }, edits }));
@@ -206,8 +224,17 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
         ...(f.create ? { command: { title: f.title, command: "rung.lsp.createFile", arguments: [f.create.uri, f.create.text] } } : {}),
       };
     });
+    return [...fixes, ...(p.context.only?.length && !p.context.only.includes(CodeActionKind.Empty) ? [] : monitor?.actions(uri) ?? [])];
   });
+  connection.languages.inlayHint.on((p) => monitor?.hints(p.textDocument.uri, p.range) ?? []);
   connection.onExecuteCommand(async (p) => {
+    if (p.command === MONITOR_COMMAND || p.command === STOP_MONITOR_COMMAND) {
+      const [uri, instance] = p.arguments ?? [];
+      if (typeof uri !== "string" || (instance !== undefined && typeof instance !== "string")) return;
+      if (p.command === STOP_MONITOR_COMMAND) monitor?.stop(uri);
+      else if (documents.get(uri)) await monitor?.start(uri, instance);
+      return;
+    }
     if (p.command !== "rung.lsp.createFile" || !root) return;
     const [uri, text] = (p.arguments ?? []) as [string, string];
     const path = fileURLToPath(uri);
@@ -230,6 +257,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter): Ser
   connection.onShutdown(() => dispose());
 
   function dispose() {
+    monitor?.stop(undefined, false);
     fsWatcher?.close();
     clearInterval(pollTimer);
     owner?.close();

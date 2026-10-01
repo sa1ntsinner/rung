@@ -1,4 +1,0 @@
-[
-  { "label": "rung: test all", "command": "rung", "args": ["test"], "cwd": "$ZED_WORKTREE_ROOT" },
-  { "label": "rung: test this block", "command": "rung", "args": ["test", "--filter", "$ZED_STEM"], "cwd": "$ZED_WORKTREE_ROOT", "tags": ["rung-block"] }
-]

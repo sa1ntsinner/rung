@@ -3,8 +3,9 @@
 import { WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
 import { WebApiClient, plainHttpRefusal } from "@rung/live";
 import { readFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
-import { WorkspaceIndex, uriOf } from "@rung/lsp";
+import { fileURLToPath } from "node:url";
+import { dirname, relative, resolve, sep } from "node:path";
+import { WorkspaceIndex, uriOf, type MonitorValues } from "@rung/lsp";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
 import { OwnerClient } from "@rung/sync";
 import { monitorPlan, monitorPlanIec, type MonitorPlan } from "./monitor.js";
@@ -50,15 +51,7 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     return await liveRun(client, sub, args, io);
   } catch (e) {
     // network and PLC errors are expected here (wrong address, PLC off, wrong password): one clear line, no stack
-    const err = e as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException };
-    const code = err.cause?.code ?? err.code;
-    const why =
-      code === "ENOTFOUND" ? "the PLC address does not resolve" :
-      code === "ECONNREFUSED" ? "the PLC refused the connection (web server off?)" :
-      code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT" || err.name === "TimeoutError" || err.name === "AbortError" ? "the PLC did not answer in time" :
-      code === "DEPTH_ZERO_SELF_SIGNED_CERT" || code === "SELF_SIGNED_CERT_IN_CHAIN" || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ? "the PLC certificate is not trusted (set insecure = true under [live.webapi] for a self-signed certificate)" :
-      err.message;
-    io.stderr(`rung live: ${why}${code && !why.includes(String(code)) ? ` (${code})` : ""}\n`);
+    io.stderr(`rung live: ${liveError(e)}\n`);
     return 1;
   } finally {
     await client.logout().catch(() => undefined);
@@ -77,7 +70,7 @@ async function watchPlan(dir: string, io: Io, opts: LiveOptions): Promise<Monito
 }
 
 /** Reads the plan's variables every interval until stopped. */
-type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; error?: string }[]>;
+export type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; error?: string }[]>;
 
 /**
  * CODESYS: the values come from the application CODESYS runs, through rung's CODESYS bridge. While rung watch runs
@@ -85,31 +78,55 @@ type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; erro
  */
 async function watchCodesys(ws: string, io: Io, opts: LiveOptions): Promise<number> {
   if (!opts.file) throw new WorkspaceError("BAD_ARGUMENT", "rung live watch needs --file <POU file>");
-  const config = await loadConfig(ws);
   const index = new WorkspaceIndex();
   await index.load(ws);
   const file = resolve(io.cwd, opts.file);
   const uri = uriOf(file);
   if (!index.docs.get(uri)) index.set(uri, await readFile(file, "utf8"), 0);
   const plan = monitorPlanIec(index, uri, opts.instance);
+  const reader = await liveReader(uri, io, ws, opts.file);
+  try {
+    return await watchValues(reader.read, plan, io, opts);
+  } finally {
+    await reader.close();
+  }
+}
+
+export interface LiveReader {
+  read: Reader;
+  close(): Promise<void>;
+}
+
+export async function liveReader(uri: string, io: Io, dir?: string, fileLabel = fileURLToPath(uri)): Promise<LiveReader> {
+  const file = fileURLToPath(uri);
+  const ws = dir ?? await findWorkspace(dirname(file));
+  const config = await loadConfig(ws);
+  if (config.project.tiaVersion !== "CODESYS") {
+    const client = await webApiFor(ws, io.env);
+    return { read: (names) => client.read(names), close: () => client.logout().catch(() => undefined) };
+  }
   const hit = pathToAddress(relative(ws, file).split(sep).join("/"));
-  if (!hit) throw new WorkspaceError("BAD_ARGUMENT", `${opts.file} is not a mirrored object of this workspace`);
+  if (!hit) throw new WorkspaceError("BAD_ARGUMENT", fileLabel + " is not a mirrored object of this workspace");
   const device = hit.address.device;
   const owner = await OwnerClient.connect(ws);
-  let bridge: Awaited<ReturnType<typeof bridgeFor>> | undefined;
+  if (owner) return { read: (names) => owner.request("read", { device, expressions: names }), close: async () => owner.close() };
+  const bridge = await bridgeFor(config, io);
   try {
-    let read: Reader;
-    if (owner) read = (names) => owner.request("read", { device, expressions: names });
-    else {
-      const b = (bridge = await bridgeFor(config, io));
-      await b.online(device, "online", config.plc[device]);
-      read = (names) => b.read(device, names);
-    }
-    return await watchValues(read, plan, io, opts);
-  } finally {
-    owner?.close();
-    await bridge?.close();
+    await bridge.online(device, "online", config.plc[device]);
+    return { read: (names) => bridge.read(device, names), close: () => bridge.close() };
+  } catch (error) {
+    await bridge.close();
+    throw error;
   }
+}
+
+export async function readMonitorValues(read: Reader, plan: Pick<MonitorPlan, "vars">): Promise<MonitorValues> {
+  const labels = Object.keys(plan.vars);
+  const rows = await read(labels.map((label) => plan.vars[label]!));
+  const values: Record<string, unknown> = {};
+  const errors: Record<string, string> = {};
+  rows.forEach((row, i) => (row.error ? (errors[labels[i]!] = row.error) : (values[labels[i]!] = row.value)));
+  return { values, errors };
 }
 
 async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOptions): Promise<number> {
@@ -123,10 +140,7 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
   void stop.then(() => (stopped = true));
   const interval = Math.max(100, opts.intervalMs ?? 500);
   while (!stopped) {
-    const rows = await read(labels.map((l) => plan.vars[l]!));
-    const values: Record<string, unknown> = {};
-    const errors: Record<string, string> = {};
-    rows.forEach((r, i) => (r.error ? (errors[labels[i]!] = r.error) : (values[labels[i]!] = r.value)));
+    const { values, errors } = await readMonitorValues(read, plan);
     if (opts.json) io.stdout(JSON.stringify({ at: Date.now(), values, ...(Object.keys(errors).length ? { errors } : {}) }) + "\n");
     else io.stdout(labels.map((l) => `  ${l.padEnd(32)} ${l in errors ? `ERROR ${errors[l]}` : JSON.stringify(values[l])}`).join("\n") + "\n\n");
     await Promise.race([stop, new Promise((r) => setTimeout(r, interval))]);
@@ -148,4 +162,16 @@ async function liveRun(client: WebApiClient, sub: string, args: string[], io: Io
     io.stdout(JSON.stringify(await client.diagnosticBuffer(), null, 2) + "\n");
     return 0;
   }
+}
+
+export function liveError(error: unknown): string {
+  const err = error as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException };
+  const code = err.cause?.code ?? err.code;
+  const why =
+    code === "ENOTFOUND" ? "the PLC address does not resolve" :
+    code === "ECONNREFUSED" ? "the PLC refused the connection (web server off?)" :
+    code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT" || err.name === "TimeoutError" || err.name === "AbortError" ? "the PLC did not answer in time" :
+    code === "DEPTH_ZERO_SELF_SIGNED_CERT" || code === "SELF_SIGNED_CERT_IN_CHAIN" || code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ? "the PLC certificate is not trusted (set insecure = true under [live.webapi] for a self-signed certificate)" :
+    err.message;
+  return why + (code && !why.includes(String(code)) && !(error instanceof WorkspaceError) ? " (" + code + ")" : "");
 }

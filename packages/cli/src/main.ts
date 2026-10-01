@@ -19,7 +19,7 @@ import {
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
 import { OwnerClient, OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
 import { HINTS, bridgeEnv, bridgeFor, decodeArgs, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
-import { startServer } from "@rung/lsp";
+import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
@@ -431,7 +431,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const note = serverNote(cmd, !!process.stdin.isTTY);
   if (note) io.stderr(note);
   if (cmd === "lsp") {
-    startServer();
+    startLsp(io);
     await new Promise<void>(() => {}); // runs until the editor closes the connection
   }
   const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
