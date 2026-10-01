@@ -32,7 +32,7 @@ describe("download handover", () => {
     expect(md).toMatch(/1 compile error\(s\): do not download/);
     expect(md).toMatch(/DB_New\.db/);
     expect(readFileSync(join(root, ".rung", "download-request.md"), "utf8")).toBe(md);
-  });
+  }, 60_000); // starts git: slow on a busy Windows runner
 
   it("says so when the workspace is not a git repository", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-handover-"));

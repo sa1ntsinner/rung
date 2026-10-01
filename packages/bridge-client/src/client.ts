@@ -191,7 +191,7 @@ export class BridgeClient {
     return this.request("objects.rename", { address, newName, expectedTiaRevision, operationId }, 600_000) as Promise<{ address: string }>;
   }
 
-  describe(scope: "hardware" | "hmi" | "techobjects" | "libraries", maxNodes = 20000): Promise<DescribeNode> {
+  describe(scope: "hardware" | "hmi" | "techobjects" | "libraries" | "units", maxNodes = 20000): Promise<DescribeNode> {
     return this.request("model.describe", { scope, maxNodes }) as Promise<DescribeNode>;
   }
 

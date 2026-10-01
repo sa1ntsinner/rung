@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Read-only YAML views of what has no editable text form in TIA Portal: hardware, HMI Unified,
-// technology objects (from the Openness object model) and tag tables (from the mirrored XML).
+// technology objects, software units and their relations (from the Openness object model) and tag tables (from the
+// mirrored XML).
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { escapeSegment, toYaml, writeFileAtomic } from "@rung/core";
@@ -26,7 +27,7 @@ export interface ViewsReport {
 }
 
 /** Writes views/<scope>/<object>.yaml (one file per top-level object) and prunes stale files of that scope. */
-export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "describe">, scopes: ("hardware" | "hmi" | "techobjects" | "libraries")[] = ["hardware", "hmi", "techobjects", "libraries"]): Promise<ViewsReport> {
+export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "describe">, scopes: ("hardware" | "hmi" | "techobjects" | "libraries" | "units")[] = ["hardware", "hmi", "techobjects", "libraries", "units"]): Promise<ViewsReport> {
   const report: ViewsReport = { written: [], truncated: [] };
   for (const scope of scopes) {
     const tree = await bridge.describe(scope);

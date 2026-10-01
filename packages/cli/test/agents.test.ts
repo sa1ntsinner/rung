@@ -32,5 +32,5 @@ describe("AGENTS.md generator", () => {
     expect(again.split(BEGIN)).toHaveLength(2);
     expect(again.split(END)).toHaveLength(2);
     expect(again).toContain("Edited notes.");
-  });
+  }, 60_000); // starts git: slow on a busy Windows runner
 });

@@ -505,6 +505,13 @@ public class DescribeAdapterTests : IClassFixture<FixtureSession>
         Assert.Contains(tree.Children["GlobalLibraries"], g => g.Attributes.TryGetValue("LibraryType", out var t) && t == "System");
     }
 
+    [Fact] public void UnitsViewListsTheSoftwareUnitsOfEachPlc()
+    {
+        var plc = Assert.Single(_fx.Session.Describe("units", 5000).Children["Plcs"]);
+        Assert.Equal("PLC_1", plc.Name);
+        Assert.Contains(plc.Children["Units"], u => u.Name == "Fx_Unit" && u.Attributes.ContainsKey("NamespacePreset"));
+    }
+
     [Fact] public void UnknownScopeIsRejected() =>
         Assert.Equal("BAD_REQUEST", Assert.Throws<RpcException>(() => _fx.Session.Describe("nope", 10)).Code);
 }

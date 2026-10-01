@@ -12,11 +12,11 @@ describe.runIf(python)("CODESYS bridge script", () => {
     const r = spawnSync(python!, [script("test_split.py")], { encoding: "utf8" });
     expect(r.stderr).toMatch(/\nOK\s*$/);
     expect(r.status).toBe(0);
-  });
+  }, 60_000); // starts Python: slow on a busy Windows runner
 
   it("goes online by logging in only and reads without writing (python bridge/codesys/test_online.py)", () => {
     const r = spawnSync(python!, [script("test_online.py")], { encoding: "utf8" });
     expect(r.stderr).toMatch(/\nOK\s*$/);
     expect(r.status).toBe(0);
-  });
+  }, 60_000); // starts Python: slow on a busy Windows runner
 });

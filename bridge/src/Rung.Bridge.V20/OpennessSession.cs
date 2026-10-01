@@ -1139,12 +1139,14 @@ namespace Rung.Bridge.V20
             ["techobjects"] = new[] { "TechnologicalObjects", "Groups" },
             // the project library: type folders, types and their versions (which rung mirrors read-only), master copies
             ["libraries"] = new[] { "Folders", "Types", "Versions", "MasterCopies" },
+            // software units and which other units each may use (their blocks are mirrored under units/)
+            ["units"] = new[] { "Units", "SafetyUnits", "Relations" },
         };
 
         public DescribeNode Describe(string scope, int maxNodes)
         {
             Alive();
-            if (!ViewCompositions.TryGetValue(scope, out var allowed)) throw new RpcException(ErrorCodes.BadRequest, "Unknown scope " + scope + " (hardware, hmi, techobjects, libraries)");
+            if (!ViewCompositions.TryGetValue(scope, out var allowed)) throw new RpcException(ErrorCodes.BadRequest, "Unknown scope " + scope + " (hardware, hmi, techobjects, libraries, units)");
             var budget = Math.Max(10, Math.Min(maxNodes, 200000));
             var count = 0;
             var root = new DescribeNode { Type = "Project", Name = _project.Name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
@@ -1167,6 +1169,15 @@ namespace Rung.Bridge.V20
                     break;
                 case "techobjects":
                     foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
+                    break;
+                case "units":
+                    foreach (var plc in Plcs())
+                    {
+                        PlcUnitProvider units = null;
+                        try { units = plc.GetService<PlcUnitProvider>(); }
+                        catch (EngineeringException) { }
+                        if (units != null) Add("Plcs", Node(units.UnitGroup, allowed, 0, ref count, budget, plc.Name));
+                    }
                     break;
                 case "libraries":
                     var libNode = LibraryNode(_project.ProjectLibrary, "ProjectLibrary", "Project library", allowed, ref count, budget);
