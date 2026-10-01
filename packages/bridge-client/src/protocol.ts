@@ -88,7 +88,18 @@ export interface ObjectEntry {
   libraryType?: string;
   /** "fp:..." strong revision, "dt:..." weak, "none" = always verify by hash. */
   fingerprint: string;
+  /** The modification dates and consistency the fingerprint belongs to, and when the bridge read it. */
+  revisionKey?: string;
+  revisionAt?: string;
   warnings?: string[];
+}
+
+/** An object's revision from an earlier listing: objects.list reads only those whose dates changed since. */
+export interface KnownRevision {
+  key: string;
+  fingerprint: string;
+  at: string;
+  libraryType?: string;
 }
 
 export interface ExportFile {

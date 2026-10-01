@@ -92,7 +92,7 @@ namespace Rung.Bridge.Core.Protocol
                 case "project.info":
                     return Session.GetProjectInfo();
                 case "objects.list":
-                    return Session.ListObjects(Str(p, "device"));
+                    return Session.ListObjects(Str(p, "device"), Obj<Dictionary<string, KnownRevision>>(p, "known"));
                 case "objects.export":
                     if (Bool(p, "inline")) return InTempDir(dir => Inline(Session.Export(Str(p, "address"), Str(p, "form"), dir)));
                     return Session.Export(Str(p, "address"), Str(p, "form"), Str(p, "dir"));

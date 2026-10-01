@@ -105,6 +105,19 @@ describe("syncOnce", () => {
     expect(t.read(pA)).toBe(srcA);
   });
 
+  it("hands the next bridge what this one read, so it reads again only what changed", async () => {
+    const at = "2026-10-01T12:00:00.0000000Z";
+    const t = setup((b) => b.add(A, { content: srcA, revisionKey: "dt:1|True", revisionAt: at, libraryType: "Lib 1.0" }).add(B));
+    await t.sync();
+    await t.sync();
+    expect(t.bridge.known[0]).toEqual({});
+    // B came without a key (a bridge that does not keep them): nothing to hand on for it
+    expect(t.bridge.known[1]).toEqual({ [A]: { key: "dt:1|True", fingerprint: t.bridge.objects.get(A)!.entry.fingerprint, at, libraryType: "Lib 1.0" } });
+    writeFileSync(t.f(".rung/revisions.json"), "{");
+    await t.sync();
+    expect(t.bridge.known[2]).toEqual({});
+  });
+
   it("imports a file edit, rewrites the file canonically and then stays quiet (no loop)", async () => {
     const t = setup();
     t.bridge.canon = (s) => s.replace(/\bbegin\b/i, "BEGIN").replace(/:=  +/g, ":= ");

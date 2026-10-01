@@ -64,7 +64,12 @@ public sealed class FakeTiaSession : ITiaSession
         return new ProjectInfo { Name = "RungFixture", Path = @"C:\fx\RungFixture\RungFixture.ap20", TiaVersion = "V20", Devices = new[] { "PLC_1" }, IsLocalSession = false, Units = new[] { "Fx_Unit" } };
     }
 
-    public IReadOnlyList<ObjectEntry> ListObjects(string device) => Objects;
+    public IReadOnlyDictionary<string, KnownRevision> Known;
+    public IReadOnlyList<ObjectEntry> ListObjects(string device, IReadOnlyDictionary<string, KnownRevision> known = null)
+    {
+        Known = known;
+        return Objects;
+    }
 
     public ExportResult Export(string address, string form, string targetDir)
     {

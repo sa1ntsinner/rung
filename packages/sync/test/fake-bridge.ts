@@ -3,7 +3,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { BridgeError, type ExportResult, type ObjectEntry, type ProjectInfo } from "@rung/bridge-client";
+import { BridgeError, type ExportResult, type KnownRevision, type ObjectEntry, type ProjectInfo } from "@rung/bridge-client";
 
 export interface FakeObject {
   entry: ObjectEntry;
@@ -45,7 +45,11 @@ export class FakeBridge {
     return this.info;
   }
 
-  async listObjects(device: string): Promise<ObjectEntry[]> {
+  /** What each listing was told the client knew from earlier passes. */
+  known: (Record<string, KnownRevision> | undefined)[] = [];
+
+  async listObjects(device: string, known?: Record<string, KnownRevision>): Promise<ObjectEntry[]> {
+    this.known.push(known);
     if (this.failList) throw new BridgeError("PORTAL_DISPOSED", "portal went away");
     return [...this.objects.values()].filter((o) => o.entry.address.startsWith(`plc:${device}/`)).map((o) => ({ ...o.entry }));
   }

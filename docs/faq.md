@@ -18,6 +18,16 @@ SCL, STL and data blocks/UDTs as sources; LAD as SIMATIC SD text (`.s7dcl`); oth
 **Does it work without TIA Portal?**
 The language server, `rung test` and `rung views --offline` work on any OS with an existing workspace (for example in CI). On Linux and macOS, rung syncs with the TIA Portal of a Windows PC or VM over ssh ([Linux and macOS](remote.md)).
 
+**Does it keep up with a large project?**
+Measured on a generated project of 1,287 objects (600 FBs, 300 FCs, 300 DBs, 50 UDTs, 20 tag tables of 100 tags) with TIA Portal V20 on a laptop:
+- the first `rung pull` takes about 2½ minutes;
+- `rung sync` with nothing to do takes about 7 s; the very first one takes about 45 s, because it reads every block's fingerprint once;
+- one edited FB goes to TIA Portal, is compiled and comes back in about 12 s;
+- the language server loads the workspace in about a second and answers an edit in milliseconds;
+- 50 test files run in 2 s.
+
+TIA Portal answers one request at a time, so `rung watch` waits between passes at least as long as a pass takes.
+
 **Which TIA Portal versions?**
 V20 today. A V21 build exists but is not verified yet.
 

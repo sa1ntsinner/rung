@@ -4,6 +4,7 @@ import {
   AddressError,
   WorkspaceError,
   addressToStem,
+  escapeSegment,
   parseAddress,
   preflight,
   recoverJournal,
@@ -11,8 +12,11 @@ import {
   type Address,
   type RungConfig,
   type StateStore,
+  writeFileAtomic,
 } from "@rung/core";
-import type { ObjectEntry, ProjectInfo } from "@rung/bridge-client";
+import type { KnownRevision, ObjectEntry, ProjectInfo } from "@rung/bridge-client";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { BridgeLike } from "./objects.js";
 
 export interface Warning {
@@ -35,6 +39,23 @@ export interface Inventory {
 }
 
 const samePath = (a: string, b: string) => a.replace(/\//g, "\\").toLowerCase() === b.replace(/\//g, "\\").toLowerCase();
+
+/**
+ * What the bridge read of each object in earlier passes: the fingerprint for its modification dates. A new bridge
+ * (every rung sync starts one) reads again only what changed since, instead of every fingerprint of the project.
+ */
+const revisionsFile = (root: string) => join(root, ".rung", "revisions.json");
+
+async function loadRevisions(root: string): Promise<{ text: string; objects: Record<string, KnownRevision> }> {
+  try {
+    const text = await readFile(revisionsFile(root), "utf8");
+    const f = JSON.parse(text) as { version?: unknown; objects?: unknown };
+    if (f.version === 1 && f.objects && typeof f.objects === "object") return { text, objects: f.objects as Record<string, KnownRevision> };
+  } catch {
+    // none yet, or unreadable: the bridge reads every fingerprint once
+  }
+  return { text: "", objects: {} };
+}
 
 export async function takeInventory(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<Inventory> {
   const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
@@ -60,8 +81,14 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
 
   const found: { entry: ObjectEntry; address: Address }[] = [];
   const skipped = new Set<string>();
+  const known = await loadRevisions(root);
+  const revisions: Record<string, KnownRevision> = {};
   for (const device of devices) {
-    for (const entry of await bridge.listObjects(device)) {
+    const prefix = `plc:${escapeSegment(device)}/`;
+    const entries = await bridge.listObjects(device, Object.fromEntries(Object.entries(known.objects).filter(([a]) => a.startsWith(prefix))));
+    for (const e of entries)
+      if (e.revisionKey && e.revisionAt) revisions[e.address] = { key: e.revisionKey, fingerprint: e.fingerprint, at: e.revisionAt, ...(e.libraryType ? { libraryType: e.libraryType } : {}) };
+    for (const entry of entries) {
       let address: Address;
       try {
         address = parseAddress(entry.address);
@@ -89,6 +116,8 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
       found.push({ entry, address });
     }
   }
+  const text = JSON.stringify({ version: 1, objects: revisions });
+  if (text !== known.text) await writeFileAtomic(revisionsFile(root), text);
 
   const pre = preflight(root, found.map((i) => ({ address: i.entry.address, stem: addressToStem(i.address) })));
   for (const [a, b] of pre.collisions) w(a, "PATH_COLLISION", `collides with ${b}`);

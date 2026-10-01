@@ -29,7 +29,19 @@ namespace Rung.Bridge.Core.Model
         public bool? IsConsistent;
         public string LibraryType;   // "LGF_FloatingAverage 3.0.2": an instance of a library type (read-only)
         public string Fingerprint;   // "fp:..." strong, "dt:..." weak, "none" = must hash
+        /// <summary>The modification dates and consistency the fingerprint belongs to, and when it was read (RevisionCache).</summary>
+        public string RevisionKey;
+        public string RevisionAt;
         public string[] Warnings;
+    }
+
+    /// <summary>What a client knows of an object from an earlier listing: objects.list reuses it while the key holds.</summary>
+    public sealed class KnownRevision
+    {
+        public string Key;
+        public string Fingerprint;
+        public string At;
+        public string LibraryType;
     }
 
     public sealed class ExportFile

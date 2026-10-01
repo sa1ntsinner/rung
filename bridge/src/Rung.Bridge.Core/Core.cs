@@ -13,7 +13,8 @@ namespace Rung.Bridge.Core
     public interface ITiaSession
     {
         ProjectInfo GetProjectInfo();
-        IReadOnlyList<ObjectEntry> ListObjects(string device);
+        /// <param name="known">What the client knows from earlier listings (RevisionCache); may be null.</param>
+        IReadOnlyList<ObjectEntry> ListObjects(string device, IReadOnlyDictionary<string, KnownRevision> known = null);
         /// <param name="form">A TextForm or "auto" (FormPolicy).</param>
         ExportResult Export(string address, string form, string targetDir);
         /// <summary>Guarded import. expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>

@@ -18,6 +18,7 @@ import {
   type DescribeNode,
   type ExportResult,
   type HelloResult,
+  type KnownRevision,
   type ObjectEntry,
   type ProjectInfo,
   type UploadOutcome,
@@ -144,8 +145,8 @@ export class BridgeClient {
   projectInfo(): Promise<ProjectInfo> {
     return this.request("project.info", {}) as Promise<ProjectInfo>;
   }
-  listObjects(device: string): Promise<ObjectEntry[]> {
-    return this.request("objects.list", { device }) as Promise<ObjectEntry[]>;
+  listObjects(device: string, known?: Record<string, KnownRevision>): Promise<ObjectEntry[]> {
+    return this.request("objects.list", { device, ...(known && Object.keys(known).length ? { known } : {}) }) as Promise<ObjectEntry[]>;
   }
   async exportObject(address: string, form: string, dir: string): Promise<ExportResult> {
     if (!this.opts.remote) return this.request("objects.export", { address, form, dir }) as Promise<ExportResult>;
