@@ -457,11 +457,15 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const sent = sending?.length ? await baseBundle(root, loc.stem, sending) : undefined;
           const staged = sent ? await stageExport(root, bridge, address, item.stem!) : undefined;
           const tia = staged ? Object.fromEntries(staged.texts) : undefined;
+          const tiaIsBase = !sent || !staged || !tia || staged.result.form !== loc.form || sameLayoutFree(sent, tia);
           // from here on the object is an ordinary one with a file edit: what the create sent is its base, so a
-          // send TIA Portal refuses (it changed meanwhile) leaves it for the next pass to merge
-          const cur: ObjectState = { address, path: loc.path, form: loc.form, fileHash: bundleHash(captured), files: sending?.length ? sending : files, tiaFingerprint: staged?.result.fingerprint ?? item.entry.fingerprint, baseId: "", readOnly: isReadOnlyEntry(item.entry), warnings: [], status: "fileDirty" };
+          // send TIA Portal refuses (it changed meanwhile) leaves it for the next pass to merge. One snapshot:
+          // the base's files and hash, and TIA Portal's fingerprint only where TIA Portal holds that base; where
+          // it was changed since, no fingerprint, so the next pass exports it and merges again
+          const base = sending?.length ? sending : files;
+          const cur: ObjectState = { address, path: loc.path, form: loc.form, fileHash: bundleHash(base), files: base, tiaFingerprint: tiaIsBase ? (staged?.result.fingerprint ?? item.entry.fingerprint) : "", baseId: "", readOnly: isReadOnlyEntry(item.entry), warnings: [], status: "fileDirty" };
           state.upsert(cur);
-          if (!sent || !staged || !tia || staged.result.form !== loc.form || sameLayoutFree(sent, tia)) {
+          if (tiaIsBase) {
             queue.push({ ...job, bundle, expected: item.entry.fingerprint, kind: "update" });
             continue;
           }
