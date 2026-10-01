@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { startServer, type MonitorProvider, type MessageReader, type MessageWriter } from "@rung/lsp";
-import type { Io } from "./common.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { startServer, type MonitorProvider, type MessageReader, type MessageWriter, type Renamer } from "@rung/lsp";
+import { findWorkspace, type Io } from "./common.js";
 import { liveError, liveReader, readMonitorValues } from "./live.js";
 import { isIecMonitor, monitorInstances, monitorPlan, monitorPlanIec } from "./monitor.js";
+import { addressOf, renameInTia } from "./twoway.js";
 
 export function lspMonitor(io: Io, open = liveReader): MonitorProvider {
   return {
@@ -16,6 +19,18 @@ export function lspMonitor(io: Io, open = liveReader): MonitorProvider {
   };
 }
 
+/** F2 on a block's name: rung rename, through rung watch when it runs (stdout is the language server's). */
+export function lspRenamer(io: Io, rename = renameInTia): Renamer {
+  return {
+    rename: async (fileUri, newName) => {
+      const file = fileURLToPath(fileUri);
+      const ws = await findWorkspace(dirname(file));
+      const r = await rename(ws, await addressOf(ws, file, ws), newName, io);
+      return { ...(r.newPath ? { newUri: pathToFileURL(join(ws, r.newPath)).href } : {}), users: r.users.length };
+    },
+  };
+}
+
 export function startLsp(io: Io, reader?: MessageReader, writer?: MessageWriter) {
-  return startServer(reader, writer, { monitor: lspMonitor(io) });
+  return startServer(reader, writer, { monitor: lspMonitor(io), renamer: lspRenamer(io) });
 }

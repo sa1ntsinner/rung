@@ -231,8 +231,35 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
   return 0;
 }
 
+/**
+ * TIA Portal renames the object and keeps every use, the files that use it follow: through rung watch when it runs,
+ * else with a bridge of its own. Prints nothing (the language server calls it too).
+ */
+export async function renameInTia(ws: string, address: string, newName: string, io: Io): Promise<RenameReport> {
+  const owner = await OwnerClient.connect(ws);
+  if (owner) {
+    try {
+      return await owner.request<RenameReport>("rename", { address, newName });
+    } finally {
+      owner.close();
+    }
+  }
+  const config = await loadConfig(ws);
+  const client = await bridgeFor(config, io, importFlags(config));
+  try {
+    const state = await openState(ws, config);
+    try {
+      return await renameObject(ws, client, state, config, address, newName);
+    } finally {
+      await state.close();
+    }
+  } finally {
+    await client.close();
+  }
+}
+
 /** Address of a mirrored object named by its workspace file or by its name (read without the state lock). */
-async function addressOf(ws: string, what: string, cwd: string): Promise<string> {
+export async function addressOf(ws: string, what: string, cwd: string): Promise<string> {
   let objects: { address: string; path: string }[] = [];
   try {
     objects = Object.values((JSON.parse(await readFile(join(ws, ".rung", "state.json"), "utf8")) as { objects?: Record<string, { address: string; path: string }> }).objects ?? {});
@@ -251,29 +278,7 @@ async function addressOf(ws: string, what: string, cwd: string): Promise<string>
 /** rung rename <file|name> <new-name>: TIA Portal renames it and keeps every use; the files that use it follow. */
 export async function cmdRename(dir: string, what: string, newName: string, io: Io): Promise<number> {
   const ws = await findWorkspace(dir);
-  const address = await addressOf(ws, what, io.cwd);
-  let r: RenameReport;
-  const owner = await OwnerClient.connect(ws);
-  if (owner) {
-    try {
-      r = await owner.request<RenameReport>("rename", { address, newName });
-    } finally {
-      owner.close();
-    }
-  } else {
-    const config = await loadConfig(ws);
-    const client = await bridgeFor(config, io, importFlags(config));
-    try {
-      const state = await openState(ws, config);
-      try {
-        r = await renameObject(ws, client, state, config, address, newName);
-      } finally {
-        await state.close();
-      }
-    } finally {
-      await client.close();
-    }
-  }
+  const r = await renameInTia(ws, await addressOf(ws, what, io.cwd), newName, io);
   io.stdout(`renamed ${parseAddress(r.from).name} to ${newName}: ${r.oldPath} → ${r.newPath ?? "(not mirrored)"}\n`);
   if (r.users.length) io.stdout(`updated where it is used: ${r.users.join(", ")}\n`);
   printWarnings(io, r.pull.warnings);

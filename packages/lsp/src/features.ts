@@ -2,7 +2,7 @@
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
-import { TAG_TEXT, scopedTo, tagTableFor, type Member, type WorkspaceIndex } from "./workspace.js";
+import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, unknownArgs } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
 
@@ -422,6 +422,18 @@ export interface TextEdit {
   start: number;
   end: number;
   newText: string;
+}
+
+/** The block, data type or DB named at offset (its header or a use of it): TIA Portal renames those, not the editor. */
+export function renameTarget(index: WorkspaceIndex, uri: string, offset: number): GlobalSymbol | undefined {
+  index = scopedTo(index, uri); // names mean the objects of this file's PLC
+  const block = index.blockAt(uri, offset);
+  if (!block) return undefined;
+  if (offset >= block.nameStart && offset <= block.nameEnd) return /\.(scl|db|udt)$/i.test(uri) ? index.global(block.name) : undefined;
+  const hit = refAt(index, uri, offset);
+  if (!hit || hit.ref.kind !== "global" || hit.member >= 0) return undefined;
+  const g = index.global(hit.ref.name);
+  return g?.block && /\.(scl|db|udt|s7dcl|xml|awl)$/i.test(g.uri) && deviceOfUri(g.uri) !== undefined ? g : undefined;
 }
 
 /** Renames a block-local variable (declaration and every #reference). Other renames are refused. */

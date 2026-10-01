@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { defaultConfig, saveConfig } from "@rung/core";
 import { WebApiClient } from "@rung/live";
 import { WorkspaceIndex } from "@rung/lsp";
@@ -96,5 +97,21 @@ describe("rung lsp monitoring wiring", () => {
     expect(read).toHaveBeenCalledWith(["PLC_PRG.counter.n"]);
     await reader.close();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rung lsp rename wiring", () => {
+  it("renames the object of a workspace file through rung rename and hands back its new file", async () => {
+    const root = (await boot()).root;
+    await mkdir(join(root, ".rung"), { recursive: true });
+    await writeFile(join(root, ".rung", "state.json"), JSON.stringify({ objects: { m: { address: "plc:PLC_1/blocks/Motor", path: "plc/PLC_1/blocks/Motor.scl" } } }));
+    const calls: unknown[][] = [];
+    const renamer = lsp.lspRenamer(io, async (ws, address, newName) => {
+      calls.push([ws, address, newName]);
+      return { from: address, to: "plc:PLC_1/blocks/Drive", oldPath: "plc/PLC_1/blocks/Motor.scl", newPath: "plc/PLC_1/blocks/Drive.scl", users: ["plc/PLC_1/blocks/Line.scl"], pull: {} as never };
+    });
+    const done = await renamer.rename(pathToFileURL(join(root, "plc", "PLC_1", "blocks", "Motor.scl")).href, "Drive");
+    expect(calls).toEqual([[root, "plc:PLC_1/blocks/Motor", "Drive"]]);
+    expect(done).toEqual({ newUri: pathToFileURL(join(root, "plc", "PLC_1", "blocks", "Drive.scl")).href, users: 1 });
   });
 });

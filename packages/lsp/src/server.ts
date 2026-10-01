@@ -25,7 +25,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
-import { complete, definition, diagnostics, hover, outline, references, rename, type CompletionKind, type OutlineSymbol } from "./features.js";
+import { complete, definition, diagnostics, hover, outline, references, rename, renameTarget, type CompletionKind, type OutlineSymbol } from "./features.js";
 import { codeActions } from "./actions.js";
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
@@ -56,6 +56,16 @@ export interface ServerHandle {
 
 export interface ServerOptions {
   monitor?: MonitorProvider;
+  /** Renames a block, data type or DB in TIA Portal the way rung rename does (the CLI fills it in). */
+  renamer?: Renamer;
+}
+
+export interface Renamer {
+  /**
+   * fileUri is the object's workspace file. TIA Portal renames it and keeps every use, and rung writes the files
+   * that follow: the editor gets no text edits. Resolves with the renamed object's file and how many others followed.
+   */
+  rename(fileUri: string, newName: string): Promise<{ newUri?: string; users: number }>;
 }
 
 export function startServer(reader?: MessageReader, writer?: MessageWriter, options: ServerOptions = {}): ServerHandle {
@@ -207,8 +217,20 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       .filter((l) => index.docs.get(l.uri))
       .map((l) => ({ uri: l.uri, range: range(l.uri, l.start, l.end) })),
   );
-  connection.onRenameRequest((p) => {
-    const r = rename(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position), p.newName);
+  connection.onRenameRequest(async (p) => {
+    const uri = p.textDocument.uri;
+    const offset = offsetOf(uri, p.position);
+    const target = renameTarget(index, uri, offset);
+    if (target) {
+      // a block, data type or DB: renamed in TIA Portal, so its uses there follow too, and rung writes the files
+      if (!options.renamer) throw new Error(`"${target.name}" is renamed in TIA Portal: rung rename "${target.name}" ${p.newName}`);
+      const done = await options.renamer.rename(target.uri, p.newName);
+      const followed = done.users ? `; ${done.users} ${done.users === 1 ? "file that uses it follows" : "files that use it follow"}` : "";
+      void connection.sendNotification("window/showMessage", { type: MessageType.Info, message: `Renamed "${target.name}" to "${p.newName}" in TIA Portal${followed}` }).catch(() => undefined);
+      if (done.newUri) void connection.window.showDocument({ uri: done.newUri }).catch(() => undefined);
+      return { changes: {} };
+    }
+    const r = rename(index, uri, offset, p.newName);
     if (!Array.isArray(r)) throw new Error(r.error);
     const changes: Record<string, { range: ReturnType<typeof range>; newText: string }[]> = {};
     for (const e of r) (changes[e.uri] ??= []).push({ range: range(e.uri, e.start, e.end), newText: e.newText });
