@@ -181,6 +181,9 @@ describe("Watcher", () => {
     expect(w.lastError).toBeNull();
     expect(w.lastPassMs).toBeGreaterThanOrEqual(150);
     await new Promise((r) => setTimeout(r, w.lastPassMs + 50));
+    w.tick(); // as long again: still too early, the idle time is twice the pass
+    expect(passes).toBe(1);
+    await new Promise((r) => setTimeout(r, w.lastPassMs));
     w.tick();
     w.tick(); // a second tick while the first runs must not queue another pass
     await new Promise((r) => setTimeout(r, w.lastPassMs + 400));

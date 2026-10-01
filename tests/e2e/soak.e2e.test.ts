@@ -3,7 +3,7 @@
 // edits the same blocks in TIA Portal (a second Openness client), rung sync runs after every step and is
 // killed at random moments (Ctrl+C, a crash). Nothing typed on either side may get lost, no conflict may
 // appear (the two people never touch the same line), and the workspace ends quiet and equal to TIA Portal.
-//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] pnpm vitest run tests/e2e/soak.e2e.test.ts
+//   RUNG_E2E_SOAK=1 [RUNG_SOAK_MINUTES=30] [RUNG_SOAK_SEED=1] [RUNG_SOAK_UNIT=Fx_Unit] pnpm vitest run tests/e2e/soak.e2e.test.ts
 import { describe, it, expect } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -22,8 +22,10 @@ const cli = join(repo, "packages", "cli", "dist", "index.js");
 const bridgeExe = join(repo, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48", "rung-bridge-v20.exe");
 
 const NAMES = ["A", "B", "C", "D", "E", "F"];
-const addr = (n: string) => `plc:PLC_1/blocks/90_Soak/Fx_Soak_${n}`;
-const rel = (n: string) => `plc/PLC_1/blocks/90_Soak/Fx_Soak_${n}.scl`;
+// RUNG_SOAK_UNIT=Fx_Unit runs it in a software unit of the fixture instead
+const folder = `PLC_1/${process.env.RUNG_SOAK_UNIT ? `units/${process.env.RUNG_SOAK_UNIT}/` : ""}blocks/90_Soak`;
+const addr = (n: string) => `plc:${folder}/Fx_Soak_${n}`;
+const rel = (n: string) => `plc/${folder}/Fx_Soak_${n}.scl`;
 const source = (n: string, l1: number) =>
   `FUNCTION "Fx_Soak_${n}" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR_TEMP \n      l1 : Int;\n      l2 : Int;\n      l3 : Int;\n      l4 : Int;\n   END_VAR\n\n\nBEGIN\n\t#l1 := ${l1};\n\t#l2 := 2;\n\t#l3 := 3;\n\t#l4 := 0;\nEND_FUNCTION\n`;
 // #l2 and #l3 keep the two people's lines apart: a line merge, like git's, joins changes on neighbouring lines
@@ -79,7 +81,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
     try {
       // leftovers of an earlier run
       for (const e of await user.listObjects("PLC_1"))
-        if (e.address.startsWith("plc:PLC_1/blocks/90_Soak/")) await user.deleteObject(e.address, e.fingerprint, randomUUID());
+        if (e.address.startsWith(`plc:${folder}/`)) await user.deleteObject(e.address, e.fingerprint, randomUUID());
 
       expect((await run(["init", "--project", project])).code).toBe(0);
       expect([0, 2]).toContain((await run(["pull"])).code);
@@ -155,7 +157,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
         const label = `#${step} ${action} ${n}`;
         if (action === "create") {
           if (exists.get(n)) continue;
-          mkdirSync(join(ws, "plc", "PLC_1", "blocks", "90_Soak"), { recursive: true });
+          mkdirSync(join(ws, "plc", ...folder.split("/")), { recursive: true });
           writeFileSync(join(ws, ...rel(n).split("/")), source(n, v));
           exists.set(n, true);
           l1.set(n, v);
@@ -244,7 +246,7 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
 
       // leave the fixture as it was
       for (const e of await user.listObjects("PLC_1"))
-        if (e.address.startsWith("plc:PLC_1/blocks/90_Soak/")) await user.deleteObject(e.address, e.fingerprint, randomUUID()).catch(() => {});
+        if (e.address.startsWith(`plc:${folder}/`)) await user.deleteObject(e.address, e.fingerprint, randomUUID()).catch(() => {});
     } finally {
       await user.close();
     }

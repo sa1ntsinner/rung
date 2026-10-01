@@ -26,7 +26,7 @@ Measured on a generated project of 1,287 objects (600 FBs, 300 FCs, 300 DBs, 50 
 - the language server loads the workspace in about a second and answers an edit in milliseconds;
 - 50 test files run in 2 s.
 
-TIA Portal answers one request at a time, so `rung watch` waits between passes at least as long as a pass takes.
+TIA Portal answers one request at a time, so `rung watch` waits between passes twice as long as a pass takes: it uses at most a third of TIA Portal's time while you work in it. Your own file edits are sent at once.
 
 **Which TIA Portal versions?**
 V20 today. A V21 build exists but is not verified yet.

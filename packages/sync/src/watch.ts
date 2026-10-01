@@ -34,7 +34,7 @@ export class Watcher {
   private retryAt = 0;
   lastReport: SyncReport | null = null;
   lastPassAt = 0;
-  /** How long the last pass took; idle polling waits at least as long. */
+  /** How long the last pass took; idle polling waits at least twice as long. */
   lastPassMs = 0;
   private lastPassEnd = 0;
   lastError: string | null = null;
@@ -60,12 +60,13 @@ export class Watcher {
 
   /**
    * Poll tick. Unlike file events it never queues behind a running pass, and it keeps the watcher idle at
-   * least as long as the last pass took, so a slow project costs at most half of TIA's time.
+   * least twice as long as the last pass took: a large project costs at most a third of TIA Portal's time,
+   * which the engineer is working in meanwhile.
    */
   tick(): void {
     if (this.running || this.queued) return;
     const now = (this.opts.now ?? Date.now)();
-    if (now - this.lastPassEnd < this.lastPassMs) return;
+    if (now - this.lastPassEnd < 2 * this.lastPassMs) return;
     void this.syncNow().catch(() => {});
   }
 
