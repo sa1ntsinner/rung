@@ -314,73 +314,214 @@ namespace Rung.Bridge.V20
 
         void WalkBlocks(PlcSoftware plc, string device, PlcBlockGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcBlock b in group.Blocks)
-            {
-                var lang = b.ProgrammingLanguage;
-                var entry = new ObjectEntry
-                {
-                    Address = Addr(device, "block", path, b.Name, b.Namespace),
-                    Kind = "block",
-                    Language = lang.ToString(),
-                    BlockType = BlockTypeOf(b),
-                    Number = b.Number,
-                    Namespace = string.IsNullOrEmpty(b.Namespace) ? null : b.Namespace,
-                    KnowHowProtected = b.IsKnowHowProtected,
-                    IsFailsafe = IsFailsafeLanguage(lang),
-                    IsConsistent = b.IsConsistent,
-                };
-                var dates = Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate);
-                entry.Fingerprint = CachedFingerprint(entry.Address, b, entry.IsConsistent, dates);
-                entry.LibraryType = CachedLibraryType(entry.Address, b, dates);
-                refs.Add(new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = plc });
-            }
+            foreach (PlcBlock b in group.Blocks) refs.Add(BlockRef(plc, device, group, path, b));
             foreach (PlcBlockUserGroup g in group.Groups)
                 WalkBlocks(plc, device, g, new List<string>(path) { g.Name }, refs);
         }
 
+        ObjectRef BlockRef(PlcSoftware plc, string device, PlcBlockGroup group, List<string> path, PlcBlock b)
+        {
+            var lang = b.ProgrammingLanguage;
+            var entry = new ObjectEntry
+            {
+                Address = Addr(device, "block", path, b.Name, b.Namespace),
+                Kind = "block",
+                Language = lang.ToString(),
+                BlockType = BlockTypeOf(b),
+                Number = b.Number,
+                Namespace = string.IsNullOrEmpty(b.Namespace) ? null : b.Namespace,
+                KnowHowProtected = b.IsKnowHowProtected,
+                IsFailsafe = IsFailsafeLanguage(lang),
+                IsConsistent = b.IsConsistent,
+            };
+            var dates = Dates(b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate);
+            entry.Fingerprint = CachedFingerprint(entry.Address, b, entry.IsConsistent, dates);
+            entry.LibraryType = CachedLibraryType(entry.Address, b, dates);
+            return new ObjectRef { Entry = entry, Obj = b, ParentGroup = group, Plc = plc };
+        }
+
         void WalkTypes(PlcSoftware plc, string device, PlcTypeGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcType t in group.Types)
-            {
-                var entry = new ObjectEntry
-                {
-                    Address = Addr(device, "type", path, t.Name, t.Namespace),
-                    Kind = "type",
-                    Language = "UDT",
-                    Namespace = string.IsNullOrEmpty(t.Namespace) ? null : t.Namespace,
-                    KnowHowProtected = t.IsKnowHowProtected,
-                    IsFailsafe = false, // V20 offers no way to tell an F-UDT
-                    IsConsistent = t.IsConsistent,
-                };
-                var dates = Dates(t.ModifiedDate, t.InterfaceModifiedDate);
-                entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, dates);
-                entry.LibraryType = CachedLibraryType(entry.Address, t, dates);
-                refs.Add(new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc });
-            }
+            foreach (PlcType t in group.Types) refs.Add(TypeRef(plc, device, group, path, t));
             foreach (PlcTypeUserGroup g in group.Groups)
                 WalkTypes(plc, device, g, new List<string>(path) { g.Name }, refs);
         }
 
+        ObjectRef TypeRef(PlcSoftware plc, string device, PlcTypeGroup group, List<string> path, PlcType t)
+        {
+            var entry = new ObjectEntry
+            {
+                Address = Addr(device, "type", path, t.Name, t.Namespace),
+                Kind = "type",
+                Language = "UDT",
+                Namespace = string.IsNullOrEmpty(t.Namespace) ? null : t.Namespace,
+                KnowHowProtected = t.IsKnowHowProtected,
+                IsFailsafe = false, // V20 offers no way to tell an F-UDT
+                IsConsistent = t.IsConsistent,
+            };
+            var dates = Dates(t.ModifiedDate, t.InterfaceModifiedDate);
+            entry.Fingerprint = CachedFingerprint(entry.Address, t, entry.IsConsistent, dates);
+            entry.LibraryType = CachedLibraryType(entry.Address, t, dates);
+            return new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc };
+        }
+
         void WalkTags(PlcSoftware plc, string device, PlcTagTableGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcTagTable t in group.TagTables)
-            {
-                // ModifiedTimeStamp is weak: "dt:" makes rung verify it by hash periodically.
-                var entry = new ObjectEntry { Address = Addr(device, "tagtable", path, t.Name, null), Kind = "tagtable", Fingerprint = Dates(t.ModifiedTimeStamp) };
-                refs.Add(new ObjectRef { Entry = entry, Obj = t, ParentGroup = group, Plc = plc });
-            }
+            foreach (PlcTagTable t in group.TagTables) refs.Add(TagTableRef(plc, device, group, path, t));
             foreach (PlcTagTableUserGroup g in group.Groups)
                 WalkTags(plc, device, g, new List<string>(path) { g.Name }, refs);
         }
 
+        // ModifiedTimeStamp is weak: "dt:" makes rung verify it by hash periodically.
+        static ObjectRef TagTableRef(PlcSoftware plc, string device, PlcTagTableGroup group, List<string> path, PlcTagTable t) =>
+            new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "tagtable", path, t.Name, null), Kind = "tagtable", Fingerprint = Dates(t.ModifiedTimeStamp) }, Obj = t, ParentGroup = group, Plc = plc };
+
         void WalkWatch(PlcSoftware plc, string device, PlcWatchAndForceTableGroup group, List<string> path, List<ObjectRef> refs)
         {
-            foreach (PlcWatchTable t in group.WatchTables)
-                refs.Add(new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "watchtable", path, t.Name, null), Kind = "watchtable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = plc });
+            foreach (PlcWatchTable t in group.WatchTables) refs.Add(WatchTableRef(plc, device, group, path, t));
             foreach (PlcForceTable t in group.ForceTables)
                 refs.Add(new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "forcetable", path, t.Name, null), Kind = "forcetable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = plc });
             foreach (PlcWatchAndForceTableUserGroup g in group.Groups)
                 WalkWatch(plc, device, g, new List<string>(path) { g.Name }, refs);
+        }
+
+        static ObjectRef WatchTableRef(PlcSoftware plc, string device, PlcWatchAndForceTableGroup group, List<string> path, PlcWatchTable t) =>
+            new ObjectRef { Entry = new ObjectEntry { Address = Addr(device, "watchtable", path, t.Name, null), Kind = "watchtable", Fingerprint = "none" }, Obj = t, ParentGroup = group, Plc = plc };
+
+        /// <summary>
+        /// The one object at this address, looked up in its group, or null where only a full listing can tell
+        /// (software units, namespaces, other kinds). TIA Portal replaces an object on import and compile, so a
+        /// reference from before is no use; listing the whole PLC again costs seconds in a large project.
+        /// </summary>
+        ObjectRef Lookup(string address)
+        {
+            var parts = AddressFormat.Parse(address);
+            if (parts.Unit != null || parts.Namespace != null) return null;
+            var plc = Plc(parts.Device);
+            var path = new List<string>(parts.Groups);
+            switch (parts.Kind)
+            {
+                case "block":
+                {
+                    PlcBlockGroup g = plc.BlockGroup;
+                    foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
+                    var b = g.Blocks.Find(parts.Name);
+                    return b == null ? null : BlockRef(plc, parts.Device, g, path, b);
+                }
+                case "type":
+                {
+                    PlcTypeGroup g = plc.TypeGroup;
+                    foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
+                    var t = g.Types.Find(parts.Name);
+                    return t == null ? null : TypeRef(plc, parts.Device, g, path, t);
+                }
+                case "tagtable":
+                {
+                    PlcTagTableGroup g = plc.TagTableGroup;
+                    foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
+                    var t = g.TagTables.Find(parts.Name);
+                    return t == null ? null : TagTableRef(plc, parts.Device, g, path, t);
+                }
+                case "watchtable":
+                {
+                    PlcWatchAndForceTableGroup g = plc.WatchAndForceTableGroup;
+                    foreach (var name in parts.Groups) if ((g = g.Groups.Find(name)) == null) return null;
+                    var t = g.WatchTables.Find(parts.Name);
+                    return t == null ? null : WatchTableRef(plc, parts.Device, g, path, t);
+                }
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>After rung's own import: this object again, without listing the PLC unless it has to.</summary>
+        ObjectRef Refresh(string address)
+        {
+            ObjectRef r = null;
+            try { r = Lookup(address); }
+            catch (EngineeringObjectDisposedException) { }
+            catch (EngineeringException) { }
+            if (r != null && r.Entry.Address == address)
+            {
+                _index[address] = r;
+                return r;
+            }
+            _index.Clear();
+            return Resolve(address);
+        }
+
+        /// <summary>
+        /// Where a name is taken in a PLC: blocks and types share their names, tag and watch tables each have their
+        /// own. TIA Portal's Find ignores letter case, as its names do, so one call per folder answers it, however
+        /// many objects the folders hold. Null when the name is free.
+        /// </summary>
+        string FindName(PlcSoftware plc, string device, string kind, string name)
+        {
+            string Blocks(PlcBlockGroup g, List<string> path)
+            {
+                var b = g.Blocks.Find(name);
+                if (b != null) return Addr(device, "block", path, b.Name, b.Namespace);
+                foreach (PlcBlockUserGroup u in g.Groups) { var hit = Blocks(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
+                return null;
+            }
+            string Types(PlcTypeGroup g, List<string> path)
+            {
+                var t = g.Types.Find(name);
+                if (t != null) return Addr(device, "type", path, t.Name, t.Namespace);
+                foreach (PlcTypeUserGroup u in g.Groups) { var hit = Types(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
+                return null;
+            }
+            string Tags(PlcTagTableGroup g, List<string> path)
+            {
+                var t = g.TagTables.Find(name);
+                if (t != null) return Addr(device, "tagtable", path, t.Name, null);
+                foreach (PlcTagTableUserGroup u in g.Groups) { var hit = Tags(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
+                return null;
+            }
+            string Watch(PlcWatchAndForceTableGroup g, List<string> path)
+            {
+                var t = g.WatchTables.Find(name);
+                if (t != null) return Addr(device, "watchtable", path, t.Name, null);
+                foreach (PlcWatchAndForceTableUserGroup u in g.Groups) { var hit = Watch(u, new List<string>(path) { u.Name }); if (hit != null) return hit; }
+                return null;
+            }
+            if (kind == "block" || kind == "type") return Blocks(plc.BlockGroup, new List<string>()) ?? Types(plc.TypeGroup, new List<string>());
+            if (kind == "tagtable") return Tags(plc.TagTableGroup, new List<string>());
+            if (kind == "watchtable") return Watch(plc.WatchAndForceTableGroup, new List<string>());
+            return null;
+        }
+
+        /// <summary>
+        /// Every block and type name of a PLC with its address (or every tag or watch table name): the clash check
+        /// for a name with a namespace, which Find does not take.
+        /// </summary>
+        List<KeyValuePair<string, string>> Names(PlcSoftware plc, string device, string kind)
+        {
+            var names = new List<KeyValuePair<string, string>>();
+            void Blocks(PlcBlockGroup g, List<string> path)
+            {
+                foreach (PlcBlock b in g.Blocks) { var ns = b.Namespace; names.Add(new KeyValuePair<string, string>(Addr(device, "block", path, b.Name, ns), Identity(b.Name, ns))); }
+                foreach (PlcBlockUserGroup u in g.Groups) Blocks(u, new List<string>(path) { u.Name });
+            }
+            void Types(PlcTypeGroup g, List<string> path)
+            {
+                foreach (PlcType t in g.Types) { var ns = t.Namespace; names.Add(new KeyValuePair<string, string>(Addr(device, "type", path, t.Name, ns), Identity(t.Name, ns))); }
+                foreach (PlcTypeUserGroup u in g.Groups) Types(u, new List<string>(path) { u.Name });
+            }
+            void Tags(PlcTagTableGroup g, List<string> path)
+            {
+                foreach (PlcTagTable t in g.TagTables) names.Add(new KeyValuePair<string, string>(Addr(device, "tagtable", path, t.Name, null), t.Name));
+                foreach (PlcTagTableUserGroup u in g.Groups) Tags(u, new List<string>(path) { u.Name });
+            }
+            void Watch(PlcWatchAndForceTableGroup g, List<string> path)
+            {
+                foreach (PlcWatchTable t in g.WatchTables) names.Add(new KeyValuePair<string, string>(Addr(device, "watchtable", path, t.Name, null), t.Name));
+                foreach (PlcWatchAndForceTableUserGroup u in g.Groups) Watch(u, new List<string>(path) { u.Name });
+            }
+            if (kind == "block" || kind == "type") { Blocks(plc.BlockGroup, new List<string>()); Types(plc.TypeGroup, new List<string>()); }
+            else if (kind == "tagtable") Tags(plc.TagTableGroup, new List<string>());
+            else if (kind == "watchtable") Watch(plc.WatchAndForceTableGroup, new List<string>());
+            return names;
         }
 
         /// <summary>
@@ -623,7 +764,9 @@ namespace Rung.Bridge.V20
             var isNew = expectedTiaRevision == "absent";
             if (isNew && AddressFormat.Parse(address).Kind == "hardware")
                 throw new RpcException(ErrorCodes.UnsupportedObject, "A PLC's network settings come with the PLC in TIA Portal; rung does not create them (" + address + ")");
+            var timing = new Timing();
             var r = isNew ? NewObjectRef(address, form) : Resolve(address);
+            timing.Lap("check");
             if (r.Entry.Kind == "hardware")
             {
                 if (form != "yaml") throw new RpcException(ErrorCodes.BadRequest, "Network settings are imported as yaml");
@@ -692,9 +835,11 @@ namespace Rung.Bridge.V20
             // committed: a rung stopped from here on (the compile takes seconds) learns it on its next pass
             Receipts.Write(operationId, address);
 
+            timing.Lap("import");
+
             // Compile outside the transaction (Siemens forbids compile inside it), then return the fresh export.
-            _index.Clear();
-            var fresh = Resolve(address);
+            var fresh = Refresh(address);
+            timing.Lap("lookup");
             var cancelled = guard.Cancelled;
             using (var compileGuard = new PasswordPromptGuard(_tiaPid))
             {
@@ -702,15 +847,19 @@ namespace Rung.Bridge.V20
                 catch (EngineeringException) { }
                 cancelled += compileGuard.Cancelled;
             }
-            _index.Clear();
+            timing.Lap("compile");
+            Refresh(address);
             var outDir = WorkDir(operationId, "out");
             var result = Export(address, "auto", outDir);
+            timing.Lap("export");
             if (cancelled > 0) result.Warnings = result.Warnings.Concat(new[] { WarningCodes.PasswordPromptCancelled }).ToArray();
             if (_args.SaveAfterImport)
             {
                 try { _project.Save(); }
                 catch (EngineeringException) { result.Warnings = result.Warnings.Concat(new[] { WarningCodes.SaveFailed }).ToArray(); }
+                timing.Lap("save");
             }
+            timing.Done("import " + address + (isNew ? " (new)" : ""));
             return result;
         }
 
@@ -829,17 +978,29 @@ namespace Rung.Bridge.V20
         {
             var parts = AddressFormat.Parse(address);
             if (parts.Unit != null) throw new RpcException(ErrorCodes.UnsupportedObject, "Creating objects in software units is not supported yet");
-            ListObjects(parts.Device);
-            if (_index.ContainsKey(address)) throw new RpcException(ErrorCodes.StaleRevision, address + " already exists in TIA Portal");
             // GenerateBlocksFromSource replaces a same-named block wherever it lives, so a file copied or moved
             // into another folder would overwrite the original. Names are unique per PLC across blocks and types.
+            // TIA Portal as it is now, not the index: another client may have created the name a moment ago.
             var want = Identity(parts.Name, parts.Namespace);
-            var clashKinds = parts.Kind == "block" || parts.Kind == "type" ? new[] { "block", "type" } : new[] { parts.Kind };
-            var clash = _index.Values.FirstOrDefault(v => Array.IndexOf(clashKinds, v.Entry.Kind) >= 0
-                && string.Equals(AddressFormat.Parse(v.Entry.Address).Device, parts.Device, StringComparison.Ordinal)
-                && string.Equals(Identity(AddressFormat.Parse(v.Entry.Address).Name, AddressFormat.Parse(v.Entry.Address).Namespace), want, StringComparison.OrdinalIgnoreCase));
-            if (clash != null)
-                throw new RpcException(ErrorCodes.NameTaken, "\"" + parts.Name + "\" already exists at " + clash.Entry.Address + "; TIA Portal names are unique per PLC. To move a block to another folder, move it in TIA Portal and rung follows.");
+            string taken = null;
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    var plc = Plc(parts.Device);
+                    taken = parts.Namespace == null
+                        ? FindName(plc, parts.Device, parts.Kind, parts.Name)
+                        : Names(plc, parts.Device, parts.Kind).FirstOrDefault(n => string.Equals(n.Value, want, StringComparison.OrdinalIgnoreCase)).Key;
+                    break;
+                }
+                catch (Exception e) when (attempt < 5 && (e is EngineeringObjectDisposedException || e is InvalidOperationException || (e is EngineeringException && e.Message.Contains("was aborted"))))
+                {
+                    System.Threading.Thread.Sleep(200 * (attempt + 1));
+                }
+            }
+            if (taken == address) throw new RpcException(ErrorCodes.StaleRevision, address + " already exists in TIA Portal");
+            if (taken != null)
+                throw new RpcException(ErrorCodes.NameTaken, "\"" + parts.Name + "\" already exists at " + taken + "; TIA Portal names are unique per PLC. To move a block to another folder, move it in TIA Portal and rung follows.");
             var allowed = parts.Kind == "block" ? new[] { "scl", "awl", "db", "s7dcl", "xml" }
                 : parts.Kind == "type" ? new[] { "udt", "s7dcl", "xml" }
                 : parts.Kind == "tagtable" ? new[] { "tags.st", "tags.xml" }
