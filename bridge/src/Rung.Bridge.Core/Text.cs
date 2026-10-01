@@ -95,10 +95,15 @@ namespace Rung.Bridge.Core
         public static void Check(bool allowed, string projectFilePath)
         {
             if (!allowed) throw new RpcException(ErrorCodes.ReadOnly, "Imports are disabled; start the bridge with --allow-import (or --allow-fixture-import for generated fixture projects).");
-            var dir = Path.GetDirectoryName(projectFilePath) ?? "";
-            var marker = Path.Combine(dir, MarkerName);
-            if (!File.Exists(marker) || !File.ReadAllText(marker).StartsWith(MarkerContent, StringComparison.Ordinal))
+            if (!IsFixture(projectFilePath))
                 throw new RpcException(ErrorCodes.ReadOnly, "Refusing to import: " + projectFilePath + " is not a rung fixture project (missing " + MarkerName + ").");
+        }
+
+        /// <summary>A project generated as a rung fixture (the marker next to it).</summary>
+        public static bool IsFixture(string projectFilePath)
+        {
+            var marker = Path.Combine(Path.GetDirectoryName(projectFilePath) ?? "", MarkerName);
+            return File.Exists(marker) && File.ReadAllText(marker).StartsWith(MarkerContent, StringComparison.Ordinal);
         }
     }
 }

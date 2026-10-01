@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig, type RungConfig } from "@rung/core";
 import { pull } from "../src/index.js";
+import { isFresh } from "../src/pull.js";
 import { BridgeError } from "@rung/bridge-client";
 import { FakeBridge } from "./fake-bridge.js";
 
@@ -337,4 +338,15 @@ describe("pull", () => {
     expect(r2.exported).toBe(1);
     expect(t.bridge.exportCalls).toEqual(["plc:PLC_1/blocks/G5/S5/Deep2/B1265"]);
   }, 600_000);
+});
+
+describe("isFresh", () => {
+  const st = (tiaFingerprint: string, verifiedAt: number) => ({ address: "a", path: "p", form: "xml", fileHash: "", files: [], tiaFingerprint, baseId: "", readOnly: false, warnings: [], status: "synced" as const, verifiedAt });
+  it("never takes a state marked stale for checked, whatever its fingerprint or check time says", () => {
+    expect(isFresh("none", st("xh:1", 9_000), 10_000, 3_600_000, 60_000)).toBe(true);
+    expect(isFresh("none", st("stale:xh:1", 9_000), 10_000, 3_600_000, 60_000)).toBe(false);
+    expect(isFresh("dt:1", st("stale:dt:1", 9_000), 10_000, 3_600_000)).toBe(false);
+    expect(isFresh("fp:1", st("fp:1", 0), 10_000, 3_600_000)).toBe(true);
+    expect(isFresh("fp:1", st("stale:fp:1", 0), 10_000, 3_600_000)).toBe(false);
+  });
 });

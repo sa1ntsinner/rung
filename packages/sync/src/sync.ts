@@ -138,7 +138,7 @@ const sameLayoutFree = (a: Record<string, string>, b: Record<string, string>) =>
   const squeeze = (x: Record<string, string>) => Object.fromEntries(Object.entries(x).map(([k, v]) => [k, withoutLayout(v)]));
   return sameTexts(squeeze(a), squeeze(b));
 };
-function withoutLayout(text: string): string {
+export function withoutLayout(text: string): string {
   let out = "";
   let quote: string | undefined;
   for (let i = 0; i < text.length; i++) {
@@ -147,6 +147,19 @@ function withoutLayout(text: string): string {
       out += c;
       if (c === "$" && quote === "'") out += text[++i] ?? ""; // $' and $$ inside a string
       else if (c === quote) quote = undefined; // '' and "" inside a literal close and reopen: the same text either way
+    } else if (c === "/" && text[i + 1] === "/") {
+      // a line comment ends at its line break, which stays: "// note\n#x := 1;" is not "// note #x := 1;"
+      const end = text.indexOf("\n", i);
+      const stop = end < 0 ? text.length : end;
+      out += text.slice(i, stop).replace(/\s+/g, "") + "\n";
+      i = stop;
+    } else if ((c === "(" || c === "/") && text[i + 1] === "*") {
+      // a block comment as one piece: a quote in it opens no string
+      const close = c === "(" ? "*)" : "*/";
+      const end = text.indexOf(close, i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += text.slice(i, stop).replace(/\s+/g, "");
+      i = stop - 1;
     } else if (c === "'" || c === '"') {
       quote = c;
       out += c;
@@ -429,6 +442,23 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: "Edited in the workspace and in TIA Portal; resolve with rung resolve" });
   };
 
+  /**
+   * The sends of the last passes whose answer never came (Ctrl+C, a crash, a bridge that stopped) that TIA Portal may
+   * hold now. With the bridge's receipts only the newest one it committed can be it: an older one that matches is
+   * someone's change back to it, not rung's send.
+   */
+  const sendCandidates = async (cur: ObjectState) => {
+    const sends = sendsOf(cur);
+    if (sends.length && bridge.receipts && sends.every((s) => s.op)) {
+      const landed = await bridge.receipts(sends.map((s) => s.op!));
+      if (landed) {
+        const newest = sends.find((s) => landed.includes(s.op!));
+        return newest ? [newest] : [];
+      }
+    }
+    return sends;
+  };
+
   const queue: ImportJob[] = [];
   let done = 0;
   for (const address of addresses) {
@@ -451,15 +481,19 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const untouched = (await localStatus(root, st.files)) === "clean";
         const files = st.files;
         const sending = st.sending;
+        // with the bridge's receipts: an object there that this create did not make is someone else's, new on both
+        // sides (taken when the same, else a conflict keeping both), never published over the file
+        const landed = item && st.sendingOp && bridge.receipts ? await bridge.receipts([st.sendingOp]) : undefined;
+        const someoneElses = landed !== undefined && !landed.includes(st.sendingOp!);
         state.remove(address);
         st = undefined;
-        if (item && untouched) {
+        if (item && untouched && !someoneElses) {
           // TIA Portal has it: finish what the import would have done (TIA's form of the file)
           await publish(address, files, await stageExport(root, bridge, address, item.stem!), isReadOnlyEntry(item.entry));
           report.created++;
           continue;
         }
-        if (item && loc && cfg.sync.import === "auto") {
+        if (item && loc && cfg.sync.import === "auto" && !someoneElses) {
           // TIA Portal has it and the file was edited since. What the create sent is the base: if TIA Portal's
           // version is that (in its own layout), the file is simply newer; if someone changed it in TIA Portal
           // meanwhile, the two are merged, or a conflict where both changed the same lines
@@ -523,7 +557,10 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           state.upsert(cur);
         }
 
-        if (status === "clean") {
+        // a file back where it was before a send TIA Portal took without answering (an undo) is the newer edit:
+        // handled like an edited file, which asks which send TIA Portal holds before merging
+        const undone = status === "clean" && tiaChanged && !adopted.has(address) && sendsOf(cur).length > 0 && !readOnly && cfg.sync.import === "auto";
+        if (status === "clean" && !undone) {
           if (tiaChanged || adopted.has(address)) {
             await publish(address, cur.files, staged!, readOnly);
             report.exported++;
@@ -586,32 +623,20 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           await writeConflict(cur, stem, bundle, staged!, false);
           continue;
         }
-        let m = mergeBundle(cur.form, base, bundle, tia);
-        const sends = sendsOf(cur);
-        if (m.kind === "conflict" && sends.length) {
-          // the last passes stopped during an import (Ctrl+C, a crash). If TIA Portal already has the file edits
-          // one of them sent (the newest it has; TIA Portal may have changed other lines since), those files are
-          // the base the file was edited from since; if none, the conflict is real. With the bridge's receipts
-          // only the newest send TIA Portal committed can be it: an older one that matches is someone's change
-          // back to it, a conflict to show, not a base.
-          let candidates = sends;
-          if (bridge.receipts && sends.every((s) => s.op)) {
-            const landed = await bridge.receipts(sends.map((s) => s.op!));
-            if (landed) {
-              const newest = sends.find((s) => landed.includes(s.op!));
-              candidates = newest ? [newest] : [];
-            }
-          }
-          for (const { files } of candidates) {
-            const from = await baseBundle(root, stemOf(cur), files);
-            const probe = mergeBundle(cur.form, base, from, tia);
-            // in TIA Portal's own layout of it (it ends a source with a blank line the sent file may not have)
-            if (probe.kind !== "conflict" && sameLayoutFree(probe.files, tia)) {
-              m = mergeBundle(cur.form, from, bundle, tia);
-              break;
-            }
+        // If TIA Portal already has the edits a send it never answered carried (TIA Portal may have changed other
+        // lines since), those files are the base the file was edited from since: asked first, as a merge with the
+        // older base could take an edit the person has undone since for TIA Portal's change and keep it
+        let m: ReturnType<typeof mergeBundle> | undefined;
+        for (const { files } of await sendCandidates(cur)) {
+          const from = await baseBundle(root, stemOf(cur), files);
+          const probe = mergeBundle(cur.form, base, from, tia);
+          // in TIA Portal's own layout of it (it ends a source with a blank line the sent file may not have)
+          if (probe.kind !== "conflict" && sameLayoutFree(probe.files, tia)) {
+            m = mergeBundle(cur.form, from, bundle, tia);
+            break;
           }
         }
+        m ??= mergeBundle(cur.form, base, bundle, tia);
         if (m.kind === "conflict") {
           await writeConflict(cur, stem, m.files, staged!, SOURCE_FORMS.has(cur.form));
           continue;

@@ -94,8 +94,17 @@ describe.runIf(enabled)("soak: real TIA Portal, two people, killed syncs", () =>
     // watch itself, which then starts again
     let watcher: ReturnType<typeof spawn> | undefined;
     const startWatch = async () => {
-      const w = spawn(process.execPath, [cli, "watch"], { cwd: ws, windowsHide: true, stdio: "ignore", env: { ...process.env, RUNG_DEBUG: "" } });
+      const w = spawn(process.execPath, [cli, "watch"], { cwd: ws, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, RUNG_DEBUG: "" } });
       watcher = w;
+      let said = "";
+      w.stdout?.on("data", (d) => (said = (said + d).slice(-4000)));
+      w.stderr?.on("data", (d) => (said = (said + d).slice(-4000)));
+      // a watch that stops by itself would leave the soak running one-shot syncs: that is a problem, not a pass
+      w.on("exit", (code) => {
+        if (watcher !== w) return;
+        watcher = undefined;
+        problems.push(`rung watch exited by itself (code ${code})\n${said}`);
+      });
       // ready once it owns the workspace (an owner file of a watch killed before names a dead process)
       const ownerFile = join(ws, ".rung", "owner.json");
       for (let i = 0; i < 1200; i++) {

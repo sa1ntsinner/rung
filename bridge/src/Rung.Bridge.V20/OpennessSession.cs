@@ -891,8 +891,6 @@ namespace Rung.Bridge.V20
                         // else (the prompt guard's Dispose alone waits up to 200 ms): a stop in between left a landed
                         // import without its receipt, and the next pass took the send for lost (seen in the soak)
                         Receipts.Write(operationId, address);
-                        // end-to-end tests only: stop as if killed, a committed import whose answer never left
-                        if (Environment.GetEnvironmentVariable("RUNG_BRIDGE_TEST_STOP") == "after-commit") Environment.Exit(3);
                         // TIA Portal takes a table with an entry it cannot hold (seen live: a watch table entry with an
                         // unknown tag) and then cannot export it any more. Still under the same exclusive access, such
                         // a table is refused and the previous version put back.
@@ -902,6 +900,8 @@ namespace Rung.Bridge.V20
                             Receipts.Remove(operationId);
                             throw new RpcException(ErrorCodes.ImportFailed, "TIA Portal took the table but cannot export it any more (" + broken + "): an entry is probably something it cannot hold, such as an unknown tag or address.");
                         }
+                        // end-to-end tests on a fixture project only: stop as if killed, an import committed and its answer lost
+                        if (Environment.GetEnvironmentVariable("RUNG_BRIDGE_TEST_STOP") == "after-commit" && FixtureGuard.IsFixture(_project.Path.FullName)) Environment.Exit(3);
                     }
                     catch (Exception e) when (e is EngineeringException || e is RpcException)
                     {

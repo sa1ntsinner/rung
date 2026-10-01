@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { BlobStore, Journal, StateStore, defaultConfig, sha256, type RungConfig } from "@rung/core";
 import { BridgeError, type CompileMessage, type ExportResult } from "@rung/bridge-client";
 import { pull, syncOnce, confirmDelete, resolveConflict } from "../src/index.js";
+import { withoutLayout } from "../src/sync.js";
 import { FakeBridge } from "./fake-bridge.js";
 
 /** TIA stand-in with import/compile/delete. `canon` models TIA re-formatting imported source. */
@@ -350,6 +351,37 @@ describe("syncOnce", () => {
     const r = await t.sync();
     expect(r.conflicts).toBe(0);
     expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 3;");
+  });
+
+  it.each(["undone", "undone and another line edited"])("an edit TIA Portal took without answering, then %s in the file: the file wins", async (how) => {
+    const src = 'FUNCTION "Fx_A" : Void\nBEGIN\n  #x := 1;\n  #y := 2;\n  #z := 3;\n  #w := 4;\nEND_FUNCTION\n';
+    const t = setup((b) => b.add(A, { content: src }));
+    await t.sync();
+    t.write(pA, src.replace("#x := 1;", "#x := 9;"));
+    t.bridge.failAfter = "OUTCOME_UNKNOWN"; // TIA Portal took x = 9, the answer never came
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.failAfter = undefined;
+    t.write(pA, how === "undone" ? src : src.replace("#w := 4;", "#w := 40;")); // the person takes x = 9 back
+    const r = await t.sync();
+    expect(r.conflicts).toBe(0);
+    const tia = t.bridge.objects.get(A)!.files[".scl"]!;
+    expect(tia).toContain("#x := 1;");
+    if (how !== "undone") expect(tia).toContain("#w := 40;");
+    expect(t.read(pA)).toContain("#x := 1;");
+  });
+
+  it("a create that never reached TIA Portal does not take an object someone else created there under the name", async () => {
+    const t = setup(() => {});
+    await t.sync();
+    t.write(pA, srcA);
+    t.bridge.hangImport = true; // the create never reaches TIA Portal
+    await expect(t.sync()).rejects.toThrow();
+    t.bridge.hangImport = false;
+    t.bridge.add(A, { content: srcA.replace("#x := 1;", "#x := 7;") }); // someone else's Fx_A
+    const r = await t.sync();
+    expect(r.conflicts).toBe(1);
+    expect(t.read(pA)).toBe(srcA); // the person's own file stays theirs
+    expect(t.bridge.objects.get(A)!.files[".scl"]).toContain("#x := 7;");
   });
 
   it("without receipts an import with an unknown outcome waits for rung resolve", async () => {
@@ -1307,5 +1339,16 @@ describe("network settings (plc/<PLC>/hardware/network.yaml)", () => {
     expect(d.warnings.map((w) => w.code)).toContain("NOT_DELETABLE");
     expect(t.read(pN)).toContain("ip: 192.168.0.10");
     expect(t.bridge.deletes).toEqual([]);
+  });
+});
+
+describe("TIA Portal's layout of a text", () => {
+  it("ignores spaces and line breaks, but not where a line comment ends or what is inside strings and comments", () => {
+    expect(withoutLayout("BEGIN\n  #x := 1;\n\n")).toBe(withoutLayout("BEGIN #x:=1;"));
+    expect(withoutLayout("// note\n#x := 1;")).not.toBe(withoutLayout("// note #x := 1;"));
+    // a quote in a comment opens no string
+    expect(withoutLayout("// don't\n#x := 1;  #y := 2;")).toBe(withoutLayout("// don't\n#x := 1;\n#y := 2;"));
+    expect(withoutLayout("(* it's *) #x := 1;")).toBe(withoutLayout("(* it's *)\n#x := 1;"));
+    expect(withoutLayout("#s := 'a  b';")).not.toBe(withoutLayout("#s := 'a b';"));
   });
 });

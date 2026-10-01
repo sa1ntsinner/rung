@@ -43,6 +43,8 @@ export const FATAL_BRIDGE_CODES = new Set(["TIA_NOT_RUNNING", "PORTAL_DISPOSED",
  * was checked longer ago than that.
  */
 export function isFresh(entryFp: string, prev: ObjectState, now: number, weakVerifyMs: number, unversionedMs = 0): boolean {
+  // marked stale (an import refused as stale, a rename): exported again, whatever the listing or the last check says
+  if (prev.tiaFingerprint.startsWith("stale:")) return false;
   // a check from the future (the clock was put back since) is of unknown age: checked again
   const age = now - (prev.verifiedAt ?? 0);
   if (entryFp === "none") return age >= 0 && age < unversionedMs;
