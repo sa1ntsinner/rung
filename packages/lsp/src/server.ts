@@ -254,7 +254,11 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     });
     return outline(index, p.textDocument.uri).map(conv);
   });
-  connection.onShutdown(() => dispose());
+  // the editor may end the process right after the answer: the PLC's Web API session is logged out first
+  connection.onShutdown(async () => {
+    dispose();
+    await monitor?.closed(3000);
+  });
 
   function dispose() {
     monitor?.stop(undefined, false);

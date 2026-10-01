@@ -32,6 +32,15 @@ describe("a test file with a mistake in its shape", () => {
     expect(await errorOf("block: Fx_Motor\ncycle: fast\ncases:\n  - steps:\n      - cycle: 1\n")).toBe("cycle is the time of one cycle, such as 10ms; not fast");
   });
 
+  it("refuses times and counts that never end or would run for hours, instead of hanging", async () => {
+    const step = (s: string, head = "") => errorOf(`block: Fx_Motor\n${head}cases:\n  - name: c\n    steps:\n      - ${s}\n`);
+    expect(await step("cycle: 1", "cycle: .inf\n")).toBe("cycle is the time of one cycle, such as 10ms; not Infinity");
+    expect(await step("advance: .inf")).toBe("c: advance: expected a time such as 2s or T#1m, got Infinity");
+    expect(await step("advance: .nan")).toBe("c: advance: expected a time such as 2s or T#1m, got NaN");
+    expect(await step("advance: T#1000d")).toBe("c: advance: T#1000d is 8640000000 cycles of 10ms; a step runs at most 10000000 (for long times, set a longer cycle: at the top of the file)");
+    expect(await step("cycle: 1e12")).toBe("c: cycle: 1000000000000 cycles; a step runs at most 10000000");
+  });
+
   it("still runs a correct file", async () => {
     expect(await errorOf("block: Fx_Motor   # the motor\ncycle: 10ms\ncases:\n  - name: starts\n    steps:\n      - set: { Start: true }\n      - cycle: 1\n      - expect: { Running: true }\n")).toBe("starts: passed");
   });

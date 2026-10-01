@@ -35,6 +35,7 @@ cases:
 - With several PLCs that each have a block of that name, say which: `plc: PLC_1` in the file, or keep the test under `tests/PLC_1/`. rung refuses to guess.
 - `expect` compares with a small tolerance for reals; `T#…` strings are durations.
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
+- A step runs at most 10 000 000 cycles: `advance: T#1d` at the default 10 ms is 8 640 000. For longer times, set a longer `cycle:` at the top of the file.
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
 - A case that stops with an error (a misspelt name in a `set`, an instruction the simulator refuses) says in which step: `step 2: Strat does not exist (did you mean Start?)`. `--json` gives that step and its line as `errorStep` and `errorLine`, so editors and GitHub annotations point at the step, not at the case.
 

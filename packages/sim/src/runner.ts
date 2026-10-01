@@ -71,6 +71,8 @@ interface TestFile {
 
 /** Keys of a step run in this order when one step has several (`{ set: ..., cycle: 1, expect: ... }`). */
 const STEP_ORDER = ["set", "cycle", "advance", "expect"] as const;
+/** The cycles one step may run: a typo like advance: 1000d (or .inf) is refused instead of running for hours. */
+const MAX_STEP_CYCLES = 10_000_000;
 
 const approx = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)) : a === b;
@@ -142,6 +144,7 @@ function shapeProblem(spec: unknown): string | undefined {
     } catch {
       return `cycle is the time of one cycle, such as 10ms; not ${String(spec.cycle)}`;
     }
+    if (!Number.isFinite(ms)) return `cycle is the time of one cycle, such as 10ms; not ${String(spec.cycle)}`;
     if (!(ms > 0)) return `cycle is the time of one cycle, such as 10ms; ${String(spec.cycle)} runs no time`;
   }
   if (spec.cases === undefined || spec.cases === null) return "no cases: list them under cases:, each with a name and its steps";
@@ -419,6 +422,14 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     const count = (op: string, v: unknown): number => {
       const n = Number(v ?? 1);
       if (!Number.isInteger(n) || n < 0) throw new SimError(`${op}: expected a whole number of cycles, got ${JSON.stringify(v)}`);
+      if (n > MAX_STEP_CYCLES) throw new SimError(`${op}: ${n} cycles; a step runs at most ${MAX_STEP_CYCLES}`);
+      return n;
+    };
+    const advanceCycles = (v: unknown): number => {
+      const ms = toMs(v);
+      if (!Number.isFinite(ms) || ms < 0) throw new SimError(`advance: expected a time such as 2s or T#1m, got ${String(v)}`);
+      const n = Math.max(1, Math.ceil(ms / cycleMs));
+      if (n > MAX_STEP_CYCLES) throw new SimError(`advance: ${String(v)} is ${n} cycles of ${cycleMs}ms; a step runs at most ${MAX_STEP_CYCLES} (for long times, set a longer cycle: at the top of the file)`);
       return n;
     };
     try {
@@ -453,8 +464,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               for (let n = 0, max = count("cycle", arg); n < max; n++) runCycle();
               break;
             case "advance": {
-              const cycles = Math.max(1, Math.ceil(toMs(arg) / cycleMs));
-              for (let n = 0; n < cycles; n++) runCycle();
+              for (let n = 0, max = advanceCycles(arg); n < max; n++) runCycle();
               break;
             }
             case "expect":

@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     # the playground runs the simulator itself: the site changes with it
-    paths: ["site/**", "tools/site/**", "packages/sim/**", "packages/lsp/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "tools/site/**", "packages/sim/**", "packages/lsp/**", "package.json", "pnpm-lock.yaml", ".github/workflows/pages.yml"]
   workflow_dispatch:
 permissions:
   contents: read

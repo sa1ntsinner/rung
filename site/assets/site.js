@@ -636,7 +636,6 @@ if (play) {
   const challenge = $(".challenge", play);
   const body = $(".play-body", play);
   let preset = PRESETS[0];
-  let engine = null;
 
   const paint = (ta, pre, mode) => {
     pre.innerHTML = ta.value.split("\n").map((l) => hlLine(l, mode)).join("\n") + "\n";
@@ -747,13 +746,45 @@ if (play) {
   body.dataset.show = "src";
 
   const show = (v) => (typeof v === "string" && /^<.*>$/.test(v) ? v : JSON.stringify(v));
-  const getEngine = () => (engine ??= import("./play.js"));
+  // the simulator runs in a worker: a test that never ends is stopped after a while, and the page stays usable
+  const BUDGET_MS = 10_000;
+  let worker = null;
+  const stopWorker = () => {
+    worker?.terminate();
+    worker = null;
+  };
+  const getWorker = () => {
+    if (!worker) {
+      const w = (worker = new Worker(new URL("./play-worker.js", import.meta.url)));
+      // one that failed to load is not reused
+      w.addEventListener("error", () => worker === w && stopWorker());
+    }
+    return worker;
+  };
+  const simulate = (file, source, test) =>
+    new Promise((resolve, reject) => {
+      const w = getWorker();
+      const finish = (settle, value) => {
+        clearTimeout(timer);
+        w.onmessage = w.onerror = null;
+        settle(value);
+      };
+      const timer = setTimeout(() => {
+        stopWorker();
+        finish(reject, Object.assign(new Error(`The simulator was stopped after ${BUDGET_MS / 1000} s.`), { overtime: true }));
+      }, BUDGET_MS);
+      w.onmessage = (e) => (e.data.error === undefined ? finish(resolve, e.data.ok) : finish(reject, new Error(e.data.error)));
+      w.onerror = (e) => {
+        e.preventDefault();
+        finish(reject, new Error(e.message || "The simulator did not load."));
+      };
+      w.postMessage({ file, source, test });
+    });
   async function run() {
     runBtn.disabled = true;
-    idle(engine ? "Running…" : "Loading the simulator…");
+    idle(worker ? "Running…" : "Loading the simulator…");
     try {
-      const { play: runTest } = await getEngine();
-      const r = await runTest(preset.file, src.value, yaml.value);
+      const r = await simulate(preset.file, src.value, yaml.value);
       out.innerHTML = r.lines.map((l) => `<span class="${l.kind}">${esc(l.text)}</span>`).join("\n");
       raw.hidden = false;
       unmark("bad");
@@ -783,9 +814,8 @@ if (play) {
         verdict.textContent = `Passed · ${total}/${total} ${total === 1 ? "case" : "cases"}`;
       }
     } catch (e) {
-      engine = null;
       result.className = "play-result fail";
-      verdict.textContent = "Could not load the simulator. Try again.";
+      verdict.textContent = e?.overtime ? `The test did not finish in ${BUDGET_MS / 1000} s: a loop that never ends, or a very long advance?` : "Could not load the simulator. Try again.";
       out.textContent = String(e?.message ?? e);
       raw.hidden = false;
     } finally {
@@ -803,7 +833,7 @@ if (play) {
   // fetch the simulator once the playground comes near
   new IntersectionObserver((entries, io) => {
     if (entries.some((e) => e.isIntersecting)) {
-      void getEngine().catch(() => (engine = null));
+      getWorker();
       io.disconnect();
     }
   }, { rootMargin: "600px 0px" }).observe(play);

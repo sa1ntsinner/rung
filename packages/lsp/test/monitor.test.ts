@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MonitorProvider, MonitorValues } from "../src/monitor.js";
-import { MONITOR_COMMAND, STOP_MONITOR_COMMAND } from "../src/monitor.js";
+import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND } from "../src/monitor.js";
+import { WorkspaceIndex } from "../src/workspace.js";
 import { lineText } from "../src/monitorText.js";
 import { lineText as vscodeLineText } from "../../../editors/vscode/src/core/monitorText.js";
 import { monitorServer, SOURCE, until } from "./monitorHarness.js";
@@ -148,6 +149,39 @@ describe("monitoring through LSP", () => {
     expect(f.read).not.toHaveBeenCalled();
     expect(await s.hints()).toEqual([]);
     expect(s.messages).toEqual([]);
+  });
+
+  it.each(["open", "read"])("shutdown answers only once a pending %s has settled and the PLC session is closed", async (phase) => {
+    const f = fake();
+    let settle!: () => void;
+    let closed = false;
+    f.close.mockImplementation(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); closed = true; });
+    if (phase === "open") f.provider.open = vi.fn(() => new Promise((resolve) => { settle = () => resolve({ read: f.read, close: f.close }); }));
+    else f.read.mockImplementation(() => new Promise((resolve) => { settle = () => resolve({ values: {}, errors: {} }); }));
+    const s = await boot(f.provider);
+    void s.execute((await s.actions())[0]!).catch(() => {});
+    await until(() => !!settle);
+    let answered = false;
+    const shutdown = s.client.sendRequest("shutdown").then(() => { answered = true; });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(answered).toBe(false);
+    settle();
+    await shutdown;
+    expect(closed).toBe(true);
+    expect(f.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("waiting for the PLC session to close gives up after a while", async () => {
+    const f = fake();
+    f.read.mockImplementation(() => new Promise(() => {}));
+    const monitoring = new Monitoring(new WorkspaceIndex(), f.provider, () => {}, () => {});
+    void monitoring.start("file:///x/Motor.scl");
+    await until(() => f.read.mock.calls.length === 1);
+    monitoring.stop();
+    const started = Date.now();
+    await monitoring.closed(50);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(f.close).not.toHaveBeenCalled();
   });
 
   it("offers Monitor values for a single instance", async () => {

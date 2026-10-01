@@ -33,6 +33,7 @@ export const STOP_MONITOR_COMMAND = "rung.lsp.stopMonitoring";
 interface Session {
   uri: string;
   plan?: MonitorPlan;
+  opening?: Promise<MonitorReader>;
   reader?: MonitorReader;
   latest?: MonitorValues;
   reading?: Promise<MonitorValues>;
@@ -41,6 +42,7 @@ interface Session {
 
 export class Monitoring {
   private session?: Session;
+  private readonly closing = new Set<Promise<void>>();
 
   constructor(
     private readonly index: WorkspaceIndex,
@@ -78,11 +80,9 @@ export class Monitoring {
     try {
       const plan = this.provider.plan(this.index, uri, instance);
       if (!Object.keys(plan.vars).length) throw new Error("this block has no values to monitor");
-      const reader = await this.provider.open(uri, plan);
-      if (this.session !== session) {
-        await reader.close();
-        return;
-      }
+      session.opening = this.provider.open(uri, plan);
+      const reader = await session.opening;
+      if (this.session !== session) return; // stop() closes it
       session.plan = plan;
       session.reader = reader;
       await this.read(session);
@@ -115,9 +115,24 @@ export class Monitoring {
     if (!session || (uri && session.uri !== uri)) return;
     this.session = undefined;
     clearTimeout(session.timer);
-    // A read may still be logging in; close after it settles so that login is logged out too.
-    void (session.reading?.catch(() => undefined) ?? Promise.resolve()).then(() => session.reader?.close()).catch(() => undefined);
+    const closed = this.close(session).catch(() => undefined);
+    this.closing.add(closed);
+    void closed.then(() => this.closing.delete(closed));
     if (refresh) this.refresh();
+  }
+
+  /** An open or a read may still be logging in: close once they settle, so that login is logged out too. */
+  private async close(session: Session): Promise<void> {
+    const reader = await session.opening?.catch(() => undefined);
+    await session.reading?.catch(() => undefined);
+    await reader?.close();
+  }
+
+  /** Every stopped session closed, or `ms` passed (a PLC that does not answer must not hold up the editor). */
+  async closed(ms: number): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([Promise.all(this.closing), new Promise((resolve) => (timer = setTimeout(resolve, ms)))]);
+    clearTimeout(timer);
   }
 
   hints(uri: string, range: Range): InlayHint[] {

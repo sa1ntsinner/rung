@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Builds what the site runs from rung's own code: the playground (the simulator and test runner) as one
-// browser module.  node tools/site/build.mjs  -> site/assets/play.js
+// browser worker.  node tools/site/build.mjs  -> site/assets/play-worker.js
 import { build } from "esbuild";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,14 +10,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const nodeStub = join(root, "tools", "site", "node-stub.mjs");
 
 await build({
-  entryPoints: [join(root, "tools", "site", "play.ts")],
+  entryPoints: [join(root, "tools", "site", "play-worker.ts")],
   bundle: true,
   platform: "browser",
-  format: "esm",
+  // a classic worker script: module workers came to Firefox only in 2023
+  format: "iife",
   target: "es2022",
   minify: true,
   legalComments: "none",
-  outfile: join(root, "site", "assets", "play.js"),
+  outfile: join(root, "site", "assets", "play-worker.js"),
   alias: {
     "@rung/lsp": join(root, "tools", "site", "lsp-lite.ts"),
     "@rung/sim": join(root, "packages", "sim", "src", "index.ts"),
