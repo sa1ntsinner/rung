@@ -857,6 +857,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const texts = Object.values(bundle);
         // a file being written (an editor's new file, a quick fix's DB before it is saved) creates nothing yet
         if (!(bundle["." + loc.form] ?? "").trim()) continue;
+        // a block renamed by hand (git mv and its header): creating it would leave TIA Portal two blocks, the callers on the old one
+        const from = await renamedBy(root, state, name, bundle["." + loc.form] ?? "");
+        if (from) {
+          const how = `rung restore ${from.path}, remove ${loc.path}, then rung rename ${from.path} ${name}: TIA Portal keeps the block, its number and its callers. For a new block instead, rung confirm-delete ${from.path} first`;
+          diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `the block of ${from.path} (deleted here) under a new name, not created: ${how}` });
+          if (plan) planned({ address, path: loc.path, action: "conflict", detail: `looks like a rename of ${from.path}: ${how}` });
+          continue;
+        }
         queue.push({ address, name, form: loc.form, stem, bundle, expected: "absent", captured, kind: "create", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
       }
     } catch (e) {
@@ -1151,6 +1159,21 @@ export async function restoreFile(root: string, state: StateStore, path: string)
   state.upsert({ ...st, status: st.status === "pendingDelete" || st.status === "fileDirty" ? "synced" : st.status, notSent: undefined });
   await state.flush();
   return kept ? { copy: relative(root, recoveryDir).split(sep).join("/") } : {};
+}
+
+/** An object whose files are gone here and whose block is this new file's under another name: a rename by hand. */
+async function renamedBy(root: string, state: StateStore, name: string, text: string): Promise<ObjectState | undefined> {
+  const blobs = new BlobStore(root);
+  const squeeze = (s: string) => normalizeText(s).replace(/[ \t]+$/gm, "");
+  for (const st of state.all()) {
+    const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
+    if (!primary || st.readOnly || (st.status !== "pendingDelete" && (st.status !== "synced" || existsSync(rel2abs(root, primary.path))))) continue;
+    const old = parseAddress(st.address).name;
+    if (old.toLowerCase() === name.toLowerCase()) continue;
+    const before = await blobs.get(primary.hash).then((b) => b.toString("utf8"), () => undefined);
+    if (before && squeeze(before.split(`"${old}"`).join(`"${name}"`)) === squeeze(text)) return st;
+  }
+  return undefined;
 }
 
 /** A PLC's default tag table, which TIA Portal never deletes (its name follows TIA's language). */

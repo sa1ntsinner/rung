@@ -417,7 +417,15 @@ export async function addressOf(ws: string, what: string, cwd: string): Promise<
 /** rung rename <file|name> <new-name>: TIA Portal renames it and keeps every use; the files that use it follow. */
 export async function cmdRename(dir: string, what: string, newName: string, io: Io): Promise<number> {
   const ws = await findWorkspace(dir);
-  const r = await renameInTia(ws, await addressOf(ws, what, io.cwd), newName, io);
+  const address = await addressOf(ws, what, io.cwd).catch(async (e) => {
+    // a tag or a variable is not an object of its own: say where it is renamed instead
+    const index = new WorkspaceIndex();
+    await index.load(ws);
+    const tag = index.global(what.replace(/^"|"$/g, ""))?.tag;
+    if (tag) throw new WorkspaceError("BAD_ARGUMENT", `${what} is a PLC tag in the table ${tag.table}: rename it in TIA Portal's tag table, which renames its uses too, and rung brings the change into the files (a new name on its line here would be a new tag, its uses left on the old one); rung rename renames blocks, data types, DBs and tag tables`);
+    throw e;
+  });
+  const r = await renameInTia(ws, address, newName, io);
   io.stdout(`renamed ${parseAddress(r.from).name} to ${newName}: ${r.oldPath} → ${r.newPath ?? "(not mirrored)"}\n`);
   if (r.users.length) io.stdout(`updated where it is used: ${r.users.join(", ")}\n`);
   printWarnings(io, r.pull.warnings);

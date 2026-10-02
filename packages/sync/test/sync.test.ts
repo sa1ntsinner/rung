@@ -749,6 +749,21 @@ describe("syncOnce", () => {
     expect(after.pendingDeletes + after.imported).toBe(0);
   });
 
+  it("a block renamed by hand (git mv and the header) is not created a second time: it says how to rename it in TIA Portal", async () => {
+    const t = setup();
+    await t.sync();
+    unlinkSync(t.f(pA));
+    t.write("plc/PLC_1/blocks/Fx_Renamed.scl", srcA.replace('"Fx_A"', '"Fx_Renamed"'));
+    const r = await t.sync(2000);
+    expect(r.created).toBe(0);
+    expect(t.bridge.objects.has("plc:PLC_1/blocks/Fx_Renamed")).toBe(false);
+    const d = r.diagnostics.find((x) => x.code === "LOOKS_LIKE_RENAME")!;
+    expect(d.message).toContain(`rung rename ${pA} Fx_Renamed`);
+    // a new block that only resembles it is created as usual once the old one's delete is confirmed
+    await t.withState((s) => confirmDelete(t.root, t.bridge, s, A));
+    expect((await t.sync(3000)).created).toBe(1);
+  });
+
   it("restores a deleted file when deletes are disabled", async () => {
     const t = setup(undefined, (c) => (c.sync.delete = "never"));
     await t.sync();
