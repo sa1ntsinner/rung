@@ -31,7 +31,7 @@ import { runTests, toJUnit } from "@rung/sim";
 import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
-import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
+import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdRestore, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
@@ -64,6 +64,7 @@ Usage:
   rung status [dir]
   rung backup [dir]                    TIA Portal archives the project now (.zap; rung makes one before the first write of each day)
   rung resolve <file> --ours|--theirs|--merged
+  rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
@@ -73,7 +74,7 @@ Usage:
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
   rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
-  rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the library and tags
+  rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the project library, software units and SimaticML tag tables
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
@@ -328,6 +329,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   watch: { options: [], positionals: 1 },
   status: { options: [], positionals: 1 },
   resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
+  restore: { options: [], positionals: 1 },
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "json"], positionals: 1 },
@@ -664,6 +666,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         }
         return await cmdResolve(target, mode, io);
       }
+      case "restore":
+        if (!target) {
+          io.stderr("rung: usage: rung restore <file>\n");
+          return 1;
+        }
+        return await cmdRestore(target, io);
       case "rename": {
         const newName = positionals[2];
         if (!target || !newName) {

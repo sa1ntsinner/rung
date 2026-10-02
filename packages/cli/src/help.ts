@@ -3,7 +3,7 @@
 const EXAMPLES: Record<string, string> = {
   setup: "setup --dry-run", check: "check --json", init: "init --project Line.ap20",
   writes: "writes off", backup: "backup", pull: "pull", sync: "sync --preview", watch: "watch", status: "status",
-  resolve: "resolve plc/PLC_1/blocks/Valve.scl --merged", "confirm-delete": "confirm-delete plc/PLC_1/blocks/Valve.scl",
+  resolve: "resolve plc/PLC_1/blocks/Valve.scl --merged", restore: "restore plc/PLC_1/blocks/Valve.scl", "confirm-delete": "confirm-delete plc/PLC_1/blocks/Valve.scl",
   rename: "rename plc/PLC_1/blocks/Valve.scl ValveCtl", test: "test --filter Valve", live: "live read StartButton",
   views: "views --offline", agents: "agents", mcp: "mcp", lsp: "lsp --stdio", doctor: "doctor --fixture",
   compile: "compile --file plc/PLC_1/blocks/Valve.scl", online: "online --state", compare: "compare --json",

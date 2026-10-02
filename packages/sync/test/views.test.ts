@@ -58,6 +58,8 @@ describe("views", () => {
           ],
         }),
       ],
+      // this PC's libraries (Siemens' own under Program Files): not the project's, never written
+      GlobalLibraries: [node("GlobalLibraryInfo", "Long Functions", { Path: "C:/Program Files/Siemens/Automation/Portal V20/Lib/Sys/Long Functions" })],
     });
     const r = await writeModelViews(root, { describe: async () => lib }, ["libraries"]);
     expect(r.written).toEqual(["views/libraries/Project library.yaml"]);

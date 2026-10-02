@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlobStore, Journal, StateStore, defaultConfig, sha256, type RungConfig } from "@rung/core";
 import { BridgeError, type CompileMessage, type ExportResult } from "@rung/bridge-client";
-import { pull, syncOnce, syncQuick, confirmDelete, resolveConflict } from "../src/index.js";
+import { pull, syncOnce, syncQuick, confirmDelete, resolveConflict, restoreFile } from "../src/index.js";
 import { withoutLayout } from "../src/sync.js";
 import { FakeBridge } from "./fake-bridge.js";
 
@@ -732,6 +732,23 @@ describe("syncOnce", () => {
     expect(existsSync(t.f(p))).toBe(true);
   });
 
+  it("rung restore puts TIA Portal's version of one file back, keeping the person's, and a deleted file too", async () => {
+    const t = setup();
+    await t.sync();
+    t.write(pA, "my edit\n");
+    const r = await t.withState((s) => restoreFile(t.root, s, pA));
+    expect(t.read(pA)).toBe(srcA);
+    expect(r.copy).toMatch(/^\.rung\/recovery\/restore-/);
+    const kept = readdirSync(t.f(r.copy!), { recursive: true }).map(String).filter((f) => f.endsWith(".scl"));
+    expect(kept.some((f) => readFileSync(join(t.f(r.copy!), f), "utf8") === "my edit\n")).toBe(true);
+    unlinkSync(t.f(pA));
+    await t.sync(2000); // a pending delete now
+    await t.withState((s) => restoreFile(t.root, s, pA));
+    expect(t.read(pA)).toBe(srcA);
+    const after = await t.sync(3000);
+    expect(after.pendingDeletes + after.imported).toBe(0);
+  });
+
   it("restores a deleted file when deletes are disabled", async () => {
     const t = setup(undefined, (c) => (c.sync.delete = "never"));
     await t.sync();
@@ -818,7 +835,7 @@ describe("syncOnce", () => {
     const r = await t.sync();
     expect(t.bridge.imports).toEqual([]);
     expect(r.diagnostics.find((d) => d.code === "READ_ONLY_EDIT")?.message).toBe(
-      "Read-only in rung: an instance of the library type LGF_FloatingAverage 3.0.2; change the type in TIA Portal's library (Edit type). The edit is not sent to TIA Portal; restore the file",
+      "Read-only in rung: an instance of the library type LGF_FloatingAverage 3.0.2; change the type in TIA Portal's library (Edit type). The edit is not sent to TIA Portal; rung restore plc/PLC_1/blocks/Fx_A.scl takes TIA Portal's version back",
     );
   });
 

@@ -106,7 +106,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
           continue;
         }
         if (fresh && local === "modified") {
-          warn(entry.address, "LOCAL_CHANGES", "file edited locally; TIA unchanged (use rung sync or rung watch to send it to TIA)");
+          warn(entry.address, "LOCAL_CHANGES", readOnly ? `read-only in rung, but edited here: rung restore ${prev.path} takes TIA Portal's version back` : `file edited locally; TIA unchanged (rung sync sends it, rung restore ${prev.path} takes TIA Portal's version back)`);
           continue;
         }
       }

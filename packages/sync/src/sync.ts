@@ -721,7 +721,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         state.upsert(cur);
         if (readOnly) {
           state.upsert({ ...cur, status: "fileDirty" });
-          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; restore the file` });
+          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; rung restore ${cur.path} takes TIA Portal's version back` });
           continue;
         }
         if (cfg.sync.import === "manual") {
@@ -1130,6 +1130,29 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 }
 
 /** Deletes an object in TIA after the user deleted its files and confirmed. */
+/**
+ * TIA Portal's version of one object as rung last had it, back in its files (a deleted file too); the person's
+ * version is kept in .rung/recovery. Offline: the next pass brings anything newer from TIA Portal.
+ */
+export async function restoreFile(root: string, state: StateStore, path: string): Promise<{ copy?: string }> {
+  const st = state.byPath(path);
+  if (!st) throw new WorkspaceError("NOT_MIRRORED", `${path} is not a file rung mirrors (rung status lists them)`);
+  if (st.status === "conflicted") throw new WorkspaceError("BAD_ARGUMENT", `${path} is in conflict: rung resolve ${st.path} --theirs takes TIA Portal's version`);
+  const opId = randomUUID();
+  const recoveryDir = join(root, ".rung", "recovery", "restore-" + opId);
+  const blobs = new BlobStore(root);
+  let kept = false;
+  for (const f of st.files) {
+    const now = await diskHash(root, f.path, f.hash);
+    if (now === f.hash) continue;
+    if (now !== "absent") kept = true;
+    await replaceGuarded(rel2abs(root, f.path), await blobs.get(f.hash), { expectedHash: now, recoveryDir, force: true });
+  }
+  state.upsert({ ...st, status: st.status === "pendingDelete" || st.status === "fileDirty" ? "synced" : st.status, notSent: undefined });
+  await state.flush();
+  return kept ? { copy: relative(root, recoveryDir).split(sep).join("/") } : {};
+}
+
 /** A PLC's default tag table, which TIA Portal never deletes (its name follows TIA's language). */
 function isDefaultTagTable(address: string): boolean {
   const a = parseAddress(address);

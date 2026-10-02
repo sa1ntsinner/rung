@@ -2,7 +2,7 @@
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, writesGranted, type RungConfig } from "@rung/core";
-import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
+import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, restoreFile, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics, nearest, uriOf } from "@rung/lsp";
 import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
@@ -53,7 +53,8 @@ const VERB: Record<PlanEntry["action"], string> = {
 function printPlan(io: Io, r: SyncReport, writesOff: boolean) {
   const plan = r.plan!;
   io.stdout("What rung sync would do now (nothing is sent, written or recorded):\n");
-  if (!plan.entries.length) io.stdout("  nothing: files and TIA Portal agree\n");
+  // "agree" only when nothing below says otherwise (a read-only file edited here is not sent, but they differ)
+  if (!plan.entries.length) io.stdout(r.diagnostics.some((d) => d.severity === "error") || r.warnings.length ? "  nothing to send or bring in\n" : "  nothing: files and TIA Portal agree\n");
   for (const e of plan.entries) {
     const sent = e.action === "create" || e.action === "update" || e.action === "merge";
     const where = e.action === "export" || e.action === "restore" ? `TIA Portal → ${e.path}` : sent ? `${e.path} → TIA Portal${e.action === "create" ? " (new)" : e.action === "merge" ? " (merged with TIA Portal's change)" : ""}` : e.path;
@@ -172,6 +173,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       watcher.poke();
       return { resolved: true };
     },
+    restore: async (p) => restoreFile(dir, state, String(p.path)),
     confirmDelete: async (p) => {
       mayWrite(live, "deleted");
       const b = watcher.bridgeForTools;
@@ -305,6 +307,31 @@ export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged
 function mayWrite(config: RungConfig, action: string): void {
   if (config.writesOff) throw new WorkspaceError("WRITES_OFF", `not ${action}: writes to TIA Portal are off in this workspace (rung writes on)`);
   if (config.sync.import !== "auto") throw new WorkspaceError("WRITES_OFF", `not ${action}: sync.import = "manual" in rung.toml`);
+}
+
+/** `rung restore <file>`: TIA Portal's version of one file as rung last had it; yours is kept in .rung/recovery. */
+export async function cmdRestore(file: string, io: Io): Promise<number> {
+  const dir = await findWorkspace(resolve(io.cwd, file, ".."));
+  const rel = relative(dir, resolve(io.cwd, file)).split(sep).join("/");
+  const owner = await OwnerClient.connect(dir);
+  let r: { copy?: string };
+  if (owner) {
+    try {
+      r = await owner.request<{ copy?: string }>("restore", { path: rel });
+    } finally {
+      owner.close();
+    }
+  } else {
+    const config = await loadConfig(dir);
+    const state = await openState(dir, config);
+    try {
+      r = await restoreFile(dir, state, rel);
+    } finally {
+      await state.close();
+    }
+  }
+  io.stdout(`${rel}: TIA Portal's version is back${r.copy ? `; yours is kept in ${r.copy}` : " (it was not changed)"}\n`);
+  return 0;
 }
 
 export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io, force = false): Promise<number> {

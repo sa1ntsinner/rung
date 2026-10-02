@@ -35,6 +35,9 @@ export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "
     const dir = join(root, "views", scope);
     const keep = new Set<string>();
     for (const [group, list] of Object.entries(tree.children ?? {})) {
+      // global libraries are this PC's (Siemens' system libraries, what is open in TIA Portal), not the project's:
+      // in git they would differ from one engineer to the next
+      if (group === "GlobalLibraries") continue;
       for (const node of list) {
         const file = join(dir, group === "Devices" || group === "HmiUnified" || group === "Plcs" || group === "ProjectLibrary" || group === "LibraryManagers" ? "" : group, `${escapeSegment(node.name ?? node.type)}.yaml`);
         await writeFileAtomic(file, toYaml(toView(node), VIEW_HEADER));
