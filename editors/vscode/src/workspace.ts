@@ -5,7 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { parseRungToml, writesState, type RungToml } from "./core/rungToml";
+import { lastBackupOf, parseRungToml, writesState, type RungToml } from "./core/rungToml";
 import { devicesInState, objectsOf, parseState, summarize, type ObjectInfo, type StateDoc } from "./core/state";
 import type { Output } from "./output";
 
@@ -42,6 +42,8 @@ export class RungWorkspace implements vscode.Disposable {
   owner: OwnerInfo | undefined;
   /** may rung write into the project from here (rung writes on; .rung/writes.json) */
   writes: "on" | "off" | "manual" = "manual";
+  /** the archive rung had TIA Portal make before its first write of the day (.rung/backups.json) */
+  lastBackup: { at: number; path: string } | undefined;
 
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChange = this.changed.event;
@@ -67,7 +69,7 @@ export class RungWorkspace implements vscode.Disposable {
       this.watcher?.dispose();
       this.watcher = undefined;
       if (root) {
-        this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "{rung.toml,.rung/state.json,.rung/owner.json,.rung/writes.json}"));
+        this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, "{rung.toml,.rung/state.json,.rung/owner.json,.rung/writes.json,.rung/backups.json}"));
         const poke = () => this.scheduleReload();
         this.watcher.onDidChange(poke);
         this.watcher.onDidCreate(poke);
@@ -97,6 +99,7 @@ export class RungWorkspace implements vscode.Disposable {
       }
     }
     this.state = root ? parseState(await readFile(join(root, ".rung", "state.json"), "utf8").catch(() => "")) : undefined;
+    this.lastBackup = root ? lastBackupOf(await readFile(join(root, ".rung", "backups.json"), "utf8").catch(() => "")) : undefined;
     this.writes = writesState(this.config, root ? await readFile(join(root, ".rung", "writes.json"), "utf8").catch(() => "") : "");
     this.objects = objectsOf(this.state);
     this.readOwner();

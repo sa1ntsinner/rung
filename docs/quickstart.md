@@ -56,6 +56,8 @@ rung watch           # keeps both sides in sync; Ctrl+C to stop
 
 `rung sync --preview` asks the sync itself what it would do: each object (create, update, merge with TIA Portal's change, a change coming from TIA Portal, a conflict, a pending delete), the lines that change on the side it lands on, and what is compiled afterwards. In VS Code: *Preview Sync* (`Alt+Q Shift+S`) lists them and opens each one as a diff.
 
+Before the first write of each day, TIA Portal archives the whole project for you (`%LOCALAPPDATA%\rung\backups\<project>\*.zap20`, the newest 10 kept; *Project → Retrieve* in TIA Portal opens one). If the archive fails, rung sends nothing that day until it works. `rung backup` makes one any time.
+
 The right is kept in `.rung/`, never in git, and names the project: a colleague who clones the folder, or a `rung init --rebind` to another project, starts with writes off again. `rung writes off` takes it back; in VS Code it is the *Writes to TIA Portal* line of the PLC view. `rung init --writes` turns it on right away, for scripts and CI.
 
 - Save `plc/PLC_1/blocks/.../Fx_Motor.scl` → rung imports it into TIA Portal, compiles it and writes TIA's formatting back. Compile errors appear on their line in the editor.

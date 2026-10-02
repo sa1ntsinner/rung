@@ -114,6 +114,12 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
           : 'rung.toml has sync.import = "manual": no copy of this workspace writes into the project.';
     if (w !== "manual") it.command = { command: w === "on" ? "rung.writes.off" : "rung.writes.on", title: w === "on" ? "Turn off writes" : "Turn on writes" };
     it.contextValue = `rung.writes.${w}`;
+    const b = this.ws.lastBackup;
+    if (w === "on" && b) {
+      const at = new Date(b.at);
+      it.description = `on · archived ${at.toDateString() === new Date().toDateString() ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : at.toLocaleDateString()}`;
+      it.tooltip += `\n\nBefore its first write of each day rung has TIA Portal archive the project. Last: ${b.path} (TIA Portal's Project → Retrieve opens it).`;
+    }
     return it;
   }
 

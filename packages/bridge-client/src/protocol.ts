@@ -242,6 +242,15 @@ export interface UploadRequest {
   pcInterfaceNumber?: number;
 }
 
+/** A project archive TIA Portal wrote (Project → Retrieve opens it). */
+export interface ArchiveOutcome {
+  path: string;
+  bytes: number;
+  /** The project had changes and was saved first (TIA Portal archives only a saved project). */
+  savedFirst: boolean;
+  removed: string[];
+}
+
 export interface UploadOutcome {
   state: "Success" | "Information" | "Warning" | "Error" | string;
   station?: string;

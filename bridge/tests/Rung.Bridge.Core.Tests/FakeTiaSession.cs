@@ -39,6 +39,13 @@ public sealed class FakeTiaSession : ITiaSession
         return new UploadOutcome { State = "Success", Station = "S71500/ET200MP station_1", Plcs = new[] { "PLC_2" } };
     }
 
+    public (string Dir, int Keep)? LastArchive;
+    public ArchiveOutcome Archive(string directory, int keep)
+    {
+        LastArchive = (directory, keep);
+        return new ArchiveOutcome { Path = (directory ?? "C:\\backups") + "\\Fx_20261002_120000.zap20", Bytes = 1234, Removed = new string[0] };
+    }
+
     public DownloadOutcome Download(DownloadRequest request)
     {
         LastDownload = request;

@@ -43,6 +43,9 @@ namespace Rung.Bridge.Core
         UploadOutcome UploadStation(UploadRequest request);
         /// <summary>Opens the object's editor in the TIA Portal window (needs a TIA Portal with user interface).</summary>
         void Show(string address);
+        /// <summary>Saves the project if it has changes and archives it (compressed) into the folder, default
+        /// %LOCALAPPDATA%\rung\backups\&lt;project&gt;; keeps the newest <paramref name="keep"/> archives of the project there.</summary>
+        ArchiveOutcome Archive(string directory, int keep);
     }
 
     public sealed class BridgeInfo

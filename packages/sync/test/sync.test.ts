@@ -1525,3 +1525,68 @@ describe("preview: the next pass's plan, with nothing written", () => {
     expect(t.bridge.imports).toEqual([]);
   });
 });
+
+describe("an archive before the first write of the day", () => {
+  class Archiving extends TiaFake {
+    archives: (string | undefined)[] = [];
+    fail: string | undefined;
+    async archive(dir?: string): Promise<{ path: string; bytes: number; savedFirst: boolean; removed: string[] }> {
+      if (this.fail) throw new BridgeError("INTERNAL", this.fail);
+      this.archives.push(dir);
+      return { path: `C:\backups\RungFixture_${this.archives.length}.zap20`, bytes: 2048, savedFirst: false, removed: [] };
+    }
+  }
+  const make = (cfg?: (c: RungConfig) => void) => {
+    const t = setup(undefined, cfg);
+    const b = Object.assign(new Archiving(), { objects: t.bridge.objects });
+    return { ...t, bridge: b, sync: (now: number) => t.withState((s) => syncOnce(t.root, b, s, { config: t.config, now: () => now })) };
+  };
+  const day = (d: number, h = 9) => new Date(2026, 9, d, h).getTime();
+
+  it("is made once a day, before the first import, and named in the report", async () => {
+    const t = make();
+    await t.sync(day(5));
+    expect(t.bridge.archives).toEqual([]); // nothing written: no archive
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    const first = await t.sync(day(5, 10));
+    expect(first.imported).toBe(1);
+    expect(first.backup).toEqual({ path: "C:\backups\RungFixture_1.zap20", bytes: 2048 });
+    t.write(pA, srcA.replace("#x := 1;", "#x := 11;"));
+    const again = await t.sync(day(5, 15));
+    expect(again.imported).toBe(1);
+    expect(again.backup).toBeUndefined();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 12;"));
+    expect((await t.sync(day(6))).backup).toBeDefined();
+    expect(t.bridge.archives.length).toBe(2);
+  });
+
+  it("without the archive nothing is written, and the next pass tries again", async () => {
+    const t = make();
+    await t.sync(day(5));
+    t.bridge.fail = "the disk is full";
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    const r = await t.sync(day(5, 10));
+    expect(r.imported).toBe(0);
+    expect(t.bridge.imports).toEqual([]);
+    expect(r.diagnostics).toEqual([expect.objectContaining({ code: "BACKUP_FAILED", message: expect.stringContaining("the disk is full") })]);
+    t.bridge.fail = undefined;
+    const next = await t.sync(day(5, 11));
+    expect(next.imported).toBe(1);
+    expect(next.backup).toBeDefined();
+  });
+
+  it("goes where backupDir says, and not at all with sync.backup = off or in a preview", async () => {
+    const t = make((c) => (c.sync.backupDir = "D:\rung-backups"));
+    await t.sync(day(5));
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    await t.withState((s) => syncOnce(t.root, t.bridge, s, { config: t.config, now: () => day(5, 10), preview: true }));
+    expect(t.bridge.archives).toEqual([]);
+    await t.sync(day(5, 10));
+    expect(t.bridge.archives).toEqual(["D:\rung-backups"]);
+    const off = make((c) => (c.sync.backup = "off"));
+    await off.sync(day(5));
+    off.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    expect((await off.sync(day(5, 10))).imported).toBe(1);
+    expect(off.bridge.archives).toEqual([]);
+  });
+});

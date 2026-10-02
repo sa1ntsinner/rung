@@ -30,7 +30,7 @@ import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
-import { cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
+import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
@@ -60,6 +60,7 @@ Usage:
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
   rung writes [on|off] [--dir <ws>]    let this workspace write into its project (off after rung init), or stop it
   rung status [dir]
+  rung backup [dir]                    TIA Portal archives the project now (.zap; rung makes one before the first write of each day)
   rung resolve <file> --ours|--theirs|--merged
   rung confirm-delete <file|address> [--dir <workspace>]
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
@@ -308,6 +309,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   check: { options: ["json"], positionals: 0 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
+  backup: { options: [], positionals: 1 },
   pull: { options: ["force"], positionals: 1 },
   sync: { options: ["preview", "json"], positionals: 1 },
   watch: { options: [], positionals: 1 },
@@ -617,6 +619,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdPull(await findWorkspace(dir), v, io);
       case "status":
         return await cmdStatus(await findWorkspace(dir), io);
+      case "backup":
+        return await cmdBackup(await findWorkspace(dir), io);
       case "writes":
         return await cmdWrites(await findWorkspace(resolve(io.cwd, (v.dir as string | undefined) ?? ".")), target, io);
       case "doctor":

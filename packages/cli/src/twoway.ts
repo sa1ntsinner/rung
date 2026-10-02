@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 
 function printReport(io: Io, r: SyncReport) {
+  if (r.backup) io.stdout(`archived the project before writing into it: ${r.backup.path} (${Math.max(1, Math.round(r.backup.bytes / 1024))} KB; TIA Portal's Project → Retrieve opens it)\n`);
   io.stdout(
     `exported ${r.exported}  imported ${r.imported}  created ${r.created}  merged ${r.merged}  conflicts ${r.conflicts}  pending-deletes ${r.pendingDeletes}  removed ${r.removed}  unchanged ${r.unchanged}\n`,
   );
@@ -154,6 +155,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
     },
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
+    archive: async () => tools().archive(config.sync.backupDir),
     online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
     connections: async (p) => tools().connections(String(p.device), !!p.scan),
     compare: async (p) => tools().compare(String(p.device), p.target as never),
@@ -341,6 +343,33 @@ export async function cmdRename(dir: string, what: string, newName: string, io: 
 }
 
 const writesLabel = (c: RungConfig) => (c.writesOff ? "off (rung writes on)" : c.sync.import === "auto" ? "on" : "off (sync.import = manual)");
+
+/** `rung backup`: TIA Portal archives the project now (the same archive rung makes before the first write of a day). */
+export async function cmdBackup(dir: string, io: Io): Promise<number> {
+  const config = await loadConfig(dir);
+  const owner = await OwnerClient.connect(dir);
+  let b: { path: string; bytes: number; savedFirst?: boolean } | undefined;
+  if (owner) {
+    try {
+      b = await owner.request("archive");
+    } finally {
+      owner.close();
+    }
+  } else {
+    const client = await bridgeFor(config, io);
+    try {
+      b = await client.archive(config.sync.backupDir);
+    } finally {
+      await client.close();
+    }
+  }
+  if (!b) {
+    io.stderr(`rung: ${config.project.tiaVersion === "CODESYS" ? "CODESYS projects are not archived by rung; copy the .project file" : "this bridge cannot archive projects"}\n`);
+    return 1;
+  }
+  io.stdout(`${b.path} (${Math.max(1, Math.round(b.bytes / 1024))} KB)${b.savedFirst ? "; the project had changes and was saved first" : ""}\nTIA Portal's Project → Retrieve opens it.\n`);
+  return 0;
+}
 
 /** `rung writes [on|off]`: whether this copy of the workspace may write into its project (core writes.ts). */
 export async function cmdWrites(dir: string, what: string | undefined, io: Io): Promise<number> {

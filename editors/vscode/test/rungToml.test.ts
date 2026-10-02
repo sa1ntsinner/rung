@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { formatPlcSection, parseRungToml, upsertPlcSection, writesState } from "../src/core/rungToml";
+import { formatPlcSection, lastBackupOf, parseRungToml, upsertPlcSection, writesState } from "../src/core/rungToml";
 
 const toml = `# rung workspace
 format = 1
@@ -94,5 +94,13 @@ describe("writesState", () => {
     expect(writesState(ws('[bridge]\nhost = "elmir@tia-pc"\n'), JSON.stringify({ project: "D:/TIA/Line3.ap20", host: "elmir@tia-pc", since: "x" }))).toBe("on");
     expect(writesState(ws('[sync]\nimport = "manual"\n'), JSON.stringify({ project: "D:/TIA/Line3.ap20", since: "x" }))).toBe("manual");
     expect(writesState(undefined, "")).toBe("manual");
+  });
+});
+
+describe("lastBackupOf", () => {
+  it("reads the archive rung recorded, or nothing", () => {
+    expect(lastBackupOf(JSON.stringify({ at: 5, project: "D:/p.ap20", path: "C:/b/p_1.zap20" }))).toEqual({ at: 5, path: "C:/b/p_1.zap20" });
+    expect(lastBackupOf("")).toBeUndefined();
+    expect(lastBackupOf("{")).toBeUndefined();
   });
 });

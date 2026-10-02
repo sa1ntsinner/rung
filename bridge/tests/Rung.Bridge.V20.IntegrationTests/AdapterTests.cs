@@ -481,6 +481,32 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
     [Fact] public void CompilesTheHardware() =>
         Assert.NotEmpty(_fx.Session.CompileHardware("PLC_1"));
 
+    [Fact] public void ArchivesTheProjectAndKeepsTheNewestArchives()
+    {
+        // a short folder: TIA Portal refuses archive paths over 143 characters
+        var dir = Path.Combine(Path.GetPathRoot(Path.GetTempPath()), "rung-it-zap", Guid.NewGuid().ToString("N").Substring(0, 8));
+        try
+        {
+            var first = _fx.Session.Archive(dir, 2);
+            Assert.True(File.Exists(first.Path), first.Path);
+            Assert.EndsWith(".zap20", first.Path);
+            Assert.True(first.Bytes > 0);
+            System.Threading.Thread.Sleep(1100); // the name carries the second
+            _fx.Session.Archive(dir, 2);
+            System.Threading.Thread.Sleep(1100);
+            var third = _fx.Session.Archive(dir, 2);
+            var left = Directory.GetFiles(dir, "*.zap20");
+            Assert.Equal(2, left.Length);
+            Assert.Contains(third.Path, left);
+            Assert.DoesNotContain(first.Path, left);
+            Assert.Contains(first.Path, third.Removed);
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { }
+        }
+    }
+
     [Fact] public void ACopyInAnotherFolderNeverOverwritesTheOriginal()
     {
         // GenerateBlocksFromSource replaces a same-named block wherever it lives

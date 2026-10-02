@@ -22,6 +22,7 @@ import {
   type ObjectEntry,
   type ProjectInfo,
   type UploadOutcome,
+  type ArchiveOutcome,
   type UploadRequest,
 } from "./protocol.js";
 
@@ -176,6 +177,19 @@ export class BridgeClient {
   async receipts(operationIds: string[]): Promise<string[] | undefined> {
     try {
       return ((await this.request("objects.receipts", { operationIds })) as { landed: string[] }).landed;
+    } catch (e) {
+      if (e instanceof BridgeError && e.code === ErrorCodes.BAD_REQUEST && /Unknown method/i.test(e.message)) return undefined;
+      throw e;
+    }
+  }
+
+  /**
+   * Saves the project if it has changes and has TIA Portal archive it (.zap) into `dir` (default on the TIA Portal PC:
+   * %LOCALAPPDATA%\rung\backups\<project>), keeping the newest `keep` archives. undefined from a bridge that cannot (CODESYS).
+   */
+  async archive(dir?: string, keep = 10): Promise<ArchiveOutcome | undefined> {
+    try {
+      return (await this.request("project.archive", { ...(dir ? { dir } : {}), keep })) as ArchiveOutcome;
     } catch (e) {
       if (e instanceof BridgeError && e.code === ErrorCodes.BAD_REQUEST && /Unknown method/i.test(e.message)) return undefined;
       throw e;

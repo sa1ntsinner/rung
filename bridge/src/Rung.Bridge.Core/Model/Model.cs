@@ -65,6 +65,17 @@ namespace Rung.Bridge.Core.Model
         public CompileMessage[] Compile;
     }
 
+    /// <summary>A project archive TIA Portal wrote (TIA Portal's Project → Retrieve opens it again).</summary>
+    public sealed class ArchiveOutcome
+    {
+        public string Path;
+        public long Bytes;
+        /// <summary>The project had changes and was saved first (TIA Portal archives only a saved project).</summary>
+        public bool SavedFirst;
+        /// <summary>Older archives of the project removed to keep the newest ones.</summary>
+        public string[] Removed;
+    }
+
     public sealed class CompileMessage
     {
         public string Address;

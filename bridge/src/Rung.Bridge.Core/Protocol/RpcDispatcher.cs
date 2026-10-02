@@ -134,6 +134,8 @@ namespace Rung.Bridge.Core.Protocol
                 case "objects.show":
                     Session.Show(Str(p, "address"));
                     return new { shown = true };
+                case "project.archive":
+                    return Session.Archive(Str(p, "dir"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("keep", out var keep) && keep.ValueKind == JsonValueKind.Number ? keep.GetInt32() : 10);
                 default:
                     throw new RpcException(ErrorCodes.BadRequest, "Unknown method: " + method);
             }

@@ -78,6 +78,16 @@ export function parseRungToml(text: string): RungToml {
   return out;
 }
 
+/** The archive rung recorded in .rung/backups.json (text "" when there is none). */
+export function lastBackupOf(text: string): { at: number; path: string } | undefined {
+  try {
+    const b = JSON.parse(text) as { at?: unknown; path?: unknown };
+    return typeof b.at === "number" && typeof b.path === "string" ? { at: b.at, path: b.path } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Whether rung writes into the project from this copy of the workspace, as the CLI decides it: sync.import = "auto"
  * in rung.toml and `rung writes on` given for this project and host (.rung/writes.json, text "" when missing).

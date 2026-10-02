@@ -52,7 +52,7 @@ import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
 import { placeCompileMessages } from "./compile-lines.js";
 import { dryState, type Plan, type PlanEntry } from "./plan.js";
 
-export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts">>;
+export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts" | "archive">>;
 
 export interface Diagnostic {
   address: string;
@@ -82,6 +82,24 @@ export interface SyncReport {
   objects?: string[];
   /** A preview (SyncOptions.preview): what the pass would have done. */
   plan?: Plan;
+  /** The archive TIA Portal wrote before this pass's first write of the day (sync.backup = "daily"). */
+  backup?: { path: string; bytes: number };
+}
+
+const backupsFile = (root: string) => join(root, ".rung", "backups.json");
+
+/** The day's first write is due an archive: none yet today, or the last one was of another project. */
+async function backupDue(root: string, cfg: RungConfig, now: number): Promise<boolean> {
+  try {
+    const last = JSON.parse(await readFile(backupsFile(root), "utf8")) as { at?: number; project?: string };
+    return last.project !== cfg.project.path || typeof last.at !== "number" || new Date(last.at).toDateString() !== new Date(now).toDateString();
+  } catch {
+    return true;
+  }
+}
+
+async function recordBackup(root: string, cfg: RungConfig, path: string, now: number): Promise<void> {
+  await writeFileAtomic(backupsFile(root), JSON.stringify({ at: now, project: cfg.project.path, path }, null, 2) + "\n");
 }
 
 export interface SyncOptions {
@@ -871,9 +889,29 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     return sha256(Buffer.from(lines.sort().join("\n"), "utf8"));
   };
   const refusalKey = (job: ImportJob) => sha256(Buffer.from(JSON.stringify(Object.entries(job.bundle).sort()), "utf8")) + ":" + others(job.address);
+  // before the first write of the day TIA Portal archives the project: a whole project to go back to. Without it
+  // nothing is written; the next pass tries again
+  let backupFailed: string | undefined;
+  if (!plan && order.length && cfg.sync.backup === "daily" && bridge.archive && (await backupDue(root, cfg, now()))) {
+    try {
+      const b = await bridge.archive(cfg.sync.backupDir);
+      if (b) {
+        await recordBackup(root, cfg, b.path, now());
+        report.backup = { path: b.path, bytes: b.bytes };
+      }
+    } catch (e) {
+      if (!(e instanceof BridgeError) || FATAL_BRIDGE_CODES.has(e.code)) throw e;
+      backupFailed = e.message;
+    }
+  }
   for (const job of order) {
     const st = state.get(job.address);
     const primaryPath = job.captured.find((c) => c.role === "primary")?.path ?? job.stem + "." + job.form;
+    if (backupFailed) {
+      failed.add(job.address);
+      diag({ address: job.address, path: primaryPath, severity: "error", code: "BACKUP_FAILED", message: `Not sent: TIA Portal could not archive the project first (${backupFailed}). rung writes nothing without that archive; sync.backup = "off" in rung.toml turns it off` });
+      continue;
+    }
     const blockedBy = job.deps.map((d) => byName.get(d)).find((d) => d && (failed.has(d.address) || cyclic.has(d.address)));
     if (cyclic.has(job.address) || blockedBy) {
       failed.add(job.address);

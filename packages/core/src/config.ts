@@ -28,6 +28,13 @@ export interface RungConfig {
     save: "after-import" | "never";
     /** Weak revisions (dates) are re-verified by export + hash after this many ms. */
     weakVerifyMs: number;
+    /**
+     * "daily": before the first write of each day, TIA Portal archives the project (.zap, Project → Retrieve opens it);
+     * if it cannot, nothing is written. "off": no archive.
+     */
+    backup: "daily" | "off";
+    /** Where the archives go, on the PC that runs TIA Portal (default %LOCALAPPDATA%\rung\backups\<project>). */
+    backupDir?: string;
   };
   readOnly: { failsafe: true; knowHow: true; system: true; graph: true };
   /** How rung reaches TIA Portal: start = "headless" opens the project in a TIA Portal without window when none has it open. */
@@ -80,7 +87,7 @@ export function defaultConfig(projectPath: string, tiaVersion: EngineeringVersio
     project: { path: projectPath, tiaVersion },
     bridge: { command: bridgeCommand, args: [] },
     devices,
-    sync: { pollMs: 2000, detect: "fingerprint", compile: "affected", delete: "confirm", import: "auto", save: "after-import", weakVerifyMs: 3_600_000 },
+    sync: { pollMs: 2000, detect: "fingerprint", compile: "affected", delete: "confirm", import: "auto", save: "after-import", weakVerifyMs: 3_600_000, backup: "daily" },
     readOnly: { failsafe: true, knowHow: true, system: true, graph: true },
     tia: { start: "headless" },
     plc: {},
@@ -114,6 +121,8 @@ export function parseConfig(text: string): RungConfig {
   if (!["confirm", "never"].includes(sync.delete)) fail("sync.delete must be confirm or never");
   if (!["auto", "manual"].includes(sync.import)) fail("sync.import must be auto or manual");
   if (!["after-import", "never"].includes(sync.save)) fail("sync.save must be after-import or never");
+  if (!["daily", "off"].includes(sync.backup)) fail("sync.backup must be daily or off");
+  if (sync.backupDir !== undefined && typeof sync.backupDir !== "string") fail("sync.backupDir must be a folder path");
   const plc: Record<string, PlcConnection> = {};
   for (const [name, v] of Object.entries((raw.plc ?? {}) as Record<string, Record<string, unknown>>)) {
     if (typeof v !== "object" || v === null) fail(`plc.${name} must be a table`);

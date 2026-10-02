@@ -170,6 +170,14 @@ rl.on("line", (line) => {
     }
     case "objects.show":
       return fail("UNSUPPORTED_CAPABILITY", "TIA Portal was started without user interface");
+    case "project.archive": {
+      // like TIA Portal: an archive of the saved project; FAKE_ARCHIVE_ERROR makes it fail
+      if (process.env.FAKE_ARCHIVE_ERROR) return fail("INTERNAL", process.env.FAKE_ARCHIVE_ERROR);
+      const path = `${p.dir ?? "C:\\Users\\me\\AppData\\Local\\rung\\backups\\RungFixture"}\\RungFixture_${String(Date.now())}.zap20`;
+      db.archives = [...(db.archives ?? []), path];
+      save(db);
+      return reply({ path, bytes: 4096, savedFirst: false, removed: [] });
+    }
     case "plc.compile":
       if (p.hardware) return reply([{ severity: "info", description: "Hardware compiled" }]);
       return reply((p.addresses ?? []).filter((a) => (db.objects.find((o) => o.address === a)?.content ?? "").includes("#undeclared")).map((a) => ({ address: a, severity: "error", description: "Tag #undeclared not defined" })));
