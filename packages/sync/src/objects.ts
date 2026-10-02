@@ -41,20 +41,27 @@ export function readOnlyReason(e: ObjectEntry): string | undefined {
 export const isStrong = (fp: string) => fp.startsWith("fp:");
 export const rel2abs = (root: string, rel: string) => join(root, ...rel.split("/"));
 
-export async function diskHash(root: string, rel: string): Promise<string | "absent"> {
+/**
+ * The file's hash; `like` when the file holds that content but with other line endings, a BOM or no final newline
+ * (a git checkout with core.autocrlf): the same text, not an edit to send to TIA Portal.
+ */
+export async function diskHash(root: string, rel: string, like?: string): Promise<string | "absent"> {
+  let bytes: Buffer;
   try {
-    return sha256(await readFile(rel2abs(root, rel)));
+    bytes = await readFile(rel2abs(root, rel));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw e;
   }
+  const hash = sha256(bytes);
+  return like && hash !== like && sha256(normalizeText(bytes.toString("utf8"))) === like ? like : hash;
 }
 
 /** Disk state relative to the recorded base: clean, missing files only, or locally modified. */
 export async function localStatus(root: string, files: readonly StateFile[]): Promise<"clean" | "missing" | "modified"> {
   let missing = false;
   for (const f of files) {
-    const h = await diskHash(root, f.path);
+    const h = await diskHash(root, f.path, f.hash);
     if (h === "absent") missing = true;
     else if (h !== f.hash) return "modified";
   }
@@ -119,8 +126,8 @@ export async function planPublication(root: string, prevFiles: readonly StateFil
   const targets: PublishTarget[] = [];
   let localEdit = false;
   for (const f of files) {
-    const cur = await diskHash(root, f.path);
     const old = baseByKey.get(pathKey(f.path));
+    const cur = await diskHash(root, f.path, old?.hash ?? f.hash);
     const base = old?.hash ?? "absent";
     if (cur !== base && cur !== f.hash && cur !== "absent") localEdit = true;
     // a case-only rename must republish even identical bytes so the on-disk name follows TIA
@@ -129,7 +136,7 @@ export async function planPublication(root: string, prevFiles: readonly StateFil
   const removes: { path: string; prevHash: string }[] = [];
   for (const old of prevFiles) {
     if (files.some((f) => pathKey(f.path) === pathKey(old.path))) continue;
-    const cur = await diskHash(root, old.path);
+    const cur = await diskHash(root, old.path, old.hash);
     if (cur === "absent") continue;
     if (cur !== old.hash) localEdit = true;
     removes.push({ path: old.path, prevHash: cur });

@@ -95,7 +95,8 @@ export async function replaceGuarded(path: string, data: string | Uint8Array, op
       preimage = join(opts.recoveryDir, `${Date.now()}-${randomBytes(4).toString("hex")}-${basename(path)}`);
       await retry(() => rename(path, preimage!));
       const captured = sha256(await readFile(preimage));
-      const unexpected = opts.expectedHash === "absent" || captured !== opts.expectedHash;
+      // the same text with other line endings (a git checkout with core.autocrlf) is what was expected
+      const unexpected = opts.expectedHash === "absent" || (captured !== opts.expectedHash && sha256(normalizeText((await readFile(preimage)).toString("utf8"))) !== opts.expectedHash);
       if (unexpected && !opts.force) {
         // put the user's file back where it was, unless something recreated it meanwhile
         if (!(await exists(path))) await retry(() => rename(preimage!, path));

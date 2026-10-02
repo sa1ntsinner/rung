@@ -126,6 +126,8 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   const config = await loadConfig(dir);
   const state = await openState(dir, config); // single writer: fails with STATE_LOCKED if another owner runs
   let server: OwnerServer | undefined;
+  // rung writes on/off and rung.toml as they are now: the watch reads them before every pass
+  let live = config;
   // an open conflict or pending delete is in every pass: print a pass when it did something or when what
   // stands open changed, not every two seconds
   const standing = (r: SyncReport) =>
@@ -133,9 +135,10 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
+    reloadConfig: async () => (live = await loadConfig(dir)),
     validateTags,
     // the watch takes downloads only when they are on for the workspace (and checks the confirmed PLC itself)
-    bridgeFactory: () => bridgeFor(config, io, [...importFlags(config), ...(config.download.enabled ? ["--allow-download"] : [])]),
+    bridgeFactory: () => bridgeFor(live, io, [...importFlags(live), ...(config.download.enabled ? ["--allow-download"] : [])]),
     onReport: (r) => {
       const now = standing(r);
       if (r.exported + r.imported + r.created + r.merged + r.removed || now !== shown) printReport(io, r);
@@ -161,7 +164,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     preview: async () => {
       const r = await watcher.preview();
       if (!r) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
-      return { ...r, writesOff: !!config.writesOff || config.sync.import !== "auto" };
+      return { ...r, writesOff: !!live.writesOff || live.sync.import !== "auto" };
     },
     diagnostics: async () => watcher.lastReport?.diagnostics ?? [],
     resolve: async (p) => {
@@ -170,12 +173,14 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return { resolved: true };
     },
     confirmDelete: async (p) => {
+      mayWrite(live, "deleted");
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       await confirmDelete(dir, b as never, state, String(p.address));
       return { deleted: true };
     },
     rename: async (p) => {
+      mayWrite(live, "renamed");
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
@@ -296,6 +301,12 @@ export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged
   return 0;
 }
 
+/** rung rename and rung confirm-delete change the project: refused before any bridge starts when this copy may not write. */
+function mayWrite(config: RungConfig, action: string): void {
+  if (config.writesOff) throw new WorkspaceError("WRITES_OFF", `not ${action}: writes to TIA Portal are off in this workspace (rung writes on)`);
+  if (config.sync.import !== "auto") throw new WorkspaceError("WRITES_OFF", `not ${action}: sync.import = "manual" in rung.toml`);
+}
+
 export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io): Promise<number> {
   const dir = await findWorkspace(workspaceDir);
   const address = await addressOf(dir, what, io.cwd);
@@ -308,6 +319,7 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
     }
   } else {
     const config = await loadConfig(dir);
+    mayWrite(config, "deleted");
     const state = await openState(dir, config);
     try {
       const client = await bridgeFor(config, io, importFlags(config));
@@ -338,6 +350,7 @@ export async function renameInTia(ws: string, address: string, newName: string, 
     }
   }
   const config = await loadConfig(ws);
+  mayWrite(config, "renamed");
   const client = await bridgeFor(config, io, importFlags(config));
   try {
     const state = await openState(ws, config);
@@ -432,7 +445,7 @@ export async function cmdWrites(dir: string, what: string | undefined, io: Io): 
     const owner = await OwnerClient.connect(dir);
     if (owner) {
       owner.close();
-      io.stdout("rung watch runs in this workspace: restart it (Ctrl+C there, then rung watch) for this to apply\n");
+      io.stdout(`rung watch runs in this workspace and ${on ? "sends your edits from its next pass on" : "sends nothing more from its next pass on (a file it is sending right now still arrives)"}\n`);
     }
   }
   return 0;

@@ -157,7 +157,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
     const removes = [];
     let localEdit = false;
     for (const f of s.files) {
-      const cur = await diskHash(root, f.path);
+      const cur = await diskHash(root, f.path, f.hash);
       if (cur === "absent") continue;
       if (cur !== f.hash) localEdit = true;
       removes.push({ path: f.path, prevHash: cur });

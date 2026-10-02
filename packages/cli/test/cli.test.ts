@@ -407,7 +407,8 @@ describe("rung CLI", () => {
       for (const cmd of [["pull"], ["sync"], ["confirm-delete", "plc/PLC_1/blocks/Motor%2FValve 1.scl"]]) {
         t.err.length = 0;
         expect(await t.run(...cmd)).toBe(1);
-        expect(t.err.join("")).toMatch(/^rung: STATE_LOCKED: /);
+        // confirm-delete is refused earlier still: writes are off in this workspace
+        expect(t.err.join("")).toMatch(cmd[0] === "confirm-delete" ? /^rung: WRITES_OFF: / : /^rung: STATE_LOCKED: /);
       }
     } finally {
       await lock.close();

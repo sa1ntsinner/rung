@@ -119,6 +119,22 @@ describe("syncOnce", () => {
     expect(t.bridge.known[2]).toEqual({});
   });
 
+  it("a file that only got other line endings (git checkout with core.autocrlf) is no edit: nothing goes to TIA Portal", async () => {
+    const t = setup();
+    await t.sync();
+    const crlf = srcA.replace(/\n/g, "\r\n");
+    t.write(pA, "﻿" + crlf);
+    const r = await t.sync(2000);
+    expect(r.imported).toBe(0);
+    expect(t.bridge.imports).toEqual([]);
+    expect(t.read(pA)).toBe("﻿" + crlf); // left as git wrote it
+    // a change in TIA Portal still replaces it, without calling it a local edit
+    t.bridge.edit(A, { ".scl": srcA.replace("#z := 3;", "#z := 30;") });
+    const back = await t.sync(3000);
+    expect(back.warnings).toEqual([]);
+    expect(t.read(pA)).toContain("#z := 30;");
+  });
+
   it("imports a file edit, rewrites the file canonically and then stays quiet (no loop)", async () => {
     const t = setup();
     t.bridge.canon = (s) => s.replace(/\bbegin\b/i, "BEGIN").replace(/:=  +/g, ":= ");
@@ -1461,6 +1477,20 @@ describe("compile scope after an import", () => {
     expect(r.imported).toBe(1);
     expect(t.bridge.compileCalls).toEqual([]);
     expect(r.diagnostics).toEqual([expect.objectContaining({ address: A, code: "COMPILE", severity: "warning", message: "compiled Fx_A on import" })]);
+  });
+
+  it("a DB's start value changed: its users compile too, TIA Portal marks them inconsistent after any import of a DB", async () => {
+    const D = "plc:PLC_1/blocks/Fx_Db";
+    const db = 'DATA_BLOCK "Fx_Db"\nVERSION : 0.1\n   VAR\n      Max : Real;\n   END_VAR\nBEGIN\n   Max := 2700.0;\nEND_DATA_BLOCK\n';
+    const user = 'FUNCTION "Fx_B" : Void\nBEGIN\n  "Fx_Db".Max := 1.0;\nEND_FUNCTION\n';
+    const t = setup((b) => b.add(D, { form: "db", content: db }).add(B, { content: user }));
+    const telling = Object.assign(new Telling(), { objects: t.bridge.objects });
+    const sync = (now: number) => t.withState((s) => syncOnce(t.root, telling, s, { config: t.config, now: () => now }));
+    await sync(1000);
+    t.write("plc/PLC_1/blocks/Fx_Db.db", db.replace("2700.0", "2650.0"));
+    const r = await sync(2000);
+    expect(r.imported).toBe(1);
+    expect(telling.compileCalls).toEqual([[B]]);
   });
 
   it("an interface change compiles the callers too, not the block a second time", async () => {

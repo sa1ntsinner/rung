@@ -33,6 +33,8 @@ export interface BridgeClientOptions {
   env?: Record<string, string>;
   /** Default 120 s. A timed-out mutation rejects with OUTCOME_UNKNOWN and is never replayed. */
   requestTimeoutMs?: number;
+  /** The first request after the handshake, which may start TIA Portal without window and open the project. Default: requestTimeoutMs. */
+  firstRequestTimeoutMs?: number;
   /** Frames above this size terminate the bridge. Default 64 MiB. */
   maxLineBytes?: number;
   /**
@@ -63,6 +65,7 @@ export class BridgeClient {
   private buffer = "";
   private malformed = 0;
   private exited = false;
+  private opened = false;
   private exitPromise: Promise<void>;
   /** Methods sent, in order (diagnostics and tests). */
   readonly sentMethods: string[] = [];
@@ -70,7 +73,7 @@ export class BridgeClient {
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
-    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "maxLineBytes">> & { remote: boolean; closeTimeoutMs: number },
+    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "firstRequestTimeoutMs" | "maxLineBytes">> & { remote: boolean; closeTimeoutMs: number },
   ) {
     this.exitPromise = new Promise((resolve) => {
       const done = () => {
@@ -104,6 +107,7 @@ export class BridgeClient {
     });
     const client = new BridgeClient(child, {
       requestTimeoutMs: opts.requestTimeoutMs ?? 120_000,
+      firstRequestTimeoutMs: opts.firstRequestTimeoutMs ?? opts.requestTimeoutMs ?? 120_000,
       maxLineBytes: opts.maxLineBytes ?? 64 * 1024 * 1024,
       remote: !!opts.remote,
       closeTimeoutMs: opts.closeTimeoutMs ?? 5_000,
@@ -126,6 +130,11 @@ export class BridgeClient {
 
   request(method: string, params: Record<string, unknown>, timeoutMs = this.opts.requestTimeoutMs): Promise<unknown> {
     if (this.exited) return Promise.reject(new BridgeError(ErrorCodes.BRIDGE_EXITED, "rung-bridge is not running"));
+    // the first request after the handshake may start TIA Portal and open the project: minutes on a cold start
+    if (method !== "bridge.hello" && !this.opened) {
+      this.opened = true;
+      timeoutMs = Math.max(timeoutMs, this.opts.firstRequestTimeoutMs);
+    }
     const id = this.nextId++;
     const mutation = MUTATIONS.has(method);
     return new Promise((resolve, reject) => {

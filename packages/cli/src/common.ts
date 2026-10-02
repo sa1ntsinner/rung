@@ -25,9 +25,9 @@ export const HINTS: Record<string, string> = {
     "TIA Portal did not answer. It may be waiting for an \"Openness access\" confirmation (look at the TIA Portal window; a TIA Portal without window cannot show it). Register the bridge once with: rung setup openness",
   NO_PROJECT: "Open the project in TIA Portal, or let rung open it in the background: [tia] start = \"headless\" in rung.toml (the default).",
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
-  NOT_A_WORKSPACE: "Run rung init in this folder first.",
+  NOT_A_WORKSPACE: "rung init binds a folder to a TIA Portal project; in a clone of a workspace, rung pull is enough.",
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
-  READ_ONLY: "Two-way sync needs writes turned on (rung writes on) and sync.import = \"auto\" in rung.toml; protected, failsafe, system and GRAPH objects and library type instances are never imported.",
+  READ_ONLY: "rung writes into TIA Portal only when writes are on (rung writes on); know-how protected, fail-safe, system and GRAPH blocks and instances of library types it never changes.",
 };
 
 export function defaultBridge(env: Io["env"]): { command: string; args: string[] } {
@@ -79,7 +79,8 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   const env = defaultBridge(io.env);
   const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
-  const client = await BridgeClient.spawn({ command, args, env: bridgeEnv(io.env, {}, extra.includes("--allow-download")) });
+  // the first request may start TIA Portal without window and open the project: minutes on a cold start
+  const client = await BridgeClient.spawn({ command, args, env: bridgeEnv(io.env, {}, extra.includes("--allow-download")), firstRequestTimeoutMs: 300_000 });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
 }

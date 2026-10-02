@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { randomBytes, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { existsSync } from "node:fs";
 import { link, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.js";
@@ -165,7 +166,8 @@ export class StateStore {
           );
       }
       if (doc && doc.format !== STATE_FORMAT) throw new WorkspaceError("STATE_FORMAT", `state format ${doc.format} is not supported`);
-      if (!doc && !binding) throw new WorkspaceError("NOT_A_WORKSPACE", `${root} has no rung state; run rung init`);
+      // a clone of a workspace has its rung.toml but not the machine state, which stays out of git
+      if (!doc && !binding) throw new WorkspaceError("NOT_A_WORKSPACE", existsSync(join(root, "rung.toml")) ? `${root} has no local state yet (a fresh clone?): run rung pull` : `${root} has no rung state; run rung init`);
       if (doc && binding && !opts.rebind && !sameBinding(doc.binding, binding))
         throw new WorkspaceError("BINDING_MISMATCH", `${bindingDifference(doc.binding, binding)}; rung init --rebind binds the workspace anew`);
       const store = new StateStore(root, doc?.workspaceId ?? randomUUID(), binding ?? doc!.binding, nonce);

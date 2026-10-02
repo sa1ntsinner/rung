@@ -2,7 +2,7 @@
 // Content-addressed base blobs and a journal that makes multi-file publication recoverable.
 import { mkdir, readdir, readFile, stat, unlink, writeFile, rename } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { replaceGuarded, sha256, writeFileAtomic } from "./atomic.js";
+import { normalizeText, replaceGuarded, sha256, writeFileAtomic } from "./atomic.js";
 import { WorkspaceError } from "./errors.js";
 import type { ObjectState } from "./state.js";
 
@@ -77,13 +77,17 @@ export class Journal {
   }
 }
 
-async function currentHash(abs: string): Promise<string | "absent"> {
+/** The file's hash; `like` when it holds that text with other line endings, a BOM or no final newline (git's autocrlf). */
+async function currentHash(abs: string, like?: string): Promise<string | "absent"> {
+  let bytes: Buffer;
   try {
-    return sha256(await readFile(abs));
+    bytes = await readFile(abs);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw e;
   }
+  const hash = sha256(bytes);
+  return like && hash !== like && sha256(normalizeText(bytes.toString("utf8"))) === like ? like : hash;
 }
 
 const abs = (root: string, rel: string) => join(root, ...rel.split("/"));
@@ -116,7 +120,7 @@ async function apply(root: string, intent: PublishIntent, force: boolean): Promi
     // A case-only rename (Motor.scl → MOTOR.scl) is the same file on Windows/macOS: never trash the new one.
     if (targetKeys.has(fold(r.path))) continue;
     const p = abs(root, r.path);
-    const now = await currentHash(p);
+    const now = await currentHash(p, r.prevHash);
     if (now === "absent") continue;
     if (now !== r.prevHash && !force) throw new WorkspaceError("LOCAL_CHANGES", `${r.path} changed locally; not removed`);
     const dest = join(root, ".rung", "trash", intent.opId, ...r.path.split("/"));
@@ -133,13 +137,13 @@ async function apply(root: string, intent: PublishIntent, force: boolean): Promi
 export async function publishBundle(root: string, intent: PublishIntent, opts: { force?: boolean; keepJournal?: boolean } = {}): Promise<PublishIntent> {
   if (!opts.force) {
     for (const t of intent.targets) {
-      const now = await currentHash(abs(root, t.path));
+      const now = await currentHash(abs(root, t.path), t.prevHash);
       if (now !== t.prevHash && now !== t.hash) throw new WorkspaceError("LOCAL_CHANGES", `${t.path} changed locally; not overwritten`);
     }
     const targetKeys = new Set(intent.targets.map((t) => fold(t.path)));
     for (const r of intent.removes) {
       if (targetKeys.has(fold(r.path))) continue;
-      const now = await currentHash(abs(root, r.path));
+      const now = await currentHash(abs(root, r.path), r.prevHash);
       if (now !== "absent" && now !== r.prevHash) throw new WorkspaceError("LOCAL_CHANGES", `${r.path} changed locally; not removed`);
     }
   }
@@ -162,7 +166,7 @@ async function restorePreimage(root: string, opId: string, t: PublishTarget): Pr
     return;
   }
   for (const n of names)
-    if ((await currentHash(join(dir, n))) === t.prevHash) {
+    if ((await currentHash(join(dir, n), t.prevHash)) === t.prevHash) {
       await mkdir(dirname(abs(root, t.path)), { recursive: true });
       await rename(join(dir, n), abs(root, t.path));
       return;
@@ -178,7 +182,7 @@ async function hasPreimage(root: string, opId: string, prevHash: string): Promis
   } catch {
     return false;
   }
-  for (const n of names) if ((await currentHash(join(dir, n))) === prevHash) return true;
+  for (const n of names) if ((await currentHash(join(dir, n), prevHash)) === prevHash) return true;
   return false;
 }
 
@@ -197,7 +201,7 @@ export async function recoverJournal(root: string): Promise<RecoveryReport> {
   for (const intent of await journal.pending()) {
     let consistent = true;
     for (const t of intent.targets) {
-      const now = await currentHash(abs(root, t.path));
+      const now = await currentHash(abs(root, t.path), t.prevHash);
       if (now === t.hash || now === t.prevHash) continue;
       if (now === "absent" && (await hasPreimage(root, intent.opId, t.prevHash))) continue;
       consistent = false;
@@ -206,7 +210,7 @@ export async function recoverJournal(root: string): Promise<RecoveryReport> {
     const targetKeys = new Set(intent.targets.map((t) => fold(t.path)));
     for (const r of intent.removes) {
       if (targetKeys.has(fold(r.path))) continue;
-      const now = await currentHash(abs(root, r.path));
+      const now = await currentHash(abs(root, r.path), r.prevHash);
       if (now !== "absent" && now !== r.prevHash) consistent = false;
     }
     if (!consistent) {

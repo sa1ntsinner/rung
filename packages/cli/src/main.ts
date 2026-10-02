@@ -138,7 +138,9 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const cfgPath = join(dir, CONFIG_FILE);
   if ((await exists(cfgPath)) && !v.rebind) {
-    io.stderr(`rung: ${cfgPath} already exists (use --rebind to bind it to another project)\n`);
+    const bound = await loadConfig(dir, { raw: true }).then((c) => c.project.path, () => undefined);
+    const same = bound && (!v.project || resolve(io.cwd, String(v.project)).toLowerCase() === resolve(dir, bound).toLowerCase());
+    io.stderr(same ? `rung: ${dir} is bound to ${bound} already; rung pull brings it into the files (in a fresh clone too)\n` : `rung: ${cfgPath} already exists (rung init --rebind binds it to another project)\n`);
     return 1;
   }
   // checked before anything starts: --from-plc changes the project, so a bad argument must stop rung before that
@@ -202,6 +204,9 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     const gi = join(dir, ".gitignore");
     const current = (await exists(gi)) ? await readFile(gi, "utf8") : "";
     if (!current.split(/\r?\n/).includes(".rung/")) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ".rung/\n");
+    // git for Windows checks text out with CRLF by default; the files stay as TIA Portal's export writes them
+    const ga = join(dir, ".gitattributes");
+    if (!(await exists(ga))) await writeFile(ga, "* text=auto eol=lf\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
     const bridgeExe = io.env.RUNG_BRIDGE ?? (config.bridge.command || bridge.command);
     const wl = /rung-bridge-v2\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe) : "unknown";
@@ -514,7 +519,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
             ? []
             : ((await readdir(join(ws, "tests"), { recursive: true }).catch(() => [])) as string[]).map((f) => `tests/${f.split(sep).join("/")}`).filter((f) => /\.ya?ml$/i.test(f) && !/\.test\.ya?ml$/.test(f)).sort();
           const hint = unnamed.length ? `; ${unnamed.slice(0, 3).join(", ")}${unnamed.length > 3 ? ` and ${unnamed.length - 3} more` : ""} ${unnamed.length === 1 ? "is" : "are"} not named *.test.yaml` : "";
-          io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
+          const what = v.filter ? ` match "${String(v.filter)}" (a part of a test file's path, any letter case, or the name of the block it tests)` : "";
+          io.stdout(`no tests${what}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
           return 3;
         }
         io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n`);
@@ -677,8 +683,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
     }
   } catch (e) {
     if (e instanceof BridgeError || e instanceof WorkspaceError || e instanceof OwnerError) {
-      io.stderr(`rung: ${e.code}: ${e.message}\n`);
-      const hint = (cmd === "init" ? initHint(e.code, !!v.project) : undefined) ?? HINTS[e.code];
+      // the bridge's own words for "started without the right to import" mean nothing to a person running rung
+      const message = e.code === "READ_ONLY" && /--allow-import/.test(e.message) ? "TIA Portal was not changed: this workspace may not write into it now" : e.message;
+      io.stderr(`rung: ${e.code}: ${message}\n`);
+      // a bridge TIA Portal knows does not wait for the "Openness access" question: TIA was slow, not asking
+      const slow = e.code === "TIMEOUT" && (await whitelistStatus(bridgeExecutable(io.env)).catch(() => "unknown")) === "ok";
+      const hint = slow ? "TIA Portal took longer than rung waited. Opening a project in a TIA Portal without window can take minutes after a reboot or for a new project; run the command again." : ((cmd === "init" ? initHint(e.code, !!v.project) : undefined) ?? HINTS[e.code]);
       if (hint) io.stderr(`hint: ${hint}\n`);
       return 1;
     }

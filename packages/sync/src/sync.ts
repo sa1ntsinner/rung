@@ -786,7 +786,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const stem = item.stem!;
         const readOnly = isReadOnlyEntry(item.entry);
         const staged = await stageExport(root, bridge, address, stem);
-        const present = await Promise.all(staged.files.map((f) => diskHash(root, f.path)));
+        const present = await Promise.all(staged.files.map((f) => diskHash(root, f.path, f.hash)));
         if (present.every((h) => h === "absent")) {
           await publish(address, [], staged, readOnly);
           report.exported++;
@@ -819,7 +819,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         }
         const removes = [];
         for (const f of st.files) {
-          const h = await diskHash(root, f.path);
+          const h = await diskHash(root, f.path, f.hash);
           if (h !== "absent") removes.push({ path: f.path, prevHash: h });
         }
         if (removes.length) await publishBundle(root, { opId: randomUUID(), address, targets: [], removes, nextState: st });
@@ -1056,7 +1056,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     // its instance DBs and callers compile again only when what they see of it changed, or rung cannot tell
     const before = job.kind === "update" && st ? (await baseBundle(root, stemOf(st), st.files).catch(() => ({}) as Record<string, string>))["." + job.form] : undefined;
     const was = interfaceOf(job.form, before);
-    if (!result.compile || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
+    // a DB is the exception: TIA Portal marks its users inconsistent after any import of it, a start value too
+    if (!result.compile || job.form === "db" || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
   }
   await checkpoint();
 

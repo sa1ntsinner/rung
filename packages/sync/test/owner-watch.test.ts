@@ -197,6 +197,38 @@ describe("Watcher", () => {
     await state.close();
   });
 
+  it("writes turned off while it runs: the next saved file stays in the files; turned on again, the bridge starts anew", async () => {
+    class Importing extends ClosableFake {
+      imported: string[] = [];
+      override async importObject(address: string, form: string, path: string, expected: string): Promise<never> {
+        this.edit(address, { ["." + form]: readFileSync(path, "utf8") });
+        this.imported.push(address);
+        return (await this.exportObject(address, form, mkdtempSync(join(tmpdir(), "rung-out-")))) as never;
+      }
+    }
+    const root = ws();
+    const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");
+    config.sync.pollMs = 60_000;
+    const state = await StateStore.open(root, { projectPath: config.project.path, tiaVersion: "V20", devices: [] });
+    const b = new Importing().add("plc:PLC_1/blocks/Fx_A", { content: "a\n" });
+    let now = config;
+    let bridges = 0;
+    const w = new Watcher(root, state, { config, reloadConfig: async () => now, bridgeFactory: async () => (bridges++, b) });
+    await w.syncNow();
+    const fileA = join(root, "plc/PLC_1/blocks/Fx_A.scl");
+    now = { ...config, sync: { ...config.sync, import: "manual" }, writesOff: true };
+    writeFileSync(fileA, "a edited\n");
+    const off = await w.syncNow();
+    expect(b.imported).toEqual([]);
+    expect(off!.warnings.map((x) => x.code)).toContain("WRITES_OFF");
+    now = config;
+    await w.syncNow();
+    expect(b.imported).toEqual(["plc:PLC_1/blocks/Fx_A"]);
+    expect(bridges).toBe(2);
+    await w.stop();
+    await state.close();
+  });
+
   it("polls at most every other pass length and never queues ticks behind a running pass", async () => {
     const root = ws();
     const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");

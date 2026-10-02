@@ -13,6 +13,8 @@ export interface ClosableBridge extends SyncBridge {
 
 export interface WatcherOptions {
   config: RungConfig;
+  /** The configuration as it is now (rung.toml and the write right), read before every pass: rung writes off applies at once. */
+  reloadConfig?: () => Promise<RungConfig>;
   /** Starts a new bridge process (called again after a crash). */
   bridgeFactory: () => Promise<ClosableBridge>;
   onReport?: (r: SyncReport) => void;
@@ -68,11 +70,15 @@ export class Watcher {
   /** Imports TIA Portal refused: not sent again every poll (SyncOptions.refused). */
   private readonly refused = new Map<string, Refusal>();
 
+  private config: RungConfig;
+
   constructor(
     private readonly root: string,
     private readonly state: StateStore,
     private readonly opts: WatcherOptions,
-  ) {}
+  ) {
+    this.config = opts.config;
+  }
 
   start(): void {
     const plc = join(this.root, "plc");
@@ -133,6 +139,18 @@ export class Watcher {
     return next;
   }
 
+  /** What this watch may do now: writes turned off stop the next import; turned on, the bridge (started without import rights) starts again. */
+  private async reload(): Promise<void> {
+    if (!this.opts.reloadConfig) return;
+    const next = await this.opts.reloadConfig().catch(() => this.config);
+    const writes = (c: RungConfig) => !c.writesOff && c.sync.import === "auto";
+    if (writes(next) && !writes(this.config) && this.bridge) {
+      await this.bridge.close().catch(() => undefined);
+      this.bridge = await this.opts.bridgeFactory();
+    }
+    this.config = next;
+  }
+
   private async pass(): Promise<SyncReport | null> {
     const now = (this.opts.now ?? Date.now)();
     if (now < this.retryAt) return null;
@@ -142,7 +160,8 @@ export class Watcher {
     this.wantFull = false;
     try {
       this.bridge ??= await this.opts.bridgeFactory();
-      const options = { validateTags: this.opts.validateTags, config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
+      await this.reload();
+      const options = { validateTags: this.opts.validateTags, config: this.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
       if (!full) {
         // a saved file goes to TIA Portal without listing the whole project; what it cannot handle, the complete pass does
         const quick = files.length ? await syncQuick(this.root, this.bridge, this.state, options, files) : null;
@@ -190,7 +209,8 @@ export class Watcher {
   async preview(): Promise<SyncReport | null> {
     await this.running?.catch(() => null);
     if (!this.bridge) return null;
-    return syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, preview: true });
+    await this.reload();
+    return syncOnce(this.root, this.bridge, this.state, { config: this.config, preview: true });
   }
 
   async stop(): Promise<void> {
