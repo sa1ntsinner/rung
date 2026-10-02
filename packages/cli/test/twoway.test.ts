@@ -83,6 +83,27 @@ describe("two-way CLI", () => {
     expect(await t.run(["writes", "off"])).toBe(0);
   });
 
+  it("sync --preview shows the edit and its lines, sends nothing, and says writes are off", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    t.out.length = 0;
+    expect(await t.run(["sync", "--preview"])).toBe(0);
+    const text = t.out.join("");
+    expect(text).toContain("What rung sync would do now (nothing is sent, written or recorded):");
+    expect(text).toMatch(/update\s+plc\/PLC_1\/blocks\/Fx_Motor\.scl → TIA Portal/);
+    expect(text).toContain("-  #a := 1;");
+    expect(text).toContain("+  #a := 2;");
+    expect(text).toContain("writes to TIA Portal are off in this workspace");
+    expect(t.db().objects[0]!.content).toContain("#a := 1;");
+    t.out.length = 0;
+    expect(await t.run(["sync", "--preview", "--json"])).toBe(0);
+    const json = JSON.parse(t.out.join("")) as { plan: { entries: { action: string; path: string }[] }; writesOff: boolean };
+    expect(json.plan.entries).toEqual([expect.objectContaining({ action: "update", path: "plc/PLC_1/blocks/Fx_Motor.scl" })]);
+    expect(json.writesOff).toBe(true);
+  });
+
   it("sync refuses imports when sync.import is manual", async () => {
     const t = setup();
     await t.run(["init", "--writes"]);

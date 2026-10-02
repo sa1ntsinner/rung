@@ -49,9 +49,12 @@ If the project is not open, rung opens it in a TIA Portal without window (`[tia]
 Until you say so, rung writes nothing into the project: `rung pull`, `rung sync` and `rung watch` bring TIA Portal's changes into the files, and your edits stay in the files (`WRITES_OFF` in the report). Look around first, on a copy of the project if you like. Then:
 
 ```
-rung writes on     # this workspace may now write into D:\TIA\Line3.ap20
-rung watch         # keeps both sides in sync; Ctrl+C to stop
+rung sync --preview  # what the next sync would send to TIA Portal and bring in, with the lines; writes nothing
+rung writes on       # this workspace may now write into D:\TIA\Line3.ap20
+rung watch           # keeps both sides in sync; Ctrl+C to stop
 ```
+
+`rung sync --preview` asks the sync itself what it would do: each object (create, update, merge with TIA Portal's change, a change coming from TIA Portal, a conflict, a pending delete), the lines that change on the side it lands on, and what is compiled afterwards. In VS Code: *Preview Sync* (`Alt+Q Shift+S`) lists them and opens each one as a diff.
 
 The right is kept in `.rung/`, never in git, and names the project: a colleague who clones the folder, or a `rung init --rebind` to another project, starts with writes off again. `rung writes off` takes it back; in VS Code it is the *Writes to TIA Portal* line of the PLC view. `rung init --writes` turns it on right away, for scripts and CI.
 

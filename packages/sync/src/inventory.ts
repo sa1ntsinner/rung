@@ -58,7 +58,14 @@ async function loadRevisions(root: string): Promise<{ text: string; objects: Rec
 }
 
 /** What every pass checks before it touches anything: the binding, then finishing or flagging interrupted write-backs. */
-export async function preparePass(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<{ info: ProjectInfo; devices: string[]; blocked: Set<string> }> {
+export async function preparePass(
+  root: string,
+  bridge: BridgeLike,
+  state: StateStore,
+  config: RungConfig,
+  warn: (w: Warning) => void,
+  readOnly = false,
+): Promise<{ info: ProjectInfo; devices: string[]; blocked: Set<string> }> {
   const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
   const info = await bridge.projectInfo();
   if (!samePath(info.path, config.project.path))
@@ -68,6 +75,8 @@ export async function preparePass(root: string, bridge: BridgeLike, state: State
   const devices = config.devices.length ? config.devices : info.devices;
   for (const d of devices) if (!info.devices.includes(d)) throw new WorkspaceError("BINDING_MISMATCH", `device ${d} not found in project`);
 
+  // a preview finishes nothing: an interrupted write-back is the next real pass's to finish
+  if (readOnly) return { info, devices, blocked: new Set() };
   await sweepTempFiles(root);
   const recovery = await recoverJournal(root);
   for (const s of recovery.completed) state.upsert(s);
@@ -77,9 +86,9 @@ export async function preparePass(root: string, bridge: BridgeLike, state: State
   return { info, devices, blocked };
 }
 
-export async function takeInventory(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<Inventory> {
+export async function takeInventory(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void, readOnly = false): Promise<Inventory> {
   const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
-  const { info, devices, blocked } = await preparePass(root, bridge, state, config, warn);
+  const { info, devices, blocked } = await preparePass(root, bridge, state, config, warn, readOnly);
 
   const found: { entry: ObjectEntry; address: Address }[] = [];
   const skipped = new Set<string>();
@@ -114,7 +123,7 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
     }
   }
   const text = JSON.stringify({ version: 1, objects: revisions });
-  if (text !== known.text) await writeFileAtomic(revisionsFile(root), text);
+  if (text !== known.text && !readOnly) await writeFileAtomic(revisionsFile(root), text);
 
   const pre = preflight(root, found.map((i) => ({ address: i.entry.address, stem: addressToStem(i.address) })));
   for (const [a, b] of pre.collisions) w(a, "PATH_COLLISION", `collides with ${b}`);

@@ -1,5 +1,7 @@
 [
   { "label": "rung: sync", "command": "rung", "args": ["sync"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus" },
+  { "label": "rung: preview sync (what goes where, nothing written)", "command": "rung", "args": ["sync", "--preview"], "cwd": "$ZED_WORKTREE_ROOT" },
+  { "label": "rung: turn on writes to TIA Portal", "command": "rung", "args": ["writes", "on"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: watch (keep in sync)", "command": "rung", "args": ["watch"], "cwd": "$ZED_WORKTREE_ROOT", "use_new_terminal": true, "reveal": "no_focus" },
   { "label": "rung: compile this block", "command": "rung", "args": ["compile", "--file", "$ZED_FILE"], "cwd": "$ZED_WORKTREE_ROOT", "tags": ["rung-block"] },
   { "label": "rung: compile PLC", "command": "rung", "args": ["compile"], "cwd": "$ZED_WORKTREE_ROOT" },

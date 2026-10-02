@@ -1480,3 +1480,48 @@ describe("compile scope after an import", () => {
     expect(t.bridge.compileCalls).toEqual([[A, B]]);
   });
 });
+
+describe("preview: the next pass's plan, with nothing written", () => {
+  it("lists what goes to TIA Portal and what comes back, with the lines, and changes nothing; the real pass then does just that", async () => {
+    const pB = "plc/PLC_1/blocks/Fx_B.scl";
+    const pC = "plc/PLC_1/blocks/Fx_C.scl";
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: "b1\nb2\n" }).add("plc:PLC_1/blocks/Fx_C", { content: "c\n" }));
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 20;"));
+    t.bridge.edit(B, { ".scl": "b1\nb2 from TIA\n" });
+    t.write("plc/PLC_1/blocks/Fx_New.scl", 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    unlinkSync(t.f(pC));
+    const snapshot = () => [readdirSync(t.f("plc/PLC_1/blocks")).sort().join(","), t.read(pA), t.read(pB), readFileSync(t.f(".rung/state.json"), "utf8"), existsSync(t.f(".rung/diagnostics.json")) ? readFileSync(t.f(".rung/diagnostics.json"), "utf8") : ""];
+    const before = snapshot();
+    const r = await t.withState((s) => syncOnce(t.root, t.bridge, s, { config: t.config, now: () => 2000, preview: true }));
+    const plan = r.plan!;
+    const of = (path: string) => plan.entries.find((e) => e.path === path);
+    expect(of(pA)).toMatchObject({ action: "update", before: srcA, after: srcA.replace("#y := 2;", "#y := 20;") });
+    expect(of(pB)).toMatchObject({ action: "export", before: "b1\nb2\n", after: "b1\nb2 from TIA\n" });
+    expect(of("plc/PLC_1/blocks/Fx_New.scl")).toMatchObject({ action: "create", before: "" });
+    expect(of(pC)).toMatchObject({ action: "pending-delete" });
+    expect(plan.compile).toEqual(expect.arrayContaining([A, "plc:PLC_1/blocks/Fx_New"]));
+    expect(t.bridge.imports).toEqual([]);
+    expect(t.bridge.compileCalls).toEqual([]);
+    expect(snapshot()).toEqual(before);
+    // the real pass does what the plan said
+    const real = await t.sync(3000);
+    expect(real).toMatchObject({ imported: 1, created: 1, exported: 1, pendingDeletes: 1 });
+  });
+
+  it("plans with writes off as if they were on, and shows a conflict without writing its file", async () => {
+    const pB = "plc/PLC_1/blocks/Fx_B.scl";
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: "b1\nb2\nb3\n" }), (c) => {
+      c.sync.import = "manual";
+      c.writesOff = true;
+    });
+    await t.sync();
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    t.bridge.edit(B, { ".scl": "b1\nTIA\nb3\n" });
+    t.write(pB, "b1\nmine\nb3\n");
+    const r = await t.withState((s) => syncOnce(t.root, t.bridge, s, { config: t.config, now: () => 2000, preview: true }));
+    expect(r.plan!.entries.map((e) => [e.path, e.action])).toEqual(expect.arrayContaining([[pA, "update"], [pB, "conflict"]]));
+    expect(existsSync(t.f(pB + ".conflict"))).toBe(false);
+    expect(t.bridge.imports).toEqual([]);
+  });
+});

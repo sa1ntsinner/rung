@@ -17,6 +17,7 @@ import { Connector } from "./connect";
 import { compareCommand, renameCommand } from "./compare";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
+import { registerPreview } from "./preview";
 import { deviceTarget, fileTarget } from "./targets";
 
 export interface Services {
@@ -103,6 +104,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     });
   reg("rung.writes.on", setWrites(true));
   reg("rung.writes.off", setWrites(false));
+  reg("rung.preview", inWs(registerPreview(context, ws, cli)));
 
   // --- compile / test
   reg(
@@ -319,6 +321,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
   const items: ActionItem[] = [
     sep("sync"),
     a("sync", "Sync now", "rung.sync", "S"),
+    a("eye", "Preview sync", "rung.preview", "Shift+S", "what the next sync would send and bring in, before anything is written"),
     running ? a("eye-closed", "Stop watch", "rung.watch.stop", "W") : a("eye", "Start watch", "rung.watch.start", "W", "keep files and TIA Portal in sync"),
     a("cloud-download", "Pull from TIA Portal", "rung.pull", "P"),
     a("info", "Status", "rung.status"),

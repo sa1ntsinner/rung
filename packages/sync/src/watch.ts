@@ -183,6 +183,13 @@ export class Watcher {
     return this.bridge;
   }
 
+  /** rung sync --preview while the watch runs: through its bridge, after the pass in progress, writing nothing. */
+  async preview(): Promise<SyncReport | null> {
+    await this.running?.catch(() => null);
+    if (!this.bridge) return null;
+    return syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, preview: true });
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     this.fsWatcher?.close();

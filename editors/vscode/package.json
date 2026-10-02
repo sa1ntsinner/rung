@@ -86,6 +86,7 @@
       { "command": "rung.watch.toggle", "title": "Toggle Watch", "category": "rung", "icon": "$(eye)" },
       { "command": "rung.watch.show", "title": "Show Watch Terminal", "category": "rung" },
       { "command": "rung.status", "title": "Show Status", "category": "rung", "icon": "$(info)" },
+      { "command": "rung.preview", "title": "Preview Sync", "category": "rung", "icon": "$(eye)" },
       { "command": "rung.writes.on", "title": "Turn On Writes to TIA Portal", "category": "rung", "icon": "$(unlock)" },
       { "command": "rung.writes.off", "title": "Turn Off Writes to TIA Portal", "category": "rung", "icon": "$(lock)" },
       { "command": "rung.quickPick", "title": "Actions…", "category": "rung", "icon": "$(list-flat)" },
@@ -128,6 +129,7 @@
         { "command": "rung.watch.toggle", "when": "rung.workspace" },
         { "command": "rung.watch.show", "when": "false" },
         { "command": "rung.status", "when": "rung.workspace" },
+        { "command": "rung.preview", "when": "rung.workspace" },
         { "command": "rung.writes.on", "when": "rung.workspace" },
         { "command": "rung.writes.off", "when": "rung.workspace" },
         { "command": "rung.views", "when": "rung.workspace" },
@@ -217,6 +219,7 @@
     },
     "keybindings": [
       { "key": "alt+q s", "command": "rung.sync", "when": "rung.workspace" },
+      { "key": "alt+q shift+s", "command": "rung.preview", "when": "rung.workspace" },
       { "key": "alt+q v", "command": "rung.monitor.toggle", "when": "rung.workspace && editorLangId == scl" },
       { "key": "alt+q w", "command": "rung.watch.toggle", "when": "rung.workspace" },
       { "key": "alt+q b", "command": "rung.compileFile", "when": "rung.workspace && editorLangId == scl" },

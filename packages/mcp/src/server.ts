@@ -204,25 +204,50 @@ export function createMcpServer(ctx: McpContext): McpServer {
     },
   );
 
-  server.registerTool("rung_sync", { description: "Run one two-way sync pass now: sends edited files to TIA Portal, brings TIA changes into files, compiles what was imported. Returns counts, warnings and diagnostics." }, async () => {
-    const none = noWorkspace();
-    if (none) return none;
-    const viaOwner = await withOwner((o) => o.request<SyncReport | null>("syncNow"));
-    if (viaOwner !== undefined) return viaOwner ? json(viaOwner) : fail("rung watch is backing off after a bridge error; check rung_status");
-    if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is configured. Ask the human to start `rung watch`.");
-    const config = await loadConfig(ctx.root);
-    const bridge = await ctx.bridgeFactory();
-    try {
-      const state = await StateStore.open(ctx.root, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices });
-      try {
-        return json(await syncOnce(ctx.root, bridge, state, { config }));
-      } finally {
-        await state.close();
+  server.registerTool(
+    "rung_sync",
+    {
+      description:
+        "Run one two-way sync pass now: sends edited files to TIA Portal, brings TIA changes into files, compiles what was imported. Returns counts, warnings and diagnostics. With preview: true it writes nothing and returns the plan (each object, create/update/merge/export/conflict, TIA Portal's text before and after): show it to the person before a sync that sends something.",
+      inputSchema: { preview: z.boolean().optional().describe("only say what the pass would do; nothing is sent or written") },
+    },
+    async ({ preview }) => {
+      const none = noWorkspace();
+      if (none) return none;
+      if (preview) {
+        const planned = await withOwner((o) => o.request<SyncReport>("preview"));
+        if (planned !== undefined) return json(planned);
+        if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is configured. Ask the human to start `rung watch`.");
+        const config = await loadConfig(ctx.root);
+        const bridge = await ctx.bridgeFactory();
+        try {
+          const state = await StateStore.open(ctx.root, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices });
+          try {
+            return json(await syncOnce(ctx.root, bridge, state, { config, preview: true }));
+          } finally {
+            await state.close();
+          }
+        } finally {
+          await bridge.close();
+        }
       }
-    } finally {
-      await bridge.close();
-    }
-  });
+      const viaOwner = await withOwner((o) => o.request<SyncReport | null>("syncNow"));
+      if (viaOwner !== undefined) return viaOwner ? json(viaOwner) : fail("rung watch is backing off after a bridge error; check rung_status");
+      if (!ctx.bridgeFactory) return fail("No rung watch is running and no bridge is configured. Ask the human to start `rung watch`.");
+      const config = await loadConfig(ctx.root);
+      const bridge = await ctx.bridgeFactory();
+      try {
+        const state = await StateStore.open(ctx.root, { projectPath: config.project.path, tiaVersion: config.project.tiaVersion, devices: config.devices });
+        try {
+          return json(await syncOnce(ctx.root, bridge, state, { config }));
+        } finally {
+          await state.close();
+        }
+      } finally {
+        await bridge.close();
+      }
+    },
+  );
 
   server.registerTool(
     "rung_diagnostics",

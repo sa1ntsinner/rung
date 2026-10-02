@@ -56,6 +56,7 @@ Usage:
   rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
   rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (your edits go to TIA Portal once writes are on)
+  rung sync [dir] --preview [--json]   what the next pass would send and bring in, with the lines; writes nothing
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
   rung writes [on|off] [--dir <ws>]    let this workspace write into its project (off after rung init), or stop it
   rung status [dir]
@@ -308,7 +309,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   pull: { options: ["force"], positionals: 1 },
-  sync: { options: [], positionals: 1 },
+  sync: { options: ["preview", "json"], positionals: 1 },
   watch: { options: [], positionals: 1 },
   status: { options: [], positionals: 1 },
   resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
@@ -410,6 +411,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "from-plc": { type: "string" },
         host: { type: "string" },
         writes: { type: "boolean" },
+        preview: { type: "boolean" },
       },
     });
   } catch (e) {
@@ -620,7 +622,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "doctor":
         return await cmdDoctor(await findWorkspace(dir), v, io);
       case "sync":
-        return await cmdSync(await findWorkspace(dir), io);
+        return await cmdSync(await findWorkspace(dir), io, { preview: !!v.preview, json: !!v.json });
       case "watch":
         return await cmdWatch(await findWorkspace(dir), io);
       case "resolve": {

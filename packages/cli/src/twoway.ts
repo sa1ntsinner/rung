@@ -2,7 +2,7 @@
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, writesGranted, type RungConfig } from "@rung/core";
-import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type RenameReport, type SyncReport } from "@rung/sync";
+import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
 import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 
@@ -16,8 +16,50 @@ function printReport(io: Io, r: SyncReport) {
 
 const exitCode = (r: SyncReport) => (r.conflicts || r.diagnostics.some((d) => d.severity === "error") ? 2 : r.warnings.some((w) => !isNotice(w.code)) ? 2 : 0);
 
-export async function cmdSync(dir: string, io: Io): Promise<number> {
+const VERB: Record<PlanEntry["action"], string> = {
+  create: "create",
+  update: "update",
+  merge: "merge",
+  export: "from TIA",
+  remove: "remove",
+  restore: "restore",
+  conflict: "conflict",
+  "pending-delete": "pending",
+};
+
+/** rung sync --preview, for a person: each object, where it goes, and the lines that change there. */
+function printPlan(io: Io, r: SyncReport, writesOff: boolean) {
+  const plan = r.plan!;
+  io.stdout("What rung sync would do now (nothing is sent, written or recorded):\n");
+  if (!plan.entries.length) io.stdout("  nothing: files and TIA Portal agree\n");
+  for (const e of plan.entries) {
+    const sent = e.action === "create" || e.action === "update" || e.action === "merge";
+    const where = e.action === "export" || e.action === "restore" ? `TIA Portal → ${e.path}` : sent ? `${e.path} → TIA Portal${e.action === "create" ? " (new)" : e.action === "merge" ? " (merged with TIA Portal's change)" : ""}` : e.path;
+    io.stdout(`  ${VERB[e.action].padEnd(9)} ${where}${e.detail ? ` — ${e.detail}` : ""}\n`);
+    if (e.before === undefined || e.after === undefined || e.action === "create") continue;
+    const lines = unifiedDiff(e.before, e.after, "", "").split("\n").slice(2);
+    for (const l of lines.slice(0, 30)) io.stdout(`            ${l}\n`);
+    if (lines.length > 30) io.stdout(`            … ${lines.length - 30} more lines (rung sync --preview --json has them all)\n`);
+  }
+  printWarnings(io, r.warnings);
+  for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${d.path || d.address}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  if (plan.compile.length) io.stdout(`compiled afterwards: ${plan.compile.map((a) => (a.startsWith("plc:") ? parseAddress(a).name : a)).join(", ")}\n`);
+  if (writesOff && plan.entries.some((e) => e.action === "create" || e.action === "update" || e.action === "merge"))
+    io.stdout("writes to TIA Portal are off in this workspace: what goes to TIA Portal waits until rung writes on\n");
+}
+
+export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; json?: boolean } = {}): Promise<number> {
   const owner = await OwnerClient.connect(dir);
+  if (owner && opts.preview) {
+    try {
+      const r = await owner.request<SyncReport & { writesOff: boolean }>("preview");
+      if (opts.json) io.stdout(JSON.stringify(r, null, 2) + "\n");
+      else printPlan(io, r, r.writesOff);
+      return 0;
+    } finally {
+      owner.close();
+    }
+  }
   if (owner) {
     try {
       const r = await owner.request<SyncReport | null>("syncNow");
@@ -35,9 +77,16 @@ export async function cmdSync(dir: string, io: Io): Promise<number> {
   // the lock before the bridge: a workspace another rung process holds fails before a TIA Portal starts for nothing
   const state = await openState(dir, config);
   try {
-    const client = await bridgeFor(config, io, importFlags(config));
+    // a preview's bridge may not import at all
+    const client = await bridgeFor(config, io, opts.preview ? [] : importFlags(config));
     try {
-      const r = await syncOnce(dir, client, state, { config });
+      const r = await syncOnce(dir, client, state, { config, preview: !!opts.preview });
+      if (opts.preview) {
+        const writesOff = !!config.writesOff || config.sync.import !== "auto";
+        if (opts.json) io.stdout(JSON.stringify({ ...r, writesOff }, null, 2) + "\n");
+        else printPlan(io, r, writesOff);
+        return 0;
+      }
       printReport(io, r);
       return exitCode(r);
     } finally {
@@ -82,6 +131,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   server = await OwnerServer.start(dir, {
     status: async () => statusOf(state, watcher),
     syncNow: async () => watcher.syncNow(true), // asked for: refused imports are tried again
+    preview: async () => {
+      const r = await watcher.preview();
+      if (!r) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
+      return { ...r, writesOff: !!config.writesOff || config.sync.import !== "auto" };
+    },
     diagnostics: async () => watcher.lastReport?.diagnostics ?? [],
     resolve: async (p) => {
       await resolveConflict(dir, state, String(p.path), p.mode as "ours" | "theirs" | "merged");

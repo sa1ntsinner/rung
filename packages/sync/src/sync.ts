@@ -50,6 +50,7 @@ import {
 } from "./objects.js";
 import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
 import { placeCompileMessages } from "./compile-lines.js";
+import { dryState, type Plan, type PlanEntry } from "./plan.js";
 
 export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts">>;
 
@@ -79,6 +80,8 @@ export interface SyncReport {
   diagnostics: Diagnostic[];
   /** A quick pass (syncQuick): the objects it looked at; its warnings and diagnostics are about those alone. */
   objects?: string[];
+  /** A preview (SyncOptions.preview): what the pass would have done. */
+  plan?: Plan;
 }
 
 export interface SyncOptions {
@@ -97,6 +100,11 @@ export interface SyncOptions {
    * the real content first, so a TIA edit seen later is merged, never overwritten. A one-shot rung sync checks always.
    */
   unversionedMs?: number;
+  /**
+   * rung sync --preview: the pass decides as it always does, on a copy of the state, and writes nothing: no import, no
+   * file, no state on disk, no diagnostics. It plans as if writes were on; the report's plan says what it would do.
+   */
+  preview?: boolean;
 }
 
 export interface Refusal {
@@ -117,6 +125,8 @@ interface ImportJob {
   bundle: Record<string, string>;
   /** For a merge: the workspace files the merged bundle was made from. */
   local?: Record<string, string>;
+  /** For a merge: TIA Portal's version it was merged with. */
+  tia?: Record<string, string>;
   /** TIA revision the bundle was based on, or "absent" for a new object. */
   expected: string;
   /** Raw disk hashes of the files as read, used to guard the canonical rewrite. */
@@ -343,6 +353,7 @@ async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Dia
  * change to both in the same pass would have to wait for the next one (STALE_REVISION): that pass runs right away.
  */
 export async function syncOnce(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions): Promise<SyncReport> {
+  if (opts.preview) return syncPass(root, bridge, dryState(state), opts);
   const first = await syncPass(root, bridge, state, opts);
   if (first.imported + first.created === 0 || !first.warnings.some((w) => w.code === "STALE_REVISION")) return first;
   const second = await syncPass(root, bridge, state, opts);
@@ -407,13 +418,16 @@ async function quickInventory(root: string, bridge: SyncBridge, state: StateStor
 
 async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions, quick?: Map<string, LocalFile>): Promise<SyncReport> {
   const now = opts.now ?? Date.now;
-  const cfg = opts.config;
+  // a preview shows what the pass would send once writes are on, whatever they are now
+  const cfg = opts.preview && opts.config.sync.import !== "auto" ? { ...opts.config, sync: { ...opts.config.sync, import: "auto" as const }, writesOff: undefined } : opts.config;
   const report = emptyReport();
   const warn = (address: string, code: string, message?: string) => report.warnings.push(message ? { address, code, message } : { address, code });
   const diag = (d: Diagnostic) => report.diagnostics.push(d);
+  const plan: Plan | undefined = opts.preview ? { entries: [], compile: [] } : undefined;
+  const planned = (e: PlanEntry) => plan!.entries.push(e);
 
-  const inv = quick ? await quickInventory(root, bridge, state, cfg, quick, (w) => report.warnings.push(w)) : await takeInventory(root, bridge, state, cfg, (w) => report.warnings.push(w));
-  await sweepStaging(root, Date.now()); // file times are real time, whatever clock the pass runs on
+  const inv = quick ? await quickInventory(root, bridge, state, cfg, quick, (w) => report.warnings.push(w)) : await takeInventory(root, bridge, state, cfg, (w) => report.warnings.push(w), !!plan);
+  if (!plan) await sweepStaging(root, Date.now()); // file times are real time, whatever clock the pass runs on
   const items = new Map(inv.items.map((i) => [i.entry.address, i]));
   const scan = quick ? { files: new Map([...quick].filter(([a]) => items.has(a)).map(([a, f]) => [a, [f]])), ignored: [] } : await scanWorkspace(root);
   for (const f of scan.ignored) warn(f.path, "IGNORED_FILE", f.reason);
@@ -476,18 +490,29 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     for (const op of pendingOps.splice(0)) await journal.done(op);
   };
   const publish = async (address: string, prevFiles: readonly StateFile[], staged: StagedExport, readOnly: boolean, force = false) => {
-    const plan = await planPublication(root, prevFiles, staged.files);
-    if (plan.localEdit && !force) throw new WorkspaceError("LOCAL_CHANGES", `${staged.primary.path} changed locally; not overwritten`);
+    if (plan) {
+      const path = staged.primary.path;
+      const before = await readFile(rel2abs(root, path), "utf8").catch(() => undefined);
+      planned({ address, path, action: force ? "restore" : "export", ...(before !== undefined ? { before } : {}), after: staged.texts.get("." + staged.result.form) ?? "" });
+      return undefined;
+    }
+    const pub = await planPublication(root, prevFiles, staged.files);
+    if (pub.localEdit && !force) throw new WorkspaceError("LOCAL_CHANGES", `${staged.primary.path} changed locally; not overwritten`);
     const next = await buildState(root, address, staged, readOnly, now());
-    if (plan.targets.length || plan.removes.length) {
+    if (pub.targets.length || pub.removes.length) {
       const opId = randomUUID();
-      await publishBundle(root, { opId, address, targets: plan.targets, removes: plan.removes, nextState: next }, { keepJournal: true, force });
+      await publishBundle(root, { opId, address, targets: pub.targets, removes: pub.removes, nextState: next }, { keepJournal: true, force });
       pendingOps.push(opId);
     }
     state.upsert(next);
     return next;
   };
   const writeConflict = async (st: ObjectState, stem: string, files: Record<string, string>, staged: StagedExport, source: boolean) => {
+    if (plan) {
+      planned({ address: st.address, path: st.path, action: "conflict", detail: "changed here and in TIA Portal on the same lines: nothing is sent until rung resolve" });
+      report.conflicts++;
+      return;
+    }
     const local: Record<string, string> = {};
     if (source) {
       for (const [suffix, text] of Object.entries(files))
@@ -590,7 +615,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           else if (sameTexts(m.files, tia)) {
             await publish(address, captured, staged, cur.readOnly);
             report.created++;
-          } else queue.push({ ...job, bundle: m.files, local: bundle, expected: staged.result.fingerprint, kind: "merge" });
+          } else queue.push({ ...job, bundle: m.files, local: bundle, tia, expected: staged.result.fingerprint, kind: "merge" });
           continue;
         }
         // not in TIA Portal: the file is simply new again
@@ -648,6 +673,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           if (deletable && !tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
             state.upsert({ ...cur, status: "pendingDelete" });
             report.pendingDeletes++;
+            if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: "deleted here: rung confirm-delete deletes it in TIA Portal, or restore the file" });
             diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: "Deleted in the workspace; run rung confirm-delete to delete it in TIA Portal, or restore the file" });
             continue;
           }
@@ -716,7 +742,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           await publish(address, captured, staged!, readOnly, false);
           report.exported++;
         } else
-          queue.push({ address, name, form: cur.form, stem, bundle: m.files, local: bundle, expected: staged!.result.fingerprint, captured, kind: "merge", rank: rankOf(cur.form, mergedTexts), deps: referencedNames(mergedTexts, name) });
+          queue.push({ address, name, form: cur.form, stem, bundle: m.files, local: bundle, tia, expected: staged!.result.fingerprint, captured, kind: "merge", rank: rankOf(cur.form, mergedTexts), deps: referencedNames(mergedTexts, name) });
         continue;
       }
 
@@ -747,6 +773,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         if (status === "modified") {
           warn(address, "LOCAL_CHANGES", "deleted in TIA but edited locally; file kept (rung resolve --ours recreates it in TIA, --theirs accepts the delete)");
           state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: "absent", tiaFiles: st.files, deletedInTia: true } });
+          if (plan) planned({ address, path: st.path, action: "conflict", detail: "deleted in TIA Portal but edited here: the file is kept until rung resolve" });
+          continue;
+        }
+        if (plan) {
+          planned({ address, path: st.path, action: "remove", detail: "deleted in TIA Portal: the file goes too" });
+          report.removed++;
           continue;
         }
         const removes = [];
@@ -865,6 +897,15 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         continue;
       }
     }
+    if (plan) {
+      // what TIA Portal holds now (the base it last had, or what it was merged with) against what it would get
+      const suffix = "." + job.form;
+      const before = job.kind === "create" ? "" : job.kind === "merge" ? (job.tia?.[suffix] ?? "") : st ? ((await baseBundle(root, stemOf(st), st.files).catch(() => ({}) as Record<string, string>))[suffix] ?? "") : "";
+      planned({ address: job.address, path: primaryPath, action: job.kind, before, after: job.bundle[suffix] ?? "" });
+      imported.push(job.address);
+      if (job.kind !== "update" || interfaceOf(job.form, before) === undefined || interfaceOf(job.form, before) !== interfaceOf(job.form, job.bundle[suffix])) withCallers.push(job.address);
+      continue;
+    }
     const stage = await stageForImport(root, job.form, job.bundle);
     // the operation's id: the bridge keeps a receipt when TIA Portal commits it (see sendsOf)
     const opId = randomUUID();
@@ -924,17 +965,17 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     opts.refused?.delete(job.address);
     // Canonical rewrite: replace the imported files with TIA's form unless they were edited meanwhile.
     const staged = await mapStaged(root, result, null, job.stem);
-    const plan = await planPublication(root, job.captured, staged.files);
+    const pub = await planPublication(root, job.captured, staged.files);
     let next = await buildState(root, job.address, staged, false, now());
-    if (plan.localEdit && next.form !== job.form) {
+    if (pub.localEdit && next.form !== job.form) {
       // TIA Portal answered in a new form, but the file changed meanwhile: the state keeps the file's form, with
       // what was sent as its base, so the next pass sends the newer edit and then takes the new form
       next = { ...next, path: primaryPath, form: job.form, files: job.captured, fileHash: bundleHash(job.captured) };
     }
-    if (plan.localEdit) warn(job.address, "EDITED_DURING_IMPORT", "the file changed while it was imported; the newer edit is sent on the next pass");
-    else if (plan.targets.length || plan.removes.length) {
+    if (pub.localEdit) warn(job.address, "EDITED_DURING_IMPORT", "the file changed while it was imported; the newer edit is sent on the next pass");
+    else if (pub.targets.length || pub.removes.length) {
       const opId = randomUUID();
-      await publishBundle(root, { opId, address: job.address, targets: plan.targets, removes: plan.removes, nextState: next }, { keepJournal: true });
+      await publishBundle(root, { opId, address: job.address, targets: pub.targets, removes: pub.removes, nextState: next }, { keepJournal: true });
       pendingOps.push(opId);
     }
     state.upsert(next);
@@ -949,6 +990,13 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     if (!result.compile || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
   }
   await checkpoint();
+
+  if (plan) {
+    // what would be compiled: the imported objects (by their imports) and, where they need it, their users
+    if (imported.length && cfg.sync.compile !== "none") plan.compile = cfg.sync.compile === "all" ? ["(the whole PLC)"] : [...new Set([...imported, ...(await withUsers(root, state, withCallers))])];
+    report.plan = plan;
+    return report;
+  }
 
   // Compile what was imported and turn compiler messages into diagnostics.
   if (imported.length && cfg.sync.compile !== "none") {
