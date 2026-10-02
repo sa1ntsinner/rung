@@ -18,6 +18,7 @@ import { compareCommand, renameCommand } from "./compare";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
 import { registerPreview } from "./preview";
+import { whoWrites } from "./usages";
 import { deviceTarget, fileTarget } from "./targets";
 
 export interface Services {
@@ -105,6 +106,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.writes.on", setWrites(true));
   reg("rung.writes.off", setWrites(false));
   reg("rung.preview", inWs(registerPreview(context, ws, cli)));
+  reg("rung.whoWrites", () => whoWrites(s.lsp));
 
   // --- compile / test
   reg(

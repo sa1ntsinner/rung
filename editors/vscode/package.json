@@ -87,6 +87,7 @@
       { "command": "rung.watch.show", "title": "Show Watch Terminal", "category": "rung" },
       { "command": "rung.status", "title": "Show Status", "category": "rung", "icon": "$(info)" },
       { "command": "rung.preview", "title": "Preview Sync", "category": "rung", "icon": "$(eye)" },
+      { "command": "rung.whoWrites", "title": "Who Writes This?", "category": "rung", "icon": "$(references)" },
       { "command": "rung.writes.on", "title": "Turn On Writes to TIA Portal", "category": "rung", "icon": "$(unlock)" },
       { "command": "rung.writes.off", "title": "Turn Off Writes to TIA Portal", "category": "rung", "icon": "$(lock)" },
       { "command": "rung.quickPick", "title": "Actions…", "category": "rung", "icon": "$(list-flat)" },
@@ -207,7 +208,8 @@
       "editor/context": [
         { "command": "rung.resolveOurs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@1" },
         { "command": "rung.resolveTheirs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@2" },
-        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl)$/", "group": "rung@3" }
+        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl)$/", "group": "rung@3" },
+        { "command": "rung.whoWrites", "when": "editorLangId == scl || editorLangId == s7dcl", "group": "navigation@9" }
       ],
       "explorer/context": [
         { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/", "group": "rung@5" },
@@ -220,6 +222,7 @@
     "keybindings": [
       { "key": "alt+q s", "command": "rung.sync", "when": "rung.workspace" },
       { "key": "alt+q shift+s", "command": "rung.preview", "when": "rung.workspace" },
+      { "key": "alt+q u", "command": "rung.whoWrites", "when": "editorLangId == scl || editorLangId == s7dcl" },
       { "key": "alt+q v", "command": "rung.monitor.toggle", "when": "rung.workspace && editorLangId == scl" },
       { "key": "alt+q w", "command": "rung.watch.toggle", "when": "rung.workspace" },
       { "key": "alt+q b", "command": "rung.compileFile", "when": "rung.workspace && editorLangId == scl" },

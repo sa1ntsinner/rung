@@ -23,6 +23,7 @@ If `rung` is not on PATH, set in settings:
 The extension runs the rung CLI for everything; it only reads `rung.toml` and `.rung/state.json` itself.
 
 - **rung sidebar** (activity bar): *Project* lists the mirrored objects by PLC, kind and TIA folder (or by block type) with conflict, changed and read-only marks; right-click to compile, test, open in TIA Portal or resolve a conflict. *PLC* shows whether `rung watch` runs (start/stop), whether this workspace may write into the project (*Writes to TIA Portal*: off after initializing, click to turn on; `rung writes on`), each PLC's online state and connection, and Go online, Go offline, Compile PLC, Compile hardware, Interfaces…, Download…. A folder without `rung.toml` gets *Initialize from a TIA Portal project* (`rung init --project`).
+- **Who Writes This?** (`Alt+Q U`, or right-click a name): what writes the tag, DB member or variable under the cursor across the project, each with its block and line and where that block is called from, then what reads it. HMI, communication blocks and indirect access are not seen, and the list says so. In a terminal or Zed: `rung who "Line_DB".Speed` (Zed task *who writes the selected name*).
 - **Preview Sync** (`Alt+Q Shift+S`, also in the actions list): what the next sync would send to TIA Portal and bring into the files, each as a diff of the side it lands on, before anything is written; then *Sync now* or, while writes are off, *Turn on writes*.
 - **Status bar**: watching / idle / conflicts / online PLCs; click for all actions.
 - **CodeLens** above every block header and editor title buttons: Compile, Test, Open in TIA Portal. Compile messages land in Problems.
@@ -44,7 +45,7 @@ Zed → Extensions → install **Siemens SCL**. Until it is listed there: *Insta
 
 - SCL highlighting, outline and the rung language server for `.scl`, `.db`, `.udt` and `.s7dcl`.
 - A run button (▶) in the gutter next to every block header: compile this block, test it, or open it in TIA Portal.
-- Tasks for everything else (*task: spawn*, or `ctrl-shift-r` in many setups): sync, preview sync (what goes where, nothing written), turn on writes, watch, compile PLC, compile hardware, test, go online/offline, interfaces, download (it asks you to type the PLC name first), open in TIA Portal, pull, views, resolve conflicts.
+- Tasks for everything else (*task: spawn*, or `ctrl-shift-r` in many setups): sync, preview sync (what goes where, nothing written), turn on writes, who writes the selected name, watch, compile PLC, compile hardware, test, go online/offline, interfaces, download (it asks you to type the PLC name first), open in TIA Portal, pull, views, resolve conflicts.
 - Snippets: `fb`, `fc`, `db`, `udt`, `if`, `ife`, `case`, `for`, `while`, `region`, `ton`, `rtrig`, `seq`.
 - Live values at the end of each line (below).
 

@@ -342,9 +342,10 @@ export function signatureHelp(index: WorkspaceIndex, uri: string, offset: number
   };
 }
 
-export function documentHighlights(index: WorkspaceIndex, uri: string, offset: number): (Location & { kind: "read" | "write" })[] {
+/** Whether a use in this file reads or writes: the left of `:=`, and output and InOut arguments of calls, write. */
+function accessIn(index: WorkspaceIndex, uri: string): (start: number) => "read" | "write" {
   const doc = index.docs.get(uri);
-  if (!doc?.parsed) return [];
+  if (!doc?.parsed) return () => "read";
   const writes = new Set<Ref>();
   const refs = doc.parsed.blocks.flatMap((b) => b.refs);
   for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n), true)) {
@@ -356,11 +357,62 @@ export function documentHighlights(index: WorkspaceIndex, uri: string, offset: n
       if (target) writes.add(target);
     });
   }
-  return references(index, uri, offset, false).filter((r) => r.uri === uri).map((r) => {
-    const ref = refs.find((x) => x.start === r.start || x.members.some((m) => m.start === r.start));
-    const kind: "read" | "write" = ref?.access === "write" || (ref && writes.has(ref)) ? "write" : "read";
-    return { ...r, kind };
-  });
+  return (start) => {
+    const ref = refs.find((x) => x.start === start || x.members.some((m) => m.start === start));
+    return ref?.access === "write" || (ref && writes.has(ref)) ? "write" : "read";
+  };
+}
+
+export function documentHighlights(index: WorkspaceIndex, uri: string, offset: number): (Location & { kind: "read" | "write" })[] {
+  if (!index.docs.get(uri)?.parsed) return [];
+  const kind = accessIn(index, uri);
+  return references(index, uri, offset, false)
+    .filter((r) => r.uri === uri)
+    .map((r) => ({ ...r, kind: kind(r.start) }));
+}
+
+export interface UsageSite extends Location {
+  kind: "read" | "write";
+  /** The block the use is in. */
+  block?: string;
+  /** Where that block is called from (one level up): the caller and the call's file position. */
+  calledFrom?: { block: string; uri: string; start: number }[];
+}
+
+/**
+ * Who writes and who reads what is under the cursor (a tag, a DB member, a local, an instance member), across the
+ * workspace: the commissioning question "what sets this?". Indirect access (pointers, VARIANT, PEEK/POKE), HMI and
+ * communication are not seen; the report says so where it shows.
+ */
+export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): { writes: UsageSite[]; reads: UsageSite[] } {
+  const kinds = new Map<string, (start: number) => "read" | "write">();
+  const kindOf = (u: string) => kinds.get(u) ?? (kinds.set(u, accessIn(index, u)), kinds.get(u)!)!;
+  const callers = new Map<string, UsageSite["calledFrom"]>();
+  const callersOf = (block: BlockModel, u: string): UsageSite["calledFrom"] => {
+    const key = `${u}#${block.name}`;
+    if (!callers.has(key))
+      callers.set(
+        key,
+        references(index, u, block.nameStart, false)
+          .filter((r) => r.uri !== u || r.start < block.start || r.start > block.end)
+          .map((r) => ({ block: index.blockAt(r.uri, r.start)?.name ?? "", uri: r.uri, start: r.start }))
+          .filter((c) => c.block),
+      );
+    return callers.get(key);
+  };
+  const writes: UsageSite[] = [];
+  const reads: UsageSite[] = [];
+  for (const r of references(index, uri, offset, false)) {
+    const block = index.blockAt(r.uri, r.start);
+    const kind = kindOf(r.uri)(r.start);
+    const site: UsageSite = { ...r, kind, ...(block ? { block: block.name } : {}) };
+    if (kind === "write" && block) {
+      const from = callersOf(block, r.uri);
+      if (from?.length) site.calledFrom = from;
+    }
+    (kind === "write" ? writes : reads).push(site);
+  }
+  return { writes, reads };
 }
 
 const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section] ?? m.section} ` : ""}**${m.name}** : \`${m.type}\`${m.comment ? ` — ${m.comment}` : ""}`;

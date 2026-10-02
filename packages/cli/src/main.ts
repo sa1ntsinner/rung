@@ -37,6 +37,7 @@ import { cmdSimulate } from "./simulate.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
+import { cmdWho } from "./who.js";
 
 export type { Io } from "./common.js";
 
@@ -69,6 +70,7 @@ Usage:
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
+  rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
   rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the library and tags
   rung agents [dir]                    regenerate the project summary in AGENTS.md
@@ -334,6 +336,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
   "codesys-bridge": { options: ["project"], positionals: 0 },
   assignments: { options: ["json"], positionals: 1 },
+  who: { options: ["file", "json", "dir"], positionals: 1 },
   upload: { options: ["ip", "use", "mode", "number"], positionals: 1 },
 };
 
@@ -582,6 +585,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdInit(dir, v, io);
       case "codesys-bridge":
         return await cmdCodesysBridge(v, io);
+      case "who":
+        return await cmdWho(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, v, io);
       case "assignments": {
         const ws = await findWorkspace(dir).catch(() => dir);
         const index = new WorkspaceIndex();

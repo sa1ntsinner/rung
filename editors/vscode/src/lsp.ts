@@ -52,6 +52,12 @@ export class Lsp implements vscode.Disposable {
     await this.start();
   }
 
+  /** One of rung's own requests (rung/usages); undefined while the server is not running. */
+  async request<T>(method: string, params: unknown): Promise<T | undefined> {
+    if (!this.client?.isRunning()) return undefined;
+    return this.client.sendRequest<T>(method, params);
+  }
+
   async stop(): Promise<void> {
     const c = this.client;
     this.client = undefined;

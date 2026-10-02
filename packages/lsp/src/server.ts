@@ -27,7 +27,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
-import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, type CompletionKind, type OutlineSymbol } from "./features.js";
+import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
@@ -260,6 +260,25 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       .filter((l) => index.docs.get(l.uri))
       .map((l) => ({ uri: l.uri, range: range(l.uri, l.start, l.end) })),
   );
+  // rung's own request: who writes and who reads what is under the cursor, with the line and the block
+  connection.onRequest("rung/usages", (p: { textDocument: { uri: string }; position: { line: number; character: number } }) => {
+    const r = usagesAt(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position));
+    const line = (uri: string, start: number) => {
+      const text = index.docs.get(uri)?.text ?? "";
+      const from = text.lastIndexOf("\n", start - 1) + 1;
+      const to = text.indexOf("\n", start);
+      return text.slice(from, to < 0 ? undefined : to).trim();
+    };
+    const out = (s: UsageSite) => ({
+      uri: s.uri,
+      range: range(s.uri, s.start, s.end),
+      kind: s.kind,
+      block: s.block,
+      text: line(s.uri, s.start),
+      ...(s.calledFrom ? { calledFrom: s.calledFrom.map((c) => ({ block: c.block, uri: c.uri, range: range(c.uri, c.start, c.start) })) } : {}),
+    });
+    return { writes: r.writes.filter((s) => index.docs.get(s.uri)).map(out), reads: r.reads.filter((s) => index.docs.get(s.uri)).map(out) };
+  });
   connection.onRenameRequest(async (p) => {
     const uri = p.textDocument.uri;
     const offset = offsetOf(uri, p.position);

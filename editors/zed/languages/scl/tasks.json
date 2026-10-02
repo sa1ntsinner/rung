@@ -8,6 +8,7 @@
   { "label": "rung: compile hardware", "command": "rung", "args": ["compile", "--hw"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: test all", "command": "rung", "args": ["test"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: test this block", "command": "rung", "args": ["test", "--filter", "$ZED_STEM"], "cwd": "$ZED_WORKTREE_ROOT", "tags": ["rung-block"] },
+  { "label": "rung: who writes the selected name", "command": "rung", "args": ["who", "$ZED_SELECTED_TEXT", "--file", "$ZED_FILE"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: go online", "command": "rung", "args": ["online"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: go offline", "command": "rung", "args": ["online", "--off"], "cwd": "$ZED_WORKTREE_ROOT" },
   { "label": "rung: online state", "command": "rung", "args": ["online", "--state"], "cwd": "$ZED_WORKTREE_ROOT", "reveal": "no_focus" },
