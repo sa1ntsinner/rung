@@ -48,6 +48,9 @@ describe("rung setup", () => {
     expect(text).toContain(`set mcpServers.rung in ${join(root, ".mcp.json")}`);
     expect(text).toContain(`set mcpServers.rung in ${join(root, ".cursor", "mcp.json")}`);
     expect(text).toContain(`set [mcp_servers.rung] in ${join(home, ".codex", "config.toml")}`);
+    // Codex's config is the same for every project: it must not send all of them to this one
+    const codex = plan.find((a) => a.kind === "toml-table") as { body: string };
+    expect(codex.body).not.toContain(JSON.stringify(root).slice(1, -1));
     expect(text).toContain(`copy 2 skills to ${join(root, ".claude", "skills")}`);
     expect(text).toContain(`copy 2 skills to ${join(root, ".agents", "skills")}`); // Cursor and Codex share .agents/skills
     expect(existsSync(join(root, ".mcp.json"))).toBe(false);

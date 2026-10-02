@@ -97,7 +97,8 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
         break;
       case "codex":
         skillDirs.add(at(".agents/skills", ".codex/skills"));
-        actions.push({ kind: "toml-table", file: join(home, ".codex", "config.toml"), table: "mcp_servers.rung", body: `command = ${JSON.stringify(mcp.command)}\nargs = ${JSON.stringify(mcpArgs)}`, why: "Codex: rung MCP server" });
+        // Codex reads one config for every project: the server finds the workspace it is started in, never a fixed one
+        actions.push({ kind: "toml-table", file: join(home, ".codex", "config.toml"), table: "mcp_servers.rung", body: `command = ${JSON.stringify(mcp.command)}\nargs = ${JSON.stringify([...mcp.args, "mcp"])}`, why: "Codex: rung MCP server (all projects)" });
         break;
       case "cursor":
         skillDirs.add(at(".agents/skills", ".cursor/skills"));
