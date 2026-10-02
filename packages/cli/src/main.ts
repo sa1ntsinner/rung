@@ -64,7 +64,7 @@ Usage:
   rung status [dir]
   rung backup [dir]                    TIA Portal archives the project now (.zap; rung makes one before the first write of each day)
   rung resolve <file> --ours|--theirs|--merged
-  rung confirm-delete <file|address> [--dir <workspace>]
+  rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
@@ -238,10 +238,13 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
     const client = await bridgeFor(config, io);
     try {
       let last = 0;
+      // progress only for a person at a terminal: in a log or a task's output, carriage returns pile up on one line
+      const live = !!process.stderr.isTTY;
       const report = await pull(dir, client, state, {
         config,
         force: !!v.force,
         onProgress: (done, total) => {
+          if (!live) return;
           const pct = Math.floor((done / Math.max(total, 1)) * 100);
           if (pct >= last + 10 || done === total) {
             last = pct;
@@ -249,11 +252,12 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
           }
         },
       });
-      io.stderr("\n");
+      if (live) io.stderr("\n");
       io.stdout(
         `exported   ${report.exported}\nunchanged  ${report.unchanged}\nremoved    ${report.removed}\nread-only  ${report.readOnly}\nwarnings   ${report.warnings.length}\n`,
       );
       printWarnings(io, report.warnings);
+      for (const o of report.overwritten) io.stdout(`overwrote your edit of ${o.path} with TIA Portal's version; yours is kept in ${o.copy}\n`);
       await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
       return report.warnings.some((w) => !isNotice(w.code)) ? 2 : 0;
     } finally {
@@ -324,7 +328,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   watch: { options: [], positionals: 1 },
   status: { options: [], positionals: 1 },
   resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
-  "confirm-delete": { options: ["dir"], positionals: 1 },
+  "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "json"], positionals: 1 },
   live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
@@ -670,10 +674,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "confirm-delete":
         if (!target) {
-          io.stderr("rung: usage: rung confirm-delete <file|address> [--dir <workspace>]\n");
+          io.stderr("rung: usage: rung confirm-delete <file|address> [--force] [--dir <workspace>]\n");
           return 1;
         }
-        return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
+        return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io, !!v.force);
       default:
         {
           const near = nearest(cmd, [...Object.keys(COMMANDS).filter((c) => c !== "codesys-bridge"), "bridge"]);

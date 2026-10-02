@@ -26,7 +26,9 @@ export type WorkspaceErrorCode =
   | "NOT_A_WORKSPACE"
   | "READ_ONLY"
   /** this copy of the workspace was not given the right to write into its project (rung writes on) */
-  | "WRITES_OFF";
+  | "WRITES_OFF"
+  | "IN_USE"
+  | "NOT_DELETABLE";
 
 export class WorkspaceError extends Error {
   override name = "WorkspaceError";

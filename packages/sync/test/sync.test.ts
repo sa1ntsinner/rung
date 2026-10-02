@@ -708,6 +708,30 @@ describe("syncOnce", () => {
     expect(after.pendingDeletes + after.exported).toBe(0);
   });
 
+  it("a block others still use: the confirmation names them and only --force deletes it", async () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: 'FUNCTION "Fx_B" : Void\nBEGIN\n  "Fx_A"();\nEND_FUNCTION\n' }));
+    await t.sync();
+    unlinkSync(t.f(pA));
+    await t.sync();
+    await expect(t.withState((s) => confirmDelete(t.root, t.bridge, s, A))).rejects.toMatchObject({ code: "IN_USE", message: expect.stringContaining("plc/PLC_1/blocks/Fx_B.scl") });
+    expect(t.bridge.deletes).toEqual([]);
+    const r = await t.withState((s) => confirmDelete(t.root, t.bridge, s, A, { force: true }));
+    expect(r.users).toEqual([B]);
+    expect(t.bridge.deletes).toEqual([A]);
+  });
+
+  it("a PLC's default tag table is never deleted: the file comes back", async () => {
+    const T = "plc:PLC_1/tags/Default tag table";
+    const t = setup((b) => b.add(T, { form: "tags.st", content: "VAR_GLOBAL\n    Start AT %I0.0 : Bool;\nEND_VAR\n" }));
+    await t.sync();
+    const p = "plc/PLC_1/tags/Default tag table.tags.st";
+    unlinkSync(t.f(p));
+    const r = await t.sync(2000);
+    expect(r.pendingDeletes).toBe(0);
+    expect(r.warnings.map((w) => w.code)).toContain("NOT_DELETABLE");
+    expect(existsSync(t.f(p))).toBe(true);
+  });
+
   it("restores a deleted file when deletes are disabled", async () => {
     const t = setup(undefined, (c) => (c.sync.delete = "never"));
     await t.sync();

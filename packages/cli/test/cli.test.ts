@@ -193,7 +193,7 @@ describe("rung CLI", () => {
     }
     t.out.length = 0;
     await t.run("test", "-h");
-    expect(t.out.join("")).toContain("--filter <text>  test path substring or exact block name");
+    expect(t.out.join("")).toContain("--filter <text>  a part of a test file's path (any letter case) or a block name");
     t.out.length = 0;
     expect(await t.run("bridge", "--help")).toBe(0);
     expect(t.out.join("")).toContain("Example:\n  rung bridge --tia V20\n");

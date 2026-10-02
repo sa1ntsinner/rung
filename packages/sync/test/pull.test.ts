@@ -43,7 +43,7 @@ describe("pull", () => {
     const t = setup((b) => b.add(MOTOR, { isConsistent: false }));
     const first = await t.run();
     const second = await t.run({ now: 2_000 });
-    for (const r of [first, second]) expect(r.warnings).toContainEqual({ address: MOTOR, code: "INCONSISTENT", message: "not compiled in TIA Portal since its last change (rung compile)" });
+    for (const r of [first, second]) expect(r.warnings).toContainEqual({ address: MOTOR, path: "plc/PLC_1/blocks/10_Drives/Motors/Fx_Motor.scl", code: "INCONSISTENT", message: "not compiled in TIA Portal since its last change (rung compile)" });
   });
 
   it("exports everything on first pull with normalized text", async () => {
@@ -113,7 +113,9 @@ describe("pull", () => {
     const t = setup();
     await t.run();
     writeFileSync(t.file("plc/PLC_1/blocks/Motor%2FValve 1.scl"), "// my edit\n");
-    await t.run({ force: true });
+    const forced = await t.run({ force: true });
+    // the report names what it replaced and where the person's version is
+    expect(forced.overwritten).toEqual([{ path: "plc/PLC_1/blocks/Motor%2FValve 1.scl", copy: expect.stringMatching(/^\.rung\/recovery\//) }]);
     expect(t.read("plc/PLC_1/blocks/Motor%2FValve 1.scl")).toBe(`// ${VALVE}\n`);
     const rec = join(t.root, ".rung", "recovery");
     const found = readdirSync(rec, { recursive: true }).map(String).filter((f) => f.endsWith(".scl"));

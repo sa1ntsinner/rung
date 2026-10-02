@@ -18,6 +18,8 @@ export interface PullReport {
   warnings: PullWarning[];
   collisions: [string, string][];
   tooLong: string[];
+  /** Local edits --force replaced, each with the folder that keeps the person's version. */
+  overwritten: { path: string; copy: string }[];
 }
 
 export interface PullOptions {
@@ -54,8 +56,12 @@ export function isFresh(entryFp: string, prev: ObjectState, now: number, weakVer
 
 export async function pull(root: string, bridge: BridgeLike, state: StateStore, opts: PullOptions): Promise<PullReport> {
   const now = opts.now ?? Date.now;
-  const report: PullReport = { exported: 0, unchanged: 0, readOnly: 0, removed: 0, warnings: [], collisions: [], tooLong: [] };
-  const warn = (address: string, code: string, message?: string) => report.warnings.push(message ? { address, code, message } : { address, code });
+  const report: PullReport = { exported: 0, unchanged: 0, readOnly: 0, removed: 0, warnings: [], collisions: [], tooLong: [], overwritten: [] };
+  // a person opens files, not addresses: the warning carries the object's file when rung has one
+  const warn = (address: string, code: string, message?: string) => {
+    const path = state.get(address)?.path;
+    report.warnings.push({ address, code, ...(message ? { message } : {}), ...(path ? { path } : {}) });
+  };
 
   const inv = await takeInventory(root, bridge, state, opts.config, (w) => report.warnings.push(w));
   report.collisions = inv.collisions;
@@ -116,6 +122,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
       if (plan.targets.length || plan.removes.length) {
         const opId = randomUUID();
         await publishBundle(root, { opId, address: entry.address, targets: plan.targets, removes: plan.removes, nextState: next }, { force: !!opts.force, keepJournal: true });
+        if (plan.localEdit) report.overwritten.push({ path: next.path, copy: `.rung/recovery/${opId}` });
         pendingOps.push(opId); // the journal entry is dropped only after state.json has recorded `next`
       }
       state.upsert(next);

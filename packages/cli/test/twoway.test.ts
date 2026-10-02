@@ -187,7 +187,7 @@ describe("two-way CLI", () => {
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
     writeFileSync(t.file("plc", "PLC_1", "blocks", "Fx_New.scl"), 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
     t.out.length = 0;
-    expect(await t.run(["sync"])).toBe(2);
+    expect(await t.run(["sync"])).toBe(0); // writes off is a state the person chose, not a failed run
     expect(t.out.join("")).toContain("WRITES_OFF");
     expect(t.out.join("")).toContain("local edit not sent to TIA Portal: writes are off in this workspace (rung writes on)");
     expect(t.out.join("")).toContain("new file not sent to TIA Portal");
@@ -244,7 +244,7 @@ describe("two-way CLI", () => {
     writeFileSync(cfg, readFileSync(cfg, "utf8").replace('import = "auto"', 'import = "manual"'));
     await t.run(["pull"]);
     writeFileSync(t.file(...motorFile), "changed\n");
-    expect(await t.run(["sync"])).toBe(2);
+    expect(await t.run(["sync"])).toBe(0);
     expect(t.out.join("")).toMatch(/IMPORT_MANUAL/);
     expect(t.db().objects[0]!.content).not.toContain("changed");
   });

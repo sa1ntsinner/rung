@@ -176,8 +176,8 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       mayWrite(live, "deleted");
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
-      await confirmDelete(dir, b as never, state, String(p.address));
-      return { deleted: true };
+      const { users } = await confirmDelete(dir, b as never, state, String(p.address), { force: !!p.force });
+      return { deleted: true, users: users.map((a) => state.get(a)?.path ?? a) };
     },
     rename: async (p) => {
       mayWrite(live, "renamed");
@@ -307,13 +307,14 @@ function mayWrite(config: RungConfig, action: string): void {
   if (config.sync.import !== "auto") throw new WorkspaceError("WRITES_OFF", `not ${action}: sync.import = "manual" in rung.toml`);
 }
 
-export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io): Promise<number> {
+export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io, force = false): Promise<number> {
   const dir = await findWorkspace(workspaceDir);
   const address = await addressOf(dir, what, io.cwd);
   const owner = await OwnerClient.connect(dir);
+  let users: string[] = [];
   if (owner) {
     try {
-      await owner.request("confirmDelete", { address });
+      users = (await owner.request<{ users?: string[] }>("confirmDelete", { address, force })).users ?? [];
     } finally {
       owner.close();
     }
@@ -324,7 +325,7 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
     try {
       const client = await bridgeFor(config, io, importFlags(config));
       try {
-        await confirmDelete(dir, client, state, address);
+        users = (await confirmDelete(dir, client, state, address, { force })).users.map((a) => state.get(a)?.path ?? a);
       } finally {
         await client.close();
       }
@@ -332,7 +333,8 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
       await state.close();
     }
   }
-  io.stdout(`deleted ${address} in TIA Portal\n`);
+  io.stdout(`deleted ${what} in TIA Portal\n`);
+  if (users.length) io.stdout(`what used it does not compile now: ${users.join(", ")} (rung compile shows where)\n`);
   return 0;
 }
 

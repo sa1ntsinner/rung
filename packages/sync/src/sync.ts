@@ -447,7 +447,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   // a preview shows what the pass would send once writes are on, whatever they are now
   const cfg = opts.preview && opts.config.sync.import !== "auto" ? { ...opts.config, sync: { ...opts.config.sync, import: "auto" as const }, writesOff: undefined } : opts.config;
   const report = emptyReport();
-  const warn = (address: string, code: string, message?: string, path?: string) => report.warnings.push({ address, code, ...(message ? { message } : {}), ...(path ? { path } : {}) });
+  const warn = (address: string, code: string, message?: string, path = state.get(address)?.path) => report.warnings.push({ address, code, ...(message ? { message } : {}), ...(path ? { path } : {}) });
   const diag = (d: Diagnostic) => {
     report.diagnostics.push(d);
     const st = state.get(d.address);
@@ -699,14 +699,15 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         if (status === "missing") {
-          // a PLC's network settings cannot be deleted: the file comes back
-          const deletable = parseAddress(address).kind !== "hardware";
-          if (!deletable) warn(address, "NOT_DELETABLE", "a PLC's network settings stay with the PLC; the file was put back");
+          // a PLC's network settings and its default tag table cannot be deleted: the file comes back
+          const deletable = parseAddress(address).kind !== "hardware" && !isDefaultTagTable(address);
+          if (!deletable) warn(address, "NOT_DELETABLE", isDefaultTagTable(address) ? "TIA Portal keeps a PLC's default tag table; the file was put back" : "a PLC's network settings stay with the PLC; the file was put back");
           if (deletable && !tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
             state.upsert({ ...cur, status: "pendingDelete" });
             report.pendingDeletes++;
             if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: `deleted here: rung confirm-delete ${cur.path} deletes it in TIA Portal, or restore the file` });
-            diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: `Deleted in the workspace; run rung confirm-delete ${cur.path} to delete it in TIA Portal, or restore the file` });
+            const how = cfg.writesOff ? `with writes on (rung writes on), rung confirm-delete ${cur.path} deletes it in TIA Portal` : `run rung confirm-delete ${cur.path} to delete it in TIA Portal`;
+            diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: `Deleted in the workspace; ${how}, or restore the file` });
             continue;
           }
           staged ??= await stageExport(root, bridge, address, stem);
@@ -1129,19 +1130,34 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 }
 
 /** Deletes an object in TIA after the user deleted its files and confirmed. */
+/** A PLC's default tag table, which TIA Portal never deletes (its name follows TIA's language). */
+function isDefaultTagTable(address: string): boolean {
+  const a = parseAddress(address);
+  return a.kind === "tagtable" && !a.unit && /^(default tag table|standard-variablentabelle|table des variables standard|tabella delle variabili standard|tabla de variables estándar)$/i.test(a.name);
+}
+
 export async function confirmDelete(
   root: string,
   bridge: { deleteObject(address: string, expectedTiaRevision: string, operationId: string): Promise<unknown> },
   state: StateStore,
   address: string,
-): Promise<void> {
+  opts: { force?: boolean } = {},
+): Promise<{ users: string[] }> {
   const st = state.get(address);
   if (!st || st.status !== "pendingDelete") throw new WorkspaceError("NOTHING_PENDING", `${address} has no pending delete (rung status lists them)`);
   if ((await localStatus(root, st.files)) !== "missing" || (await Promise.all(st.files.map((f) => diskHash(root, f.path)))).some((h) => h !== "absent"))
     throw new WorkspaceError("LOCAL_CHANGES", `${address} has files again; delete not confirmed`);
+  const { name } = parseAddress(address);
+  if (isDefaultTagTable(address))
+    throw new WorkspaceError("NOT_DELETABLE", `TIA Portal never deletes a PLC's default tag table; restore ${st.path} (git checkout -- "${st.path}", or rung pull)`);
+  // what still names it stops compiling: say so first, and only --force deletes it anyway
+  const users = (await withUsers(root, state, [address])).filter((a) => a !== address);
+  if (users.length && !opts.force)
+    throw new WorkspaceError("IN_USE", `${name} is used by ${users.map((a) => state.get(a)?.path ?? a).join(", ")}; they will not compile without it. rung confirm-delete ${st.path} --force deletes it anyway`);
   await bridge.deleteObject(address, st.tiaFingerprint, randomUUID());
   state.remove(address);
   await state.flush();
+  return { users };
 }
 
 /**
