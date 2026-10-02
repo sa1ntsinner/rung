@@ -339,11 +339,43 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
   /** Variables of the FB that owns the METHOD being parsed. */
   let ownerVars: VarDecl[] | undefined;
 
+  /** A token a statement can end with: a value, a name, a closing bracket. */
+  const endsValue = (x: Token | undefined) =>
+    !!x && (x.kind === "local" || x.kind === "global" || x.kind === "number" || x.kind === "string" || x.kind === "absolute" || x.text === ")" || x.text === "]" || isKw(x, "TRUE", "FALSE"));
+  const STATEMENT = new Set(["IF", "CASE", "FOR", "WHILE", "REPEAT", "RETURN", "EXIT", "CONTINUE", "REGION", "GOTO"]);
+  const lineOf = (offset: number) => src.slice(0, offset).split("\n").length;
+  /** An integer CASE label: 7, 16#FF, 2#1010, 1_000. */
+  const intOf = (text: string): number | undefined => {
+    const m = /^(?:(2|8|16)#)?([0-9A-F_]+)$/i.exec(text);
+    const n = m ? parseInt(m[2]!.replace(/_/g, ""), Number(m[1] ?? 10)) : NaN;
+    return Number.isSafeInteger(n) ? n : undefined;
+  };
+
   function parseBody(block: BlockModel, endKw: string) {
     const stack: { kw: string; tok: Token }[] = [];
+    // the values each open CASE's labels took: TIA Portal refuses a value twice
+    const labels = new Map<Token, { lo: number; hi: number; at: Token }[]>();
     let parens = 0;
     while (peek().kind !== "eof" && !isKw(peek(), endKw) && !(iec && isHeaderAt(peek()))) {
       const t = next();
+      const before = tokens[i - 2];
+      if (!iec && parens === 0 && endsValue(before) && !freeText.some(([a, b]) => before!.start >= a && before!.start < b)) {
+        // a statement without its ';': the next one starts on a new line, or a closing keyword follows
+        const starts = (t.kind === "local" || t.kind === "global" || (t.kind === "ident" && STATEMENT.has(t.upper))) && src.lastIndexOf("\n", t.start) > before!.start;
+        if (starts || isKw(t, "END_IF", "ELSIF", "ELSE", "END_CASE", "END_FOR", "END_WHILE", "UNTIL", "END_REGION")) diagnostics.push({ message: "Missing ';'", start: before!.start, end: before!.end, severity: "error" });
+      }
+      const open = stack[stack.length - 1];
+      if (open?.kw === "CASE" && parens === 0 && t.kind === "number" && before && (isKw(before, "OF") || before.text === ";" || before.text === ",") && [":", ",", ".."].includes(peek().text)) {
+        const lo = intOf(t.text);
+        const hi = peek().text === ".." && peek(1).kind === "number" ? (next(), intOf(next().text)) : lo;
+        if (lo !== undefined && hi !== undefined) {
+          const seen = labels.get(open.tok) ?? (labels.set(open.tok, []), labels.get(open.tok)!);
+          const clash = seen.find((s) => lo <= s.hi && s.lo <= hi);
+          if (clash) err(`CASE label ${lo === hi ? lo : `${lo}..${hi}`} is already taken on line ${lineOf(clash.at.start)}`, t);
+          seen.push({ lo, hi, at: t });
+        }
+        continue;
+      }
       if (t.kind === "local" || t.kind === "global") {
         // a DB's start value of a member with a quoted name ("Valve 1".Delay := T#2s;) is the DB's own, like Counter := 0;
         const dbStart = block.kind === "DB" && t.kind === "global" && (tokens[i - 2]?.text === ";" || isKw(tokens[i - 2]!, "BEGIN"));

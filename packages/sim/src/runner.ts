@@ -2,8 +2,8 @@
 // rung test: YAML unit tests for SCL blocks, run on the offline simulator.
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { LineCounter, isMap, isSeq, parse as parseYaml, parseDocument } from "yaml";
-import { STANDARD, STANDARD_BY_NAME, deviceOfUri, nearest, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
+import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
+import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { SYSTEM_FUNCTIONS, Simulator, SimError, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
 
@@ -53,6 +53,9 @@ export interface FileResult {
   plc?: string;
   cases: CaseResult[];
   error?: string;
+  /** Location of a file-level YAML error (from 1). */
+  errorLine?: number;
+  errorColumn?: number;
   /** The stubs the cases called (a technology object: used), with how often; `runs`: the simulator could have run it. */
   stubbed?: { name: string; calls: number; runs?: true }[];
   /** Stubs named but never called (probably a typo). */
@@ -77,8 +80,20 @@ const MAX_STEP_CYCLES = 10_000_000;
 const approx = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)) : a === b;
 
-function normalizeExpected(v: unknown): unknown {
-  if (typeof v === "string" && /^(T|TIME|LT|LTIME)#/i.test(v)) return toMs(v);
+/** Short PLC names often differ by two swapped letters or an expanded abbreviation (LENGTH/LEN). */
+function nearest(name: string, names: Iterable<string>): string | undefined {
+  const candidates = [...names];
+  const upper = name.toUpperCase();
+  for (let i = 0; i < upper.length - 1; i++) {
+    const swapped = upper.slice(0, i) + upper[i + 1] + upper[i] + upper.slice(i + 2);
+    const hit = candidates.find((n) => n.toUpperCase() === swapped);
+    if (hit) return hit;
+  }
+  return nearestSpelling(name, candidates) ?? candidates.find((n) => n.length >= 3 && upper.startsWith(n.toUpperCase()));
+}
+
+function normalizeExpected(v: unknown, type?: string): unknown {
+  if (typeof v === "string" && ((!type || isTime(type)) && /^(T|TIME|LT|LTIME)#/i.test(v) || isTime(type) && /^\d+(?:\.\d+)?(?:ms|s|m|h)$/i.test(v))) return toMs(v);
   return v;
 }
 
@@ -111,8 +126,11 @@ const isArrayValue = (v: Value): v is ArrayValue => typeof v === "object" && v !
 function checkKind(name: string, current: Value, value: Value) {
   if (current === undefined || typeof current === "object") return;
   const kind = (v: Value) => (typeof v === "boolean" ? "a BOOL (true/false)" : typeof v === "number" ? "a number" : "a string");
-  if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${JSON.stringify(value)}`);
+  if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${shown(value)}`);
 }
+
+const isTime = (type?: string) => /^(TIME|LTIME|S5TIME)$/i.test(type ?? "");
+const shown = (v: unknown): string => v === undefined || v === null ? "no value" : JSON.stringify(v);
 
 const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -134,7 +152,7 @@ function shapeProblem(spec: unknown): string | undefined {
       }
       if (values !== null && !plain(values)) return `stubs.${name} is a map of output values, such as { STATUS: 0 } (or {} for none)`;
       for (const [k, v] of Object.entries(values ?? {}))
-        if (!["boolean", "number", "string"].includes(typeof v)) return `stubs.${name}.${k}: a value is true/false, a number or a string, not ${JSON.stringify(v)}`;
+        if (!["boolean", "number", "string"].includes(typeof v)) return `stubs.${name}.${k}: a value is true/false, a number or a string, not ${shown(v)}`;
     }
   }
   if (spec.cycle !== undefined) {
@@ -149,12 +167,18 @@ function shapeProblem(spec: unknown): string | undefined {
   }
   if (spec.cases === undefined || spec.cases === null) return "no cases: list them under cases:, each with a name and its steps";
   if (!Array.isArray(spec.cases)) return "cases is a list, one case per entry starting with -";
+  const names = new Map<string, number>();
   for (const [i, c] of spec.cases.entries()) {
     const label = `case ${i + 1}${plain(c) && typeof c.name === "string" ? ` (${c.name})` : ""}`;
     if (!plain(c)) return `${label} is not a case: a case has name and steps`;
     const key = Object.keys(c).find((k) => k !== "name" && k !== "steps");
     if (key) return `${label}: unknown key ${key} (a case has name and steps)`;
-    if (c.steps === undefined || c.steps === null || (Array.isArray(c.steps) && !c.steps.length)) return `${label} has no steps: indent them under the case, below its name`;
+    if (typeof c.name !== "string" || !c.name.trim()) return `${label}: missing name: give the case a name`;
+    const earlier = names.get(c.name);
+    if (earlier !== undefined) return `${label}: duplicate name ${shown(c.name)} (case ${earlier + 1} and case ${i + 1})`;
+    names.set(c.name, i);
+    if (Array.isArray(c.steps) && !c.steps.length) return `${label} has no steps`;
+    if (c.steps === undefined || c.steps === null) return `${label} has no steps: indent them under the case, below its name`;
     if (!Array.isArray(c.steps)) return `${label}: steps is a list, one step per line starting with -`;
   }
   return undefined;
@@ -169,12 +193,19 @@ const INT_RANGE: Record<string, [number, number]> = {
 /** Rejects a `set` value the variable's declared type cannot hold (40000 in an Int, 1.5 in a DInt, a number in a Bool). */
 function checkType(name: string, type: string, value: Value) {
   const t = type.replace(/^"|"$/g, "").toUpperCase();
+  if (/^(ARRAY|STRUCT)\b/.test(t)) throw new SimError(`${name} is ${type}: set its ${/^ARRAY\b/.test(t) ? "elements" : "members"} in the test steps`);
   const range = INT_RANGE[t];
   if (range) {
-    if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${JSON.stringify(value)}`);
+    if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${shown(value)}`);
     if (value < range[0] || value > range[1]) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
-  } else if (t === "BOOL" && typeof value !== "boolean") throw new SimError(`${name} expects a BOOL (true/false), got ${JSON.stringify(value)}`);
-  else if ((t === "REAL" || t === "LREAL") && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a number, got ${JSON.stringify(value)}`);
+  } else if (isTime(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a duration, such as T#500ms, got ${shown(value)}`);
+  else if (t === "BOOL" && typeof value !== "boolean") throw new SimError(`${name} expects a BOOL (true/false), got ${shown(value)}`);
+  else if (/^(W?STRING|W?CHAR)(?:\[\s*\d+\s*\])?$/.test(t)) {
+    if (typeof value !== "string") throw new SimError(`${name} is ${type}: expects text, got ${shown(value)}`);
+    const max = /CHAR$/.test(t) ? 1 : Number(/\[\s*(\d+)\s*\]/.exec(t)?.[1] ?? 254);
+    if (value.length > max) throw new SimError(`${name} is ${type}: ${value.length} characters is longer than ${max}`);
+  }
+  else if ((t === "REAL" || t === "LREAL") && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a number, got ${shown(value)}`);
 }
 
 /**
@@ -247,7 +278,7 @@ function closestName(index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: 
 
 /** The error with the name the test most likely meant, when there is one. */
 function hinted(e: unknown, index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: "set" | "expect"): unknown {
-  if (!(e instanceof SimError)) return e;
+  if (!(e instanceof SimError) || /did you mean|is a constant|is VAR_TEMP|has not run yet|is a data block:/.test(e.message)) return e;
   const near = closestName(index, g, typed, op);
   return near ? new SimError(`${e.message} (did you mean ${near}?)`, e.block, e.offset) : e;
 }
@@ -269,6 +300,7 @@ function stubbable(seen: WorkspaceIndex): Map<string, string> {
     if (s.block?.dbOf) add(s.block.dbOf);
   }
   for (const e of STANDARD) add(e.name);
+  for (const n of RECORD_INTERFACE.keys()) add(n);
   for (const n of SYSTEM_FUNCTIONS) add(n);
   return out;
 }
@@ -279,6 +311,10 @@ function stubInterface(seen: WorkspaceIndex, name: string): Map<string, { name: 
   const upper = (xs: [string, string][]) => new Map(xs.map(([n, type]) => [n.toUpperCase(), { name: n, type }]));
   if (b?.kind === "FB") return upper(b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant").map((v) => [v.name, v.type]));
   if (b?.kind === "FC") return upper([...b.vars.filter((v) => v.section === "Output" || v.section === "InOut").map((v): [string, string] => [v.name, v.type]), ...(b.returnType && !/^void$/i.test(b.returnType) ? [["RET_VAL", b.returnType] as [string, string]] : [])]);
+  const known = RECORD_INTERFACE.get(name.toUpperCase());
+  if (known) return upper(known);
+  const system = SYSTEM_TYPES.get(name.toUpperCase());
+  if (system) return upper(system.map((m) => [m.name, m.type]));
   const std = STANDARD_BY_NAME.get(name.toUpperCase());
   if (std?.kind === "functionBlock") return upper(std.params.map((p) => [p.name, p.type]));
   if (std) return upper([["RET_VAL", std.returns ?? "ANY"], ...std.params.filter((p) => p.dir !== "in").map((p): [string, string] => [p.name, p.type])]);
@@ -310,7 +346,8 @@ function stubProblem(seen: WorkspaceIndex, tested: string, stubs: NonNullable<Te
         return `stubs.${name}.${k}: ${bare} has no ${k}${near ? ` (did you mean ${near}?)` : ""}`;
       }
       try {
-        checkType(`stubs.${name}.${k}`, member.type, normalizeExpected(v) as Value);
+        if (seen.membersOfType(member.type.replace(/^"|"$/g, "")).length) throw new SimError(`stubs.${name}.${k} is ${member.type}: set its members in the test steps`);
+        checkType(`stubs.${name}.${k}`, member.type, normalizeExpected(v, member.type) as Value);
       } catch (e) {
         return (e as Error).message;
       }
@@ -319,12 +356,112 @@ function stubProblem(seen: WorkspaceIndex, tested: string, stubs: NonNullable<Te
   return undefined;
 }
 
+/** Interfaces absent from the instruction catalogue, but fixed by the PLC. */
+const RECORD_INTERFACE = new Map<string, [string, string][]>([
+  ["RDREC", [["REQ", "Bool"], ["ID", "DWord"], ["INDEX", "Int"], ["MLEN", "UInt"], ["RECORD", "Variant"], ["VALID", "Bool"], ["BUSY", "Bool"], ["ERROR", "Bool"], ["STATUS", "DWord"], ["LEN", "UInt"]]],
+  ["WRREC", [["REQ", "Bool"], ["ID", "DWord"], ["INDEX", "Int"], ["LEN", "UInt"], ["RECORD", "Variant"], ["DONE", "Bool"], ["BUSY", "Bool"], ["ERROR", "Bool"], ["STATUS", "DWord"]]],
+]);
+
+/** Follow declarations, including each array dimension, rather than guessing from the stored value. */
+function declaration(seen: WorkspaceIndex, g: GlobalSymbol, name: string): Member | undefined {
+  const { global, root, path } = splitName(name);
+  const target = seen.global(root);
+  let m: Member | undefined = global
+    ? target?.tag ? { name: root, type: target.tag.dataType, isArray: false } : target?.gvar ? { ...target.gvar.decl } : target ? { name: root, type: target.name, typeRef: target.name, isArray: false } : undefined
+    : g.block!.vars.find((v) => v.name.toUpperCase() === root.toUpperCase()) ?? (target?.gvar ? { ...target.gvar.decl } : undefined);
+  if (!global && g.block!.kind === "FC" && root.toUpperCase() === g.block!.name.toUpperCase()) m = { name: root, type: g.block!.returnType ?? "Void", isArray: false };
+  for (const [i, seg] of path.entries()) {
+    if (!m) return undefined;
+    if (typeof seg !== "string") {
+      for (const _ of seg) {
+        const shape = splitArrayType(m.type);
+        if (!shape) return undefined;
+        const type = shape.dims.length > 1 ? `Array[${shape.dims.slice(1).join(",")}] of ${shape.element}` : shape.element;
+        m = { ...m, type, isArray: /^array\b/i.test(type), typeRef: shape.element.replace(/^"|"$/g, "") };
+      }
+    } else {
+      const known = RECORD_INTERFACE.get((m.typeRef ?? m.type).replace(/^"|"$/g, "").toUpperCase());
+      const members = known ? known.map(([name, type]) => ({ name, type, isArray: false })) : seen.membersOf(m);
+      const hit = members.find((v) => v.name.toUpperCase() === seg.toUpperCase());
+      if (!hit && members.length) {
+        const near = nearest(seg, members.map((v) => v.name));
+        const suggested = (global ? `"${root}"` : root) + path.map((p, j) => typeof p === "string" ? `.${j === i ? near : p}` : `[${p.join(",")}]`).join("");
+        throw new SimError(`${name} does not exist${near ? ` (did you mean ${suggested}?)` : ""}`);
+      }
+      m = hit;
+    }
+  }
+  return m;
+}
+
+/** Point a shape error at the case/key the YAML parser located. */
+function problemPosition(text: string, problem: string): { errorLine?: number; errorColumn?: number } {
+  const lines = new LineCounter();
+  const doc = parseDocument(text, { lineCounter: lines });
+  let node: unknown = doc.contents;
+  const ci = /^case (\d+)/.exec(problem);
+  if (ci && isMap(doc.contents)) {
+    const cases = doc.contents.get("cases", true);
+    if (isSeq(cases)) node = cases.items[Number(ci[1]) - 1];
+  }
+  const key = /unknown key (\S+)/.exec(problem)?.[1];
+  if (key && isMap(node)) node = node.items.find((p) => String(p.key) === key)?.key ?? node;
+  const range = (node as { range?: number[] } | null)?.range;
+  const pos = range ? lines.linePos(range[0]!) : undefined;
+  return pos ? { errorLine: pos.line, errorColumn: pos.col } : {};
+}
+
+/** Collect external calls through the workspace graph, stopping at a stubbed unit. */
+function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: string[]): { name: string; reason: string; value: string; key: string }[] {
+  const given = new Set(provided.map((n) => n.replace(/^"|"$/g, "").toUpperCase()));
+  const visited = new Set<string>();
+  const missing = new Map<string, { name: string; reason: string; value: string; key: string }>();
+  const add = (name: string, reason: string, value = "{}") => {
+    if (!given.has(name.toUpperCase())) missing.set(name.toUpperCase(), { name, reason, value, key: name.includes("~") || seen.global(name)?.kind === "OBJECT" ? `'"${name}"'` : name });
+  };
+  const visit = (g: GlobalSymbol) => {
+    if (!g.block || visited.has(g.uri + g.name)) return;
+    visited.add(g.uri + g.name);
+    for (const r of g.block.refs) {
+      if (r.kind === "global" && r.name.includes("~")) add(r.name, "has no value offline", "257");
+      const global = r.kind !== "local" ? seen.global(r.name) : undefined;
+      if (global?.kind === "OBJECT") add(global.name, "is not simulated");
+      if (r.access !== "call") continue;
+      let type = r.name;
+      let member: Member | undefined = r.kind !== "global" ? g.block.vars.find((v) => v.name.toUpperCase() === r.name.toUpperCase()) ?? global?.gvar?.decl : global?.block?.dbOf ? { name: r.name, type: global.block.dbOf, typeRef: global.block.dbOf, isArray: false } : undefined;
+      for (const seg of r.members) {
+        if (!member) break;
+        const hit = seen.membersOf(member).find((m) => m.name.toUpperCase() === seg.name.toUpperCase());
+        if (!hit || hit.section === "Method" || hit.section === "Action") break;
+        member = hit;
+      }
+      if (member) type = (member.typeRef ?? member.type).replace(/^"|"$/g, "");
+      const key = type.toUpperCase();
+      if (given.has(key)) continue;
+      const target = seen.global(type);
+      if (target?.block && /^(FB|FC|PRG)$/.test(target.block.kind)) visit(target);
+      else if (target?.kind === "OBJECT" || global?.kind === "OBJECT") continue;
+      else if (!STANDARD_BY_NAME.has(key) && !SYSTEM_FUNCTIONS.has(key) && !/^\w+_TO_\w+$|^__RUNG_/i.test(key))
+        add(type, target ? "has no code the simulator can run" : RECORD_INTERFACE.has(key) || /^(MB_|MC_)/.test(key) ? "is not simulated" : "is not in the workspace", member || RECORD_INTERFACE.has(key) ? "{}" : "{ RET_VAL: 0 }");
+    }
+  };
+  visit(tested);
+  return [...missing.values()];
+}
+
 export async function runTestFile(index: WorkspaceIndex, file: string, text: string): Promise<FileResult> {
   let spec: TestFile;
   try {
-    spec = (parseYaml(text) ?? {}) as TestFile;
+    const lines = new LineCounter();
+    const doc = parseDocument(text, { lineCounter: lines });
+    if (doc.errors.length) {
+      const e = doc.errors[0]!;
+      const pos = lines.linePos(e.pos[0]);
+      return { file, block: "?", cases: [], error: `invalid YAML: ${e.message}`, errorLine: pos.line, errorColumn: pos.col };
+    }
+    spec = (doc.toJS() ?? {}) as TestFile;
     const problem = shapeProblem(spec);
-    if (problem) return { file, block: typeof spec.block === "string" ? spec.block : "?", cases: [], error: problem };
+    if (problem) return { file, block: typeof spec.block === "string" ? spec.block : "?", cases: [], error: problem, ...problemPosition(text, problem) };
   } catch (e) {
     return { file, block: "?", cases: [], error: `invalid YAML: ${(e as Error).message}` };
   }
@@ -337,10 +474,12 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   const seen = scopedTo(index, g.uri);
   const stubProblemText = spec.stubs ? stubProblem(seen, g.block.name, spec.stubs) : undefined;
   if (stubProblemText) return { file, block: blockName, cases: [], error: stubProblemText };
+  const required = requiredStubs(seen, g, Object.keys(spec.stubs ?? {}));
+  if (required.length) return { file, block: blockName, cases: [], error: `stubs needed (${required.map((s) => `${s.name} ${s.reason}`).join("; ")}): write stubs: { ${required.map((s) => `${s.key}: ${s.value}`).join(", ")} }` };
   // by upper-case name, without quotes; T#... values are durations; hardware identifiers are numbers
   const entries = Object.entries(spec.stubs ?? {}).map(([n, values]) => [n.replace(/^"|"$/g, "").toUpperCase(), values] as const);
   const stubs = new Map<string, Struct>(
-    entries.filter(([n]) => !n.includes("~")).map(([n, values]) => [n, Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k.toUpperCase(), normalizeExpected(v) as Value]))]),
+    entries.filter(([n]) => !n.includes("~")).map(([n, values]) => [n, Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k.toUpperCase(), normalizeExpected(v, stubInterface(seen, n)?.get(k.toUpperCase())?.type) as Value]))]),
   );
   const hardware = new Map<string, number>(entries.filter(([n]) => n.includes("~")).map(([n, v]) => [n, Number(v)]));
   const stubCalls = new Map<string, number>();
@@ -359,10 +498,16 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     let fcInputs: Record<string, Value> = {};
     let fcOutputs: Struct = {};
     let fcReturn: Value;
+    let fcRan = false;
     let current = 0; // the step running (from 1), for an error
     const getMem = (): Struct => (isFb ? inst!.mem : fcOutputs);
-    const resolve = (name: string): { get: () => Value; set: (v: Value) => void } => {
+    const resolve = (name: string, op: "set" | "expect"): { get: () => Value; set: (v: Value) => void; decl?: Member } => {
       let { global, root, path } = splitName(name);
+      const decl = declaration(seen, g, name);
+      const own = !global ? g.block!.vars.find((v) => v.name.toUpperCase() === root.toUpperCase()) : undefined;
+      if (own?.section === "Constant" || decl?.section === "Constant" || (global && seen.global(root)?.tag?.value !== undefined)) throw new SimError(`${name} is a constant: ${op === "set" ? "it cannot be set" : "use its declared value"}`);
+      if (own?.section === "Temp" || decl?.section === "Temp") throw new SimError(`${name} is VAR_TEMP: it holds nothing between calls`);
+      if (!global && !own && seen.global(root)?.kind === "DB") throw new SimError(`${root} is a data block: write '"${root}"${name.slice(root.length)}'`);
       const gvar = !global && !(isFb && root.toUpperCase() in getMem()) ? scopedTo(index, g.uri).global(root)?.gvar : undefined; // the block's own PLC's list
       if (gvar) ({ root, path } = { root: gvar.list, path: [root, ...path] }); // bare GVL variable
       const walk = (base: Struct, key: string, rest: Seg[]) => {
@@ -395,14 +540,23 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         if (!Array.isArray(holder) && !((k as string) in holder) && !open) throw new SimError(`${name} does not exist`);
         const h = holder as Record<string | number, Value>;
         const kk = k;
-        return { get: () => h[kk], set: (v: Value) => void (h[kk] = v) };
+        return { decl, get: () => h[kk], set: (v: Value) => void (h[kk] = v) };
       };
       if (global || ((!isFb || !(root.toUpperCase() in getMem())) && sim.isIecGlobal(root))) {
         sim.read({ root: { kind: "global", name: root }, path: [], start: 0 }, null); // materialize DB/tag
         return walk(sim.globals, root, path);
       }
-      if (!isFb && !path.length && root.toUpperCase() === g.block!.name.toUpperCase()) return { get: () => fcReturn, set: () => {} };
-      if (!isFb && !path.length) return { get: () => fcOutputs[root.toUpperCase()] ?? fcInputs[root], set: (v) => void (fcInputs[root] = v) };
+      if (!isFb) {
+        const key = root.toUpperCase();
+        const returning = key === g.block!.name.toUpperCase();
+        if (!own && !returning) throw new SimError(`${name} does not exist`);
+        if (op === "set" && (returning || !["Input", "InOut"].includes(own?.section ?? ""))) throw new SimError(`${name} is not an input of ${g.block!.name}: set an input or IN_OUT`);
+        if (op === "expect" && !fcRan && (returning || !(key in fcInputs))) throw new SimError(`${g.block!.name} has not run yet: run a cycle before expecting ${name}`);
+        if (returning) return { decl, get: () => fcReturn, set: () => {} };
+        const base = op === "set" || (["Input", "InOut"].includes(own?.section ?? "") && key in fcInputs) ? fcInputs : key in fcOutputs ? fcOutputs : fcInputs;
+        if (!(key in base) && op === "set") base[key] = sim.defaultValue(own!, g.block);
+        return walk(base, root, path);
+      }
       return walk(getMem(), root, path);
     };
     const runCycle = () => {
@@ -412,6 +566,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         const r = sim.callBlock(g.block!.name, fcInputs);
         fcOutputs = r.outputs;
         fcReturn = r.returnValue;
+        fcRan = true;
         // IN_OUT parameters behave like the caller's variable: the value written by the FC is passed next cycle
         for (const v of inOuts) {
           const key = Object.keys(fcInputs).find((x) => x.toUpperCase() === v.name.toUpperCase()) ?? v.name;
@@ -421,11 +576,12 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     };
     const count = (op: string, v: unknown): number => {
       const n = Number(v ?? 1);
-      if (!Number.isInteger(n) || n < 0) throw new SimError(`${op}: expected a whole number of cycles, got ${JSON.stringify(v)}`);
+      if (!Number.isInteger(n) || n < 0) throw new SimError(`${op}: expected a whole number of cycles, got ${shown(v)}`);
       if (n > MAX_STEP_CYCLES) throw new SimError(`${op}: ${n} cycles; a step runs at most ${MAX_STEP_CYCLES}`);
       return n;
     };
     const advanceCycles = (v: unknown): number => {
+      if ((typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && /^\d+(?:\.\d+)?$/.test(v.trim()))) throw new SimError(`advance: write a unit, such as ${v}ms`);
       const ms = toMs(v);
       if (!Number.isFinite(ms) || ms < 0) throw new SimError(`advance: expected a time such as 2s or T#1m, got ${String(v)}`);
       const n = Math.max(1, Math.ceil(ms / cycleMs));
@@ -443,20 +599,30 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         for (const op of STEP_ORDER) {
           if (!(op in step)) continue;
           const arg = step[op];
+          if ((op === "set" || op === "expect") && !plain(arg)) throw new SimError(`${op}: write names and values, e.g. { Raw: 1 }`);
           switch (op) {
             case "set":
               for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
                 let target: ReturnType<typeof resolve>;
                 try {
-                  target = resolve(k);
+                  target = resolve(k, "set");
                 } catch (e) {
                   throw hinted(e, index, g, k, "set");
                 }
-                const value = normalizeExpected(v) as Value;
-                // a variable of the block itself is checked against its declared type, others against their value
-                const decl = /^[A-Za-z_]\w*$/.test(k) ? g.block.vars.find((x) => x.name.toUpperCase() === k.toUpperCase() && x.section !== "Temp" && !x.isArray && !x.members?.length) : undefined;
-                if (decl) checkType(k, decl.type, value);
-                else checkKind(k, target.get(), value);
+                const currentValue = target.get();
+                if (target.decl?.isArray || isArrayValue(currentValue)) {
+                  const indices: number[] = [];
+                  for (let arr = currentValue; isArrayValue(arr); arr = arr.items[0]) indices.push(arr.lo);
+                  throw new SimError(`${k} is ${target.decl?.type ?? "an array"}: set its elements, e.g. '${k}[${indices.join(",")}]'`);
+                }
+                if (currentValue && typeof currentValue === "object") {
+                  const mem = "__fb" in currentValue ? (currentValue as Instance).mem : currentValue as Struct;
+                  const first = seen.membersOf(target.decl ?? { type: "", isArray: false, name: k })[0]?.name ?? Object.keys(mem)[0] ?? "member";
+                  throw new SimError(`${k} is ${target.decl?.type ?? "a struct"}: set its members, e.g. '${k}.${first}'`);
+                }
+                const value = normalizeExpected(v, target.decl?.type) as Value;
+                if (target.decl) checkType(k, target.decl.type, value);
+                else checkKind(k, currentValue, value);
                 target.set(value);
               }
               break;
@@ -469,17 +635,16 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
             }
             case "expect":
               for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
-                let actual: unknown;
+                let target: ReturnType<typeof resolve>;
                 try {
-                  actual = resolve(k).get();
+                  target = resolve(k, "expect");
                 } catch (e) {
-                  actual = `<${(hinted(e, index, g, k, "expect") as Error).message}>`;
+                  throw hinted(e, index, g, k, "expect");
                 }
-                // a name an FC does not have reads as nothing
-                const near = actual === undefined ? closestName(index, g, k, "expect") : undefined;
-                if (near) actual = `<${k} does not exist (did you mean ${near}?)>`;
-                const expected = normalizeExpected(v);
-                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected, actual });
+                const actual = target.get();
+                if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
+                const expected = normalizeExpected(v, target.decl?.type);
+                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : actual });
               }
               break;
           }
@@ -501,7 +666,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   for (const name of Object.keys(spec.stubs ?? {})) {
     const calls = stubCalls.get(name.replace(/^"|"$/g, "").toUpperCase()) ?? 0;
     if (calls) stubbed.push({ name, calls, ...(runnable(seen, name.replace(/^"|"$/g, "")) ? { runs: true as const } : {}) });
-    else warnings.push(`stub ${name} was never called: a typo, or code these cases do not reach`);
+    else if (!results.some((c) => c.error)) warnings.push(`stub ${name} was never called: a typo, or code these cases do not reach`);
   }
   const plc = deviceOfUri(g.uri);
   const at = testPositions(text);
@@ -559,7 +724,7 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     const text = await readFile(f, "utf8");
     // --filter matches the file path or the block under test (rung test --filter Fx_Motor), which may carry a
     // comment after it; block names ignore letter case as in TIA Portal
-    if (filter && !rel.includes(filter) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text)) continue;
+    if (filter && !rel.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase()) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text)) continue;
     out.push(await runTestFile(index, rel, text));
   }
   return out;
@@ -569,12 +734,13 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 export function toJUnit(results: FileResult[]): string {
   const cases = results.flatMap((f) => (f.error ? [{ f, c: { name: "(file)", passed: false, failures: [], error: f.error, ms: 0 } as CaseResult }] : f.cases.map((c) => ({ f, c }))));
-  const failed = cases.filter((x) => !x.c.passed).length;
+  const failed = cases.filter((x) => !x.c.passed && !x.c.error).length;
+  const errors = cases.filter((x) => !!x.c.error).length;
   const body = cases
     .map(({ f, c }) => {
       const inner = c.passed ? "" : c.error ? `<error message="${esc(c.errorStep ? `step ${c.errorStep}: ${c.error}` : c.error)}"/>` : `<failure message="${esc(c.failures.map((x) => `step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}`).join("; "))}"/>`;
-      return `  <testcase classname="${esc(f.file)}" name="${esc(`${f.block}: ${c.name}`)}" time="${(c.ms / 1000).toFixed(3)}">${inner}</testcase>`;
+      return `  <testcase classname="${esc(f.file)}" name="${esc(f.error ? f.file : `${f.block}: ${c.name}`)}" time="${(c.ms / 1000).toFixed(3)}">${inner}</testcase>`;
     })
     .join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="rung" tests="${cases.length}" failures="${failed}">\n${body}\n</testsuite>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="rung" tests="${cases.length}" failures="${failed}" errors="${errors}">\n${body}\n</testsuite>\n`;
 }

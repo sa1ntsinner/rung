@@ -6,7 +6,8 @@ import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
 import { deviceOfUri, scopedTo, tagTableFor, type WorkspaceIndex } from "./workspace.js";
 import { TYPE_BITS, assignmentList } from "./assignments.js";
-import { calledWithoutInstance, scopeDecl } from "./features.js";
+import { calledWithoutInstance, scopeDecl, unknownMember } from "./features.js";
+import { nearest } from "./nearest.js";
 import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
 
 export interface EditAt {
@@ -19,7 +20,7 @@ export interface EditAt {
 export interface QuickFix {
   title: string;
   /** Diagnostic code the fix answers. */
-  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER" | "UNKNOWN_GLOBAL";
+  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER" | "UNKNOWN_GLOBAL" | "UNKNOWN_MEMBER";
   edits: EditAt[];
   /** A new file (an instance DB); rung sync creates it in TIA Portal. */
   create?: { uri: string; text: string };
@@ -34,6 +35,8 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
   for (const block of doc.parsed.blocks) {
     if (end < block.start || start > block.end) continue;
     for (const ref of block.refs) {
+      const typo = unknownMember(index, uri, block, ref);
+      if (typo?.suggestion && typo.end >= start && typo.start <= end) out.push({ title: `Change to ${typo.suggestion}`, code: "UNKNOWN_MEMBER", edits: [{ uri, start: typo.start, end: typo.end, newText: typo.suggestion }], preferred: true });
       if (ref.end < start || ref.start > end) continue;
       if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name, ref.start) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
       if (calledWithoutInstance(index, ref)) out.push(...instanceFixes(index, doc.text, uri, block, ref));
@@ -48,7 +51,11 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
       const next = site.args[i + 1];
       const prev = site.args[i - 1];
       const range = next ? { start: a.start, end: next.start } : prev ? { start: prev.end, end: a.end } : { start: a.start, end: a.end };
-      out.push({ title: `Remove the argument ${a.name} (${site.callee.name} has no such parameter)`, code: "UNKNOWN_PARAMETER", edits: [{ uri, ...range, newText: "" }], preferred: true });
+      // a parameter renamed in the block, or a typo: keep the wiring and give the argument the name it most likely meant
+      const given = new Set(site.args.map((x) => x.name?.toUpperCase()));
+      const meant = nearest(a.name!, site.callee.params.filter((p) => !given.has(p.name.toUpperCase())).map((p) => p.name));
+      if (meant) out.push({ title: `Rename the argument ${a.name} to ${meant}`, code: "UNKNOWN_PARAMETER", edits: [{ uri, start: a.nameStart!, end: a.nameEnd!, newText: meant }], preferred: true });
+      out.push({ title: `Remove the argument ${a.name} (${site.callee.name} has no such parameter)`, code: "UNKNOWN_PARAMETER", edits: [{ uri, ...range, newText: "" }], ...(meant ? {} : { preferred: true }) });
     });
     const missing = missingParams(site);
     if (missing.length && site.ref.end >= start && site.ref.start <= end) {

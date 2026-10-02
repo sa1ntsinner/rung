@@ -214,7 +214,7 @@ describe("system instructions", () => {
   it("rung test reads the virtual clock after advance", async () => {
     const idx = new WorkspaceIndex();
     idx.set("file:///w/plc/P/blocks/Fx_Clock.scl", fb("Fx_Clock", "VAR_OUTPUT\n  now : DTL;\nEND_VAR", "  RD_LOC_T(#now);"), 0);
-    const r = await runTestFile(idx, "tests/clock.test.yaml", "block: Fx_Clock\ncycle: 100ms\ncases:\n  - steps:\n      - advance: 61s\n      - expect: { now.YEAR: 2024, now.MINUTE: 1, now.SECOND: 1, now.WEEKDAY: 2 }\n");
+    const r = await runTestFile(idx, "tests/clock.test.yaml", "block: Fx_Clock\ncycle: 100ms\ncases:\n  - name: case 1\n    steps:\n      - advance: 61s\n      - expect: { now.YEAR: 2024, now.MINUTE: 1, now.SECOND: 1, now.WEEKDAY: 2 }\n");
     expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
   });
 });

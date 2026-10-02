@@ -48,7 +48,7 @@ describe("rung test stubs", () => {
       test(
         "Fx_Reader",
         "  RDREC: { VALID: false, BUSY: false, ERROR: false, STATUS: 0, LEN: 4 }",
-        "      - set: { start: true }\n      - cycle: 1\n      - expect: { rd.REQ: true, rd.INDEX: 1, value: 0, failed: false }\n      - set: { rd.VALID: true }\n      - cycle: 1\n      - expect: { value: 4 }\n      - set: { rd.ERROR: true, rd.EXTRA: 5 }\n      - cycle: 1\n      - expect: { failed: true, rd.EXTRA: 5 }\n",
+        "      - set: { start: true }\n      - cycle: 1\n      - expect: { rd.REQ: true, rd.INDEX: 1, value: 0, failed: false }\n      - set: { rd.VALID: true }\n      - cycle: 1\n      - expect: { value: 4 }\n      - set: { rd.ERROR: true }\n      - cycle: 1\n      - expect: { failed: true }\n",
       ),
     );
     expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
@@ -92,7 +92,7 @@ describe("rung test stubs", () => {
     const run = (stubs: string) => runTestFile(workspace(), "t.yaml", test("Fx_Record", stubs, "      - cycle: 1\n      - expect: { ok: true, rd.ID: 257 }\n"));
     const r = await run("  RDREC: { VALID: true }\n  '\"Rack_1~Valve_Module\"': 257");
     expect([r.cases[0]!.passed, r.stubbed]).toEqual([true, [{ name: "RDREC", calls: 1 }, { name: '"Rack_1~Valve_Module"', calls: 1 }]]);
-    expect((await run("  RDREC: { VALID: true }")).cases[0]!.error).toBe(`"Rack_1~Valve_Module" is a hardware identifier: it has no value offline; give it one in the test (stubs: { '"Rack_1~Valve_Module"': 257 }) (in Fx_Record, line 9)`);
+    expect((await run("  RDREC: { VALID: true }")).error).toBe(`stubs needed (Rack_1~Valve_Module has no value offline): write stubs: { '"Rack_1~Valve_Module"': 257 }`);
     expect((await run("  '\"Rack_1~Valve_Module\"': { ID: 1 }")).error).toBe('stubs."Rack_1~Valve_Module": a hardware identifier stands for a number (its HW_IO value), such as 257');
   });
 
@@ -110,13 +110,13 @@ describe("rung test stubs", () => {
     expect(await error("  Fx_Outer: {}")).toBe("stubs.Fx_Outer: Fx_Outer is the block under test; stub what it calls");
     expect(await error("  RDREC: [1, 2]")).toBe("stubs.RDREC is a map of output values, such as { STATUS: 0 } (or {} for none)");
     expect(await error("  RDREC: { VALID: [true] }")).toBe("stubs.RDREC.VALID: a value is true/false, a number or a string, not [true]");
-    expect((await runTestFile(workspace(), "t.yaml", "block: Fx_Outer\nstubs: [RDREC]\ncases:\n  - steps:\n      - cycle: 1\n")).error).toBe(
+    expect((await runTestFile(workspace(), "t.yaml", "block: Fx_Outer\nstubs: [RDREC]\ncases:\n  - name: case 1\n    steps:\n      - cycle: 1\n")).error).toBe(
       "stubs is a map: a block, instruction or technology object, then the values its outputs start with (RDREC: { VALID: true })",
     );
   });
 
   it("without a stub, what the simulator does not model still stops the test, and says how a test can stand in for it", async () => {
-    const r = await runTestFile(workspace(), "t.yaml", "block: Fx_Reader\ncases:\n  - steps:\n      - cycle: 1\n");
-    expect(r.cases[0]!.error).toMatch(/^rd \(RDREC\) is not simulated: .*; a test can stand in for it with stubs: \{ RDREC: \{\} \}/);
+    const r = await runTestFile(workspace(), "t.yaml", "block: Fx_Reader\ncases:\n  - name: case 2\n    steps:\n      - cycle: 1\n");
+    expect(r.error).toBe("stubs needed (RDREC is not simulated): write stubs: { RDREC: {} }");
   });
 });

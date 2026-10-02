@@ -54,7 +54,7 @@ const results = async (idx: WorkspaceIndex, yaml: string) => {
 
 describe("SCL and STL networks in SimaticML blocks", () => {
   it("runs TIA Portal's LAD FB with an SCL and an STL network (Fx_Mixed)", async () => {
-    const yaml = "block: Fx_Mixed\ncases:\n  - steps:\n      - set: { a: 3, b: true }\n      - cycle: 1\n      - expect: { q: 6, s: true }\n      - set: { r: true }\n      - cycle: 1\n      - expect: { s: false }\n";
+    const yaml = "block: Fx_Mixed\ncases:\n  - name: case 1\n    steps:\n      - set: { a: 3, b: true }\n      - cycle: 1\n      - expect: { q: 6, s: true }\n      - set: { r: true }\n      - cycle: 1\n      - expect: { s: false }\n";
     expect(await results(workspace({ "Fx_Mixed.xml": MIXED }), yaml)).toEqual([undefined, [true, undefined, []]]);
   });
 
@@ -77,7 +77,7 @@ describe("SCL and STL networks in SimaticML blocks", () => {
       t("END_IF"), t(";"),
     ].join("");
     const xml = fb("Fx_Both", members, [unit(1, "STL", stl("CALL", call) + stl("EMPTY_LINE")), unit(2, "SCL", scl)]);
-    const yaml = "block: Fx_Both\ncases:\n  - steps:\n      - set: { go: true }\n      - cycle: 1\n      - expect: { n1: 1, n2: 1 }\n      - set: { go: false }\n      - cycle: 1\n      - set: { go: true }\n      - cycle: 1\n      - expect: { n1: 2, n2: 2 }\n";
+    const yaml = "block: Fx_Both\ncases:\n  - name: case 2\n    steps:\n      - set: { go: true }\n      - cycle: 1\n      - expect: { n1: 1, n2: 1 }\n      - set: { go: false }\n      - cycle: 1\n      - set: { go: true }\n      - cycle: 1\n      - expect: { n1: 2, n2: 2 }\n";
     const idx = workspace({ "Fx_Both.xml": xml });
     expect(await results(idx, yaml)).toEqual([undefined, [true, undefined, []]]);
     // their operands are references for the editor and the call graph
@@ -88,7 +88,7 @@ describe("SCL and STL networks in SimaticML blocks", () => {
   it("runs an STL block kept as SimaticML network by network", async () => {
     const members = '<Section Name="Input"><Member Name="a" Datatype="Bool" /><Member Name="b" Datatype="Bool" /><Member Name="n" Datatype="Int" /></Section><Section Name="Output"><Member Name="q" Datatype="Bool" /><Member Name="m" Datatype="Int" /></Section>';
     const xml = fb("Fx_Stl", members, [unit(1, "STL", stl("A", local("a")) + stl("O", local("b")) + stl("Assign", local("q"))), unit(2, "STL", stl("L", local("n")) + stl("T", local("m")))], "STL");
-    const yaml = "block: Fx_Stl\ncases:\n  - steps:\n      - set: { b: true, n: 7 }\n      - cycle: 1\n      - expect: { q: true, m: 7 }\n      - set: { b: false }\n      - cycle: 1\n      - expect: { q: false }\n";
+    const yaml = "block: Fx_Stl\ncases:\n  - name: case 3\n    steps:\n      - set: { b: true, n: 7 }\n      - cycle: 1\n      - expect: { q: true, m: 7 }\n      - set: { b: false }\n      - cycle: 1\n      - expect: { q: false }\n";
     expect(await results(workspace({ "Fx_Stl.xml": xml }), yaml)).toEqual([undefined, [true, undefined, []]]);
   });
 
@@ -98,7 +98,7 @@ describe("SCL and STL networks in SimaticML blocks", () => {
     const open = fb("Fx_Open", members, [unit(1, "STL", stl("A", local("q"))), unit(2, "SCL", sclSet("x", "TRUE"))]);
     const ladOpen = fb("Fx_LadOpen", members, [unit(1, "STL", stl("A", local("q"))), ladSet(2, "x")]);
     const last = fb("Fx_Last", members, [unit(1, "STL", stl("A", local("q")))]);
-    const yaml = (b: string) => `block: ${b}\ncases:\n  - steps:\n      - cycle: 1\n`;
+    const yaml = (b: string) => `block: ${b}\ncases:\n  - name: case 4\n    steps:\n      - cycle: 1\n`;
     const idx = workspace({ "Fx_Old.xml": refused, "Fx_Open.xml": open, "Fx_LadOpen.xml": ladOpen, "Fx_Last.xml": last });
     expect((await runTestFile(idx, "t.test.yaml", yaml("Fx_Old"))).cases[0]!.error).toBe('"Fx_Old" uses STL instructions the simulator does not run yet (network 1): TAK (in Fx_Old)');
     for (const name of ["Fx_Open", "Fx_LadOpen"]) expect((await runTestFile(idx, "t.test.yaml", yaml(name))).cases[0]!.error).toMatch(/^STL network 1: the logic string is still open at the end of the network and cannot continue in STL: not simulated/);

@@ -120,7 +120,7 @@ describe("workspace features", () => {
   it("renames a local everywhere in its block and refuses globals", () => {
     const edits = rename(idx, user(), at(user(), "#speed :="), "velocity");
     expect(Array.isArray(edits) && edits.map((e) => e.newText)).toEqual(["velocity", "#velocity"]);
-    expect(rename(idx, user(), at(user(), '"Fx_Global"'), "X")).toMatchObject({ error: expect.stringMatching(/Only local/) });
+    expect(rename(idx, user(), at(user(), '"Fx_Global"'), "X")).toMatchObject({ error: expect.stringMatching(/Only variables/) });
     expect(rename(idx, user(), at(user(), "#speed :="), "Motor")).toMatchObject({ error: expect.stringMatching(/already exists/) });
     expect(rename(idx, user(), at(user(), "#speed :="), "1bad")).toMatchObject({ error: expect.stringMatching(/not a valid/) });
   });

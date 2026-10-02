@@ -25,11 +25,11 @@ describe("a test file with a mistake in its shape", () => {
     expect(await errorOf("block: Fx_Motor\nsteps:\n  - set: { Start: true }\n")).toBe("unknown key steps: a test file has block, plc, cycle, stubs and cases (the steps go in a case under cases:)");
     expect(await errorOf("block: Fx_Motor\n")).toBe("no cases: list them under cases:, each with a name and its steps");
     // a case whose steps slipped out of it by indentation would pass without testing anything
-    expect(await errorOf("block: Fx_Motor\ncases:\n  - name: runs\n  - steps:\n      - cycle: 1\n")).toBe("case 1 (runs) has no steps: indent them under the case, below its name");
+    expect(await errorOf("block: Fx_Motor\ncases:\n  - name: runs\n  - name: case 1\n    steps:\n      - cycle: 1\n")).toBe("case 1 (runs) has no steps: indent them under the case, below its name");
     expect(await errorOf("block: Fx_Motor\ncases:\n  - name: runs\n    step:\n      - cycle: 1\n")).toBe("case 1 (runs): unknown key step (a case has name and steps)");
     expect(await errorOf("block: Fx_Motor\ncases:\n  - name: runs\n    steps: { cycle: 1 }\n")).toBe("case 1 (runs): steps is a list, one step per line starting with -");
-    expect(await errorOf("block: Fx_Motor\ncycle: 0ms\ncases:\n  - steps:\n      - advance: 1s\n")).toBe("cycle is the time of one cycle, such as 10ms; 0ms runs no time");
-    expect(await errorOf("block: Fx_Motor\ncycle: fast\ncases:\n  - steps:\n      - cycle: 1\n")).toBe("cycle is the time of one cycle, such as 10ms; not fast");
+    expect(await errorOf("block: Fx_Motor\ncycle: 0ms\ncases:\n  - name: case 2\n    steps:\n      - advance: 1s\n")).toBe("cycle is the time of one cycle, such as 10ms; 0ms runs no time");
+    expect(await errorOf("block: Fx_Motor\ncycle: fast\ncases:\n  - name: case 3\n    steps:\n      - cycle: 1\n")).toBe("cycle is the time of one cycle, such as 10ms; not fast");
   });
 
   it("refuses times and counts that never end or would run for hours, instead of hanging", async () => {
@@ -50,7 +50,7 @@ describe("rung test --filter", () => {
   it("matches the block a file tests, also after a comment and in other letter case", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-filter-"));
     mkdirSync(join(root, "tests"), { recursive: true });
-    writeFileSync(join(root, "tests", "drive.test.yaml"), "block: Fx_Motor          # FB: one instance per case\ncases:\n  - steps:\n      - cycle: 1\n");
+    writeFileSync(join(root, "tests", "drive.test.yaml"), "block: Fx_Motor          # FB: one instance per case\ncases:\n  - name: case 4\n    steps:\n      - cycle: 1\n");
     expect((await runTests(root, index(), "Fx_Motor")).map((f) => f.file)).toEqual(["tests/drive.test.yaml"]);
     expect((await runTests(root, index(), "fx_motor")).map((f) => f.file)).toEqual(["tests/drive.test.yaml"]);
     expect(await runTests(root, index(), "Fx_Mot")).toEqual([]);

@@ -987,6 +987,7 @@ export class Simulator {
       const stubbed = c.callee.root.kind === "global" && !c.callee.path.length ? this.stubOf(name) : undefined;
       if (stubbed && (!target || target.block?.kind === "FC")) return this.callStub(name, c, frame, stubbed);
       if (target?.block?.kind === "FC") return this.callFc(target.block, c, frame);
+      if (c.callee.root.kind === "global" && !c.callee.path.length && !target && !stubbed) throw new SimError(`${name} is not in the workspace: use stubs: { ${name}: { RET_VAL: 0 } }`, frame?.block.name, c.callee.start);
       if (target?.kind === "OBJECT" && !stubbed) throw this.objectError(name);
       // instruction called on typed instance data: #t.TON(...) on an IEC_TIMER, #c.CTU(...) on an IEC_COUNTER
       const last = c.callee.path[c.callee.path.length - 1];
@@ -1004,7 +1005,7 @@ export class Simulator {
       if (!isInstance(inst)) {
         const d = this.declOf(c.callee, frame);
         const type = (d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
-        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(`${name} (${type}) is not simulated: ${NOT_SIMULATED}; a test can stand in for it with stubs: { ${type}: {} }`, frame?.block.name, c.callee.start);
+        if (type && !this.index.global(type)?.block && !d?.members?.length) throw new SimError(STANDARD_BY_NAME.has(type.toUpperCase()) || /^(RDREC|WRREC|MB_CLIENT|MC_)/i.test(type) ? `${name} (${type}) is not simulated: use stubs: { ${type}: {} }` : `${type} is not in the workspace: use stubs: { ${type}: {} }`, frame?.block.name, c.callee.start);
         throw new SimError(`${name} is not a function block instance`, frame?.block.name, c.callee.start);
       }
       this.runInstance(inst, c.args, frame);

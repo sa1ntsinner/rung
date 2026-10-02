@@ -61,18 +61,18 @@ describe("rung test runner", () => {
   });
 
   it("tests FCs and global DB members", async () => {
-    const r = await runTestFile(index(), "v.yaml", `block: Fx_Valve\ncases:\n  - steps:\n      - set: { Enable: true, Mode: 1 }\n      - cycle: 1\n      - expect: { Open: true }\n      - set: { Mode: 2 }\n      - cycle: 1\n      - expect: { Open: false }\n`);
+    const r = await runTestFile(index(), "v.yaml", `block: Fx_Valve\ncases:\n  - name: case 1\n    steps:\n      - set: { Enable: true, Mode: 1 }\n      - cycle: 1\n      - expect: { Open: true }\n      - set: { Mode: 2 }\n      - cycle: 1\n      - expect: { Open: false }\n`);
     expect(r.cases[0]!.passed).toBe(true);
-    const g = await runTestFile(index(), "g.yaml", `block: Fx_Motor\ncases:\n  - steps:\n      - set: { '"Fx_Global".Station.Mode': 3 }\n      - expect: { '"Fx_Global".Station.Mode': 3, '"Fx_Global".Count': 0 }\n`);
+    const g = await runTestFile(index(), "g.yaml", `block: Fx_Motor\ncases:\n  - name: case 2\n    steps:\n      - set: { '"Fx_Global".Station.Mode': 3 }\n      - expect: { '"Fx_Global".Station.Mode': 3, '"Fx_Global".Count': 0 }\n`);
     expect(g.cases[0]!.passed).toBe(true);
   });
 
   it("reports unknown blocks, bad YAML and unknown steps clearly", async () => {
     expect((await runTestFile(index(), "a.yaml", "block: Nope\ncases: []\n")).error).toMatch(/not found/);
     expect((await runTestFile(index(), "b.yaml", "block: [unclosed")).error).toMatch(/invalid YAML/);
-    const r = await runTestFile(index(), "c.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - jump: 1\n");
+    const r = await runTestFile(index(), "c.yaml", "block: Fx_Motor\ncases:\n  - name: case 3\n    steps:\n      - jump: 1\n");
     expect(r.cases[0]!.error).toMatch(/unknown step "jump"/);
-    expect(r.cases[0]).toMatchObject({ errorStep: 1, errorLine: 4 });
+    expect(r.cases[0]).toMatchObject({ errorStep: 1, errorLine: 5 });
   });
 
   it("keeps the step an error stopped in, and its line", async () => {
@@ -81,37 +81,37 @@ describe("rung test runner", () => {
     // an error before any step (a block the tests cannot call) has no step
     const idx = index();
     idx.set("file:///w/plc/P/blocks/Fx_Ob.scl", 'ORGANIZATION_BLOCK "Fx_Ob"\nBEGIN\nEND_ORGANIZATION_BLOCK\n', 0);
-    const ob = await runTestFile(idx, "o.yaml", "block: Fx_Ob\ncases:\n  - steps:\n      - cycle: 1\n");
+    const ob = await runTestFile(idx, "o.yaml", "block: Fx_Ob\ncases:\n  - name: case 4\n    steps:\n      - cycle: 1\n");
     expect(ob.cases[0]!.error).toMatch(/tests call FBs, FCs or PROGRAMs/);
     expect(ob.cases[0]).not.toHaveProperty("errorStep");
     expect(toJUnit([r])).toContain('<error message="step 2: Strat does not exist (did you mean Start?)"/>');
   });
 
   it("runs every key of a multi-key step in the order set, cycle, advance, expect", async () => {
-    const r = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - expect: { Running: true }\n        cycle: 1\n        set: { Start: true }\n  - steps:\n      - cycle: 1\n        expect: { Running: true }\n");
+    const r = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - name: case 5\n    steps:\n      - expect: { Running: true }\n        cycle: 1\n        set: { Start: true }\n  - name: case 6\n    steps:\n      - cycle: 1\n        expect: { Running: true }\n");
     expect(r.cases.map((c) => [c.passed, c.error])).toEqual([
       [true, undefined],
       [false, undefined],
     ]);
-    expect(r.cases[1]!.failures).toEqual([{ step: 1, name: "Running", expected: true, actual: false, line: 8 }]);
-    const bad = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - cycle: 1\n        expct: { Running: true }\n");
+    expect(r.cases[1]!.failures).toEqual([{ step: 1, name: "Running", expected: true, actual: false, line: 10 }]);
+    const bad = await runTestFile(index(), "m.yaml", "block: Fx_Motor\ncases:\n  - name: case 7\n    steps:\n      - cycle: 1\n        expct: { Running: true }\n");
     expect(bad.cases[0]!.error).toMatch(/unknown step "expct"/);
   });
 
   it("names the block, variable or member a misspelt name most likely meant", async () => {
     const idx = index();
     idx.set("file:///w/plc/P/blocks/Fx_Drive.scl", 'FUNCTION_BLOCK "Fx_Drive"\nVAR\n  drive : Struct\n    speed : Int;\n  END_STRUCT;\n  axes : Array[1..2] of "Fx_Types";\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
-    const one = (steps: string, block = "Fx_Motor") => runTestFile(idx, "t.yaml", `block: ${block}\ncases:\n  - steps:\n${steps}`);
+    const one = (steps: string, block = "Fx_Motor") => runTestFile(idx, "t.yaml", `block: ${block}\ncases:\n  - name: case 8\n    steps:\n${steps}`);
     expect((await runTestFile(index(), "t.yaml", "block: Fx_Motr\ncases: []\n")).error).toBe("block Fx_Motr not found (did you mean Fx_Motor?)");
     expect((await one("      - set: { Strat: true }\n")).cases[0]!.error).toBe("Strat does not exist (did you mean Start?)");
-    expect((await one("      - cycle: 1\n      - expect: { Runing: false }\n")).cases[0]!.failures[0]!.actual).toBe("<Runing does not exist (did you mean Running?)>");
+    expect((await one("      - cycle: 1\n      - expect: { Runing: false }\n")).cases[0]!.error).toBe("Runing does not exist (did you mean Running?)");
     expect((await one("      - set: { '\"Fx_Global\".Cout': 1 }\n")).cases[0]!.error).toBe('"Fx_Global".Cout does not exist (did you mean "Fx_Global".Count?)');
     expect((await one("      - set: { '\"Fx_Globl\".Count': 1 }\n")).cases[0]!.error).toMatch(/ \(did you mean "Fx_Global"\.Count\?\)$/);
     expect((await one("      - set: { drive.sped: 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("drive.sped does not exist (did you mean drive.speed?)");
     expect((await one("      - set: { 'axes[2].Mdoe': 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("axes[2].Mdoe does not exist (did you mean axes[2].Mode?)");
     // an FC: inputs for set, outputs for expect
-    expect((await one("      - set: { Enabel: true }\n      - cycle: 1\n", "Fx_Valve")).cases[0]!.error).toBe("Enabel is not an input of Fx_Valve (did you mean Enable?)");
-    expect((await one("      - cycle: 1\n      - expect: { Opn: true }\n", "Fx_Valve")).cases[0]!.failures[0]!.actual).toBe("<Opn does not exist (did you mean Open?)>");
+    expect((await one("      - set: { Enabel: true }\n      - cycle: 1\n", "Fx_Valve")).cases[0]!.error).toBe("Enabel does not exist (did you mean Enable?)");
+    expect((await one("      - cycle: 1\n      - expect: { Opn: true }\n", "Fx_Valve")).cases[0]!.error).toBe("Opn does not exist (did you mean Open?)");
     // nothing close: the message stays as it was
     expect((await one("      - set: { Throttle: 1 }\n")).cases[0]!.error).toBe("Throttle does not exist");
   });
@@ -145,21 +145,21 @@ describe("rung test runner", () => {
     const idx = index();
     idx.set("file:///w/plc/P/blocks/Arr.scl", 'FUNCTION_BLOCK "Arr"\nVAR\n  pts : Array[1..3] of "Fx_Types";\n  grid : Array[0..1, 0..2] of Int;\n  sum : Int;\nEND_VAR\nBEGIN\n  #sum := #pts[2].Mode + #grid[1, 2];\nEND_FUNCTION_BLOCK\n', 0);
     idx.set("file:///w/plc/P/blocks/Inc.scl", 'FUNCTION "Inc" : Void\nVAR_IN_OUT\n  acc : Int;\nEND_VAR\nBEGIN\n  #acc := #acc + 1;\nEND_FUNCTION\n', 0);
-    const a = await runTestFile(idx, "a.yaml", "block: Arr\ncases:\n  - steps:\n      - set: { 'pts[2].Mode': 3, 'grid[1,2]': 4 }\n      - cycle: 1\n      - expect: { sum: 7, 'pts[2].Mode': 3, pts.2.Mode: 3 }\n");
+    const a = await runTestFile(idx, "a.yaml", "block: Arr\ncases:\n  - name: case 9\n    steps:\n      - set: { 'pts[2].Mode': 3, 'grid[1,2]': 4 }\n      - cycle: 1\n      - expect: { sum: 7, 'pts[2].Mode': 3, pts.2.Mode: 3 }\n");
     expect(a.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
-    const f = await runTestFile(idx, "f.yaml", "block: Inc\ncases:\n  - steps:\n      - set: { acc: 0 }\n      - cycle: 3\n      - expect: { acc: 3 }\n");
+    const f = await runTestFile(idx, "f.yaml", "block: Inc\ncases:\n  - name: case 10\n    steps:\n      - set: { acc: 0 }\n      - cycle: 3\n      - expect: { acc: 3 }\n");
     expect(f.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
   });
 
   it("rejects set values of the wrong kind", async () => {
-    const r = await runTestFile(index(), "t.yaml", "block: Fx_Motor\ncases:\n  - steps:\n      - set: { Start: 1 }\n");
+    const r = await runTestFile(index(), "t.yaml", "block: Fx_Motor\ncases:\n  - name: case 11\n    steps:\n      - set: { Start: 1 }\n");
     expect(r.cases[0]!.error).toMatch(/Start expects a BOOL \(true\/false\), got 1/);
   });
 
   it("rejects values the declared type cannot hold, also for an FC's inputs before the first cycle", async () => {
     const idx = new WorkspaceIndex();
     idx.set("file:///w/Fx_Add.scl", 'FUNCTION "Fx_Add" : Int\nVAR_INPUT\n  a : Int;\n  on : Bool;\nEND_VAR\nBEGIN\n  #Fx_Add := #a + 1;\nEND_FUNCTION\n', 0);
-    const run = async (set: string) => (await runTestFile(idx, "t.yaml", `block: Fx_Add\ncases:\n  - steps:\n      - set: ${set}\n`)).cases[0]!.error;
+    const run = async (set: string) => (await runTestFile(idx, "t.yaml", `block: Fx_Add\ncases:\n  - name: case 12\n    steps:\n      - set: ${set}\n`)).cases[0]!.error;
     expect(await run("{ a: 40000 }")).toMatch(/a is Int: 40000 is outside -32768\.\.32767/);
     expect(await run("{ a: 1.5 }")).toMatch(/a is Int: expects a whole number, got 1\.5/);
     expect(await run("{ on: 1 }")).toMatch(/on expects a BOOL \(true\/false\), got 1/);
@@ -170,7 +170,7 @@ describe("rung test runner", () => {
     const idx = new WorkspaceIndex();
     for (const [plc, add] of [["PLC_A", 1], ["PLC_B", 2]] as const)
       idx.set(`file:///w/plc/${plc}/blocks/Fx_Add.scl`, `FUNCTION "Fx_Add" : Int\nVAR_INPUT\n  a : Int;\nEND_VAR\nBEGIN\n  #Fx_Add := #a + ${add};\nEND_FUNCTION\n`, 0);
-    const test = (extra: string) => `block: Fx_Add\n${extra}cases:\n  - steps:\n      - { set: { a: 1 }, cycle: 1, expect: { Fx_Add: 3 } }\n`;
+    const test = (extra: string) => `block: Fx_Add\n${extra}cases:\n  - name: case 13\n    steps:\n      - { set: { a: 1 }, cycle: 1, expect: { Fx_Add: 3 } }\n`;
     expect((await runTestFile(idx, "tests/add.test.yaml", test(""))).error).toMatch(/Fx_Add is in several PLCs \(PLC_A, PLC_B\): add `plc: PLC_A`/);
     expect((await runTestFile(idx, "tests/add.test.yaml", test("plc: PLC_B\n"))).cases[0]!.passed).toBe(true);
     expect((await runTestFile(idx, "tests/PLC_B/add.test.yaml", test(""))).cases[0]!.passed).toBe(true);
@@ -183,7 +183,7 @@ describe("rung test runner", () => {
       idx.set(`file:///w/plc/${plc}/tags/${list}.st`, "VAR_GLOBAL\n  x : INT;\nEND_VAR\n", 0);
       idx.set(`file:///w/plc/${plc}/blocks/FB_R.st`, "FUNCTION_BLOCK FB_R\nVAR_OUTPUT\n  y : INT;\nEND_VAR\ny := x * 2;\nEND_FUNCTION_BLOCK\n", 0);
     }
-    const r = await runTestFile(idx, "tests/PLC_B/r.test.yaml", "block: FB_R\ncases:\n  - steps:\n      - { set: { x: 5 }, cycle: 1, expect: { y: 10 } }\n");
+    const r = await runTestFile(idx, "tests/PLC_B/r.test.yaml", "block: FB_R\ncases:\n  - name: case 14\n    steps:\n      - { set: { x: 5 }, cycle: 1, expect: { y: 10 } }\n");
     expect(r.error).toBeUndefined();
     expect(r.cases[0]).toMatchObject({ passed: true });
   });

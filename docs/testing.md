@@ -4,7 +4,7 @@ rung runs unit tests for SCL, LAD, FBD and STL function blocks and functions on 
 
 ```
 rung test                       # all tests/**/*.test.yaml
-rung test --filter motor        # only files whose path contains "motor"
+rung test --filter motor        # path substring or exact block name (case-insensitive)
 rung test --filter Fx_Motor     # only the tests of the block Fx_Motor
 rung test --junit report.xml    # JUnit XML for CI
 rung test --json                # every result with the line of its case, of each failing step and of the step an error stopped in (VS Code's Testing view uses it)
@@ -25,23 +25,26 @@ cases:
       - cycle: 1                          # run one cycle (time advances by `cycle`)
       - expect: { Running: true, SpeedOut: 1500 }
       - set: { Start: false }
-      - advance: 2s                       # run as many cycles as fit into 2 s
+      - advance: 2s                       # run whole cycles for at least 2 s
       - expect: { Running: true }
       - set: { '"Fx_Global".Ready': true } # DB members and tags use their TIA names
       - expect: { Debounce.Q: false, Elapsed: "T#0ms" }
 ```
 
-- `set` writes inputs, statics, instance members (`Timer.PT`) or globals (`"DB".member`, `"Tag"`). Array elements are addressed as `'pts[2].x'` or `'grid[1,2]'` (quote them inside `{ … }`). The value must fit the variable: `true`/`false` for BOOL, a whole number within range for integer types (40000 is refused for an Int), numbers for reals, strings for strings.
+- Every case needs a nonempty `name:` unique within its file, and at least one step.
+- `set` writes inputs, statics, instance members (`Timer.PT`) or globals (`"DB".member`, `"Tag"`). Array elements are addressed as `'pts[2].x'` or `'grid[1,2]'` (quote them inside `{ … }`). The value must fit the variable: `true`/`false` for BOOL, a whole number within range for integer types (40000 is refused for an Int), numbers for reals, strings within their declared length. Set arrays and structs element by element (`'Levels[1]'`, `Data.Cmd.Start`); whole lists and maps are refused.
 - With several PLCs that each have a block of that name, say which: `plc: PLC_1` in the file, or keep the test under `tests/PLC_1/`. rung refuses to guess.
-- `expect` compares with a small tolerance for reals; `T#…` strings are durations.
+- `expect` compares with a small tolerance for reals; TIME values accept the same durations as `advance` (`500ms`, `T#500ms`, `2s`).
+- `advance` needs a unit (`200ms`, not `200`). It runs whole cycles, rounded up, at least one: at `cycle: 10ms`, `15ms` runs two cycles and `0ms` runs one.
+- `--filter` matches a path substring or the exact `block:` name, case-insensitively on every platform. Paths accept `/` or `\\`; case names are not matched.
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
 - A step runs at most 10 000 000 cycles: `advance: T#1d` at the default 10 ms is 8 640 000. For longer times, set a longer `cycle:` at the top of the file.
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
-- A case that stops with an error (a misspelt name in a `set`, an instruction the simulator refuses) says in which step: `step 2: Strat does not exist (did you mean Start?)`. `--json` gives that step and its line as `errorStep` and `errorLine`, so editors and GitHub annotations point at the step, not at the case.
+- A case that stops with an error (a misspelt name in a `set`, an instruction the simulator refuses) says in which step: `step 2: Strat does not exist (did you mean Start?)`. `--json` gives that step and its line as `errorStep` and `errorLine`, so editors and GitHub annotations point at the step, not at the case. File-level YAML errors carry `errorLine` and `errorColumn` when the parser can place them.
 
 ## Stubs
 
-What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:
+What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. Before running a file, rung lists the missing stubs in its block’s call graph, including calls through other workspace blocks; a stubbed block ends that search. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:
 
 ```yaml
 block: Fx_Reader
@@ -71,7 +74,7 @@ cases:
 - **A hardware identifier** (`"Rack~Gateway"`, a system constant) has no value offline. The test gives it one, a number, where the code passes it on (to a stubbed RDREC, for example).
 - **Only what is named is stubbed.**
   - `rung test` prints once per file what the stubs stood in for (`stubbed: RDREC ×2, MB_CLIENT`), and marks a stub of code the simulator could run itself ("replaces code the simulator runs"). This is allowed, to test one unit alone.
-  - A stub the cases never called gets a warning: a typo, or code they do not reach.
+  - A stub the cases never called gets a warning: a typo, or code they do not reach. This warning is suppressed when a case stopped with an error.
   - Refused like the rest of the file: a name nothing in the workspace calls or declares (with the closest one), a member a known type does not have, a value its declared type cannot hold, and the block under test itself.
 
 ## What the simulator covers

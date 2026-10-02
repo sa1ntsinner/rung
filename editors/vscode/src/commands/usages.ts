@@ -11,6 +11,9 @@ interface Site {
   block?: string;
   text: string;
   calledFrom?: { block: string; uri: string; range: vscode.Range }[];
+  /** Reached inside a block the structure holding it is handed to: that call. */
+  through?: { block: string; param: string; uri: string; range: vscode.Range; text: string };
+  whole?: boolean;
 }
 
 export async function whoWrites(lsp: Lsp): Promise<void> {
@@ -27,16 +30,18 @@ export async function whoWrites(lsp: Lsp): Promise<void> {
     return;
   }
   type Item = vscode.QuickPickItem & { site?: Site; at?: { uri: string; range: vscode.Range } };
-  const where = (s: Site) => `${vscode.workspace.asRelativePath(vscode.Uri.parse(s.uri))}:${s.range.start.line + 1}`;
+  const where = (s: { uri: string; range: vscode.Range }) => `${vscode.workspace.asRelativePath(vscode.Uri.parse(s.uri))}:${s.range.start.line + 1}`;
   const items: Item[] = [];
   items.push({ label: `writes (${r.writes.length})`, kind: vscode.QuickPickItemKind.Separator });
   if (!r.writes.length) items.push({ label: "$(info) nothing in the workspace writes it", description: "an HMI, a communication block or indirect access may" });
+  const block = (s: Site) => `${s.block ?? ""}${s.whole ? " (the whole structure)" : ""}`;
+  const through = (s: Site) => s.through ? [{ label: `      $(call-incoming) as ${s.through.param} from ${s.through.block}: ${s.through.text}`, detail: where(s.through), at: s.through }] : [];
   for (const s of r.writes) {
-    items.push({ label: `$(edit) ${s.text}`, description: s.block ?? "", detail: where(s), site: s });
-    for (const c of s.calledFrom ?? []) items.push({ label: `      $(call-incoming) called from ${c.block}`, detail: `${vscode.workspace.asRelativePath(vscode.Uri.parse(c.uri))}:${c.range.start.line + 1}`, at: c });
+    items.push({ label: `$(edit) ${s.text}`, description: block(s), detail: where(s), site: s }, ...through(s));
+    for (const c of s.calledFrom ?? []) items.push({ label: `      $(call-incoming) called from ${c.block}`, detail: where(c), at: c });
   }
   items.push({ label: `reads (${r.reads.length})`, kind: vscode.QuickPickItemKind.Separator });
-  for (const s of r.reads) items.push({ label: `$(eye) ${s.text}`, description: s.block ?? "", detail: where(s), site: s });
+  for (const s of r.reads) items.push({ label: `$(eye) ${s.text}`, description: block(s), detail: where(s), site: s }, ...through(s));
   const pick = await vscode.window.showQuickPick(items, {
     title: `Who writes ${word}? (HMI, communication and indirect access are not seen)`,
     matchOnDescription: true,

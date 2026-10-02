@@ -55,7 +55,7 @@ cases:
   it("refuses a LAD block with elements it cannot run, naming them", async () => {
     const idx = new WorkspaceIndex();
     idx.set("file:///w/FB_Edge.s7dcl", '{\n    S7_Language := "LAD";\n}\nFUNCTION_BLOCK "FB_Edge"\n    VAR_INPUT\n        a : Bool;\n    END_VAR\n    VAR\n        m : Bool;\n        n : Int;\n        q : Bool;\n    END_VAR\n    {\n      S7_Language := "LAD"\n    }\n    NETWORK\n        RUNG wire#powerrail\n            Contact( #a )\n            Calculate{ SrcType := Int }( IN1 := 1, OUT => #n )\n            Coil( #q )\n        END_RUNG\n    END_NETWORK\nEND_FUNCTION_BLOCK\n', 0);
-    const r = await runTestFile(idx, "edge.test.yaml", "block: FB_Edge\ncases:\n  - steps:\n      - cycle: 1\n");
+    const r = await runTestFile(idx, "edge.test.yaml", "block: FB_Edge\ncases:\n  - name: case 1\n    steps:\n      - cycle: 1\n");
     expect(JSON.stringify(r)).toMatch(/LAD elements the simulator does not run yet: Calculate\{ SrcType := Int \}\( IN1 := 1, OUT => #n \)/);
   });
 });

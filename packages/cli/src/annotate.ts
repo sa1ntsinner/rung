@@ -10,13 +10,13 @@ const property = (s: string) => data(s).replace(/:/g, "%3A").replace(/,/g, "%2C"
 /** `::error file=…,line=…,title=…::…` lines; paths relative to the repository (`base`), results' to `ws`. */
 export function githubAnnotations(results: readonly FileResult[], ws: string, base: string): string[] {
   const out: string[] = [];
-  const at = (file: string, line: number | undefined, title: string, message: string) => {
+  const at = (file: string, line: number | undefined, title: string, message: string, column?: number) => {
     const path = relative(base, join(ws, file)).split(sep).join("/");
-    out.push(`::error file=${property(path)}${line ? `,line=${line}` : ""},title=${property(title)}::${data(message)}`);
+    out.push(`::error file=${property(path)}${line ? `,line=${line}` : ""}${column ? `,col=${column}` : ""},title=${property(title)}::${data(message)}`);
   };
   for (const f of results) {
     if (f.error) {
-      at(f.file, undefined, `rung test: ${f.file}`, f.error);
+      at(f.file, f.errorLine, `rung test: ${f.file}`, f.error, f.errorColumn);
       continue;
     }
     for (const c of f.cases) {

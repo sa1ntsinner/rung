@@ -82,7 +82,7 @@ cases:
     const r = await runTestFile(index(), "main.test.yaml", `
 block: MAIN
 cases:
-  - steps:
+  - name: case 1\n    steps:
       - cycle: 3
       - expect: { nScans: 3, fbBlink.bEnable: true }
 `);

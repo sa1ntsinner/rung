@@ -280,7 +280,7 @@ describe("rung CLI", () => {
     writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n      - expect: { Runing: false }\n");
     writeFileSync(join(t.dir, "tests", "typo.test.yaml"), "block: Fx_Rn\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n");
     expect(await t.run("test")).toBe(2);
-    expect(t.out.join("")).toContain("FAIL Fx_Run: runs\n       step 2: Runing expected false got <Runing does not exist (did you mean Running?)>\n");
+    expect(t.out.join("")).toContain("FAIL Fx_Run: runs — step 2: Runing does not exist (did you mean Running?)\n");
     expect(t.out.join("")).toContain("FAIL tests/typo.test.yaml: block Fx_Rn not found (did you mean Fx_Run?)\n");
   });
 

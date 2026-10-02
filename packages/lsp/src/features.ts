@@ -2,6 +2,8 @@
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
+import type { Token } from "./lexer.js";
+import { nearest } from "./nearest.js";
 import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, orderedParams, paramsOf, unknownArgs, type CallSite } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
@@ -93,6 +95,71 @@ function refAt(index: WorkspaceIndex, uri: string, offset: number): { block: Blo
   return undefined;
 }
 
+/** The named argument under the cursor (`Start` in `#Pump(Start := #x)`) and the parameter it names in the callee. */
+function argAt(index: WorkspaceIndex, uri: string, offset: number): { site: CallSite; name: string; start: number; end: number; param?: Member } | undefined {
+  for (const site of callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n), true)) {
+    if (offset < site.open || offset > site.close) continue;
+    const a = site.args.find((x) => x.name && offset >= x.nameStart! && offset <= x.nameEnd!);
+    if (!a) continue;
+    const g = site.callee.kind === "std" ? undefined : index.global(site.callee.name);
+    const v = g?.block?.vars.find((x) => x.name.toUpperCase() === a.name!.toUpperCase());
+    return { site, name: a.name!, start: a.nameStart!, end: a.nameEnd!, ...(v ? { param: { ...v, uri: g!.uri } } : {}) };
+  }
+  return undefined;
+}
+
+/** The word under the cursor where no reference is, quotes included in `raw`: a type name in a declaration. */
+function wordAt(text: string, offset: number): { raw: string; word: string; start: number; end: number } | undefined {
+  let start = offset;
+  let end = offset;
+  while (start > 0 && /[\p{L}\p{N}_"]/u.test(text[start - 1]!)) start--;
+  while (end < text.length && /[\p{L}\p{N}_"]/u.test(text[end]!)) end++;
+  const raw = text.slice(start, end);
+  const word = raw.replace(/^"|"$/g, "");
+  return word ? { raw, word, start, end } : undefined;
+}
+
+/** The first member of `ref` its type does not have, with the name it most likely meant (only when the type is known completely). */
+export function unknownMember(index: WorkspaceIndex, uri: string, block: BlockModel, ref: Ref): { start: number; end: number; name: string; parent: string; suggestion?: string } | undefined {
+  const root = rootMembers(index, block, ref, uri);
+  if (!root.length) return undefined;
+  const chain = index.resolveChain(root, ref.members);
+  for (let i = 0; i < chain.length; i++) {
+    if (chain[i]) continue;
+    // the parent's type is not known (system type, unmirrored UDT, elementary bit access): no verdict
+    const scope = i > 0 ? index.membersOf(chain[i - 1]!) : root;
+    if (!scope.length) return undefined;
+    const m = ref.members[i]!;
+    const suggestion = nearest(m.name, scope.map((s) => s.name));
+    return { start: m.start, end: m.end, name: m.name, parent: i === 0 ? ref.name : ref.members[i - 1]!.name, ...(suggestion ? { suggestion } : {}) };
+  }
+  return undefined;
+}
+
+const TEXT_TYPE = /^(W?STRING(\[.*\])?|W?CHAR)$/i;
+const NUMERIC_TYPE = /^(U?S?INT|U?D?INT|U?L?INT|L?REAL|BYTE|L?D?WORD|BOOL|L?TIME|S5TIME|DATE|L?TOD|TIME_OF_DAY|L?DT|DTL|DATE_AND_TIME)$/i;
+
+/** `#x := <one literal>;` where the literal cannot become the declared type: text into a number, a number into text. */
+function literalMismatches(index: WorkspaceIndex, uri: string, tokens: Token[], block: BlockModel): FeatureDiagnostic[] {
+  const out: FeatureDiagnostic[] = [];
+  const code = tokens.filter((t) => t.kind !== "comment" && t.kind !== "pragma");
+  const at = new Map(code.map((t, i) => [t.start, i]));
+  for (const ref of block.refs) {
+    if (ref.kind !== "local" || ref.access !== "write" || ref.members.length) continue;
+    const i = at.get(ref.start) ?? -9;
+    const [op, value, end] = [code[i + 1], code[i + 2], code[i + 3]];
+    if (op?.text !== ":=" || !value || end?.text !== ";") continue;
+    const d = scopeDecl(index, uri, block, ref.name, ref.start);
+    if (!d || d.isArray) continue;
+    const type = d.type.replace(/\s+/g, "");
+    const text = value.kind === "string";
+    const number = value.kind === "number" && /^[+-]?\d[\d_]*(\.\d+)?(e[+-]?\d+)?$/i.test(value.text);
+    if (text && NUMERIC_TYPE.test(type)) out.push({ start: value.start, end: value.end, severity: "error", message: `#${d.name} is ${d.type}: ${value.text} is text, TIA Portal does not convert it`, code: "TYPE_MISMATCH" });
+    else if (number && TEXT_TYPE.test(type)) out.push({ start: value.start, end: value.end, severity: "error", message: `#${d.name} is ${d.type}: write the text in quotes, '${value.text}'`, code: "TYPE_MISMATCH" });
+  }
+  return out;
+}
+
 function rootMembers(index: WorkspaceIndex, block: BlockModel, ref: Ref, uri: string): Member[] {
   if (ref.kind === "local") {
     const d = scopeDecl(index, uri, block, ref.name, ref.start);
@@ -179,18 +246,10 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
         continue;
       }
       // Member names: only report when the type is known completely.
-      const root = rootMembers(index, block, ref, uri);
-      if (!root.length) continue;
-      const chain = index.resolveChain(root, ref.members);
-      for (let i = 0; i < chain.length; i++) {
-        if (chain[i]) continue;
-        // the parent's type is not known (system type, unmirrored UDT, elementary bit access): no verdict
-        if (i > 0 && !index.membersOf(chain[i - 1]!).length) break;
-        const m = ref.members[i]!;
-        out.push({ start: m.start, end: m.end, severity: "warning", message: `${m.name} is not a member of ${i === 0 ? ref.name : ref.members[i - 1]!.name}`, code: "UNKNOWN_MEMBER" });
-        break;
-      }
+      const m = unknownMember(index, uri, block, ref);
+      if (m) out.push({ start: m.start, end: m.end, severity: "warning", message: `${m.name} is not a member of ${m.parent}${m.suggestion ? ` (did you mean ${m.suggestion}?)` : ""}`, code: "UNKNOWN_MEMBER" });
     }
+    if (/\.scl$/i.test(uri)) out.push(...literalMismatches(index, uri, doc.parsed.tokens, block));
   }
   return out;
 }
@@ -218,7 +277,15 @@ export function outline(index: WorkspaceIndex, uri: string): OutlineSymbol[] {
 export function definition(index: WorkspaceIndex, uri: string, offset: number): Location | undefined {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
-  if (!hit) return undefined;
+  if (!hit) {
+    // a named argument: the parameter in the block it calls
+    const a = argAt(index, uri, offset);
+    if (a) return a.param?.start !== undefined ? { uri: a.param.uri!, start: a.param.start, end: a.param.end! } : undefined;
+    // a type in a declaration (`Data : "UDT_Motor";`, `Pump : "FB_Motor";`) or the FB of an instance DB's header
+    const w = wordAt(index.docs.get(uri)?.text ?? "", offset);
+    const g = w?.raw.startsWith('"') ? index.global(w.word) : undefined;
+    return g?.block ? { uri: g.uri, start: g.start, end: g.end } : undefined;
+  }
   const { block, ref, member } = hit;
   if (member < 0) {
     if (ref.kind === "local") {
@@ -233,6 +300,13 @@ export function definition(index: WorkspaceIndex, uri: string, offset: number): 
   return m?.uri !== undefined && m.start !== undefined ? { uri: m.uri, start: m.start, end: m.end! } : undefined;
 }
 
+/** A variable other blocks can name: an FB's or FC's parameter, an FB's static (through its instances), a DB's or a data type's member. */
+function visibleOutside(block: BlockModel, v: VarDecl): boolean {
+  if (block.kind === "DB" || block.kind === "UDT") return true;
+  if (block.kind === "FB") return v.section === "Input" || v.section === "Output" || v.section === "InOut" || v.section === "Static";
+  return block.kind === "FC" && (v.section === "Input" || v.section === "Output" || v.section === "InOut");
+}
+
 /** Declaration (possibly nested in a STRUCT) whose name is under the cursor. */
 function declAt(vars: VarDecl[], offset: number): VarDecl | undefined {
   for (const v of vars) {
@@ -244,11 +318,18 @@ function declAt(vars: VarDecl[], offset: number): VarDecl | undefined {
 }
 
 /** Every place in the workspace whose resolved declaration is `target` (members of DBs, UDTs, FB interfaces). */
-function memberReferences(index: WorkspaceIndex, target: Location, includeDeclaration: boolean): Location[] {
-  const out: Location[] = includeDeclaration ? [target] : [];
+function memberReferences(index: WorkspaceIndex, target: Location, includeDeclaration: boolean): (Location & { arg?: string })[] {
+  const out: (Location & { arg?: string })[] = includeDeclaration ? [target] : [];
   const same = (m: Member | undefined) => m?.uri === target.uri && m.start === target.start;
+  // a parameter of an FB or FC is also named by the calls' arguments: #Pump(Start := ...)
+  const owner = index.blockAt(target.uri, target.start);
+  const param = owner && (owner.kind === "FB" || owner.kind === "FC") ? owner.vars.find((v) => v.start === target.start && (v.section === "Input" || v.section === "Output" || v.section === "InOut")) : undefined;
   for (const d of index.docs.values()) {
     const seen = scopedTo(index, d.uri); // each file's names mean its own PLC's objects
+    if (param)
+      for (const site of callSites(seen, d.uri, (b, n) => scopeDecl(seen, d.uri, b, n)))
+        if (site.callee.kind !== "std" && seen.global(site.callee.name)?.uri === target.uri)
+          for (const a of site.args) if (a.name?.toUpperCase() === param.name.toUpperCase()) out.push({ uri: d.uri, start: a.nameStart!, end: a.nameEnd!, arg: param.section });
     for (const b of d.parsed?.blocks ?? [])
       for (const r of b.refs) {
         if (!r.members.length && r.kind !== "local") continue;
@@ -263,17 +344,25 @@ function memberReferences(index: WorkspaceIndex, target: Location, includeDeclar
   return out;
 }
 
-export function references(index: WorkspaceIndex, uri: string, offset: number, includeDeclaration = true): Location[] {
+/** `fileOnly`: the uses in this file are enough (highlights), a block's parameter is not looked up in its callers. */
+export function references(index: WorkspaceIndex, uri: string, offset: number, includeDeclaration = true, fileOnly = false): Location[] {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   const out: Location[] = [];
-  // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), or a declaration (in an FC: its own uses)
+  // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), a named argument, or a declaration (in an FC: its own uses)
   const onDecl = !hit ? declAt(index.blockAt(uri, offset)?.vars ?? [], offset) : undefined;
-  const memberTarget = hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset) : onDecl ? { uri, start: onDecl.start, end: onDecl.end } : undefined;
+  const arg = !hit && !onDecl ? argAt(index, uri, offset)?.param : undefined;
+  const memberTarget =
+    hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset)
+    : onDecl ? { uri, start: onDecl.start, end: onDecl.end }
+    : arg?.start !== undefined ? { uri: arg.uri!, start: arg.start, end: arg.end! }
+    : undefined;
   if (memberTarget) return memberReferences(index, memberTarget, includeDeclaration);
   if (hit && hit.member < 0 && hit.ref.kind === "local") {
     const u = hit.ref.name.toUpperCase();
     const d = localDecl(hit.block, hit.ref.name, hit.ref.start);
+    // the interface and statics of a block are used from outside too: by the calls and through instances
+    if (d && !fileOnly && visibleOutside(hit.block, d)) return memberReferences(index, { uri, start: d.start, end: d.end }, includeDeclaration);
     // the same variable: in a PROPERTY, GET's local and SET's local of one name are two
     for (const r of hit.block.refs) if (r.kind === "local" && r.name.toUpperCase() === u && localDecl(hit.block, r.name, r.start) === d) out.push({ uri, start: r.start, end: r.end });
     if (d && includeDeclaration) out.unshift({ uri, start: d.start, end: d.end });
@@ -366,7 +455,7 @@ function accessIn(index: WorkspaceIndex, uri: string): (start: number) => "read"
 export function documentHighlights(index: WorkspaceIndex, uri: string, offset: number): (Location & { kind: "read" | "write" })[] {
   if (!index.docs.get(uri)?.parsed) return [];
   const kind = accessIn(index, uri);
-  return references(index, uri, offset, false)
+  return references(index, uri, offset, false, true)
     .filter((r) => r.uri === uri)
     .map((r) => ({ ...r, kind: kind(r.start) }));
 }
@@ -377,6 +466,141 @@ export interface UsageSite extends Location {
   block?: string;
   /** Where that block is called from (one level up): the caller and the call's file position. */
   calledFrom?: { block: string; uri: string; start: number }[];
+  /** Reached through a parameter: the call that hands the structure holding it to this block (`Data := "Plant_DB".Pump`). */
+  through?: { block: string; uri: string; start: number; param: string };
+  /** A use of the whole structure that holds it (`"Plant_DB".Pump := #Spare;`). */
+  whole?: boolean;
+}
+
+type Call = { block: string; uri: string; start: number };
+
+/** Where `block` is called: `"FC"(...)`, an instance DB `"Motor_DB"(...)`, a multi-instance `#Pump(...)`. OBs run by themselves, DBs are not called. */
+export function callsOf(index: WorkspaceIndex, block: BlockModel, uri: string): Call[] {
+  if (block.kind !== "FB" && block.kind !== "FC") return [];
+  const own = scopedTo(index, uri).global(block.name);
+  const u = block.name.toUpperCase();
+  const out: Call[] = [];
+  for (const d of index.docs.values()) {
+    const seen = scopedTo(index, d.uri);
+    if (own && seen.global(block.name) !== own) continue; // another PLC's block of that name
+    for (const b of d.parsed?.blocks ?? []) {
+      const instances = new Set(block.kind === "FB" ? b.vars.filter((v) => v.typeRef?.toUpperCase() === u).map((v) => v.name.toUpperCase()) : []);
+      for (const r of b.refs) {
+        if (r.access !== "call" || r.members.length) continue;
+        const n = r.name.toUpperCase();
+        if (r.kind === "local" ? instances.has(n) : r.kind === "global" && (n === u || seen.global(r.name)?.block?.dbOf?.toUpperCase() === u)) out.push({ block: b.name, uri: d.uri, start: r.start });
+      }
+    }
+  }
+  return out;
+}
+
+/** Names of a declaration (nested in STRUCTs) under the cursor, outermost first. */
+function declPath(vars: VarDecl[], offset: number): string[] | undefined {
+  for (const v of vars) {
+    if (offset >= v.start && offset <= v.end) return [v.name];
+    const inner = v.members ? declPath(v.members, offset) : undefined;
+    if (inner) return [v.name, ...inner];
+  }
+  return undefined;
+}
+
+/** A global or typed DB's member under the cursor (a use, a start value or its declaration): the DB and the names down to it. */
+function dbPathAt(index: WorkspaceIndex, uri: string, offset: number): { db: GlobalSymbol; chain: string[] } | undefined {
+  const isData = (b: BlockModel | undefined) => b?.kind === "DB" && (!b.dbOf || index.global(b.dbOf)?.block?.kind === "UDT");
+  const hit = refAt(index, uri, offset);
+  if (hit) {
+    const { block, ref, member } = hit;
+    if (ref.kind === "global" && member >= 0) {
+      const g = index.global(ref.name);
+      return g && isData(g.block) ? { db: g, chain: ref.members.slice(0, member + 1).map((m) => m.name) } : undefined;
+    }
+    const g = ref.kind === "local" && isData(block) ? index.global(block.name) : undefined;
+    return g?.uri === uri ? { db: g, chain: [ref.name, ...ref.members.slice(0, member + 1).map((m) => m.name)] } : undefined;
+  }
+  const block = index.blockAt(uri, offset);
+  const chain = block && isData(block) ? declPath(block.vars, offset) : undefined;
+  const g = chain ? index.global(block!.name) : undefined;
+  return chain && g?.uri === uri ? { db: g, chain } : undefined;
+}
+
+/**
+ * Who writes and who reads one member of one DB (`"Plant_DB".Pump.Running`, not every Running of the data type):
+ * its uses, and the uses inside the blocks the structure holding it is handed to (`Data := "Plant_DB".Pump` → `#Data.Running`
+ * in FB_Motor), three calls deep. An input is a copy, so only its reads count there; an output only its writes.
+ */
+export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: string[]): { writes: UsageSite[]; reads: UsageSite[] } {
+  const want = chain.map((n) => n.toUpperCase());
+  const kinds = new Map<string, (start: number) => "read" | "write">();
+  const kindOf = (u: string) => kinds.get(u) ?? (kinds.set(u, accessIn(scopedTo(index, u), u)), kinds.get(u)!)!;
+  const sites = new Map<string, CallSite[]>();
+  const callsIn = (u: string) => sites.get(u) ?? (sites.set(u, callSites(scopedTo(index, u), u, (b, n) => scopeDecl(scopedTo(index, u), u, b, n))), sites.get(u)!)!;
+  const callers = new Map<BlockModel, Call[]>();
+  const writes: UsageSite[] = [];
+  const reads: UsageSite[] = [];
+  const add = (site: UsageSite, b: BlockModel) => {
+    if (site.kind === "write" && !site.through) {
+      const from = callers.get(b) ?? (callers.set(b, callsOf(index, b, site.uri)), callers.get(b)!);
+      if (from.length) site.calledFrom = from;
+    }
+    (site.kind === "write" ? writes : reads).push(site);
+  };
+  const same = (segs: { name: string }[], names: string[]) => segs.slice(0, names.length).every((s, i) => s.name.toUpperCase() === names[i]);
+  /** The block and parameter a reference is handed to as the whole value of an argument. */
+  const passedTo = (u: string, r: Ref): { uri: string; callee: BlockModel; param: VarDecl } | undefined => {
+    const text = index.docs.get(u)?.text ?? "";
+    const end = (r.members.at(-1) ?? r).end;
+    for (const site of callsIn(u)) {
+      const i = site.args.findIndex((a) => r.start >= a.start && end <= a.end);
+      if (i < 0) continue;
+      const a = site.args[i]!;
+      if (text.slice(a.nameEnd ?? a.start, a.end).replace(/^\s*(:=|=>)?\s*/, "").trim() !== text.slice(r.start, end)) return undefined;
+      const g = site.callee.kind === "std" ? undefined : scopedTo(index, u).global(site.callee.name);
+      const name = (a.name ?? orderedParams(site.callee)[i]?.name)?.toUpperCase();
+      const param = g?.block?.vars.find((v) => v.name.toUpperCase() === name);
+      return g?.block && param ? { uri: g.uri, callee: g.block, param } : undefined;
+    }
+    return undefined;
+  };
+  const follow = (u: string, callee: BlockModel, param: VarDecl, rest: string[], through: NonNullable<UsageSite["through"]>, depth: number) => {
+    const counts = (k: "read" | "write") => param.section === "InOut" || (param.section === "Input" ? k === "read" : param.section === "Output" && k === "write");
+    for (const r of callee.refs) {
+      if (r.kind !== "local" || r.name.toUpperCase() !== param.name.toUpperCase() || !same(r.members, rest.slice(0, r.members.length))) continue;
+      if (r.members.length >= rest.length) {
+        const s = r.members[rest.length - 1]!;
+        const k = kindOf(u)(r.start);
+        if (counts(k)) add({ uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through }, callee);
+        continue;
+      }
+      const next = depth < 3 ? passedTo(u, r) : undefined;
+      if (next) follow(next.uri, next.callee, next.param, rest.slice(r.members.length), { block: callee.name, uri: u, start: r.start, param: next.param.name }, depth + 1);
+    }
+  };
+  for (const d of index.docs.values()) {
+    if (scopedTo(index, d.uri).global(db.name)?.uri !== db.uri) continue; // another PLC's DB of that name
+    for (const b of d.parsed?.blocks ?? [])
+      for (const r of b.refs) {
+        // a start value in the DB itself, or "Db".member anywhere
+        const own = d.uri === db.uri && r.kind === "local" && b.kind === "DB";
+        if (!own && !(r.kind === "global" && r.name.toUpperCase() === db.name.toUpperCase())) continue;
+        const segs = own ? [{ name: r.name, start: r.start, end: r.end }, ...r.members] : r.members;
+        if (!same(segs, want.slice(0, segs.length))) continue;
+        if (segs.length >= want.length) {
+          const s = segs[want.length - 1]!;
+          add({ uri: d.uri, start: s.start, end: s.end, kind: kindOf(d.uri)(r.start), block: b.name }, b);
+          continue;
+        }
+        // the structure that holds it, handed to a block's parameter: its uses there
+        const passed = passedTo(d.uri, r);
+        if (passed) {
+          follow(passed.uri, passed.callee, passed.param, want.slice(segs.length), { block: b.name, uri: d.uri, start: r.start, param: passed.param.name }, 0);
+          continue;
+        }
+        const last = segs.at(-1) ?? r;
+        add({ uri: d.uri, start: last.start, end: last.end, kind: kindOf(d.uri)(r.start), block: b.name, whole: true }, b);
+      }
+  }
+  return { writes, reads };
 }
 
 /**
@@ -385,30 +609,21 @@ export interface UsageSite extends Location {
  * communication are not seen; the report says so where it shows.
  */
 export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): { writes: UsageSite[]; reads: UsageSite[] } {
+  const path = dbPathAt(scopedTo(index, uri), uri, offset);
+  if (path) return usagesOfPath(index, path.db, path.chain);
   const kinds = new Map<string, (start: number) => "read" | "write">();
   const kindOf = (u: string) => kinds.get(u) ?? (kinds.set(u, accessIn(index, u)), kinds.get(u)!)!;
-  const callers = new Map<string, UsageSite["calledFrom"]>();
-  const callersOf = (block: BlockModel, u: string): UsageSite["calledFrom"] => {
-    const key = `${u}#${block.name}`;
-    if (!callers.has(key))
-      callers.set(
-        key,
-        references(index, u, block.nameStart, false)
-          .filter((r) => r.uri !== u || r.start < block.start || r.start > block.end)
-          .map((r) => ({ block: index.blockAt(r.uri, r.start)?.name ?? "", uri: r.uri, start: r.start }))
-          .filter((c) => c.block),
-      );
-    return callers.get(key);
-  };
+  const callers = new Map<BlockModel, Call[]>();
   const writes: UsageSite[] = [];
   const reads: UsageSite[] = [];
-  for (const r of references(index, uri, offset, false)) {
+  for (const r of references(index, uri, offset, false) as (Location & { arg?: string })[]) {
     const block = index.blockAt(r.uri, r.start);
-    const kind = kindOf(r.uri)(r.start);
-    const site: UsageSite = { ...r, kind, ...(block ? { block: block.name } : {}) };
+    // a call's argument sets the block's input (and in/out); it reads an output
+    const kind = r.arg ? (r.arg === "Output" ? "read" : "write") : kindOf(r.uri)(r.start);
+    const site: UsageSite = { uri: r.uri, start: r.start, end: r.end, kind, ...(block ? { block: block.name } : {}) };
     if (kind === "write" && block) {
-      const from = callersOf(block, r.uri);
-      if (from?.length) site.calledFrom = from;
+      const from = callers.get(block) ?? (callers.set(block, callsOf(index, block, r.uri)), callers.get(block)!);
+      if (from.length) site.calledFrom = from;
     }
     (kind === "write" ? writes : reads).push(site);
   }
@@ -420,7 +635,13 @@ const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section]
 export function hover(index: WorkspaceIndex, uri: string, offset: number): { markdown: string; start: number; end: number } | undefined {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
-  if (!hit) return typeHover(index, uri, offset);
+  if (!hit) {
+    const a = argAt(index, uri, offset);
+    const p = a && !a.param ? a.site.callee.params.find((x) => x.name.toUpperCase() === a.name.toUpperCase()) : undefined;
+    if (a?.param) return { markdown: `${describeMember(a.param)}\n\nof ${a.site.callee.name}`, start: a.start, end: a.end };
+    if (a && p) return { markdown: `${SECTION_LABEL[p.section]} **${p.name}** : \`${p.type}\`${p.documentation ? ` — ${p.documentation}` : ""}\n\nof ${a.site.callee.name}`, start: a.start, end: a.end };
+    return typeHover(index, uri, offset);
+  }
   const { block, ref, member } = hit;
   if (member >= 0) {
     const m = index.resolveChain(rootMembers(index, block, ref, uri), ref.members.slice(0, member + 1))[member];
@@ -465,15 +686,9 @@ export function describeStandard(std: CatalogEntry): string {
 
 /** Hover on a type name, where no reference is: `t : TON;`, `x : Int;`, `d : "UDT_Motor";`. */
 function typeHover(index: WorkspaceIndex, uri: string, offset: number): { markdown: string; start: number; end: number } | undefined {
-  const text = index.docs.get(uri)?.text;
-  if (!text) return undefined;
-  let start = offset;
-  let end = offset;
-  while (start > 0 && /[\p{L}\p{N}_"]/u.test(text[start - 1]!)) start--;
-  while (end < text.length && /[\p{L}\p{N}_"]/u.test(text[end]!)) end++;
-  const raw = text.slice(start, end);
-  const word = raw.replace(/^"|"$/g, "");
-  if (!word) return undefined;
+  const w = wordAt(index.docs.get(uri)?.text ?? "", offset);
+  if (!w) return undefined;
+  const { raw, word, start, end } = w;
   const upper = word.toUpperCase();
   const std = STANDARD_BY_NAME.get(upper);
   if (std && !raw.startsWith('"')) return { markdown: describeStandard(std), start, end };
@@ -580,20 +795,42 @@ export function renameTarget(index: WorkspaceIndex, uri: string, offset: number)
   return g?.block && /\.(scl|db|udt|s7dcl|xml|awl)$/i.test(g.uri) && deviceOfUri(g.uri) !== undefined ? { uri: g.uri, name: g.name } : undefined;
 }
 
-/** Renames a block-local variable (declaration and every #reference). Other renames are refused. */
+/**
+ * Renames a variable: a block's local in that block; a parameter or static of a block, a DB's or a data type's member
+ * also in every file that names it (calls' arguments, instance members, DB start values). Blocks and globals are refused.
+ */
 export function rename(index: WorkspaceIndex, uri: string, offset: number, newName: string): TextEdit[] | { error: string } {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   if (!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(newName)) return { error: `${newName} is not a valid SCL identifier` };
   const block = index.blockAt(uri, offset);
   if (!block) return { error: "Nothing to rename here" };
-  let decl = block.vars.find((v) => offset >= v.start && offset <= v.end);
+  let decl = declAt(block.vars, offset);
   if (!decl) {
+    // from a use elsewhere: a named argument, an instance's or a DB's member, an instance DB's start value
     const hit = refAt(index, uri, offset);
-    if (!hit || hit.ref.kind !== "local" || hit.member >= 0) return { error: "Only local variables can be renamed from the editor (blocks and globals are renamed in TIA Portal)" };
+    const target = hit ? (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB" && hit.block.dbOf) ? definition(index, uri, offset) : undefined) : argAt(index, uri, offset)?.param;
+    if (target?.uri !== undefined && target.start !== undefined && index.blockAt(target.uri, target.start)) return rename(index, target.uri, target.start, newName);
+    if (!hit || hit.ref.kind !== "local" || hit.member >= 0) return { error: "Only variables can be renamed from the editor (blocks and globals are renamed in TIA Portal)" };
     decl = localDecl(block, hit.ref.name, hit.ref.start);
   }
   if (!decl) return { error: "Declaration not found" };
-  if (localDecl(block, newName)) return { error: `${newName} already exists in ${block.name}` };
+  const siblings = block.vars.includes(decl) ? block.vars : (function find(vars: VarDecl[]): VarDecl[] | undefined {
+    for (const v of vars) if (v.members?.includes(decl!)) return v.members;
+    for (const v of vars) { const f = v.members && find(v.members); if (f) return f; }
+    return undefined;
+  })(block.vars) ?? block.vars;
+  if (siblings.some((v) => v !== decl && v.name.toUpperCase() === newName.toUpperCase())) return { error: `${newName} already exists in ${block.name}` };
+  if (visibleOutside(block, decl)) {
+    // every file that names it must be text the editor can change: a LAD/FBD block from XML or a TwinCAT POU is not
+    const at = memberReferences(index, { uri, start: decl.start, end: decl.end }, true);
+    const text = (l: { uri: string }) => index.docs.get(l.uri)?.code === undefined && /\.(scl|db|udt)$/i.test(l.uri);
+    // a LAD/FBD block from XML, STL or a TwinCAT POU that names the block (or its instance DBs) may use it unseen
+    const names = [block.name, ...index.allGlobals().filter((g) => g.block?.dbOf?.toUpperCase() === block.name.toUpperCase()).map((g) => g.name)].map((n) => n.toUpperCase());
+    const locked = at.find((l) => !text(l)) ?? [...index.docs.values()].find((d) => !text(d) && d.uri !== uri && !TAG_TEXT.test(d.uri) && names.some((n) => d.text.toUpperCase().includes(n)));
+    const where = locked && ("start" in locked ? index.blockAt(locked.uri, locked.start)?.name : locked.parsed?.blocks[0]?.name);
+    if (locked) return { error: `${decl.name} may be used in ${where ?? locked.uri.split("/").at(-1)}, which the editor cannot change: rename it in TIA Portal` };
+    return at.map((l) => ({ uri: l.uri, start: l.start, end: l.end, newText: index.docs.get(l.uri)!.text[l.start] === "#" ? "#" + newName : newName }));
+  }
   const u = decl.name.toUpperCase();
   const text = index.docs.get(uri)?.code ?? index.docs.get(uri)?.text ?? "";
   const edits: TextEdit[] = [{ uri, start: decl.start, end: decl.end, newText: newName }];
