@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
-// rung watch: repeats syncOnce on file changes and on a poll timer, restarting the bridge with backoff.
+// rung watch: a quick pass for the files that changed, a complete pass on a poll timer, restarting the bridge with backoff.
 import { watch, type FSWatcher } from "node:fs";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { RungConfig, StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
-import { syncOnce, type Refusal, type SyncBridge, type SyncReport } from "./sync.js";
+import { syncOnce, syncQuick, type Refusal, type SyncBridge, type SyncReport } from "./sync.js";
 
 export interface ClosableBridge extends SyncBridge {
   close(): Promise<void>;
@@ -25,6 +25,23 @@ export interface WatcherOptions {
 /** rung watch checks watch and force tables again (an export each) at most this often; file edits go at once. */
 const UNVERSIONED_MS = 60_000;
 
+/**
+ * A quick pass's report seen with the last complete one: its own objects as it found them, everything else (a
+ * conflict elsewhere, a pending delete) as the complete pass left it. The counts are the quick pass's.
+ */
+function mergeQuick(last: SyncReport | null, quick: SyncReport): SyncReport {
+  if (!last) return quick;
+  const mine = new Set(quick.objects ?? []);
+  return {
+    ...quick,
+    conflicts: last.conflicts,
+    pendingDeletes: last.pendingDeletes,
+    warnings: [...last.warnings.filter((w) => !mine.has(w.address)), ...quick.warnings],
+    diagnostics: [...last.diagnostics.filter((d) => !mine.has(d.address)), ...quick.diagnostics],
+    objects: undefined,
+  };
+}
+
 export class Watcher {
   private bridge: ClosableBridge | null = null;
   private fsWatcher: FSWatcher | null = null;
@@ -35,9 +52,13 @@ export class Watcher {
   private stopped = false;
   private failures = 0;
   private retryAt = 0;
+  /** Workspace-relative files changed since the last pass (file events). */
+  private readonly dirty = new Set<string>();
+  /** The next pass looks at everything: the first one, a poll tick, rung sync, a conflict resolved, after an error. */
+  private wantFull = true;
   lastReport: SyncReport | null = null;
   lastPassAt = 0;
-  /** How long the last pass took; idle polling waits at least twice as long. */
+  /** How long the last complete pass took; idle polling waits at least twice as long. */
   lastPassMs = 0;
   private lastPassEnd = 0;
   lastError: string | null = null;
@@ -54,17 +75,18 @@ export class Watcher {
     const plc = join(this.root, "plc");
     mkdirSync(plc, { recursive: true });
     this.fsWatcher = watch(plc, { recursive: true }, (_event, file) => {
-      if (file && /(^|[\\/])\./.test(String(file))) return; // our own temp files
-      this.poke();
+      if (!file) return this.poke(); // the platform did not say which: look at everything
+      if (/(^|[\\/])\./.test(String(file))) return; // our own temp files
+      this.poke("plc/" + String(file).split(sep).join("/"));
     });
     this.timer = setInterval(() => this.tick(), this.opts.config.sync.pollMs);
     void this.syncNow().catch(() => {});
   }
 
   /**
-   * Poll tick. Unlike file events it never queues behind a running pass, and it keeps the watcher idle at
-   * least twice as long as the last pass took: a large project costs at most a third of TIA Portal's time,
-   * which the engineer is working in meanwhile.
+   * Poll tick: a complete pass. Unlike file events it never queues behind a running pass, and it keeps the watcher
+   * idle at least twice as long as the last complete pass took: a large project costs at most a third of TIA Portal's
+   * time, which the engineer is working in meanwhile.
    */
   tick(): void {
     if (this.running || this.queued) return;
@@ -73,19 +95,23 @@ export class Watcher {
     void this.syncNow().catch(() => {});
   }
 
-  /** Debounced trigger for file events. */
-  poke(): void {
+  /** Debounced trigger for file events: the files go in a quick pass; without a file, a complete pass. */
+  poke(file?: string): void {
+    if (file) this.dirty.add(file);
+    else this.wantFull = true;
     if (this.debounce) clearTimeout(this.debounce);
-    this.debounce = setTimeout(() => void this.syncNow().catch(() => {}), this.opts.debounceMs ?? 300);
+    this.debounce = setTimeout(() => void this.syncNow(false, true).catch(() => {}), this.opts.debounceMs ?? 300);
   }
 
   /**
    * Runs a pass now, or right after the current one. At most one pass runs and one waits;
    * callers arriving while one waits join it (events coalesce). A person asking (rung sync) retries refused imports.
+   * `quick`: only for the files that changed, unless something asked for a complete pass meanwhile.
    */
-  syncNow(retry = false): Promise<SyncReport | null> {
+  syncNow(retry = false, quick = false): Promise<SyncReport | null> {
     if (this.stopped) return Promise.resolve(null);
     if (retry) this.refused.clear();
+    if (!quick) this.wantFull = true;
     if (this.queued) return this.queued;
     const prev = this.running ?? Promise.resolve(null);
     const next = prev
@@ -107,22 +133,30 @@ export class Watcher {
   private async pass(): Promise<SyncReport | null> {
     const now = (this.opts.now ?? Date.now)();
     if (now < this.retryAt) return null;
+    const full = this.wantFull;
+    const files = [...this.dirty];
+    this.dirty.clear();
+    this.wantFull = false;
     try {
       this.bridge ??= await this.opts.bridgeFactory();
+      const options = { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS };
+      if (!full) {
+        // a saved file goes to TIA Portal without listing the whole project; what it cannot handle, the complete pass does
+        const quick = files.length ? await syncQuick(this.root, this.bridge, this.state, options, files) : null;
+        if (quick) return this.reported(mergeQuick(this.lastReport, quick), now);
+        if (!files.length) return this.lastReport;
+      }
       const t0 = Date.now();
-      const r = await syncOnce(this.root, this.bridge, this.state, { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS }).finally(() => {
+      const r = await syncOnce(this.root, this.bridge, this.state, options).finally(() => {
         this.lastPassMs = Date.now() - t0;
         this.lastPassEnd = (this.opts.now ?? Date.now)();
       });
-      this.failures = 0;
-      this.lastReport = r;
-      this.lastPassAt = now;
-      this.lastError = null;
-      this.opts.onReport?.(r);
-      return r;
+      return this.reported(r, now);
     } catch (e) {
       const err = e as Error;
       this.lastError = err.message;
+      // what this pass was to look at is looked at again, completely
+      this.wantFull = true;
       // Bridge-level trouble: drop the bridge and retry with exponential backoff; the workspace stays safe.
       if (!(e instanceof BridgeError) || ["BRIDGE_EXITED", "PORTAL_DISPOSED", "TIMEOUT", "TIA_NOT_RUNNING", "NO_PROJECT"].includes(e.code)) {
         await this.bridge?.close().catch(() => {});
@@ -134,6 +168,15 @@ export class Watcher {
       this.opts.onError?.(err, wait);
       return null;
     }
+  }
+
+  private reported(r: SyncReport, at: number): SyncReport {
+    this.failures = 0;
+    this.lastReport = r;
+    this.lastPassAt = at;
+    this.lastError = null;
+    this.opts.onReport?.(r);
+    return r;
   }
 
   get bridgeForTools(): ClosableBridge | null {

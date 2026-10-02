@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlobStore, Journal, StateStore, defaultConfig, sha256, type RungConfig } from "@rung/core";
 import { BridgeError, type CompileMessage, type ExportResult } from "@rung/bridge-client";
-import { pull, syncOnce, confirmDelete, resolveConflict } from "../src/index.js";
+import { pull, syncOnce, syncQuick, confirmDelete, resolveConflict } from "../src/index.js";
 import { withoutLayout } from "../src/sync.js";
 import { FakeBridge } from "./fake-bridge.js";
 
@@ -1350,5 +1350,90 @@ describe("TIA Portal's layout of a text", () => {
     expect(withoutLayout("// don't\n#x := 1;  #y := 2;")).toBe(withoutLayout("// don't\n#x := 1;\n#y := 2;"));
     expect(withoutLayout("(* it's *) #x := 1;")).toBe(withoutLayout("(* it's *)\n#x := 1;"));
     expect(withoutLayout("#s := 'a  b';")).not.toBe(withoutLayout("#s := 'a b';"));
+  });
+});
+
+describe("syncQuick: the files rung watch saw change, without listing the project", () => {
+  const quick = (t: ReturnType<typeof setup>, paths: string[]) => t.withState((s) => syncQuick(t.root, t.bridge, s, { config: t.config, now: () => 5000 }, paths));
+
+  it("imports an edited file, writes TIA Portal's version back and compiles it, with no listing and no export first", async () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: 'FUNCTION "Fx_B" : Void\nBEGIN\n  "Fx_A"();\nEND_FUNCTION\n' }));
+    t.bridge.canon = (s) => s.replace(/:=  +/g, ":= ");
+    await t.sync();
+    const listings = t.bridge.known.length;
+    const before = t.bridge.objects.get(A)!.entry.fingerprint;
+    t.bridge.exportCalls = [];
+    t.write(pA, srcA.replace("#y := 2;", "#y :=   20;"));
+    const r = await quick(t, [pA]);
+    expect(r).toMatchObject({ imported: 1, objects: [A] });
+    expect(t.bridge.known.length).toBe(listings);
+    // the revision of the last complete pass, which TIA Portal checks; the only export is the import's answer
+    expect(t.bridge.imports[0]!.expected).toBe(before);
+    expect(t.bridge.exportCalls).toEqual([A]);
+    expect(t.read(pA)).toContain("#y := 20;");
+    // the block that calls it is compiled with it
+    expect(t.bridge.compileCalls.at(-1)).toEqual(expect.arrayContaining([A, B]));
+    // and the next complete pass finds nothing to do
+    const idle = await t.sync(6000);
+    expect(idle.imported + idle.exported + idle.merged).toBe(0);
+  });
+
+  it("does nothing, and asks the bridge nothing, for rung's own write-back or a file that is no source", async () => {
+    const t = setup();
+    await t.sync();
+    let asked = 0;
+    const info = t.bridge.projectInfo.bind(t.bridge);
+    t.bridge.projectInfo = async () => (asked++, info());
+    t.write("plc/PLC_1/blocks/notes.txt", "x");
+    t.write("plc/PLC_1/blocks/Fx_A.scl.conflict", "x");
+    const r = await quick(t, [pA, "plc/PLC_1/blocks/notes.txt", "plc/PLC_1/blocks/Fx_A.scl.conflict", "plc/PLC_1/blocks/.Fx_A.scl.swp"]);
+    expect(r).toMatchObject({ imported: 0, objects: [] });
+    expect(asked).toBe(0);
+  });
+
+  it("leaves new, deleted and conflicted files, interrupted sends and stale objects to the complete pass", async () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B));
+    await t.sync();
+    const pB = "plc/PLC_1/blocks/Fx_B.scl";
+    t.write("plc/PLC_1/blocks/Fx_New.scl", 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    expect(await quick(t, ["plc/PLC_1/blocks/Fx_New.scl"])).toBeNull();
+    unlinkSync(t.f("plc/PLC_1/blocks/Fx_New.scl"));
+    unlinkSync(t.f(pB));
+    expect(await quick(t, [pB])).toBeNull();
+    await t.sync(); // B is a pending delete now
+    t.write(pB, "edited\n");
+    expect(await quick(t, [pB])).toBeNull();
+    // a stale state: TIA Portal refused the last send as stale, the next pass must merge
+    await t.withState(async (s) => s.upsert({ ...s.get(A)!, tiaFingerprint: `stale:${s.get(A)!.tiaFingerprint}` }));
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    expect(await quick(t, [pA])).toBeNull();
+    expect(t.bridge.imports).toEqual([]);
+  });
+
+  it("an object changed in TIA Portal since the last listing is refused as stale and merged by the complete pass", async () => {
+    const t = setup();
+    await t.sync();
+    t.bridge.edit(A, { ".scl": srcA.replace("#z := 3;", "#z := 30;") });
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    expect(await quick(t, [pA])).toBeNull();
+    const r = await t.sync(6000);
+    expect(r.merged).toBe(1);
+    const text = t.bridge.objects.get(A)!.files[".scl"]!;
+    expect(text).toContain("#x := 10;");
+    expect(text).toContain("#z := 30;");
+    expect(t.read(pA)).toBe(text);
+  });
+
+  it("keeps what it did not look at in the diagnostics editors read: a conflict elsewhere stays", async () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: "b1\nb2\nb3\n" }));
+    await t.sync();
+    t.bridge.edit(B, { ".scl": "b1\nTIA\nb3\n" });
+    t.write("plc/PLC_1/blocks/Fx_B.scl", "b1\nmine\nb3\n");
+    await t.sync(6000);
+    const saved = () => JSON.parse(readFileSync(join(t.root, ".rung", "diagnostics.json"), "utf8")).items as { address: string; code: string }[];
+    expect(saved().some((d) => d.address === B && d.code === "CONFLICT")).toBe(true);
+    t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
+    expect(await quick(t, [pA])).toMatchObject({ imported: 1 });
+    expect(saved().some((d) => d.address === B && d.code === "CONFLICT")).toBe(true);
   });
 });

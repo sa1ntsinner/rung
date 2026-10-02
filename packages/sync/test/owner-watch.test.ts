@@ -125,9 +125,13 @@ describe("Watcher", () => {
     const r = await w.syncNow();
     expect(r).not.toBeNull();
     expect(bridges.length).toBe(2);
-    // a TIA-side change shows up after a file event poke
+    // a file that is no source is not a reason to list the project; a TIA-side change shows up with the next complete pass
     bridges[1]!.edit("plc:PLC_1/blocks/Fx_A", { ".scl": "a2\n" });
+    const listings = bridges[1]!.known.length;
     writeFileSync(join(root, "plc/PLC_1/blocks/unrelated.txt"), "x");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(bridges[1]!.known.length).toBe(listings);
+    await w.syncNow();
     await until(() => readFileSync(join(root, "plc/PLC_1/blocks/Fx_A.scl"), "utf8") === "a2\n");
     await w.stop();
     await state.close();
@@ -156,6 +160,39 @@ describe("Watcher", () => {
     expect(imports).toBe(1);
     await w.syncNow(true);
     expect(imports).toBe(2);
+    await w.stop();
+    await state.close();
+  });
+
+  it("sends a saved file in a quick pass without listing the project; a new file gets a complete pass", async () => {
+    class Importing extends ClosableFake {
+      imported: string[] = [];
+      override async importObject(address: string, form: string, path: string, expected: string): Promise<never> {
+        const o = this.objects.get(address);
+        if (expected === "absent") this.add(address, { form, content: readFileSync(path, "utf8") });
+        else if (!o || o.entry.fingerprint !== expected) throw new BridgeError("STALE_REVISION", address);
+        else this.edit(address, { ["." + form]: readFileSync(path, "utf8") });
+        this.imported.push(address);
+        return (await this.exportObject(address, form, mkdtempSync(join(tmpdir(), "rung-out-")))) as never;
+      }
+    }
+    const root = ws();
+    const config = defaultConfig("C:\\fx\\RungFixture\\RungFixture.ap20", "V20", "fake");
+    config.sync.pollMs = 60_000; // no poll ticks: what happens is the file events' doing
+    const state = await StateStore.open(root, { projectPath: config.project.path, tiaVersion: "V20", devices: [] });
+    const b = new Importing().add("plc:PLC_1/blocks/Fx_A", { content: "a\n" });
+    const w = new Watcher(root, state, { config, debounceMs: 50, bridgeFactory: async () => b });
+    w.start();
+    const fileA = join(root, "plc/PLC_1/blocks/Fx_A.scl");
+    await until(() => existsSync(fileA));
+    await new Promise((r) => setTimeout(r, 200));
+    const listings = b.known.length;
+    writeFileSync(fileA, "a edited\n");
+    await until(() => b.imported.includes("plc:PLC_1/blocks/Fx_A"));
+    expect(b.known.length).toBe(listings);
+    writeFileSync(join(root, "plc/PLC_1/blocks/Fx_New.scl"), 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    await until(() => b.imported.includes("plc:PLC_1/blocks/Fx_New"));
+    expect(b.known.length).toBeGreaterThan(listings);
     await w.stop();
     await state.close();
   });

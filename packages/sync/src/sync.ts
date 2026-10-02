@@ -29,7 +29,7 @@ import {
   type StateStore,
 } from "@rung/core";
 import { BridgeError, type BridgeClient } from "@rung/bridge-client";
-import { takeInventory, type Warning } from "./inventory.js";
+import { preparePass, takeInventory, type Inventory, type Warning } from "./inventory.js";
 import { SOURCE_FORMS, mergeBundle, mergeText } from "./merge.js";
 import {
   baseBundle,
@@ -77,6 +77,8 @@ export interface SyncReport {
   pendingDeletes: number;
   warnings: Warning[];
   diagnostics: Diagnostic[];
+  /** A quick pass (syncQuick): the objects it looked at; its warnings and diagnostics are about those alone. */
+  objects?: string[];
 }
 
 export interface SyncOptions {
@@ -298,7 +300,7 @@ async function withUsers(root: string, state: StateStore, imported: string[]): P
   return [...out];
 }
 
-async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Diagnostic) => boolean = () => false): Promise<number> {
+async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Diagnostic) => boolean = () => false, untouched: (d: Diagnostic) => boolean = () => false): Promise<number> {
   const file = join(root, ".rung", "diagnostics.json");
   let seq = 0;
   let previous: Diagnostic[] = [];
@@ -309,7 +311,8 @@ async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Dia
   } catch {
     /* first run */
   }
-  const kept = previous.filter((d) => d.code === "COMPILE" && keep(d));
+  // a quick pass leaves what it did not look at (a conflict elsewhere, a pending delete) as the last pass found it
+  const kept = previous.filter((d) => untouched(d) || (d.code === "COMPILE" && keep(d)));
   const key = (d: Diagnostic) => `${d.address}\u0000${d.line ?? ""}\u0000${d.message}`;
   const seen = new Set(items.map(key));
   const all = [...kept.filter((d) => !seen.has(key(d))), ...items];
@@ -341,17 +344,60 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
   };
 }
 
-async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions): Promise<SyncReport> {
+const emptyReport = (): SyncReport => ({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
+
+/**
+ * A pass for files rung watch saw change: only their objects are imported, compiled and written back, without
+ * listing the project. Each import names the revision TIA Portal had at the last complete pass and TIA Portal refuses
+ * it if the object changed since, so nothing of TIA's is overwritten. Anything else (a new, deleted or renamed file,
+ * a conflict, an interrupted send, an object marked stale or read-only) needs a complete pass: then this returns null,
+ * having changed nothing, or, when TIA Portal refused an import as stale, having marked that object for the merge.
+ */
+export async function syncQuick(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions, paths: readonly string[]): Promise<SyncReport | null> {
+  const picked = new Map<string, LocalFile>();
+  for (const path of new Set(paths)) {
+    const st = state.all().find((s) => s.files.some((f) => f.path === path));
+    if (!st) {
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      if (name.startsWith(".") || CONFLICT_SUFFIXES.some((s) => name.endsWith(s)) || !pathToAddress(path)) continue; // not a file rung mirrors
+      return null; // a new or renamed source
+    }
+    if (picked.has(st.address)) continue;
+    const status = await localStatus(root, st.files);
+    if (status === "clean") continue; // rung's own write-back, or saved unchanged
+    const plain = (st.status === "synced" || st.status === "fileDirty") && !st.readOnly && !st.sending && !st.sent;
+    if (status === "missing" || !plain || !st.tiaFingerprint || st.tiaFingerprint === "none" || st.tiaFingerprint.startsWith("stale:")) return null;
+    picked.set(st.address, { path: st.path, form: st.form, stem: stemOf(st) });
+  }
+  if (!picked.size) return { ...emptyReport(), objects: [] };
+  const r = await syncPass(root, bridge, state, opts, picked);
+  return r.warnings.some((w) => w.code === "STALE_REVISION") ? null : { ...r, objects: [...picked.keys()] };
+}
+
+/** The objects of a quick pass as the last complete pass left them; TIA Portal's real revision is checked by the import. */
+async function quickInventory(root: string, bridge: SyncBridge, state: StateStore, cfg: RungConfig, picked: Map<string, LocalFile>, warn: (w: Warning) => void): Promise<Inventory> {
+  const { info, devices, blocked } = await preparePass(root, bridge, state, cfg, warn);
+  const items: Inventory["items"] = [];
+  for (const address of picked.keys()) {
+    const st = state.get(address);
+    if (!st) continue; // finished or dropped by the journal recovery just now
+    const parsed = parseAddress(address);
+    items.push({ entry: { address, kind: parsed.kind, knowHowProtected: false, isFailsafe: false, isSystem: false, fingerprint: st.tiaFingerprint }, address: parsed, stem: stemOf(st) });
+  }
+  return { info, devices, items, blocked, skipped: new Set(), collisions: [], tooLong: [] };
+}
+
+async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions, quick?: Map<string, LocalFile>): Promise<SyncReport> {
   const now = opts.now ?? Date.now;
   const cfg = opts.config;
-  const report: SyncReport = { exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] };
+  const report = emptyReport();
   const warn = (address: string, code: string, message?: string) => report.warnings.push(message ? { address, code, message } : { address, code });
   const diag = (d: Diagnostic) => report.diagnostics.push(d);
 
-  const inv = await takeInventory(root, bridge, state, cfg, (w) => report.warnings.push(w));
+  const inv = quick ? await quickInventory(root, bridge, state, cfg, quick, (w) => report.warnings.push(w)) : await takeInventory(root, bridge, state, cfg, (w) => report.warnings.push(w));
   await sweepStaging(root, Date.now()); // file times are real time, whatever clock the pass runs on
   const items = new Map(inv.items.map((i) => [i.entry.address, i]));
-  const scan = await scanWorkspace(root);
+  const scan = quick ? { files: new Map([...quick].filter(([a]) => items.has(a)).map(([a, f]) => [a, [f]])), ignored: [] } : await scanWorkspace(root);
   for (const f of scan.ignored) warn(f.path, "IGNORED_FILE", f.reason);
   // one file per object: the one rung mirrors; a second one (X.awl next to X.scl, X.scl next to
   // X.protected.yaml) is never read, and two new files for one object create nothing
@@ -379,13 +425,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         ? `${device} is not among the devices in rung.toml; the files under it are not synced`
         : `the project has no PLC ${device} (its PLCs: ${inv.info.devices.join(", ")}); the files under it are not synced`,
     );
-  const addresses = [...new Set([...items.keys(), ...state.all().map((s) => s.address).filter(bound), ...[...local.keys()].filter(bound)])].sort();
+  // a quick pass looks at its own objects only: every other one would look deleted in TIA Portal
+  const addresses = quick ? [...items.keys()] : [...new Set([...items.keys(), ...state.all().map((s) => s.address).filter(bound), ...[...local.keys()].filter(bound)])].sort();
 
   // An object renamed in TIA Portal only by letter case is the same object (and, on Windows and macOS, the same
   // file): the new address takes over the old one's state (as in pull), instead of a conflict with its own file
   // and a delete. Its files then follow the new name.
   const orphans = new Map<string, ObjectState>();
-  for (const s of state.all()) if (!items.has(s.address) && bound(s.address) && !inv.skipped.has(s.address) && !inv.blocked.has(s.address)) orphans.set(nameKey(stemOf(s)), s);
+  if (!quick) for (const s of state.all()) if (!items.has(s.address) && bound(s.address) && !inv.skipped.has(s.address) && !inv.blocked.has(s.address)) orphans.set(nameKey(stemOf(s)), s);
   const adopted = new Set<string>();
   const adoptedFrom = new Set<string>();
   for (const i of inv.items) {
@@ -549,7 +596,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         let staged: StagedExport | undefined;
         let tiaChanged = false;
         // an adopted state is written under the new name even when the object did not change
-        if (adopted.has(address) || !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs, opts.unversionedMs)) {
+        // a quick pass does not look: the import tells whether TIA Portal still has the revision it names
+        if (adopted.has(address) || (!quick && !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs, opts.unversionedMs))) {
           staged = await stageExport(root, bridge, address, stem);
           tiaChanged = bundleHash(staged.files) !== st.fileHash;
           if (!tiaChanged) state.upsert({ ...st, tiaFingerprint: staged.result.fingerprint, verifiedAt: now() });
@@ -903,11 +951,16 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 
   const compiledAll = imported.length > 0 && cfg.sync.compile === "all";
   const compiled = new Set(imported);
-  await writeDiagnostics(root, report.diagnostics, (d) => {
-    if (compiledAll || !d.address || compiled.has(d.address)) return false;
-    const now = state.get(d.address);
-    return !!now && (!d.revision || now.tiaFingerprint === d.revision);
-  });
+  await writeDiagnostics(
+    root,
+    report.diagnostics,
+    (d) => {
+      if (compiledAll || !d.address || compiled.has(d.address)) return false;
+      const now = state.get(d.address);
+      return !!now && (!d.revision || now.tiaFingerprint === d.revision);
+    },
+    (d) => !!quick && d.code !== "COMPILE" && !items.has(d.address),
+  );
   await state.flush();
   return report;
 }

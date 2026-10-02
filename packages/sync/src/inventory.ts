@@ -57,9 +57,9 @@ async function loadRevisions(root: string): Promise<{ text: string; objects: Rec
   return { text: "", objects: {} };
 }
 
-export async function takeInventory(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<Inventory> {
+/** What every pass checks before it touches anything: the binding, then finishing or flagging interrupted write-backs. */
+export async function preparePass(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<{ info: ProjectInfo; devices: string[]; blocked: Set<string> }> {
   const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
-
   const info = await bridge.projectInfo();
   if (!samePath(info.path, config.project.path))
     throw new WorkspaceError("BINDING_MISMATCH", `TIA Portal has ${info.path} open; this workspace is bound to ${config.project.path} (rung init --rebind binds it to another project)`);
@@ -74,6 +74,12 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
   const blocked = new Set(recovery.recoveryRequired);
   for (const a of blocked) w(a, "RECOVERY_REQUIRED", "an interrupted write-back could not be finished; see .rung/journal and .rung/recovery");
   for (const a of recovery.dropped) w(a, "WRITE_BACK_DROPPED", "the file was edited after an interrupted write-back of TIA Portal's version; it is compared with TIA Portal again");
+  return { info, devices, blocked };
+}
+
+export async function takeInventory(root: string, bridge: BridgeLike, state: StateStore, config: RungConfig, warn: (w: Warning) => void): Promise<Inventory> {
+  const w = (address: string, code: string, message?: string) => warn(message ? { address, code, message } : { address, code });
+  const { info, devices, blocked } = await preparePass(root, bridge, state, config, warn);
 
   const found: { entry: ObjectEntry; address: Address }[] = [];
   const skipped = new Set<string>();
