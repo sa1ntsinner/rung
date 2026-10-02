@@ -37,7 +37,7 @@ const DETAIL: Record<string, string> = {
   grant: "let your user update the whitelist later without administrator rights", stdio: "speak LSP on stdin/stdout",
   block: "the FB or FC to run", cycle: "cycle time in ms", address: "address to listen on", port: "port to listen on",
   instance: "the instance DB to read an FB through", interval: "how often to read, in ms", ip: "the PLC's address",
-  "from-plc": "make a new project from the PLC at this address", host: "run the bridge on a Windows PC over ssh", off: "turn it off",
+  "from-plc": "make a new project from the PLC at this address", verbose: "every notice, also those shown on the last pull", host: "run the bridge on a Windows PC over ssh", off: "turn it off",
 };
 /** What the exit code means, for the commands scripts and CI read it from. */
 const EXIT: Record<string, string> = {

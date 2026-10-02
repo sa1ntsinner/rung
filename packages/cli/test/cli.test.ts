@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COMMANDS, HELP, main, serverNote } from "../src/main.js";
@@ -38,6 +39,25 @@ function setup(env: Record<string, string> = {}) {
 }
 
 describe("rung CLI from inside a workspace", () => {
+  it("a notice the last pull showed is counted, not repeated; --verbose shows it again", async () => {
+    const t = setup();
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    db.objects[1].entry = { address: db.objects[1].address, kind: "block", language: "SCL", knowHowProtected: false, isFailsafe: false, isSystem: false, isConsistent: false, fingerprint: "fp:" + createHash("sha256").update(db.objects[1].content).digest("hex").slice(0, 8) };
+    writeFileSync(t.objects, JSON.stringify(db));
+    expect(await t.run("init")).toBe(0);
+    await t.run("pull"); // the first pull exports; the notice comes with the next ones
+    t.out.length = 0;
+    await t.run("pull");
+    expect(t.out.join("")).toMatch(/INCONSISTENT\s+plc\/PLC_1\/blocks\/Motor%2FValve 1\.scl/);
+    t.out.length = 0;
+    await t.run("pull");
+    expect(t.out.join("")).not.toMatch(/INCONSISTENT\s+plc/);
+    expect(t.out.join("")).toContain("(1 notice as on the last pull: INCONSISTENT; rung pull --verbose shows them)");
+    t.out.length = 0;
+    await t.run("pull", "--verbose");
+    expect(t.out.join("")).toMatch(/INCONSISTENT\s+plc/);
+  });
+
   it("pull, status and sync find rung.toml in a parent folder", async () => {
     const t = setup();
     expect(await t.run("init")).toBe(0);

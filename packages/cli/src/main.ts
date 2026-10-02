@@ -56,7 +56,7 @@ Usage:
                                        a new project from a running PLC (TIA's "Upload device as new station")
   rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
   rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
-  rung pull [dir] [--force]            TIA → files (never overwrites local edits without --force)
+  rung pull [dir] [--force] [--verbose]  TIA → files (never overwrites local edits without --force)
   rung sync [dir]                      one two-way pass (your edits go to TIA Portal once writes are on)
   rung sync [dir] --preview [--json]   what the next pass would send and bring in, with the lines; writes nothing
   rung watch [dir]                     keep syncing; serves CLI, editors and agents (Ctrl+C to stop)
@@ -257,7 +257,14 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
       io.stdout(
         `exported   ${report.exported}\nunchanged  ${report.unchanged}\nremoved    ${report.removed}\nread-only  ${report.readOnly}\nwarnings   ${report.warnings.length}\n`,
       );
-      printWarnings(io, report.warnings);
+      // a notice already shown on the last pull (a block kept as XML, one TIA has not compiled) is counted, not repeated
+      const seenFile = join(dir, ".rung", "notices.json");
+      const seen = new Set<string>(await readFile(seenFile, "utf8").then((t) => JSON.parse(t) as string[], () => []));
+      const key = (w: { address: string; code: string; message?: string }) => `${w.address}\t${w.code}\t${w.message ?? ""}`;
+      const known = v.verbose ? [] : report.warnings.filter((w) => isNotice(w.code) && seen.has(key(w)));
+      printWarnings(io, report.warnings.filter((w) => !known.includes(w)));
+      if (known.length) io.stdout(`  (${known.length} notice${known.length === 1 ? "" : "s"} as on the last pull: ${[...new Set(known.map((w) => w.code))].join(", ")}; rung pull --verbose shows them)\n`);
+      await writeFile(seenFile, JSON.stringify(report.warnings.filter((w) => isNotice(w.code)).map(key))).catch(() => undefined);
       for (const o of report.overwritten) io.stdout(`overwrote your edit of ${o.path} with TIA Portal's version; yours is kept in ${o.copy}\n`);
       await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
       return report.warnings.some((w) => !isNotice(w.code)) ? 2 : 0;
@@ -324,7 +331,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
-  pull: { options: ["force"], positionals: 1 },
+  pull: { options: ["force", "verbose"], positionals: 1 },
   sync: { options: ["preview", "json"], positionals: 1 },
   watch: { options: [], positionals: 1 },
   status: { options: [], positionals: 1 },
@@ -391,6 +398,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         device: { type: "string", multiple: true },
         rebind: { type: "boolean" },
         force: { type: "boolean" },
+        verbose: { type: "boolean" },
         fixture: { type: "boolean" },
         ours: { type: "boolean" },
         theirs: { type: "boolean" },
