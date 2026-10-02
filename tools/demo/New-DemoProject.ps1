@@ -88,13 +88,16 @@ try {
         if ($access) { $access.PlcProtectionAccessLevel = [Siemens.Engineering.HW.PlcProtectionAccessLevel]::FullAccess }
         $cpuItem.SetAttribute('CommunicationMode', [uint32]0)
     } catch { Write-Warning "CPU security settings: $($_.Exception.Message)" }
-    # not a factory address (192.168.0.1 answers on almost every network)
+    # no factory address on any port (192.168.0.1 and 192.168.1.1 answer on almost every plant network): X1 on
+    # 192.168.250.1, X2 on 192.168.251.1, so rung connect never finds a real PLC for this demo
     try {
         $subnet = $project.Subnets.Create('System:Subnet.Ethernet', 'PN/IE_1')
         $ethernet = @($cpuItem.DeviceItems | Where-Object { $n = Get-Service2 $_ ([Siemens.Engineering.HW.Features.NetworkInterface]); $n -and "$($n.InterfaceType)" -eq 'Ethernet' })
-        $node = (Get-Service2 $ethernet[0] ([Siemens.Engineering.HW.Features.NetworkInterface])).Nodes[0]
-        $node.SetAttribute('Address', '192.168.250.1')
-        $node.ConnectToSubnet($subnet)
+        for ($k = 0; $k -lt $ethernet.Count; $k++) {
+            $node = (Get-Service2 $ethernet[$k] ([Siemens.Engineering.HW.Features.NetworkInterface])).Nodes[0]
+            $node.SetAttribute('Address', "192.168.$(250 + $k).1")
+            if ($k -eq 0) { $node.ConnectToSubnet($subnet) }
+        }
     } catch { Write-Warning "network: $($_.Exception.Message)" }
     # the I/O modules behind the tags, so the program compiles without "inputs or outputs ... do not exist"
     $slots = @($device.DeviceItems) + @($device.DeviceItems | ForEach-Object { $_.DeviceItems })
