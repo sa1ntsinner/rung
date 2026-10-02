@@ -1,0 +1,49 @@
+FUNCTION_BLOCK "FB_Motor"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Start : Bool;   // start command, a pulse is enough
+      Stop : Bool;   // stop, NC: FALSE stops
+      EStopOk : Bool;   // safety relay feedback
+      Feedback : Bool;   // contactor feedback
+      Reset : Bool;   // acknowledge a fault
+      FeedbackTime : Time;   // the contactor must answer within this
+   END_VAR
+
+   VAR_OUTPUT
+      Run : Bool;   // contactor
+      Fault : Bool;   // feedback missing
+   END_VAR
+
+   VAR
+      Watchdog {InstructionName := 'TON_TIME'; LibVersion := '1.0'} : TON_TIME;
+      Running : Bool;   // the contactor is commanded
+      Faulted : Bool;   // latched until reset
+   END_VAR
+
+
+BEGIN
+	REGION Fault
+	    // the contactor did not pull in (or dropped out) while it is commanded
+	    #Watchdog(IN := #Running AND NOT #Feedback,
+	              PT := #FeedbackTime);
+	    IF #Watchdog.Q THEN
+	        #Faulted := TRUE;
+	    ELSIF #Reset THEN
+	        #Faulted := FALSE;
+	    END_IF;
+	END_REGION
+
+	REGION Run
+	    IF #Start AND #Stop AND #EStopOk AND NOT #Faulted THEN
+	        #Running := TRUE;
+	    END_IF;
+	    IF NOT #Stop OR NOT #EStopOk OR #Faulted THEN
+	        #Running := FALSE;
+	    END_IF;
+	    // outputs written once, at the end: TIA warns about outputs read before they are written
+	    #Run := #Running;
+	    #Fault := #Faulted;
+	END_REGION
+
+END_FUNCTION_BLOCK

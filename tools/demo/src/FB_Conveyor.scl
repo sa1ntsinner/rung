@@ -1,0 +1,52 @@
+FUNCTION_BLOCK "FB_Conveyor"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Cmd : "UDT_MotorCmd";   // operator commands
+      EStopOk : Bool;   // safety relay feedback
+      Feedback : Bool;   // contactor feedback
+      PartSensor : Bool;   // light barrier at the end of the belt
+      SpeedRaw : Int;   // drive speed, analog input
+   END_VAR
+
+   VAR_OUTPUT
+      Run : Bool;   // contactor
+      Fault : Bool;   // a fault stops the belt
+      Speed : Real;   // rpm
+   END_VAR
+
+   VAR_IN_OUT
+      Parts : DInt;   // parts that left the belt
+   END_VAR
+
+   VAR
+      Motor : "FB_Motor";
+      PartEdge {InstructionName := 'R_TRIG'; LibVersion := '1.0'} : R_TRIG;
+   END_VAR
+
+
+BEGIN
+	REGION Motor
+	    #Motor(Start := #Cmd.Start,
+	           Stop := #Cmd.Stop,
+	           EStopOk := #EStopOk,
+	           Feedback := #Feedback,
+	           Reset := #Cmd.Reset,
+	           FeedbackTime := "Line_DB".FeedbackTime);
+	    #Run := #Motor.Run;
+	    #Fault := #Motor.Fault;
+	END_REGION
+
+	REGION Count
+	    // one part per rising edge of the light barrier, only while the belt runs
+	    #PartEdge(CLK := #PartSensor);
+	    IF #PartEdge.Q AND #Run THEN
+	        #Parts := #Parts + 1;
+	    END_IF;
+	END_REGION
+
+	REGION Speed
+	    #Speed := "FC_Scale"(Raw := #SpeedRaw, Low := 0.0, High := 1500.0);
+	END_REGION
+
+END_FUNCTION_BLOCK

@@ -1,0 +1,9 @@
+TYPE "UDT_MotorCmd"
+VERSION : 0.1
+   STRUCT
+      Start : Bool;   // operator: start the line
+      Stop : Bool;   // operator: stop button, NC (FALSE while pressed)
+      Reset : Bool;   // operator: acknowledge faults
+   END_STRUCT;
+
+END_TYPE

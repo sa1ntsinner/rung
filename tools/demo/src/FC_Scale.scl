@@ -1,0 +1,14 @@
+FUNCTION "FC_Scale" : Real
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      Raw : Int;   // analog input, 0..27648
+      Low : Real;   // value at 0
+      High : Real;   // value at 27648
+   END_VAR
+
+
+BEGIN
+	// raw counts of an analog input in engineering units, held inside Low..High
+	#FC_Scale := LIMIT(MN := #Low, IN := #Low + (INT_TO_REAL(#Raw) / 27648.0) * (#High - #Low), MX := #High);
+END_FUNCTION

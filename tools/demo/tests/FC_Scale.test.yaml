@@ -1,0 +1,19 @@
+block: FC_Scale
+cases:
+  - name: scales 0..27648 onto Low..High and holds the ends
+    steps:
+      - set: { Raw: 0, Low: 0.0, High: 1500.0 }
+        cycle: 1
+        expect: { FC_Scale: 0.0 }
+      - set: { Raw: 13824 }
+        cycle: 1
+        expect: { FC_Scale: 750.0 }
+      - set: { Raw: 27648 }
+        cycle: 1
+        expect: { FC_Scale: 1500.0 }
+      - set: { Raw: -500 }
+        cycle: 1
+        expect: { FC_Scale: 0.0 }
+      - set: { Raw: 32000 }
+        cycle: 1
+        expect: { FC_Scale: 1500.0 }

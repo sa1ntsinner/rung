@@ -1,0 +1,21 @@
+ORGANIZATION_BLOCK "Main"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+
+BEGIN
+	// operator commands from the panel buttons
+	"Line_DB".Cmd.Start := "Start_PB";
+	"Line_DB".Cmd.Stop := "Stop_PB";
+	"Line_DB".Cmd.Reset := "Reset_PB";
+
+	"Conveyor_DB"(Cmd := "Line_DB".Cmd,
+	              EStopOk := "EStop_OK",
+	              Feedback := "Motor_FB",
+	              PartSensor := "Part_Sensor",
+	              SpeedRaw := "Speed_AI",
+	              Parts := "Line_DB".PartsTotal);
+
+	"Motor_Run" := "Conveyor_DB".Run;
+	"Fault_Lamp" := "Conveyor_DB".Fault;
+	"Line_DB".SpeedActual := "Conveyor_DB".Speed;
+END_ORGANIZATION_BLOCK

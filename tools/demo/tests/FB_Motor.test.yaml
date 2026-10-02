@@ -1,0 +1,36 @@
+block: FB_Motor
+cycle: 10ms
+cases:
+  - name: starts on a pulse and keeps running
+    steps:
+      - set: { Stop: true, EStopOk: true, FeedbackTime: T#2s, Start: true }
+        cycle: 1
+      - set: { Start: false, Feedback: true }
+        advance: 5s
+        expect: { Run: true, Fault: false }
+
+  - name: stops with the stop button and with the emergency stop
+    steps:
+      - set: { Stop: true, EStopOk: true, FeedbackTime: T#2s, Feedback: true, Start: true }
+        cycle: 1
+      - set: { Start: false, Stop: false }
+        cycle: 1
+        expect: { Run: false }
+      - set: { Stop: true, Start: true }
+        cycle: 1
+      - set: { Start: false, EStopOk: false }
+        cycle: 1
+        expect: { Run: false }
+
+  - name: no contactor feedback within the time is a fault until reset
+    steps:
+      - set: { Stop: true, EStopOk: true, FeedbackTime: T#2s, Start: true }
+        cycle: 1
+      - set: { Start: false }
+        advance: 1900ms
+        expect: { Run: true, Fault: false }
+      - advance: 200ms
+        expect: { Run: false, Fault: true }
+      - set: { Reset: true }
+        cycle: 2
+        expect: { Fault: false }

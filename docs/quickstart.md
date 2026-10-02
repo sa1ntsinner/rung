@@ -34,6 +34,8 @@ It installs the VS Code extension, adds rung's MCP server to the agents it finds
 
 ## 3. Mirror a project
 
+To try rung without touching a real project first: `powershell -ExecutionPolicy Bypass -File tools\demo\New-DemoProject.ps1` (from a clone of the repository) makes a small conveyor project in `%USERPROFILE%\rung-demo` and a workspace next to it, pulled, with tests and a first git commit. It takes a minute or two.
+
 In an empty folder:
 
 ```

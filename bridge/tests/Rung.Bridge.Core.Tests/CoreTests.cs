@@ -90,6 +90,17 @@ public class DispatcherTests
         Assert.Equal("V20", r.GetProperty("result").GetProperty("tiaVersion").GetString());
     }
 
+    [Fact] public void ArchiveTakesTheFolderAndTheCountAsOptional()
+    {
+        var s = new FakeTiaSession();
+        var r = Call("{\"id\":1,\"method\":\"project.archive\",\"params\":{\"keep\":10}}", s);
+        Assert.True(r.TryGetProperty("result", out var result), r.ToString());
+        Assert.EndsWith(".zap20", result.GetProperty("path").GetString());
+        Assert.Equal((null, 10), s.LastArchive);
+        Call("{\"id\":2,\"method\":\"project.archive\",\"params\":{\"dir\":\"D:\\\\b\"}}", s);
+        Assert.Equal(("D:\\b", 10), s.LastArchive);
+    }
+
     [Fact] public void HelloDoesNotTouchSession()
     {
         var d = new RpcDispatcher(() => throw new InvalidOperationException("no portal yet"), new BridgeInfo("V20", "t"));

@@ -135,7 +135,7 @@ namespace Rung.Bridge.Core.Protocol
                     Session.Show(Str(p, "address"));
                     return new { shown = true };
                 case "project.archive":
-                    return Session.Archive(Str(p, "dir"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("keep", out var keep) && keep.ValueKind == JsonValueKind.Number ? keep.GetInt32() : 10);
+                    return Session.Archive(OptStr(p, "dir"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("keep", out var keep) && keep.ValueKind == JsonValueKind.Number ? keep.GetInt32() : 10);
                 default:
                     throw new RpcException(ErrorCodes.BadRequest, "Unknown method: " + method);
             }
@@ -191,6 +191,10 @@ namespace Rung.Bridge.Core.Protocol
                 throw new RpcException(ErrorCodes.BadRequest, "Missing or invalid string parameter: " + name);
             return v.GetString();
         }
+
+        /// <summary>A string parameter the caller may leave out: null then.</summary>
+        static string OptStr(JsonElement p, string name) =>
+            p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString().Length > 0 ? v.GetString() : null;
 
         static bool Bool(JsonElement p, string name) =>
             p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;

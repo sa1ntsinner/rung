@@ -1,0 +1,27 @@
+block: FB_Conveyor
+cycle: 10ms
+cases:
+  - name: counts the parts that leave the belt while it runs
+    steps:
+      - set: { "Cmd.Stop": true, EStopOk: true, Feedback: true, "Cmd.Start": true }
+        cycle: 1
+        expect: { Run: true }
+      - set: { "Cmd.Start": false, PartSensor: true }
+        cycle: 2
+      - set: { PartSensor: false }
+        cycle: 2
+      - set: { PartSensor: true }
+        cycle: 2
+        expect: { Parts: 2 }
+
+  - name: a part passing while the belt stands still is not counted
+    steps:
+      - set: { "Cmd.Stop": true, EStopOk: true, PartSensor: true }
+        cycle: 2
+        expect: { Run: false, Parts: 0 }
+
+  - name: shows the drive speed in rpm
+    steps:
+      - set: { SpeedRaw: 13824 }
+        cycle: 1
+        expect: { Speed: 750.0 }

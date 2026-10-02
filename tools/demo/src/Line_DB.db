@@ -1,0 +1,18 @@
+DATA_BLOCK "Line_DB"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+NON_RETAIN
+   VAR
+      Cmd : "UDT_MotorCmd";
+      SpeedSetpoint : Real;   // rpm, from the HMI
+      SpeedActual : Real;   // rpm, scaled from the drive's analog input
+      PartsTotal : DInt;   // parts that left the belt since the last reset
+      FeedbackTime : Time;   // the contactor must answer within this
+   END_VAR
+
+
+BEGIN
+   SpeedSetpoint := 1200.0;
+   FeedbackTime := T#2S;
+
+END_DATA_BLOCK
