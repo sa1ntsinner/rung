@@ -28,7 +28,7 @@ import {
   type StateFile,
   type StateStore,
 } from "@rung/core";
-import { BridgeError, type BridgeClient } from "@rung/bridge-client";
+import { BridgeError, type BridgeClient, type CompileMessage } from "@rung/bridge-client";
 import { preparePass, takeInventory, type Inventory, type Warning } from "./inventory.js";
 import { SOURCE_FORMS, mergeBundle, mergeText } from "./merge.js";
 import {
@@ -262,6 +262,24 @@ async function localBundle(root: string, stem: string, primaryPath: string): Pro
     captured.push({ path: rel, role: primary ? "primary" : "companion" + suffix, hash: sha256(bytes) });
   }
   return { bundle, captured };
+}
+
+/**
+ * What other blocks see of a source: its header and declarations, for the forms where rung can tell them apart from
+ * the body. undefined where it cannot (data types, tag tables, LAD as SD, network settings): their users always compile.
+ */
+function interfaceOf(form: string, text: string | undefined): string | undefined {
+  if (text === undefined) return undefined;
+  const squeeze = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trim();
+  if (form === "scl" || form === "awl" || form === "db") {
+    const begin = /^[ \t]*BEGIN[ \t]*$/im.exec(text);
+    return begin ? squeeze(text.slice(0, begin.index)) : undefined;
+  }
+  if (form === "xml") {
+    const m = /<Interface>[\s\S]*?<\/Interface>/.exec(text);
+    return m ? squeeze(m[0]) : undefined;
+  }
+  return undefined;
 }
 
 /** Quoted identifiers a source refers to (its own name excluded). */
@@ -787,6 +805,10 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 
   // Imports in dependency order; cycles and dependants of failures are blocked, never guessed.
   const imported: string[] = [];
+  /** What TIA Portal's compile during the import said, per object (bridges that tell). */
+  const compiledByImport = new Map<string, CompileMessage[]>();
+  /** Imported objects whose users must compile too. */
+  const withCallers: string[] = [];
   const byName = new Map(queue.map((j) => [j.name, j]));
   const order: ImportJob[] = [];
   const visiting = new Set<string>();
@@ -920,6 +942,11 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     else if (job.kind === "merge") report.merged++;
     else report.imported++;
     imported.push(job.address);
+    if (result.compile) compiledByImport.set(job.address, result.compile);
+    // its instance DBs and callers compile again only when what they see of it changed, or rung cannot tell
+    const before = job.kind === "update" && st ? (await baseBundle(root, stemOf(st), st.files).catch(() => ({}) as Record<string, string>))["." + job.form] : undefined;
+    const was = interfaceOf(job.form, before);
+    if (!result.compile || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
   }
   await checkpoint();
 
@@ -932,7 +959,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     }
     for (const [device, addrs] of byDevice) {
       try {
-        const raw = await bridge.compile(device, cfg.sync.compile === "all" ? [] : await withUsers(root, state, addrs));
+        let raw: CompileMessage[];
+        if (cfg.sync.compile === "all") raw = await bridge.compile(device, []);
+        else {
+          // the import compiled the object itself already; what is left is its users, where they need it
+          const own = addrs.filter((a) => compiledByImport.has(a));
+          const scope = (await withUsers(root, state, addrs.filter((a) => withCallers.includes(a)))).filter((a) => !compiledByImport.has(a));
+          raw = [...own.flatMap((a) => compiledByImport.get(a)!), ...(scope.length ? await bridge.compile(device, scope) : [])];
+        }
         const msgs = await placeCompileMessages(root, (a) => state.get(a)?.path, raw, (f) => readFile(f, "utf8"));
         for (const m of msgs) {
           // "No block was compiled. All blocks are up-to-date." says nothing about any file

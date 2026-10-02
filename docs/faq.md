@@ -22,7 +22,7 @@ The language server, `rung test` and `rung views --offline` work on any OS with 
 Measured on a generated project of 1,287 objects (600 FBs, 300 FCs, 300 DBs, 50 UDTs, 20 tag tables of 100 tags) with TIA Portal V20 on a laptop:
 - the first `rung pull` takes about 2½ minutes;
 - `rung sync` with nothing to do takes about 7 s; the very first one takes about 45 s, because it reads every block's fingerprint once;
-- one edited FB goes to TIA Portal, is compiled and comes back in about 12 s;
+- under `rung watch`, a saved FB is in TIA Portal, compiled, and back in its file with TIA's errors on their lines in about 3 s (the first one after TIA Portal starts takes longer, while TIA warms up). A saved file goes straight to TIA Portal without looking through the rest of the project; callers and instance DBs compile again only when the block's interface changed;
 - the language server loads the workspace in about a second and answers an edit in milliseconds;
 - 50 test files run in 2 s.
 

@@ -61,6 +61,8 @@ namespace Rung.Bridge.Core.Model
         public string[] Warnings;
         public string Fingerprint;   // revision the bytes belong to
         public string BundleHash;
+        /// <summary>An import's answer: what TIA Portal's compile of the imported object said (null when it did not compile it).</summary>
+        public CompileMessage[] Compile;
     }
 
     public sealed class CompileMessage

@@ -1437,3 +1437,46 @@ describe("syncQuick: the files rung watch saw change, without listing the projec
     expect(saved().some((d) => d.address === B && d.code === "CONFLICT")).toBe(true);
   });
 });
+
+describe("compile scope after an import", () => {
+  /** A bridge that, like rung's, tells what its compile during the import said. */
+  class Telling extends TiaFake {
+    override async importObject(address: string, form: string, path: string, expected: string, op = ""): Promise<ExportResult> {
+      const r = await super.importObject(address, form, path, expected, op);
+      return { ...r, compile: [{ address, severity: "warning", description: `compiled ${address.split("/").pop()} on import` }] };
+    }
+  }
+  const caller = 'FUNCTION "Fx_B" : Void\nBEGIN\n  "Fx_A"();\nEND_FUNCTION\n';
+  const make = () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: caller }));
+    const telling = Object.assign(new Telling(), { objects: t.bridge.objects });
+    return { ...t, bridge: telling, sync: (now = 1000) => t.withState((s) => syncOnce(t.root, telling, s, { config: t.config, now: () => now })) };
+  };
+
+  it("a body change compiles nothing more: the import's own compile answers for the block", async () => {
+    const t = make();
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 20;"));
+    const r = await t.sync(2000);
+    expect(r.imported).toBe(1);
+    expect(t.bridge.compileCalls).toEqual([]);
+    expect(r.diagnostics).toEqual([expect.objectContaining({ address: A, code: "COMPILE", severity: "warning", message: "compiled Fx_A on import" })]);
+  });
+
+  it("an interface change compiles the callers too, not the block a second time", async () => {
+    const t = make();
+    await t.sync();
+    t.write(pA, srcA.replace("BEGIN", "VAR_INPUT\n  extra : Bool;\nEND_VAR\nBEGIN"));
+    const r = await t.sync(2000);
+    expect(r.imported).toBe(1);
+    expect(t.bridge.compileCalls).toEqual([[B]]);
+  });
+
+  it("a bridge that does not tell gets the compile of the block and its callers as before", async () => {
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: caller }));
+    await t.sync();
+    t.write(pA, srcA.replace("#y := 2;", "#y := 20;"));
+    await t.sync(2000);
+    expect(t.bridge.compileCalls).toEqual([[A, B]]);
+  });
+});

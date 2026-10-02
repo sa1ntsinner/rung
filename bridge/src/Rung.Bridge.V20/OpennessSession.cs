@@ -930,9 +930,10 @@ namespace Rung.Bridge.V20
             var fresh = Refresh(address);
             timing.Lap("lookup");
             var cancelled = guard.Cancelled;
+            CompilerResult compiled = null;
             using (var compileGuard = new PasswordPromptGuard(_tiaPid))
             {
-                try { (fresh.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>()?.Compile(); }
+                try { compiled = (fresh.Obj as IEngineeringServiceProvider)?.GetService<ICompilable>()?.Compile(); }
                 catch (EngineeringException) { }
                 cancelled += compileGuard.Cancelled;
             }
@@ -940,6 +941,14 @@ namespace Rung.Bridge.V20
             Refresh(address);
             var outDir = WorkDir(operationId, "out");
             var result = Export(address, "auto", outDir);
+            // the compile above is the one the client needs for this object: its messages come with the answer, so
+            // a block whose interface stayed the same is not compiled a second time
+            if (compiled != null)
+            {
+                var messages = new List<CompileMessage>();
+                FlattenImported(compiled.Messages, address, messages);
+                result.Compile = messages.ToArray();
+            }
             timing.Lap("export");
             if (cancelled > 0) result.Warnings = result.Warnings.Concat(new[] { WarningCodes.PasswordPromptCancelled }).ToArray();
             if (_args.SaveAfterImport)
@@ -1498,20 +1507,39 @@ namespace Rung.Bridge.V20
         /// <summary>Object name → address for the device's mirrored objects; null where a name is ambiguous.</summary>
         Dictionary<string, string> AddressesByName(string device)
         {
-            var plc = Plc(device);
-            if (!_index.Values.Any(v => plc.Equals(v.Plc))) ListObjects(device);
-            return _index.Values.Where(v => plc.Equals(v.Plc))
+            // by the address, not by comparing PLC objects: each Equals is a call into TIA Portal (a second for a large project)
+            Func<ObjectRef, bool> of = v => AddressFormat.Parse(v.Entry.Address).Device == device;
+            if (!_index.Values.Any(of)) ListObjects(device);
+            return _index.Values.Where(of)
                 .GroupBy(v => AddressFormat.Parse(v.Entry.Address).Name, StringComparer.Ordinal)
                 .ToDictionary(g => g.Key, g => g.Count() == 1 ? g.First().Entry.Address : null, StringComparer.Ordinal);
         }
 
-        static void Flatten(IEnumerable<CompilerResultMessage> list, string address, Dictionary<string, string> byName, List<CompileMessage> into)
+        static void Flatten(IEnumerable<CompilerResultMessage> list, string address, Dictionary<string, string> byName, List<CompileMessage> into) =>
+            Flatten(list, address, name => byName.TryGetValue(name, out var hit) ? hit : null, into);
+
+        /// <summary>An import's compile: its own block's name answers at once; the name index of the PLC is built
+        /// only when the compiler names another object (it costs a second on a large project).</summary>
+        void FlattenImported(IEnumerable<CompilerResultMessage> list, string address, List<CompileMessage> into)
+        {
+            var parts = AddressFormat.Parse(address);
+            Dictionary<string, string> all = null;
+            Flatten(list, address, name =>
+            {
+                if (name == parts.Name) return address;
+                all = all ?? AddressesByName(parts.Device);
+                return all.TryGetValue(name, out var hit) ? hit : null;
+            }, into);
+        }
+
+        static void Flatten(IEnumerable<CompilerResultMessage> list, string address, Func<string, string> addressOf, List<CompileMessage> into)
         {
             foreach (CompilerResultMessage m in list)
             {
                 // a node naming a block ("Fx_Broken (FC3)") sets the address for everything below it
                 var here = address;
-                if (!string.IsNullOrEmpty(m.Path) && byName.TryGetValue(CompilePath.ObjectName(m.Path), out var hit) && hit != null) here = hit;
+                var hit = string.IsNullOrEmpty(m.Path) ? null : addressOf(CompilePath.ObjectName(m.Path));
+                if (hit != null) here = hit;
                 if (m.Messages.Count == 0 && !string.IsNullOrEmpty(m.Description) && m.State != CompilerResultState.Success)
                 {
                     var leaf = CompilePath.Leaf(m.Path);
@@ -1525,7 +1553,7 @@ namespace Rung.Bridge.V20
                         Section = leaf.Section,
                     });
                 }
-                Flatten(m.Messages, here, byName, into);
+                Flatten(m.Messages, here, addressOf, into);
             }
         }
 

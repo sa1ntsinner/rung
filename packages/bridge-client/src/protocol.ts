@@ -117,6 +117,8 @@ export interface ExportResult {
   warnings: string[];
   fingerprint: string;
   bundleHash: string;
+  /** An import's answer: what TIA Portal's compile of the imported object said (absent from bridges that do not tell). */
+  compile?: CompileMessage[];
 }
 
 export interface XRefEntry {
