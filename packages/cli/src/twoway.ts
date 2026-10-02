@@ -123,6 +123,8 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       io.stderr(`rung watch: ${(e as { code?: string }).code ?? "ERROR"}: ${e.message} — retrying in ${Math.round(wait / 1000)} s\n`);
       server?.emit("error", { message: e.message, retryInMs: wait });
     },
+    // editors show it while it happens (the language server turns it into progress)
+    onPhase: (phase, detail) => server?.emit("phase", { phase, detail }),
   });
   const tools = () => {
     const b = watcher.bridgeForTools;

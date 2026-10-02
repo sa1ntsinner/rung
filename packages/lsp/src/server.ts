@@ -82,6 +82,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   const timers = new Map<string, NodeJS.Timeout>();
   let refreshSupport = false;
   let snippetSupport = false;
+  let progressSupport = false;
+  /** What rung watch is doing now (sending a file, compiling), shown by the editor as progress. */
+  let phase: { done(): void; report(message: string): void } | undefined;
   let monitor = options.monitor ? new Monitoring(index, options.monitor, () => {
     if (refreshSupport) void connection.languages.inlayHint.refresh().catch(() => undefined);
   }, (message) => void connection.sendNotification("window/showMessage", { type: MessageType.Error, message }).catch(() => undefined)) : undefined;
@@ -117,6 +120,25 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     timers.set(uri, setTimeout(() => void publish(uri), 150));
   }
 
+  let phaseRun = 0;
+  /** rung watch's "sending Fx_Motor.scl to TIA Portal", "compiling …" as the editor's progress, until the pass reports. */
+  async function showPhase(p: { phase: string; detail: string }) {
+    if (!progressSupport) return;
+    const message = p.phase === "sending" ? `sending ${p.detail.split("/").pop()} to TIA Portal` : `${p.phase} ${p.detail}`;
+    if (phase) return phase.report(message);
+    const run = ++phaseRun;
+    const progress = await connection.window.createWorkDoneProgress();
+    // the pass reported while the editor was asked for a progress: nothing to show any more
+    if (run !== phaseRun) return progress.done();
+    progress.begin("rung", undefined, message);
+    phase = progress;
+  }
+  function endPhase() {
+    phaseRun++;
+    phase?.done();
+    phase = undefined;
+  }
+
   async function loadSyncDiagnostics() {
     if (!root) return;
     try {
@@ -130,6 +152,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.onInitialize(async (params) => {
     refreshSupport = params.capabilities.workspace?.inlayHint?.refreshSupport === true;
     snippetSupport = params.capabilities.textDocument?.completion?.completionItem?.snippetSupport === true;
+    progressSupport = params.capabilities.window?.workDoneProgress === true;
     // an editor with monitoring of its own (rung's VS Code extension) turns this one off
     if ((params.initializationOptions as { monitor?: boolean } | undefined)?.monitor === false) monitor = undefined;
     const folder = params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? undefined;
@@ -183,7 +206,14 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       /* no plc folder yet */
     }
     owner = await OwnerClient.connect(root);
-    if (owner) await owner.subscribe((event) => event === "diagnostics" && void loadSyncDiagnostics()).catch(() => {});
+    if (owner)
+      await owner
+        .subscribe((event, params) => {
+          if (event === "diagnostics") void loadSyncDiagnostics();
+          if (event === "phase") void showPhase(params as { phase: string; detail: string });
+          if (event === "report" || event === "error") endPhase();
+        })
+        .catch(() => {});
     else pollTimer = setInterval(() => void loadSyncDiagnostics(), 2000);
   });
 

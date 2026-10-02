@@ -8,18 +8,20 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node.js";
 import { startServer } from "../src/server.js";
+import { OwnerServer } from "@rung/sync";
 import { LineIndex } from "../src/lexer.js";
 import type { CompletionItem, DocumentHighlight, InitializeParams, InitializeResult, SignatureHelp } from "vscode-languageserver/node.js";
 
 const SRC = 'FUNCTION_BLOCK "Fx_A"\nVAR\n   count : Int;\nEND_VAR\nBEGIN\n   #count := #count + 1;\n   #nope := 1;\nEND_FUNCTION_BLOCK\n';
 
-async function boot(capabilities: InitializeParams["capabilities"] = {}) {
+async function boot(capabilities: InitializeParams["capabilities"] = {}, before?: (root: string) => Promise<unknown>) {
   const root = mkdtempSync(join(tmpdir(), "rung-lsp-srv-"));
   const blocks = join(root, "plc", "PLC_1", "blocks");
   mkdirSync(blocks, { recursive: true });
   writeFileSync(join(blocks, "Fx_A.scl"), SRC);
   mkdirSync(join(root, ".rung"), { recursive: true });
   writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ seq: 1, items: [{ address: "plc:PLC_1/blocks/Fx_A", path: "plc/PLC_1/blocks/Fx_A.scl", severity: "error", code: "COMPILE", message: "compiler says no", line: 6 }] }));
+  await before?.(root);
   const toServer = new PassThrough();
   const toClient = new PassThrough();
   const server = startServer(new StreamMessageReader(toServer), new StreamMessageWriter(toClient));
@@ -39,6 +41,28 @@ const until = async (cond: () => boolean) => {
     await new Promise((r) => setTimeout(r, 20));
   }
 };
+
+describe("rung lsp: what rung watch is doing, as the editor's progress", () => {
+  it("shows sending and compiling while a pass runs and ends when it reports", async () => {
+    let owner: OwnerServer | undefined;
+    const t = await boot({ window: { workDoneProgress: true } }, async (root) => (owner = await OwnerServer.start(root, {})));
+    const progress: { kind: string; message?: string; title?: string }[] = [];
+    t.client.onRequest("window/workDoneProgress/create", () => null);
+    t.client.onNotification("$/progress", (p: { value: { kind: string; message?: string; title?: string } }) => progress.push(p.value));
+    await new Promise((r) => setTimeout(r, 300)); // the server subscribes once initialized
+    owner!.emit("phase", { phase: "sending", detail: "plc/PLC_1/blocks/Fx_A.scl" });
+    await until(() => progress.length === 1);
+    owner!.emit("phase", { phase: "compiling", detail: "what uses the changed blocks" });
+    owner!.emit("report", { imported: 1 });
+    await until(() => progress.some((p) => p.kind === "end"));
+    expect(progress).toEqual([
+      { kind: "begin", title: "rung", message: "sending Fx_A.scl to TIA Portal" },
+      { kind: "report", message: "compiling what uses the changed blocks" },
+      { kind: "end" },
+    ]);
+    await owner!.close();
+  });
+});
 
 describe("rung lsp", () => {
   it("advertises capabilities and serves diagnostics, hover, definition, completion and rename", async () => {

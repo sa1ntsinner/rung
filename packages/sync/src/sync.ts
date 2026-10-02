@@ -123,6 +123,8 @@ export interface SyncOptions {
    * file, no state on disk, no diagnostics. It plans as if writes were on; the report's plan says what it would do.
    */
   preview?: boolean;
+  /** What the pass is doing now, for editors to show: sending a file to TIA Portal, compiling, archiving. */
+  onPhase?: (phase: "sending" | "compiling" | "archiving", detail: string) => void;
 }
 
 export interface Refusal {
@@ -894,6 +896,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   let backupFailed: string | undefined;
   if (!plan && order.length && cfg.sync.backup === "daily" && bridge.archive && (await backupDue(root, cfg, now()))) {
     try {
+      opts.onPhase?.("archiving", "the project, before the first write of the day");
       const b = await bridge.archive(cfg.sync.backupDir);
       if (b) {
         await recordBackup(root, cfg, b.path, now());
@@ -944,6 +947,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (job.kind !== "update" || interfaceOf(job.form, before) === undefined || interfaceOf(job.form, before) !== interfaceOf(job.form, job.bundle[suffix])) withCallers.push(job.address);
       continue;
     }
+    opts.onPhase?.("sending", primaryPath);
     const stage = await stageForImport(root, job.form, job.bundle);
     // the operation's id: the bridge keeps a receipt when TIA Portal commits it (see sendsOf)
     const opId = randomUUID();
@@ -1046,6 +1050,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     for (const [device, addrs] of byDevice) {
       try {
         let raw: CompileMessage[];
+        if (withCallers.some((a) => addrs.includes(a)) || cfg.sync.compile === "all") opts.onPhase?.("compiling", cfg.sync.compile === "all" ? device : "what uses the changed blocks");
         if (cfg.sync.compile === "all") raw = await bridge.compile(device, []);
         else {
           // the import compiled the object itself already; what is left is its users, where they need it

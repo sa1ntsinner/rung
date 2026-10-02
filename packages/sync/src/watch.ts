@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { RungConfig, StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
-import { syncOnce, syncQuick, type Refusal, type SyncBridge, type SyncReport } from "./sync.js";
+import { syncOnce, syncQuick, type Refusal, type SyncBridge, type SyncOptions, type SyncReport } from "./sync.js";
 
 export interface ClosableBridge extends SyncBridge {
   close(): Promise<void>;
@@ -17,6 +17,8 @@ export interface WatcherOptions {
   bridgeFactory: () => Promise<ClosableBridge>;
   onReport?: (r: SyncReport) => void;
   onError?: (e: Error, retryInMs: number) => void;
+  /** What a pass is doing now (SyncOptions.onPhase). */
+  onPhase?: SyncOptions["onPhase"];
   debounceMs?: number;
   maxBackoffMs?: number;
   now?: () => number;
@@ -139,7 +141,7 @@ export class Watcher {
     this.wantFull = false;
     try {
       this.bridge ??= await this.opts.bridgeFactory();
-      const options = { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS };
+      const options = { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
       if (!full) {
         // a saved file goes to TIA Portal without listing the whole project; what it cannot handle, the complete pass does
         const quick = files.length ? await syncQuick(this.root, this.bridge, this.state, options, files) : null;
