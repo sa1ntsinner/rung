@@ -179,6 +179,26 @@ describe("rung CLI", () => {
     expect(await t.run("--version")).toBe(0);
   });
 
+  it("each command's help lists only its usage, its options and a runnable example", async () => {
+    const t = setup();
+    for (const [cmd, spec] of Object.entries(COMMANDS)) {
+      t.out.length = 0;
+      expect(await t.run(cmd, "--help")).toBe(0);
+      const text = t.out.join("");
+      expect(text).toContain(`rung ${cmd}`);
+      expect(text).toContain("Example:\n  rung ");
+      for (const opt of spec.options) expect(text).toContain(`--${opt}`);
+      expect(text).not.toContain("Environment:");
+      if (cmd !== "test") expect(text).not.toContain("  rung test ");
+    }
+    t.out.length = 0;
+    await t.run("test", "-h");
+    expect(t.out.join("")).toContain("--filter <text>  test path substring or exact block name");
+    t.out.length = 0;
+    expect(await t.run("bridge", "--help")).toBe(0);
+    expect(t.out.join("")).toContain("Example:\n  rung bridge --tia V20\n");
+  });
+
   it("init binds the single open project and writes config, gitignore and AGENTS.md", async () => {
     const t = setup();
     expect(await t.run("init")).toBe(0);
@@ -280,7 +300,7 @@ describe("rung CLI", () => {
     writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n      - expect: { Runing: false }\n");
     writeFileSync(join(t.dir, "tests", "typo.test.yaml"), "block: Fx_Rn\ncases:\n  - name: runs\n    steps:\n      - cycle: 1\n");
     expect(await t.run("test")).toBe(2);
-    expect(t.out.join("")).toContain("FAIL Fx_Run: runs — step 2: Runing does not exist (did you mean Running?)\n");
+    expect(t.out.join("")).toContain("FAIL tests/run.test.yaml:3 Fx_Run: runs — step 2: Runing does not exist (did you mean Running?)\n");
     expect(t.out.join("")).toContain("FAIL tests/typo.test.yaml: block Fx_Rn not found (did you mean Fx_Run?)\n");
   });
 
@@ -300,6 +320,27 @@ describe("rung CLI", () => {
     expect(r.files[0]!.cases[0]).not.toHaveProperty("errorStep");
   });
 
+  it("every failed case identifies its file and case line, including execution errors", async () => {
+    const t = setup();
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\nVAR_OUTPUT\n  Running : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "first.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - expect: { Running: true }\n");
+    writeFileSync(join(t.dir, "tests", "second.test.yaml"), "block: Fx_Run\n\ncases:\n  - name: runs\n    steps:\n      - set: { Typo: true }\n");
+    expect(await t.run("test")).toBe(2);
+    expect(t.out.join("")).toContain("FAIL tests/first.test.yaml:3 Fx_Run: runs");
+    expect(t.out.join("")).toContain("FAIL tests/second.test.yaml:4 Fx_Run: runs — step 1:");
+  });
+
+  it("no matching tests has a distinct exit code in both text and JSON", async () => {
+    const t = setup();
+    expect(await t.run("test", "--filter", "Plant_DB")).toBe(3);
+    expect(t.out.join("")).toContain('no tests match "Plant_DB"');
+    t.out.length = 0;
+    expect(await t.run("test", "--filter", "Plant_DB", "--json")).toBe(3);
+    expect(JSON.parse(t.out.join(""))).toEqual({ files: [] });
+  });
+
   it("test in GitHub Actions puts every failure on its step in the pull request", async () => {
     const t = setup({ GITHUB_ACTIONS: "true" });
     mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
@@ -313,13 +354,13 @@ describe("rung CLI", () => {
 
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
-    expect(await t.run("test")).toBe(1);
+    expect(await t.run("test")).toBe(3);
     expect(t.out.join("")).toMatch(/^no tests: rung test runs tests\/\*\*\/\*\.test\.yaml/);
     // a test file without .test in its name is read by nobody: say which
     mkdirSync(join(t.dir, "tests", "drives"), { recursive: true });
     writeFileSync(join(t.dir, "tests", "drives", "motor.yaml"), "block: Fx_Motor\n");
     t.out.length = 0;
-    expect(await t.run("test")).toBe(1);
+    expect(await t.run("test")).toBe(3);
     expect(t.out.join("")).toBe("no tests: rung test runs tests/**/*.test.yaml (docs/testing.md); tests/drives/motor.yaml is not named *.test.yaml\n");
   });
 

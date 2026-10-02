@@ -77,6 +77,9 @@ export class BridgeClient {
         if (this.exited) return;
         this.exited = true;
         this.failAll(new BridgeError(ErrorCodes.BRIDGE_EXITED, "rung-bridge exited"));
+        // the TIA Portal the bridge started inherits its pipes and may keep them open: let go of them, or this
+        // process waits for that TIA Portal to end
+        setTimeout(() => [child.stdout, child.stderr, child.stdin].forEach((s) => s.destroy()), 1000).unref();
         resolve();
       };
       child.on("exit", done);

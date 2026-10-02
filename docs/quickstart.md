@@ -58,7 +58,7 @@ rung watch           # keeps both sides in sync; Ctrl+C to stop
 
 `rung sync --preview` asks the sync itself what it would do: each object (create, update, merge with TIA Portal's change, a change coming from TIA Portal, a conflict, a pending delete), the lines that change on the side it lands on, and what is compiled afterwards. In VS Code: *Preview Sync* (`Alt+Q Shift+S`) lists them and opens each one as a diff.
 
-Before the first write of each day, TIA Portal archives the whole project for you (`%LOCALAPPDATA%\rung\backups\<project>\*.zap20`, the newest 10 kept; *Project → Retrieve* in TIA Portal opens one). If the archive fails, rung sends nothing that day until it works. `rung backup` makes one any time.
+Before the first write of each day, TIA Portal archives the whole project for you (`%LOCALAPPDATA%\rung\backups\<project>\*.zap20`, the newest 10 kept; *Project → Retrieve* in TIA Portal opens one). If the archive fails, rung sends nothing that day until it works. `rung backup` makes one any time and counts as that day’s archive for the next sync.
 
 The right is kept in `.rung/`, never in git, and names the project: a colleague who clones the folder, or a `rung init --rebind` to another project, starts with writes off again. `rung writes off` takes it back; in VS Code it is the *Writes to TIA Portal* line of the PLC view. `rung init --writes` turns it on right away, for scripts and CI.
 
@@ -67,10 +67,10 @@ The right is kept in `.rung/`, never in git, and names the project: a colleague 
 - Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`. LAD and FBD blocks merge network by network: one person's change to network 2 and another's to network 5 both stay; the same network changed on both sides is a conflict (`.tia` shows TIA Portal's version).
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
-- Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor flags what TIA Portal's import would refuse: a tag without an address or with a type that does not fit it, two tags on one line, a name used twice. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
+- Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor and sync check for a missing address, a type that does not fit it, two tags on one line and a name used twice. Sync refuses the table until these are fixed; TIA Portal itself can accept a mismatched type and show the tag red. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
 - `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
-`rung sync` does one pass instead of watching; `rung status` shows what is open.
+`rung sync` does one pass instead of watching. Sync and watch print `→ TIA  <file>` for a send and `← TIA  <file>` for a file brought from TIA Portal, with created, merged or removed where needed. Large passes show the first eight files and a count; `rung sync --json` lists all. `rung status` compares disk hashes with the last recorded TIA version and lists edited files that have not been sent, with the reason when known; it does not contact TIA Portal.
 
 ## 5. Test without a PLC
 
@@ -95,4 +95,4 @@ rung download               # you type the PLC name to confirm; TIA's risky ques
 - `rung views`: read-only YAML views of hardware, HMI, technology objects, the project library and the software units with their relations.
 - `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. All over the S7-1500 Web API, read-only.
 - `rung agents`: refreshes the project summary in `AGENTS.md`.
-- `rung --help` lists every command and option.
+- `rung --help` lists every command; `rung sync --help` (or any command’s `--help`) shows its options and an example.

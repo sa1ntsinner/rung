@@ -77,7 +77,17 @@ export interface PlacedMessage extends CompilePosition {
 export async function placeCompileMessages<T extends PlacedMessage>(root: string, fileOf: (address: string) => string | undefined, msgs: T[], read: (path: string) => Promise<string>): Promise<T[]> {
   const cache = new Map<string, string | null>();
   const out: T[] = [];
-  for (const m of msgs) {
+  const plcMessages = new Set<string>();
+  for (const raw of msgs) {
+    if (/^\s*Compiling finished\b/i.test(raw.description)) continue;
+    // Older bridges inherited the requested block for this PLC-wide warning.
+    const global = /^Inputs or outputs are used that do not exist in the configured hardware\b/i.test(raw.description.trim());
+    const m = global ? { ...raw, address: undefined, file: undefined, line: undefined, column: undefined } : raw;
+    if (!m.address) {
+      const key = `${m.severity}\u0000${m.description}`;
+      if (plcMessages.has(key)) continue;
+      plcMessages.add(key);
+    }
     const file = m.address ? fileOf(m.address) : undefined;
     if (!file) {
       out.push(m);

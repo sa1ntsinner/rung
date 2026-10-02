@@ -155,17 +155,19 @@ async function workspace(dir: string, io: Io, download = false) {
   return { ws, config, link: new PlcLink(ws, config, io, download) };
 }
 
-async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[]): Promise<number> {
+async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[], device: string): Promise<number> {
   const objects = await snapshot(ws);
   const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => objects.find((o) => o.address === a)?.path, raw, (f) => readFile(f, "utf8"));
   let errors = 0;
+  let warnings = 0;
   for (const m of msgs) {
     if (m.severity === "info" && /^No block was compiled/i.test(m.description)) continue;
-    if (m.severity === "error" && !/^Compiling finished/.test(m.description)) errors++;
-    const where = m.file ? `${m.file}${m.line ? `:${m.line}` : ""}` : m.address ?? "";
+    if (m.severity === "error") errors++;
+    if (m.severity === "warning") warnings++;
+    const where = m.file ? `${m.file}${m.line ? `:${m.line}` : ""}` : m.address ?? `PLC ${device}`;
     io.stdout(`  ${m.severity.padEnd(8)} ${where}${where ? " — " : ""}${m.description.replace(/\s*\n\s*/g, " ")}\n`);
   }
-  io.stdout(errors ? `compile: ${errors} error(s)\n` : "compile: ok\n");
+  io.stdout(errors ? `compile: ${errors} error(s)${warnings ? `, ${warnings} warning(s)` : ""}\n` : `compile: ok${warnings ? ` (${warnings} warning(s))` : ""}\n`);
   return errors ? 2 : 0;
 }
 
@@ -174,7 +176,7 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
   const device = await deviceOf(config, v, ws, link);
   if (v.hw) {
     const msgs = await link.call<CompileMessage[]>("compileHardware", { device }, (b) => b.compileHardware(device));
-    return printCompile(ws, config, io, msgs);
+    return printCompile(ws, config, io, msgs, device);
   }
   const files = ((v.file as string[] | undefined) ?? []).map((f) => relative(ws, resolve(io.cwd, f)).split(sep).join("/"));
   let addresses: string[] = [];
@@ -187,7 +189,7 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
     });
   }
   const msgs = await link.call<CompileMessage[]>("compile", { device, addresses }, (b) => b.compile(device, addresses));
-  return printCompile(ws, config, io, msgs);
+  return printCompile(ws, config, io, msgs, device);
 }
 
 export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
@@ -275,7 +277,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 
   if (config.download.compileFirst && software) {
     const msgs = await link.call<CompileMessage[]>("compile", { device, addresses: [] }, (b) => b.compile(device, []));
-    if ((await printCompile(ws, config, io, msgs)) !== 0) {
+    if ((await printCompile(ws, config, io, msgs, device)) !== 0) {
       io.stderr("rung download: the program has compile errors; nothing was downloaded\n");
       return 2;
     }

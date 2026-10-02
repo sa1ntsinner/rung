@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
-import { casesIn, failureText, parseResults } from "../src/core/testItems";
+import { casesIn, failureText, noTestsHint, parseResults } from "../src/core/testItems";
 
 describe("test explorer model", () => {
+  it("shows the no-tests hint from the CLI exit code, with both filter match rules", () => {
+    expect(noTestsHint("Plant_DB", 3)).toBe("No tests for Plant_DB. --filter matches a test path substring or the exact block name. Add tests/Plant_DB.test.yaml with block: Plant_DB.");
+    for (const code of [0, 1, 2, null]) expect(noTestsHint("Plant_DB", code)).toBeUndefined();
+  });
   it("finds the cases of a test file, block and flow style, with their lines", () => {
     const text = [
       "block: Fx_Motor # the FB",

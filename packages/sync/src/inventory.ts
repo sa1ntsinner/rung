@@ -21,6 +21,7 @@ import type { BridgeLike } from "./objects.js";
 
 export interface Warning {
   address: string;
+  path?: string;
   code: string;
   message?: string;
 }

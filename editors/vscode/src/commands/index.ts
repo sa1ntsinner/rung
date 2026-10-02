@@ -4,6 +4,7 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { Args, parseOnlineState } from "../core/args";
 import { parseNoTarget } from "../core/connect";
+import { noTestsHint } from "../core/testItems";
 import type { Lsp } from "../lsp";
 import type { OnlineMonitor } from "../online";
 import type { Output } from "../output";
@@ -146,9 +147,8 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     if (!t?.name) return;
     await saveIfDirty(t.uri);
     const r = await cli.run(Args.testBlock(t.name));
-    // rung test --filter matches test file paths: say where tests for this block are expected
-    if (!r.error && /^0\/0 passed/m.test(r.output))
-      void vscode.window.showInformationMessage(`No tests for ${t.name}. rung test runs tests/**/*.test.yaml files whose path contains "${t.name}", e.g. tests/${t.name}.test.yaml with block: ${t.name}.`);
+    const hint = noTestsHint(t.name, r.code);
+    if (!r.error && hint) void vscode.window.showInformationMessage(hint);
   });
 
   // --- online

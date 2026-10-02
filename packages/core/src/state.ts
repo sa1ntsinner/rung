@@ -41,6 +41,8 @@ export interface ObjectState {
   readOnly: boolean;
   warnings: string[];
   status: ObjectStatus;
+  /** Why the last attempt left this edit in the workspace. */
+  notSent?: { code: string; message: string };
   /** Epoch ms of the last verification by export + hash (weak revisions). */
   verifiedAt?: number;
   /** Set while status is "conflicted": the TIA revision and files the conflict was computed against. */

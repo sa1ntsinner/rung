@@ -28,6 +28,7 @@ import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
 import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
 import { runTests, toJUnit } from "@rung/sim";
+import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
 import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
@@ -207,7 +208,8 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     if (wl === "missing" || wl === "stale") io.stderr(`rung: ${WHITELIST_HINT}\n`);
     io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\n`);
     const writing = config.sync.import === "auto" && writesGranted(await readWrites(dir), config);
-    if (!writing && config.sync.import === "auto")
+    if (writing) io.stdout(`Writes to TIA Portal are on for ${config.project.path}; rung writes off stops them.\n`);
+    else if (config.sync.import === "auto")
       io.stdout("Writes to TIA Portal are off: rung pull and rung watch bring the project into files, your edits stay in the files. When you want rung to send them: rung writes on\n");
     io.stdout("Next: rung pull\n");
     return 0;
@@ -358,7 +360,13 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
 
 export async function main(argv: string[], io: Io): Promise<number> {
   // the Windows end of a workspace on Linux or macOS (rung over ssh): the bridge itself, its arguments untouched
-  if (argv[0] === "bridge") return runBridge(argv.slice(1), io);
+  if (argv[0] === "bridge") {
+    if (argv.includes("--help") || argv.includes("-h")) {
+      io.stdout(commandHelp("bridge", ["tia", "args"], HELP));
+      return 0;
+    }
+    return runBridge(argv.slice(1), io);
+  }
   let parsed;
   try {
     parsed = parseArgs({
@@ -439,7 +447,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const [cmd, target] = positionals;
   if (v.help || !cmd) {
-    io.stdout(HELP);
+    if (cmd && !COMMANDS[cmd]) {
+      io.stderr(`rung: unknown command ${cmd}; rung --help lists the commands\n`);
+      return 1;
+    }
+    io.stdout(cmd ? commandHelp(cmd, COMMANDS[cmd]!.options, HELP) : HELP);
     return cmd || v.help ? 0 : 1;
   }
   const wrong = misuse(cmd, v, positionals);
@@ -469,7 +481,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           // for editors (the VS Code test explorer): results with the line of every case and failing step
           io.stdout(JSON.stringify({ files: results }, null, 2) + "\n");
           const n = results.reduce((k, f) => k + count(f), 0);
-          return n ? (results.some((f) => failedOf(f)) ? 2 : 0) : 1;
+          return n ? (results.some((f) => failedOf(f)) ? 2 : 0) : 3;
         }
         let failed = 0;
         for (const f of results) {
@@ -479,7 +491,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             continue;
           }
           for (const c of f.cases) {
-            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${f.block}: ${c.name}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}\n`);
+            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${c.passed ? "" : `${f.file}:${c.line ?? 1} `}${f.block}: ${c.name}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}\n`);
             for (const x of c.failures) {
               // expect: { Running: "true" } is the text "true", never the BOOL the block has
               const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));
@@ -503,7 +515,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             : ((await readdir(join(ws, "tests"), { recursive: true }).catch(() => [])) as string[]).map((f) => `tests/${f.split(sep).join("/")}`).filter((f) => /\.ya?ml$/i.test(f) && !/\.test\.ya?ml$/.test(f)).sort();
           const hint = unnamed.length ? `; ${unnamed.slice(0, 3).join(", ")}${unnamed.length > 3 ? ` and ${unnamed.length - 3} more` : ""} ${unnamed.length === 1 ? "is" : "are"} not named *.test.yaml` : "";
           io.stdout(`no tests${v.filter ? ` match "${String(v.filter)}"` : ""}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
-          return 1;
+          return 3;
         }
         io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n`);
         return failed ? 2 : total ? 0 : 1;

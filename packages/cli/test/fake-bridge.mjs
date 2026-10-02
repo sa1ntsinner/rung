@@ -80,6 +80,7 @@ rl.on("line", (line) => {
     }
     case "objects.import": {
       if (!allowImport) return fail("READ_ONLY", "imports need --allow-import");
+      if (db.refuseImports) return fail("IMPORT_FAILED", db.refuseImports);
       // a client on another machine sends the files (inline); a local one names a path
       const sent = p.files ? p.files.find((f) => f.name === p.primary) : undefined;
       if (p.files) db.inline = [...(db.inline ?? []), "import " + p.files.map((f) => f.name).join(",")];
@@ -180,6 +181,7 @@ rl.on("line", (line) => {
     }
     case "plc.compile":
       if (p.hardware) return reply([{ severity: "info", description: "Hardware compiled" }]);
+      if (db.compileMessages) return reply(db.compileMessages);
       return reply((p.addresses ?? []).filter((a) => (db.objects.find((o) => o.address === a)?.content ?? "").includes("#undeclared")).map((a) => ({ address: a, severity: "error", description: "Tag #undeclared not defined" })));
     default:
       return fail("BAD_REQUEST", "unknown " + req.method);

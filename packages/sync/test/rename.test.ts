@@ -25,6 +25,14 @@ async function setup() {
 }
 
 describe("rung rename", () => {
+  it("labels an unrelated block that was already inconsistent before the rename", async () => {
+    const { root, bridge, config, state } = await setup();
+    bridge.add("plc:PLC_1/blocks/Broken", { content: "// broken\n", isConsistent: false });
+    await pull(root, bridge, state, { config });
+    const r = await renameObject(root, bridge, state, config, "plc:PLC_1/blocks/Drives/Fx_Counter", "Fx_Pulse");
+    expect(r.pull.warnings).toContainEqual(expect.objectContaining({ address: "plc:PLC_1/blocks/Broken", code: "INCONSISTENT", message: expect.stringContaining("already inconsistent before rename") }));
+    await state.close();
+  });
   it("renames in TIA, moves the file and brings back every file that named the old object", async () => {
     const { root, bridge, config, state } = await setup();
     mkdirSync(join(root, "tests", "drives"), { recursive: true });

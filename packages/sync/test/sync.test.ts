@@ -1472,6 +1472,26 @@ describe("compile scope after an import", () => {
     expect(t.bridge.compileCalls).toEqual([[B]]);
   });
 
+  it("a parameter renamed in the block and its call in one pass: the caller's old text compiled by the first import is not reported", async () => {
+    class Stale extends TiaFake {
+      override async importObject(address: string, form: string, path: string, expected: string, op = ""): Promise<ExportResult> {
+        const r = await super.importObject(address, form, path, expected, op);
+        // TIA compiling Fx_A also compiles the caller's text it has then: the old call
+        const compile = address === A ? [{ address: B, severity: "error" as const, description: "The formal parameter 'x' is invalid." }] : [{ address, severity: "info" as const, description: `compiled ${address.split("/").pop()} on import` }];
+        return { ...r, compile };
+      }
+    }
+    const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: caller }));
+    const stale = Object.assign(new Stale(), { objects: t.bridge.objects });
+    const sync = (now: number) => t.withState((s) => syncOnce(t.root, stale, s, { config: t.config, now: () => now }));
+    await sync(1000);
+    t.write(pA, srcA.replace("BEGIN", "VAR_INPUT\n  y2 : Bool;\nEND_VAR\nBEGIN"));
+    t.write("plc/PLC_1/blocks/Fx_B.scl", caller.replace('"Fx_A"()', '"Fx_A"(y2 := TRUE)'));
+    const r = await sync(2000);
+    expect(r.imported).toBe(2);
+    expect(r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  });
+
   it("a bridge that does not tell gets the compile of the block and its callers as before", async () => {
     const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: caller }));
     await t.sync();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Minimal stand-in for rung-bridge speaking the JSON-lines protocol. Behaviour via FAKE_MODE.
 import { createInterface } from "node:readline";
+import { spawn } from "node:child_process";
 
 const mode = process.env.FAKE_MODE ?? "ok";
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
@@ -19,6 +20,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "bridge.hello":
       reply({ protocol: mode === "protocol2" ? 2 : 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: ["export"] });
       if (mode === "crash-after-hello") setTimeout(() => process.exit(3), 20);
+      // like a bridge whose TIA Portal outlives it: a child that inherited the pipes keeps them open
+      if (mode === "orphan-after-hello") {
+        spawn(process.execPath, ["-e", "setTimeout(() => {}, 8000)"], { stdio: "inherit" });
+        setTimeout(() => process.exit(3), 20);
+      }
       return;
     case "project.info":
       return fail("TIA_NOT_RUNNING", "no portal");

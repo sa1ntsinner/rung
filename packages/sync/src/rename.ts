@@ -36,6 +36,7 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
   const oldName = parseAddress(address).name;
   if (newName === oldName) throw new WorkspaceError("BAD_ARGUMENT", `${oldName} already has that name`);
 
+  const inconsistent = new Set((await bridge.listObjects(parseAddress(address).device)).filter((o) => o.isConsistent === false).map((o) => o.address));
   const { address: to } = await bridge.renameObject(address, newName, st.tiaFingerprint, randomUUID());
 
   // every other file that names the old object is re-exported, even though TIA reports it unchanged
@@ -49,6 +50,7 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
   }
   await state.flush();
   const report = await pull(root, bridge, state, { config });
+  for (const w of report.warnings) if (w.code === "INCONSISTENT" && inconsistent.has(w.address)) w.message = `already inconsistent before rename; ${w.message ?? "run rung compile"}`;
   users.push(...(await renameInTests(root, oldName, newName)));
   return { from: address, to, oldPath: st.path, ...(state.get(to) ? { newPath: state.get(to)!.path } : {}), users, pull: report };
 }

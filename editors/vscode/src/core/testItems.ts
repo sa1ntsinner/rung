@@ -37,6 +37,11 @@ export interface FileResult {
   error?: string;
 }
 
+/** Exit 3 from rung test means no cases matched; errors use 1 and failures use 2. */
+export function noTestsHint(name: string, code: number | null): string | undefined {
+  return code === 3 ? `No tests for ${name}. --filter matches a test path substring or the exact block name. Add tests/${name}.test.yaml with block: ${name}.` : undefined;
+}
+
 /**
  * The cases of a test file, read line by line (the file may be half-written while it is edited; the run
  * brings rung's own reading of it): `- name: …` entries under `cases:`, and cases without a name as "case N".

@@ -19,6 +19,7 @@ export interface WatcherOptions {
   onError?: (e: Error, retryInMs: number) => void;
   /** What a pass is doing now (SyncOptions.onPhase). */
   onPhase?: SyncOptions["onPhase"];
+  validateTags?: SyncOptions["validateTags"];
   debounceMs?: number;
   maxBackoffMs?: number;
   now?: () => number;
@@ -39,7 +40,7 @@ function mergeQuick(last: SyncReport | null, quick: SyncReport): SyncReport {
     conflicts: last.conflicts,
     pendingDeletes: last.pendingDeletes,
     warnings: [...last.warnings.filter((w) => !mine.has(w.address)), ...quick.warnings],
-    diagnostics: [...last.diagnostics.filter((d) => !mine.has(d.address)), ...quick.diagnostics],
+    diagnostics: [...last.diagnostics.filter((d) => !mine.has(d.address) && !quick.diagnostics.some((q) => !q.path && q.address === d.address && q.code === d.code)), ...quick.diagnostics],
     objects: undefined,
   };
 }
@@ -141,7 +142,7 @@ export class Watcher {
     this.wantFull = false;
     try {
       this.bridge ??= await this.opts.bridgeFactory();
-      const options = { config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
+      const options = { validateTags: this.opts.validateTags, config: this.opts.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
       if (!full) {
         // a saved file goes to TIA Portal without listing the whole project; what it cannot handle, the complete pass does
         const quick = files.length ? await syncQuick(this.root, this.bridge, this.state, options, files) : null;

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { main } from "../src/main.js";
 import { OwnerClient } from "@rung/sync";
+import { printReport, validateTags } from "../src/twoway.js";
 
 const fakeScript = fileURLToPath(new URL("./fake-bridge.mjs", import.meta.url));
 const PROJECT = "C:\\fx\\RungFixture\\RungFixture.ap20";
@@ -20,7 +21,7 @@ function setup() {
   const err: string[] = [];
   const env = { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([fakeScript]), FAKE_OBJECTS: objects };
   const run = (args: string[], extra: Partial<Parameters<typeof main>[1]> = {}) => main(args, { cwd: dir, stdout: (s) => out.push(s), stderr: (s) => err.push(s), env, ...extra });
-  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { objects: { address: string; content: string }[]; downloads?: unknown[] };
+  const db = () => JSON.parse(readFileSync(objects, "utf8")) as { project: { path: string }; objects: { address: string; content: string }[]; downloads?: unknown[] };
   const file = (...p: string[]) => join(dir, ...p);
   return { dir, run, out, err, db, file, objects };
 }
@@ -33,6 +34,138 @@ const until = async (cond: () => boolean, ms = 15_000) => {
 };
 
 describe("two-way CLI", () => {
+  it("status finds disk edits before sync, persists writes-off and refusal reasons, and clears them after sending", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    t.out.length = 0;
+    expect(await t.run(["status"])).toBe(0);
+    expect(t.out.join("")).toContain("1 object, 0 synced");
+    expect(t.out.join("")).toContain("edited, not sent plc/PLC_1/blocks/Fx_Motor.scl — writes off (rung writes on)");
+    await t.run(["sync"]);
+    const state = JSON.parse(readFileSync(t.file(".rung", "state.json"), "utf8"));
+    expect(state.objects[MOTOR]).toMatchObject({ status: "fileDirty", notSent: { code: "WRITES_OFF" } });
+    t.out.length = 0;
+    await t.run(["status"]);
+    expect(t.out.join("")).toContain("WRITES_OFF");
+    await t.run(["writes", "on"]);
+    writeFileSync(t.objects, JSON.stringify({ ...t.db(), refuseImports: "source refused" }));
+    await t.run(["sync"]);
+    t.out.length = 0;
+    await t.run(["status"]);
+    expect(t.out.join("")).toContain("IMPORT_FAILED: source refused");
+    writeFileSync(t.objects, JSON.stringify({ ...t.db(), refuseImports: null }));
+    await t.run(["sync"]);
+    t.out.length = 0;
+    await t.run(["status"]);
+    expect(t.out.join("")).toContain("1 object, 1 synced");
+    expect(t.out.join("")).not.toContain("edited, not sent");
+  });
+
+  it("a manual backup counts for the day's next sync", async () => {
+    const t = setup();
+    await t.run(["init", "--writes"]);
+    await t.run(["pull"]);
+    await t.run(["backup"]);
+    expect(JSON.parse(readFileSync(t.file(".rung", "backups.json"), "utf8"))).toMatchObject({ project: PROJECT });
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    expect(await t.run(["sync"])).toBe(0);
+    expect((t.db() as unknown as { archives: string[] }).archives).toHaveLength(1);
+  });
+
+  it("init --writes announces the project and the exact command to stop writes", async () => {
+    const t = setup();
+    expect(await t.run(["init", "--writes"])).toBe(0);
+    expect(t.out.join("")).toContain(`Writes to TIA Portal are on for ${PROJECT}; rung writes off stops them.\n`);
+  });
+
+  it("sync names files in each direction and keeps the full movement list in JSON", async () => {
+    const t = setup();
+    await t.run(["init", "--writes"]);
+    t.out.length = 0;
+    await t.run(["sync"]);
+    expect(t.out.join("")).toContain("← TIA  plc/PLC_1/blocks/Fx_Motor.scl\n");
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    t.out.length = 0;
+    await t.run(["sync"]);
+    expect(t.out.join("")).toContain("→ TIA  plc/PLC_1/blocks/Fx_Motor.scl\n");
+    writeFileSync(t.file("plc", "PLC_1", "blocks", "Fx_New.scl"), 'FUNCTION "Fx_New" : Void\nBEGIN\nEND_FUNCTION\n');
+    t.out.length = 0;
+    await t.run(["sync", "--json"]);
+    expect(JSON.parse(t.out.join("")).changes).toContainEqual({ path: "plc/PLC_1/blocks/Fx_New.scl", action: "create" });
+    const out: string[] = [];
+    printReport({ cwd: t.dir, env: {}, stdout: (s) => out.push(s), stderr: () => {} }, { exported: 1000, imported: 0, created: 0, merged: 0, conflicts: 0, pendingDeletes: 0, removed: 0, unchanged: 0, warnings: [], diagnostics: [], changes: Array.from({ length: 1000 }, (_, i) => ({ path: `plc/PLC_1/blocks/F${i}.scl`, action: "export" as const })) });
+    expect(out.join("").match(/← TIA/g)).toHaveLength(8);
+    expect(out.join("")).toContain("992 more files (1000 moved");
+  });
+
+  it("sync refuses a tag table on its missing-address and address-size lines, before import", async () => {
+    const t = setup();
+    const address = "plc:PLC_1/tags/Inputs";
+    const content = "VAR_GLOBAL\n    Start AT %I0.0 : Bool;\nEND_VAR\n";
+    writeFileSync(t.objects, JSON.stringify({ ...t.db(), objects: [{ address, form: "tags.st", content }] }));
+    await t.run(["init", "--writes"]);
+    await t.run(["pull"]);
+    const file = t.file("plc", "PLC_1", "tags", "Inputs.tags.st");
+    writeFileSync(file, "VAR_GLOBAL\n    NoAddr : Bool;\n    BadType AT %I1.3 : Int;\nEND_VAR\n");
+    t.out.length = 0;
+    expect(await t.run(["sync"])).toBe(2);
+    expect(t.out.join("")).toMatch(/NO_ADDRESS\s+plc\/PLC_1\/tags\/Inputs.tags.st:2 — NoAddr has no address/);
+    expect(t.out.join("")).toMatch(/ADDRESS_SIZE\s+plc\/PLC_1\/tags\/Inputs.tags.st:3 — BadType is a Int/);
+    expect(t.db().objects[0]!.content).toBe(content);
+    expect(validateTags("Inputs.tags.st", "VAR_GLOBAL\n    Fine AT %IW2 : Int;\nEND_VAR\n")).toEqual([]);
+    writeFileSync(file, "VAR_GLOBAL\n    Fine AT %IW2 : Int;\nEND_VAR\n");
+    expect(await t.run(["sync"])).toBe(0);
+  });
+
+  it("sync drops compile summaries and keeps repeated PLC-wide warnings off files", async () => {
+    const t = setup();
+    await t.run(["init", "--writes"]);
+    await t.run(["pull"]);
+    const global = { address: MOTOR, severity: "warning", description: "Inputs or outputs are used that do not exist in the configured hardware." };
+    writeFileSync(t.objects, JSON.stringify({ ...t.db(), compileMessages: [{ address: MOTOR, severity: "error", section: "body", bodyLine: 1, description: "Tag #undeclared not defined." }, { address: MOTOR, severity: "error", description: "Compiling finished (errors: 1; warnings: 1)" }, global, global] }));
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #undeclared := 1;\nEND_FUNCTION_BLOCK\n');
+    t.out.length = 0;
+    expect(await t.run(["sync"])).toBe(2);
+    expect(t.out.join("")).not.toContain("Compiling finished");
+    expect(t.out.join("").match(/configured hardware/g)).toHaveLength(1);
+    const items = JSON.parse(readFileSync(t.file(".rung", "diagnostics.json"), "utf8")).items;
+    expect(items).toHaveLength(2);
+    expect(items.find((d: { severity: string }) => d.severity === "warning")).toMatchObject({ address: "plc:PLC_1", path: "" });
+    expect(items.find((d: { severity: string }) => d.severity === "warning")).not.toHaveProperty("line");
+    expect(items.find((d: { severity: string }) => d.severity === "error")).toMatchObject({ path: "plc/PLC_1/blocks/Fx_Motor.scl", line: 3 });
+  });
+
+  it("delete and conflict hints include commands with files, and an unmatched path lists pending deletes", async () => {
+    const t = setup();
+    await t.run(["init", "--writes"]);
+    await t.run(["pull"]);
+    t.err.length = 0;
+    expect(await t.run(["confirm-delete", "plc/PLC_1/blocks/Fx_Motr.scl"])).toBe(1);
+    expect(t.err.join("")).toContain("did you mean plc/PLC_1/blocks/Fx_Motor.scl?");
+    unlinkSync(t.file(...motorFile));
+    await t.run(["sync"]);
+    expect(t.out.join("")).toContain("rung confirm-delete plc/PLC_1/blocks/Fx_Motor.scl");
+    t.err.length = 0;
+    expect(await t.run(["confirm-delete", "plc/PLC_1/blocks/Nope.scl"])).toBe(1);
+    expect(t.err.join("")).toContain("pending deletes: plc/PLC_1/blocks/Fx_Motor.scl");
+    expect(t.err.join("")).not.toContain("rung pull");
+    writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nBEGIN\n  #a := 2;\nEND_FUNCTION_BLOCK\n');
+    const db = t.db();
+    db.objects[0]!.content = db.objects[0]!.content.replace("#a := 1", "#a := 3");
+    writeFileSync(t.objects, JSON.stringify(db));
+    t.out.length = 0;
+    await t.run(["sync"]);
+    expect(t.out.join("")).toContain("markers in plc/PLC_1/blocks/Fx_Motor.scl.conflict; run rung resolve plc/PLC_1/blocks/Fx_Motor.scl --ours|--theirs|--merged");
+    t.out.length = 0;
+    await t.run(["status"]);
+    expect(t.out.join("")).toContain("edited, not sent plc/PLC_1/blocks/Fx_Motor.scl — conflict");
+    t.out.length = 0;
+    await t.run(["sync"]);
+    expect(t.out.join("").match(/run rung resolve plc\/PLC_1\/blocks\/Fx_Motor.scl --ours\|--theirs\|--merged/g)).toHaveLength(1);
+  });
+
   it("sync imports a local edit and writes back TIA's canonical text", async () => {
     const t = setup();
     await t.run(["init", "--writes"]);
@@ -161,6 +294,8 @@ describe("two-way CLI", () => {
     const stopSignal = new Promise<void>((r) => (stop = r));
     const watching = t.run(["watch"], { stopSignal });
     await until(() => existsSync(t.file(...motorFile)));
+    await until(() => t.out.join("").includes("← TIA  plc/PLC_1/blocks/Fx_Motor.scl"));
+    expect(await t.run(["backup"])).toBe(0); // through the owner, before this watch's first send
     t.out.length = 0;
     expect(await t.run(["status"])).toBe(0);
     expect(t.out.join("")).toMatch(/watching/);
@@ -169,8 +304,13 @@ describe("two-way CLI", () => {
     expect(t.err.join("")).toMatch(/rung watch runs in this workspace and already brings TIA Portal's changes in; rung pull is not needed while it runs/);
     writeFileSync(t.file(...motorFile), 'FUNCTION_BLOCK "Fx_Motor"\nbegin\n  #a := 42;\nEND_FUNCTION_BLOCK\n');
     await until(() => t.db().objects[0]!.content.includes("#a := 42;"));
+    await until(() => t.out.join("").includes("→ TIA  plc/PLC_1/blocks/Fx_Motor.scl"));
+    expect((t.db() as unknown as { archives: string[] }).archives).toHaveLength(1);
     t.out.length = 0;
     expect(await t.run(["sync"])).toBe(0); // via IPC
+    const json: string[] = [];
+    expect(await t.run(["sync", "--json"], { stdout: (s) => json.push(s) })).toBe(0);
+    expect(JSON.parse(json.join(""))).toHaveProperty("changes");
     // read-only lookups of the state must not need its lock while watch runs
     t.err.length = 0;
     expect(await t.run(["compile", "--file", join(...motorFile)])).toBe(0);
@@ -205,4 +345,3 @@ describe("two-way CLI", () => {
     expect(t.out.join("").match(/DELETE_PENDING/g)).toHaveLength(1);
   }, 60_000);
 });
-

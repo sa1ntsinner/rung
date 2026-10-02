@@ -1516,7 +1516,7 @@ namespace Rung.Bridge.V20
         }
 
         static void Flatten(IEnumerable<CompilerResultMessage> list, string address, Dictionary<string, string> byName, List<CompileMessage> into) =>
-            Flatten(list, address, name => byName.TryGetValue(name, out var hit) ? hit : null, into);
+            Flatten(list, null, name => byName.TryGetValue(name, out var hit) ? hit : null, into);
 
         /// <summary>An import's compile: its own block's name answers at once; the name index of the PLC is built
         /// only when the compiler names another object (it costs a second on a large project).</summary>
@@ -1524,7 +1524,8 @@ namespace Rung.Bridge.V20
         {
             var parts = AddressFormat.Parse(address);
             Dictionary<string, string> all = null;
-            Flatten(list, address, name =>
+            // A PLC-level leaf has no block; only a node naming one gives its children an address.
+            Flatten(list, null, name =>
             {
                 if (name == parts.Name) return address;
                 all = all ?? AddressesByName(parts.Device);

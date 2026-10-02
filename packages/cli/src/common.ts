@@ -164,6 +164,6 @@ export async function findWorkspace(start: string): Promise<string> {
 const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT", "WRITE_BACK_DROPPED"]);
 export const isNotice = (code: string) => NOTICES.has(code);
 
-export function printWarnings(io: Io, warnings: readonly { address: string; code: string; message?: string }[]) {
-  for (const w of warnings) io.stdout(`  ${w.code.padEnd(20)} ${w.address}${w.message ? ` — ${w.message}` : ""}\n`);
+export function printWarnings(io: Io, warnings: readonly { address: string; path?: string; code: string; message?: string }[]) {
+  for (const w of warnings) io.stdout(`  ${w.code.padEnd(20)} ${w.path ?? w.address}${w.message ? ` — ${w.message}` : ""}\n`);
 }

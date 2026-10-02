@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: BUSL-1.1
 import { main } from "./main.js";
+import { quietBrokenPipe } from "./output.js";
+
+quietBrokenPipe(process.stdout);
+quietBrokenPipe(process.stderr);
 
 const code = await main(process.argv.slice(2), {
   cwd: process.cwd(),

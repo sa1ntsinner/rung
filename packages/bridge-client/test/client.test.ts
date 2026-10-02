@@ -42,6 +42,14 @@ describe("BridgeClient", () => {
     await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "BRIDGE_EXITED" });
   });
 
+  it("lets go of the pipes when the bridge dies and what it started keeps them open", async () => {
+    const c = await spawn(fake("orphan-after-hello"));
+    const child = (c as unknown as { child: { stdout: { destroyed: boolean } } }).child;
+    await new Promise((r) => setTimeout(r, 1600));
+    await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "BRIDGE_EXITED" });
+    expect(child.stdout.destroyed).toBe(true);
+  });
+
   it("times out read requests with TIMEOUT", async () => {
     const c = await spawn(fake("slow", { requestTimeoutMs: 1000 }));
     await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "TIMEOUT" });

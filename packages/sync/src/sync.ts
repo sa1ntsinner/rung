@@ -80,6 +80,8 @@ export interface SyncReport {
   diagnostics: Diagnostic[];
   /** A quick pass (syncQuick): the objects it looked at; its warnings and diagnostics are about those alone. */
   objects?: string[];
+  /** Files moved in this pass; JSON carries every file, terminals show a bounded sample. */
+  changes?: { path: string; action: "export" | "import" | "create" | "merge" | "remove" | "restore" }[];
   /** A preview (SyncOptions.preview): what the pass would have done. */
   plan?: Plan;
   /** The archive TIA Portal wrote before this pass's first write of the day (sync.backup = "daily"). */
@@ -98,7 +100,7 @@ async function backupDue(root: string, cfg: RungConfig, now: number): Promise<bo
   }
 }
 
-async function recordBackup(root: string, cfg: RungConfig, path: string, now: number): Promise<void> {
+export async function recordBackup(root: string, cfg: RungConfig, path: string, now: number): Promise<void> {
   await writeFileAtomic(backupsFile(root), JSON.stringify({ at: now, project: cfg.project.path, path }, null, 2) + "\n");
 }
 
@@ -124,6 +126,8 @@ export interface SyncOptions {
    */
   preview?: boolean;
   /** What the pass is doing now, for editors to show: sending a file to TIA Portal, compiling, archiving. */
+  /** Tag-table checks supplied by the caller, avoiding a sync → lsp dependency cycle. */
+  validateTags?: (path: string, text: string) => { code: string; message: string; line: number }[];
   onPhase?: (phase: "sending" | "compiling" | "archiving", detail: string) => void;
 }
 
@@ -360,7 +364,7 @@ async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Dia
     /* first run */
   }
   // a quick pass leaves what it did not look at (a conflict elsewhere, a pending delete) as the last pass found it
-  const kept = previous.filter((d) => untouched(d) || (d.code === "COMPILE" && keep(d)));
+  const kept = previous.filter((d) => !/^\s*Compiling finished\b/i.test(d.message) && (untouched(d) || (d.code === "COMPILE" && keep(d))));
   const key = (d: Diagnostic) => `${d.address}\u0000${d.line ?? ""}\u0000${d.message}`;
   const seen = new Set(items.map(key));
   const all = [...kept.filter((d) => !seen.has(key(d))), ...items];
@@ -390,10 +394,12 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
     pendingDeletes: second.pendingDeletes,
     warnings: unique([...first.warnings.filter((w) => w.code !== "STALE_REVISION"), ...second.warnings]),
     diagnostics: unique([...first.diagnostics, ...second.diagnostics]),
+    changes: [...(first.changes ?? []), ...(second.changes ?? [])],
+    ...((first.backup ?? second.backup) ? { backup: first.backup ?? second.backup } : {}),
   };
 }
 
-const emptyReport = (): SyncReport => ({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
+const emptyReport = (): SyncReport => ({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [], changes: [] });
 
 /**
  * A pass for files rung watch saw change: only their objects are imported, compiled and written back, without
@@ -441,8 +447,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   // a preview shows what the pass would send once writes are on, whatever they are now
   const cfg = opts.preview && opts.config.sync.import !== "auto" ? { ...opts.config, sync: { ...opts.config.sync, import: "auto" as const }, writesOff: undefined } : opts.config;
   const report = emptyReport();
-  const warn = (address: string, code: string, message?: string) => report.warnings.push(message ? { address, code, message } : { address, code });
-  const diag = (d: Diagnostic) => report.diagnostics.push(d);
+  const warn = (address: string, code: string, message?: string, path?: string) => report.warnings.push({ address, code, ...(message ? { message } : {}), ...(path ? { path } : {}) });
+  const diag = (d: Diagnostic) => {
+    report.diagnostics.push(d);
+    const st = state.get(d.address);
+    if (st && d.severity === "error" && d.code !== "COMPILE" && st.status === "fileDirty") state.upsert({ ...st, notSent: { code: d.code, message: d.message } });
+  };
   const plan: Plan | undefined = opts.preview ? { entries: [], compile: [] } : undefined;
   const planned = (e: PlanEntry) => plan!.entries.push(e);
 
@@ -525,11 +535,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       pendingOps.push(opId);
     }
     state.upsert(next);
+    report.changes!.push({ path: staged.primary.path, action: force ? "restore" : "export" });
     return next;
   };
   const writeConflict = async (st: ObjectState, stem: string, files: Record<string, string>, staged: StagedExport, source: boolean) => {
     if (plan) {
-      planned({ address: st.address, path: st.path, action: "conflict", detail: "changed here and in TIA Portal on the same lines: nothing is sent until rung resolve" });
+      planned({ address: st.address, path: st.path, action: "conflict", detail: `changed here and in TIA Portal on the same lines; run rung resolve ${st.path} --ours|--theirs|--merged after sync writes the conflict helpers` });
       report.conflicts++;
       return;
     }
@@ -553,7 +564,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       sent: undefined,
     });
     report.conflicts++;
-    diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: "Edited in the workspace and in TIA Portal; resolve with rung resolve" });
+    diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: `Edited here and in TIA Portal; ${source ? `markers in ${st.path}.conflict` : `TIA version in ${st.path}.tia`}; run rung resolve ${st.path} --ours|--theirs|--merged` });
   };
 
   /**
@@ -642,13 +653,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       }
 
       if (st?.status === "conflicted") {
-        warn(address, "CONFLICT", "unresolved conflict; run rung resolve");
+        const hint = `Unresolved conflict; check ${st.path}.conflict or ${st.path}.tia; run rung resolve ${st.path} --ours|--theirs|--merged`;
+        warn(address, "CONFLICT", hint, st.path);
         report.conflicts++;
-        diag({ address, path: st.path, severity: "error", code: "CONFLICT", message: "Unresolved conflict; run rung resolve" });
+        diag({ address, path: st.path, severity: "error", code: "CONFLICT", message: hint });
         continue;
       }
       if (st?.status === "recoveryRequired") {
-        warn(address, "RECOVERY_REQUIRED", "the last import has an unknown outcome; check TIA Portal and run rung resolve");
+        warn(address, "RECOVERY_REQUIRED", `the last import has an unknown outcome; check TIA Portal, then run rung resolve ${st.path} --ours|--theirs|--merged`, st.path);
         continue;
       }
 
@@ -681,7 +693,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
             report.exported++;
           } else {
             // a restored file ends a pending delete or a refused edit
-            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending || cur.sent) state.upsert({ ...cur, status: "synced", sending: undefined, sendingOp: undefined, sent: undefined });
+            if (cur.status === "pendingDelete" || cur.status === "fileDirty" || cur.sending || cur.sent) state.upsert({ ...cur, status: "synced", notSent: undefined, sending: undefined, sendingOp: undefined, sent: undefined });
             report.unchanged++;
           }
           continue;
@@ -693,8 +705,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           if (deletable && !tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
             state.upsert({ ...cur, status: "pendingDelete" });
             report.pendingDeletes++;
-            if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: "deleted here: rung confirm-delete deletes it in TIA Portal, or restore the file" });
-            diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: "Deleted in the workspace; run rung confirm-delete to delete it in TIA Portal, or restore the file" });
+            if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: `deleted here: rung confirm-delete ${cur.path} deletes it in TIA Portal, or restore the file` });
+            diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: `Deleted in the workspace; run rung confirm-delete ${cur.path} to delete it in TIA Portal, or restore the file` });
             continue;
           }
           staged ??= await stageExport(root, bridge, address, stem);
@@ -704,13 +716,17 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         // modified locally
+        cur = { ...cur, status: "fileDirty", notSent: undefined };
+        state.upsert(cur);
         if (readOnly) {
           state.upsert({ ...cur, status: "fileDirty" });
           diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; restore the file` });
           continue;
         }
         if (cfg.sync.import === "manual") {
-          warn(address, ...notSent(cfg, "local edit"));
+          const [code, message] = notSent(cfg, "local edit");
+          state.upsert({ ...cur, status: "fileDirty", notSent: { code, message } });
+          warn(address, code, message, cur.path);
           continue;
         }
         const { bundle, captured } = await localBundle(root, stemOf(cur), cur.path);
@@ -791,9 +807,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (!item && st) {
         const status = await localStatus(root, st.files);
         if (status === "modified") {
-          warn(address, "LOCAL_CHANGES", "deleted in TIA but edited locally; file kept (rung resolve --ours recreates it in TIA, --theirs accepts the delete)");
+          warn(address, "LOCAL_CHANGES", `deleted in TIA but edited locally; file kept (rung resolve ${st.path} --ours recreates it in TIA; rung resolve ${st.path} --theirs accepts the delete)`, st.path);
           state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: "absent", tiaFiles: st.files, deletedInTia: true } });
-          if (plan) planned({ address, path: st.path, action: "conflict", detail: "deleted in TIA Portal but edited here: the file is kept until rung resolve" });
+          if (plan) planned({ address, path: st.path, action: "conflict", detail: `deleted in TIA Portal but edited here; file kept until rung resolve ${st.path} --ours|--theirs|--merged` });
           continue;
         }
         if (plan) {
@@ -808,13 +824,15 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         }
         if (removes.length) await publishBundle(root, { opId: randomUUID(), address, targets: [], removes, nextState: st });
         state.remove(address);
+        report.changes!.push({ path: st.path, action: "remove" });
         report.removed++;
         continue;
       }
 
       if (loc) {
         if (cfg.sync.import !== "auto") {
-          warn(address, ...notSent(cfg, "new file"));
+          const [code, message] = notSent(cfg, "new file");
+          warn(address, code, message, loc.path);
           continue;
         }
         if (!CREATABLE.has(loc.form)) {
@@ -921,6 +939,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       diag({ address: job.address, path: primaryPath, severity: "error", code: "DEPENDENCY_BLOCKED", message: cyclic.has(job.address) ? "Cyclic dependency between changed objects; import them together with rung sync --batch (not automatic)" : `Waiting for ${blockedBy!.address}, which could not be imported` });
       continue;
     }
+    if (job.form === "tags.st" && opts.validateTags) {
+      const problems = opts.validateTags(primaryPath, job.bundle[".tags.st"] ?? "");
+      if (problems.length) {
+        failed.add(job.address);
+        for (const p of problems) diag({ address: job.address, path: primaryPath, severity: "error", code: p.code, line: p.line, message: `${p.message}. Nothing was changed in TIA Portal` });
+        continue;
+      }
+    }
     const key = opts.refused ? refusalKey(job) : "";
     const earlier = opts.refused?.get(job.address);
     if (earlier && earlier.key === key) {
@@ -1024,6 +1050,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     if (job.kind === "create") report.created++;
     else if (job.kind === "merge") report.merged++;
     else report.imported++;
+    report.changes!.push({ path: primaryPath, action: job.kind === "update" ? "import" : job.kind });
     imported.push(job.address);
     if (result.compile) compiledByImport.set(job.address, result.compile);
     // its instance DBs and callers compile again only when what they see of it changed, or rung cannot tell
@@ -1055,14 +1082,24 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         else {
           // the import compiled the object itself already; what is left is its users, where they need it
           const own = addrs.filter((a) => compiledByImport.has(a));
-          const scope = (await withUsers(root, state, addrs.filter((a) => withCallers.includes(a)))).filter((a) => !compiledByImport.has(a));
-          raw = [...own.flatMap((a) => compiledByImport.get(a)!), ...(scope.length ? await bridge.compile(device, scope) : [])];
+          const order = new Map(imported.map((a, i) => [a, i]));
+          const changed = addrs.filter((a) => withCallers.includes(a));
+          const lastChange = Math.max(-1, ...changed.map((a) => order.get(a)!));
+          // a user imported before the last interface change of the pass compiled against the old interface: again
+          const scope = (await withUsers(root, state, changed)).filter((a) => !compiledByImport.has(a) || order.get(a)! < lastChange);
+          // each object keeps the messages of the last compile that saw it: FB_Motor's import compiles its caller's
+          // old text, the caller's own import a moment later compiles its new one (a renamed parameter in both)
+          const events = [...own.map((a) => compiledByImport.get(a)!), ...(scope.length ? [await bridge.compile(device, scope)] : [])];
+          const covers = events.map((msgs, i) => new Set([...(i < own.length ? [own[i]!] : scope), ...msgs.flatMap((m) => (m.address ? [m.address] : []))]));
+          const last = new Map<string, number>();
+          covers.forEach((c, i) => c.forEach((a) => last.set(a, i)));
+          raw = events.flatMap((msgs, i) => msgs.filter((m) => !m.address || last.get(m.address) === i));
         }
         const msgs = await placeCompileMessages(root, (a) => state.get(a)?.path, raw, (f) => readFile(f, "utf8"));
         for (const m of msgs) {
           // "No block was compiled. All blocks are up-to-date." says nothing about any file
           if (m.severity === "info" && /^No block was compiled/i.test(m.description)) continue;
-          const target = m.address ?? "";
+          const target = m.address ?? `plc:${device}`;
           const path = (target && state.get(target)?.path) || "";
           const revision = target ? state.get(target)?.tiaFingerprint : undefined;
           diag({ address: target, path, severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}) });
@@ -1174,7 +1211,7 @@ export async function resolveConflict(root: string, state: StateStore, path: str
         // side). Taken as it is, TIA Portal's side would be lost
         throw new WorkspaceError(
           "CONFLICT_MARKERS",
-          `${f.path}.conflict still contains conflict markers: merge it there, or merge into ${f.path} and delete ${f.path}.conflict; rung resolve --ours keeps your file, --theirs takes TIA Portal's`,
+          `${f.path}.conflict still contains conflict markers: merge it there, or merge into ${f.path} and delete ${f.path}.conflict; rung resolve ${f.path} --ours keeps your file; rung resolve ${f.path} --theirs takes TIA Portal's`,
         );
       }
     }

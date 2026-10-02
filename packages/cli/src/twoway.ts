@@ -2,17 +2,38 @@
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, writesGranted, type RungConfig } from "@rung/core";
-import { OwnerClient, OwnerServer, Watcher, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
+import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
+import { WorkspaceIndex, diagnostics, nearest, uriOf } from "@rung/lsp";
 import { readFile } from "node:fs/promises";
 import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 
-function printReport(io: Io, r: SyncReport) {
+export function validateTags(path: string, text: string) {
+  const index = new WorkspaceIndex();
+  const uri = uriOf(resolve(path));
+  index.set(uri, text, 0);
+  const doc = index.docs.get(uri)!;
+  const codes = new Set(["SYNTAX", "TAG_COMMENT", "TAG_LINE", "DUPLICATE_TAG", "NO_VALUE", "START_VALUE", "NO_ADDRESS", "BAD_ADDRESS", "ADDRESS_SIZE"]);
+  return diagnostics(index, uri).filter((d) => codes.has(d.code)).map((d) => ({ code: d.code, message: d.message, line: doc.lines.position(d.start).line + 1 }));
+}
+
+const diagnosticTarget = (d: { path?: string; address?: string }) => d.path || (d.address?.startsWith("plc:") && !d.address.includes("/") ? `PLC ${d.address.slice(4)}` : d.address ?? "");
+
+export function printReport(io: Io, r: SyncReport) {
   if (r.backup) io.stdout(`archived the project before writing into it: ${r.backup.path} (${Math.max(1, Math.round(r.backup.bytes / 1024))} KB; TIA Portal's Project → Retrieve opens it)\n`);
   io.stdout(
     `exported ${r.exported}  imported ${r.imported}  created ${r.created}  merged ${r.merged}  conflicts ${r.conflicts}  pending-deletes ${r.pendingDeletes}  removed ${r.removed}  unchanged ${r.unchanged}\n`,
   );
-  printWarnings(io, r.warnings);
-  for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${d.path || d.address}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  const changes = r.changes ?? [];
+  for (const c of changes.slice(0, 8)) {
+    const toTia = c.action === "import" || c.action === "create" || c.action === "merge";
+    const note = c.action === "create" ? " (created)" : c.action === "merge" ? " (merged)" : c.action === "remove" ? " (removed)" : c.action === "restore" ? " (restored)" : "";
+    io.stdout(`${toTia ? "→" : "←"} TIA  ${c.path}${note}\n`);
+  }
+  if (changes.length > 8) io.stdout(`… ${changes.length - 8} more files (${changes.length} moved; rung sync --json lists all)\n`);
+  printWarnings(io, r.warnings.filter((w) => !r.diagnostics.some((d) => d.address === w.address && d.code === w.code && d.message === w.message)));
+  for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  const compiled = r.diagnostics.filter((d) => d.code === "COMPILE");
+  if (compiled.length) io.stdout(`compile: ${compiled.filter((d) => d.severity === "error").length} error(s), ${compiled.filter((d) => d.severity === "warning").length} warning(s)\n`);
 }
 
 const exitCode = (r: SyncReport) => (r.conflicts || r.diagnostics.some((d) => d.severity === "error") ? 2 : r.warnings.some((w) => !isNotice(w.code)) ? 2 : 0);
@@ -43,7 +64,7 @@ function printPlan(io: Io, r: SyncReport, writesOff: boolean) {
     if (lines.length > 30) io.stdout(`            … ${lines.length - 30} more lines (rung sync --preview --json has them all)\n`);
   }
   printWarnings(io, r.warnings);
-  for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${d.path || d.address}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
   if (plan.compile.length) io.stdout(`compiled afterwards: ${plan.compile.map((a) => (a.startsWith("plc:") ? parseAddress(a).name : a)).join(", ")}\n`);
   if (writesOff && plan.entries.some((e) => e.action === "create" || e.action === "update" || e.action === "merge"))
     io.stdout("writes to TIA Portal are off in this workspace: what goes to TIA Portal waits until rung writes on\n");
@@ -68,7 +89,8 @@ export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; js
         io.stderr("rung: the watcher is backing off after a bridge error; see rung status\n");
         return 1;
       }
-      printReport(io, r);
+      if (opts.json) io.stdout(JSON.stringify(r, null, 2) + "\n");
+      else printReport(io, r);
       return exitCode(r);
     } finally {
       owner.close();
@@ -81,14 +103,15 @@ export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; js
     // a preview's bridge may not import at all
     const client = await bridgeFor(config, io, opts.preview ? [] : importFlags(config));
     try {
-      const r = await syncOnce(dir, client, state, { config, preview: !!opts.preview });
+      const r = await syncOnce(dir, client, state, { config, validateTags, preview: !!opts.preview });
       if (opts.preview) {
         const writesOff = !!config.writesOff || config.sync.import !== "auto";
         if (opts.json) io.stdout(JSON.stringify({ ...r, writesOff }, null, 2) + "\n");
         else printPlan(io, r, writesOff);
         return 0;
       }
-      printReport(io, r);
+      if (opts.json) io.stdout(JSON.stringify(r, null, 2) + "\n");
+      else printReport(io, r);
       return exitCode(r);
     } finally {
       await client.close();
@@ -110,6 +133,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
+    validateTags,
     // the watch takes downloads only when they are on for the workspace (and checks the confirmed PLC itself)
     bridgeFactory: () => bridgeFor(config, io, [...importFlags(config), ...(config.download.enabled ? ["--allow-download"] : [])]),
     onReport: (r) => {
@@ -157,7 +181,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));
     },
     compileHardware: async (p) => tools().compileHardware(String(p.device)),
-    archive: async () => tools().archive(config.sync.backupDir),
+    archive: async () => {
+      const b = await tools().archive(config.sync.backupDir);
+      if (b) await recordBackup(dir, config, b.path, Date.now());
+      return b;
+    },
     online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
     connections: async (p) => tools().connections(String(p.device), !!p.scan),
     compare: async (p) => tools().compare(String(p.device), p.target as never),
@@ -191,8 +219,12 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
-function statusOf(state: StateStore, watcher?: Watcher) {
-  const all = state.all();
+async function statusOf(state: StateStore, watcher?: Watcher) {
+  const all = await Promise.all(state.all().map(async (o) => {
+    if (o.status === "conflicted" || o.status === "recoveryRequired" || o.status === "importing") return o;
+    const disk = await localStatus(state.root, o.files);
+    return { ...o, status: disk === "clean" ? (o.status === "fileDirty" || o.status === "pendingDelete" ? "synced" : o.status) : disk === "missing" ? "pendingDelete" : "fileDirty" };
+  }));
   const by = (s: string) => all.filter((o) => o.status === s).map((o) => o.path);
   return {
     objects: all.length,
@@ -200,6 +232,7 @@ function statusOf(state: StateStore, watcher?: Watcher) {
     readOnly: all.filter((o) => o.readOnly).length,
     conflicted: by("conflicted"),
     fileDirty: by("fileDirty"),
+    unsent: all.filter((o) => o.status === "fileDirty" || o.status === "conflicted").map((o) => ({ path: o.path, reason: o.status === "conflicted" ? "conflict" : o.notSent ? `${o.notSent.code}: ${o.notSent.message}` : o.readOnly ? "read-only" : undefined })),
     pendingDelete: by("pendingDelete"),
     recoveryRequired: by("recoveryRequired"),
     owner: watcher ? { lastPassAt: watcher.lastPassAt, lastError: watcher.lastError, scanAgeMs: watcher.lastPassAt ? Date.now() - watcher.lastPassAt : null } : null,
@@ -209,7 +242,7 @@ function statusOf(state: StateStore, watcher?: Watcher) {
 export async function cmdStatus(dir: string, io: Io): Promise<number> {
   const config = await loadConfig(dir);
   const owner = await OwnerClient.connect(dir);
-  let s: ReturnType<typeof statusOf>;
+  let s: Awaited<ReturnType<typeof statusOf>>;
   if (owner) {
     try {
       s = await owner.request("status");
@@ -219,23 +252,24 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
   } else {
     const state = await StateStore.open(dir, null);
     try {
-      s = statusOf(state);
+      s = await statusOf(state);
     } finally {
       await state.close();
     }
   }
   io.stdout(`writes to TIA Portal: ${writesLabel(config)}\n`);
   io.stdout(`${s.objects} object${s.objects === 1 ? "" : "s"}, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
-  for (const [label, list] of [["conflicted", s.conflicted], ["file dirty", s.fileDirty], ["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
+  for (const [label, list] of [["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
+  for (const u of s.unsent) io.stdout(`  edited, not sent ${u.path} — ${u.reason ?? (config.writesOff ? "writes off (rung writes on)" : config.sync.import === "manual" ? "sync.import = manual" : "rung sync")}\n`);
   // compile errors TIA reported and that still apply
-  let compileErrors: { path?: string; line?: number; message: string; severity: string; code: string }[] = [];
+  let compileErrors: { address?: string; path?: string; line?: number; message: string; severity: string; code: string }[] = [];
   try {
     compileErrors = ((JSON.parse(await readFile(join(dir, ".rung", "diagnostics.json"), "utf8")) as { items?: typeof compileErrors }).items ?? []).filter((d) => d.code === "COMPILE" && d.severity === "error" && !/^Compiling finished/.test(d.message));
   } catch {
     /* no pass yet */
   }
-  for (const d of compileErrors) io.stdout(`  ${"compile error".padEnd(16)} ${d.path ?? ""}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  for (const d of compileErrors) io.stdout(`  ${"compile error".padEnd(16)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
   return s.conflicted.length || s.recoveryRequired.length || compileErrors.length ? 2 : 0;
 }
 
@@ -319,9 +353,9 @@ export async function renameInTia(ws: string, address: string, newName: string, 
 
 /** Address of a mirrored object named by its workspace file or by its name (read without the state lock). */
 export async function addressOf(ws: string, what: string, cwd: string): Promise<string> {
-  let objects: { address: string; path: string }[] = [];
+  let objects: { address: string; path: string; status?: string }[] = [];
   try {
-    objects = Object.values((JSON.parse(await readFile(join(ws, ".rung", "state.json"), "utf8")) as { objects?: Record<string, { address: string; path: string }> }).objects ?? {});
+    objects = Object.values((JSON.parse(await readFile(join(ws, ".rung", "state.json"), "utf8")) as { objects?: Record<string, { address: string; path: string; status?: string }> }).objects ?? {});
   } catch {
     /* no state yet */
   }
@@ -331,7 +365,11 @@ export async function addressOf(ws: string, what: string, cwd: string): Promise<
   const named = objects.filter((o) => parseAddress(o.address).name.toLowerCase() === what.replace(/^"|"$/g, "").toLowerCase());
   if (named.length === 1) return named[0]!.address;
   if (named.length > 1) throw new WorkspaceError("BAD_ARGUMENT", `several objects are named ${what}: ${named.map((o) => o.path).join(", ")}; give the file instead`);
-  throw new WorkspaceError("NOT_MIRRORED", `no mirrored object or file ${what}; run rung pull`);
+  const pending = objects.filter((o) => o.status === "pendingDelete").map((o) => o.path);
+  const nearName = nearest(what, objects.map((o) => parseAddress(o.address).name));
+  const near = nearest(rel, objects.map((o) => o.path)) ?? objects.find((o) => parseAddress(o.address).name === nearName)?.path;
+  const hint = pending.length ? `pending deletes: ${pending.slice(0, 5).join(", ")}${pending.length > 5 ? ", … (rung status lists all)" : ""}` : near ? `did you mean ${near}?` : `mirrored paths: ${objects.slice(0, 5).map((o) => o.path).join(", ") || "none"}; check the file path`;
+  throw new WorkspaceError("NOT_MIRRORED", `no mirrored object or file ${what}; ${hint}`);
 }
 
 /** rung rename <file|name> <new-name>: TIA Portal renames it and keeps every use; the files that use it follow. */
@@ -369,6 +407,7 @@ export async function cmdBackup(dir: string, io: Io): Promise<number> {
     io.stderr(`rung: ${config.project.tiaVersion === "CODESYS" ? "CODESYS projects are not archived by rung; copy the .project file" : "this bridge cannot archive projects"}\n`);
     return 1;
   }
+  await recordBackup(dir, config, b.path, Date.now());
   io.stdout(`${b.path} (${Math.max(1, Math.round(b.bytes / 1024))} KB)${b.savedFirst ? "; the project had changes and was saved first" : ""}\nTIA Portal's Project → Retrieve opens it.\n`);
   return 0;
 }

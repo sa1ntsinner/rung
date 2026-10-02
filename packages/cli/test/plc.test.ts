@@ -67,6 +67,19 @@ describe("rung compare", () => {
 });
 
 describe("PLC commands", () => {
+  it("compile drops the summary and shows a repeated hardware warning once at PLC level", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    const warning = { address: "plc:PLC_1/blocks/Fx_Motor", severity: "warning", description: "Inputs or outputs are used that do not exist in the configured hardware." };
+    t.patch({ compileMessages: [warning, warning, { address: warning.address, severity: "warning", description: "Compiling finished (errors: 0; warnings: 1)" }] });
+    t.out.length = 0;
+    expect(await t.run(["compile", "--file", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    expect(t.out.join("")).toContain("warning  PLC PLC_1 — Inputs or outputs");
+    expect(t.out.join("").match(/configured hardware/g)).toHaveLength(1);
+    expect(t.out.join("")).not.toContain("Compiling finished");
+    expect(t.out.join("")).not.toContain("Fx_Motor.scl");
+  });
   it("stops at options that leave nothing to do, before looking for the PLC", async () => {
     const t = setup(["1"]);
     await t.run(["init"]);

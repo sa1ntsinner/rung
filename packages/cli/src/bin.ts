@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Entry for the bundled CLI (CommonJS, no top-level await) used by rung.cjs and the rung.exe single executable.
 import { main } from "./main.js";
+import { quietBrokenPipe } from "./output.js";
+
+quietBrokenPipe(process.stdout);
+quietBrokenPipe(process.stderr);
 
 // started by the VS Code extension's `rung` command with VS Code's own Node.js: what rung starts (VS Code's
 // CLI, the bridge) must not run as Node.js too
