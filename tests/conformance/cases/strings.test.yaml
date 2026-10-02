@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Strings
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_len: 5
+          r_len_empty: 0
+          r_left: AB
+          r_left_zero: ""
+          r_right: DE
+          r_right_long: ABCDE
+          r_mid: BC
+          r_mid_last: E
+          r_mid_past: ""
+          r_concat: ABCDE!
+          r_find: 3
+          r_find_missing: 0
+          r_find_empty: 0
+          r_insert: ABxyCDE
+          r_insert_end: ABCDExy
+          r_delete: ADE
+          r_delete_last: ABCD
+          r_replace: AxyDE
+          r_replace_last: ABCDxy
+          r_insert_zero: xyABCDE
+          r_delete_past: ABCDE
+          r_replace_zero: xyABCDE

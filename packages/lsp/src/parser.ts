@@ -306,6 +306,13 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         } while (depth > 0 && peek().kind !== "eof");
         continue;
       }
+      // A bit/slice access belongs to the base variable, not a structure member. Consume it so writes
+      // such as w.3 := FALSE and #w.%X3 := FALSE are recorded as writes of w.
+      if (peek().text === "." && ((iec && peek(1).kind === "number" && /^\d+$/.test(peek(1).text)) || (peek(1).kind === "absolute" && /^%[XBWD]\d+$/i.test(peek(1).text)))) {
+        next();
+        next();
+        continue;
+      }
       if (peek().text === "." && (peek(1).kind === "ident" || peek(1).kind === "global" || peek(1).kind === "local")) {
         next();
         const m = next();

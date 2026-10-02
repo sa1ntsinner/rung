@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Conversions
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_half: 1
+          r_one_half: 2
+          r_two_half: 3
+          r_neg_half: -1
+          r_neg_one_half: -2
+          r_neg_two_half: -3
+          r_lreal_half: 3
+          r_lreal_neg_half: -3
+          r_trunc_neg: -2
+          r_trunc_tie: 2
+          r_int_real: -123
+          r_real_precision: 16777216
+          r_bool_true: 1
+          r_bool_false: 0
+          r_string_int: -123
+          r_string_real: 12.5
+          r_string_hex: 255
+          r_int_string: "-123"
+          r_bool_string: "TRUE"
+          r_real_cancel: 0

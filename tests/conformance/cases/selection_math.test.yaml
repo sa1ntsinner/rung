@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_SelectionMath
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_less: true
+          r_equal: false
+          r_real_cmp: true
+          r_sel_false: -3
+          r_sel_true: 7
+          r_mux_first: -3
+          r_mux_last: 12
+          r_limit_high: 7
+          r_limit_low: -3
+          r_limit_inside: 2
+          r_min: -3
+          r_max: 12
+          r_abs: 3
+          r_sqrt: 1.41421354
+          r_expt: 8

@@ -26,6 +26,12 @@ The logs of both runs are in [media/soak.json](media/soak.json), one row per rec
 
 It shows that these sequences of edits, kills and merges lose nothing on that commit. It does not prove the same for every project, every TIA Portal update or every kind of object.
 
+## The simulator against CODESYS
+
+`tests/conformance/` holds twelve IEC programs that each compute their own results (integer widths and wrap, conversions and rounding, REAL precision, shifts and rotates, bit access, selection and math, control flow, arrays and structures, function block state, counters and triggers, strings, TIME). Their expected values were recorded from CODESYS V3.5 SP22 running them in its simulation; CI runs them on rung's simulator on every change (`packages/sim/test/conformance.test.ts`) and `RUNG_E2E_CODESYS=1 npx vitest run tests/e2e/conformance.e2e.test.ts` compares CODESYS with the recordings again.
+
+Today 11 of the 12 programs match CODESYS exactly, 0 differ, and 1 is refused by rung on purpose: 64-bit integers beyond 2^53, which the simulator does not hold exactly and therefore stops at rather than rounding. What this shows is the shared IEC part of the simulator; Siemens-specific SCL (rounding half to even, as Siemens documents for ROUND and REAL conversions; S7 timers; system instructions) is not checked against a Siemens runtime here.
+
 ## One production program
 
 42 of the 43 blocks of one real machine program run in `rung test`, 8 of them with stubs (communication, technology objects). The program is confidential, so no names; it does not stand for general compatibility. What the simulator covers and refuses is in [testing.md](testing.md).

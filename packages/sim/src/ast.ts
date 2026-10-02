@@ -86,7 +86,7 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
     }
     if (/^(2|8|16)$/.test(prefix)) return { k: "lit", value: exactLiteral(t, val, Number(prefix)), type: "int" };
     if (/^(BOOL)$/.test(prefix)) return { k: "lit", value: /^(1|TRUE)$/i.test(val), type: "bool" };
-    if (/REAL$/.test(prefix)) return { k: "lit", value: parseFloat(val), type: "real" };
+    if (/REAL$/.test(prefix)) return { k: "lit", value: parseFloat(val), type: "real", typeName: prefix };
     const based = /^(2|8|16)#(.+)$/.exec(val);
     // BYTE#16#80, W#16#00FF, DINT#5: the literal has its type's width (NOT and shifts keep to it)
     const typeName = ({ B: "BYTE", W: "WORD", DW: "DWORD", LW: "LWORD" } as Record<string, string>)[prefix] ?? prefix;
@@ -163,6 +163,9 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
         next();
         next();
         r.path.push({ slice: slice[1]!.toUpperCase() as "X" | "B" | "W" | "D", n: Number(slice[2]) });
+      } else if (opts.iec && peek().text === "." && peek(1).kind === "number" && /^\d+$/.test(peek(1).text)) {
+        next();
+        r.path.push({ slice: "X", n: Number(next().text) });
       } else if (peek().text === "." && ["ident", "global", "local"].includes(peek(1).kind)) {
         next();
         r.path.push({ member: next().text.replace(/^#/, "").replace(/^"|"$/g, "") });

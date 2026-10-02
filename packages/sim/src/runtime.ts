@@ -174,6 +174,26 @@ function wrapInteger(v: number, d: Decl | undefined): number {
   return wrapBig(BigInt(v), w);
 }
 
+/** A REAL is IEEE single precision in both source dialects; LREAL keeps the double. */
+function fitNumber(v: number, d: Decl | undefined): number {
+  return d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(v) : wrapInteger(v, d);
+}
+
+/** Integer text in a conversion, including IEC type/radix prefixes; never silently lose 64-bit low bits. */
+function conversionNumber(v: Value): number {
+  if (typeof v !== "string") return Number(v);
+  const text = v.trim().replace(/_/g, "").replace(/^(?:SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|BYTE|WORD|DWORD|LWORD)#/i, "");
+  const based = /^([+-]?)(2|8|16)#([+-]?)([0-9a-f]+)$/i.exec(text);
+  if (based) {
+    const digits = based[4]!;
+    const radix = based[2]!;
+    if (!(radix === "2" ? /^[01]+$/ : radix === "8" ? /^[0-7]+$/ : /^[0-9a-f]+$/i).test(digits) || (based[1] && based[3])) return NaN;
+    const sign = (based[1] || based[3]) === "-" ? -1n : 1n;
+    return exactInteger(sign * BigInt((radix === "2" ? "0b" : radix === "8" ? "0o" : "0x") + digits));
+  }
+  return /^[+-]?\d+$/.test(text) ? exactInteger(BigInt(text)) : Number(text);
+}
+
 /** An integer wrapped into its width, exactly: a 64-bit result a double cannot hold stops the test. */
 function wrapBig(x: bigint, [bits, signed]: [number, boolean]): number {
   return exactInteger(signed ? BigInt.asIntN(bits, x) : BigInt.asUintN(bits, x));
@@ -288,7 +308,7 @@ export class Simulator {
       }
       const doc = this.index.docs.get(this.uriOf(b))!;
       const src = doc.code ?? doc.text; // TwinCAT XML: code with the markup blanked out
-      const iec = doc.code !== undefined || /\.st$/i.test(doc.uri);
+      const iec = this.isIec(b);
       const range = accessor ? b.property?.[accessor] : b.bodyStart === undefined ? undefined : { start: b.bodyStart, end: b.end };
       try {
         s = range ? parseBody(src, range.start, range.end, { iec }) : [];
@@ -312,6 +332,21 @@ export class Simulator {
     }
     if (uri === undefined) throw new SimError(`"${b.name}" is not in the workspace`, b.name);
     return uri;
+  }
+
+  /** Source form of this block, including in a workspace containing both vendors' files. */
+  private isIec(b: BlockModel | undefined): boolean {
+    if (!b?.name) return false; // a synthetic frame for an unscoped constant
+    const doc = this.index.docs.get(this.uriOf(b));
+    return doc?.code !== undefined || /\.st$/i.test(doc?.uri ?? "");
+  }
+
+  private round(x: number, frame: Frame | null): number {
+    if (!this.isIec(frame?.block)) return roundHalfEven(x);
+    if (!Number.isFinite(x) || Number.isInteger(x)) return x;
+    const abs = Math.abs(x);
+    const whole = Math.floor(abs);
+    return Math.sign(x) * (whole + (abs - whole >= 0.5 ? 1 : 0));
   }
 
   /** 1-based source line of an offset in a block's file (for error messages). */
@@ -415,7 +450,7 @@ export class Simulator {
         /* complex initializers (array lists) keep the default */
       }
     }
-    return v;
+    return typeof v === "number" && /^REAL$/i.test(t) ? Math.fround(v) : v;
   }
 
   private structOf(vars: VarDecl[], scope?: BlockModel, accessor?: "get" | "set"): Struct {
@@ -680,7 +715,7 @@ export class Simulator {
     const { obj, key } = this.locate(ref, frame);
     // an assigned structure or array is copied, as on the PLC: #b := #a; then #a.x := 5; leaves #b.x alone
     (obj as Record<string | number, Value>)[key] =
-      typeof value === "number" ? wrapInteger(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
+      typeof value === "number" ? fitNumber(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -691,24 +726,45 @@ export class Simulator {
    */
   private staticDecl(e: Expr, frame: Frame | null): Decl | undefined {
     const named = (t: string): Decl => ({ type: t, typeRef: t, isArray: false });
+    const realOf = (values: Expr[], always = false): Decl | undefined => {
+      const types = values.map((v) => this.staticDecl(v, frame)).map((d) => (d?.typeRef ?? d?.type)?.toUpperCase());
+      return types.includes("LREAL") ? named("LREAL") : always || types.includes("REAL") ? named("REAL") : undefined;
+    };
     switch (e.k) {
       case "ref":
         return this.declOf(e.ref, frame);
       case "lit":
-        return e.typeName && INT_WIDTH[e.typeName] ? named(e.typeName) : undefined;
+        return e.type === "real" ? named(e.typeName ?? "REAL") : e.typeName && INT_WIDTH[e.typeName] ? named(e.typeName) : undefined;
       case "un":
-        return e.op === "NOT" ? this.staticDecl(e.e, frame) : undefined;
+        return this.staticDecl(e.e, frame);
       case "bin":
-        return ["AND", "&", "OR", "XOR"].includes(e.op) ? (this.staticDecl(e.l, frame) ?? this.staticDecl(e.r, frame)) : undefined;
+        if (["AND", "&", "OR", "XOR"].includes(e.op)) return this.staticDecl(e.l, frame) ?? this.staticDecl(e.r, frame);
+        return ["+", "-", "*", "/", "MOD", "**"].includes(e.op) ? realOf([e.l, e.r], e.op === "**") : undefined;
       case "call": {
         if (e.callee.path.length) return undefined;
         // a shift or rotation has the width of its input: NOT SHL(IN := BYTE#16#01, N := 1) is a BYTE
         if (/^(SHL|SHR|ROL|ROR)$/i.test(e.callee.root.name)) {
           const input = e.args.find((a) => a.name?.toUpperCase() === "IN") ?? e.args.find((a) => !a.name);
-          return input ? this.staticDecl(input.value, frame) : undefined;
+          const d = input ? this.staticDecl(input.value, frame) : undefined;
+          if (d) return d;
+          const v = input?.value;
+          if (/^(ROL|ROR)$/i.test(e.callee.root.name) && v?.k === "lit" && v.type === "int" && typeof v.value === "number" && v.value >= 0)
+            return named(v.value <= 0xff ? "BYTE" : v.value <= 0xffff ? "WORD" : v.value <= 0xffff_ffff ? "DWORD" : "LWORD");
+          return undefined;
         }
         const to = /_TO_([A-Z]+)$/i.exec(e.callee.root.name)?.[1]?.toUpperCase();
-        return to && INT_WIDTH[to] ? named(to) : undefined;
+        if (to && (INT_WIDTH[to] || REAL_TYPES.test(to))) return named(to);
+        const upper = e.callee.root.name.toUpperCase();
+        // IEC EXPT always returns floating point, including integer inputs. TwinCAT documents LREAL.
+        if (upper === "EXPT" && this.isIec(frame?.block)) return named("LREAL");
+        if (/^(SQRT|SQR|LN|LOG|EXP|EXPT|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return realOf(e.args.map((a) => a.value), true);
+        if (upper === "RUNTIME") return named("LREAL");
+        if (/^(ABS|MIN|MAX|LIMIT|SEL|MUX|SCALE_X)$/.test(upper)) {
+          const values = e.args.filter((a, i) => !(upper === "SEL" && (a.name?.toUpperCase() === "G" || (!a.name && i === 0))) && !(upper === "MUX" && (a.name?.toUpperCase() === "K" || (!a.name && i === 0))));
+          return realOf(values.map((a) => a.value));
+        }
+        const b = this.index.global(e.callee.root.name)?.block;
+        return b?.returnType ? named(b.returnType) : undefined;
       }
       default:
         return undefined;
@@ -773,7 +829,7 @@ export class Simulator {
         if (e.callee.path.length) return "unknown";
         const upper = e.callee.root.name.toUpperCase();
         if (/_TO_/.test(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
-        if (/^(SQRT|SQR|LN|LOG|EXP|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
+        if (/^(SQRT|SQR|LN|LOG|EXP|EXPT|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
         if (/^(LEN|FIND|SWAP|COUNTOFELEMENTS|LOWER_BOUND|UPPER_BOUND|T_DIFF|MOVE_BLK_VARIANT)$/.test(upper)) return "int";
         if (upper === "RUNTIME") return "real";
         if (/^(ABS|MIN|MAX|LIMIT|SEL|MUX)$/.test(upper)) {
@@ -790,6 +846,13 @@ export class Simulator {
   // ------------------------------------------------------------------ expressions
 
   eval(e: Expr, frame: Frame | null): Value {
+    const value = this.evalValue(e, frame);
+    // Round each REAL intermediate before its parent expression consumes it, not just the final assignment.
+    const d = typeof value === "number" ? this.staticDecl(e, frame) : undefined;
+    return typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : value;
+  }
+
+  private evalValue(e: Expr, frame: Frame | null): Value {
     switch (e.k) {
       case "lit":
         return e.value;
@@ -806,7 +869,7 @@ export class Simulator {
         return w ? wrapBig(~BigInt(v), w) : exactInteger(~BigInt(v));
       }
       case "bin": {
-        const l = this.eval(e.l, frame);
+        let l = this.eval(e.l, frame);
         if (e.op === "AND" || e.op === "&") {
           const r = this.eval(e.r, frame);
           return typeof l === "number" ? bitwise("AND", l, r as number) : !!l && !!r;
@@ -815,7 +878,16 @@ export class Simulator {
           const r = this.eval(e.r, frame);
           return typeof l === "number" ? bitwise("OR", l, r as number) : !!l || !!r;
         }
-        const r = this.eval(e.r, frame);
+        let r = this.eval(e.r, frame);
+        if (typeof l === "number" && typeof r === "number") {
+          const types = [this.staticDecl(e.l, frame), this.staticDecl(e.r, frame)].map((d) => (d?.typeRef ?? d?.type)?.toUpperCase());
+          // Promote an integer operand before a REAL operation, including a comparison. A double
+          // computation followed only by result rounding would retain bits that a REAL operand lost.
+          if (types.includes("REAL") && !types.includes("LREAL")) {
+            l = Math.fround(l);
+            r = Math.fround(r);
+          }
+        }
         switch (e.op) {
           case "XOR":
             return typeof l === "number" ? bitwise("XOR", l, r as number) : !!l !== !!r;
@@ -961,6 +1033,14 @@ export class Simulator {
           return Math.log10(n(args[0]));
         case "EXP":
           return Math.exp(n(args[0]));
+        case "EXPT": {
+          const base = n(named("IN1", 0));
+          const exponent = n(named("IN2", 1));
+          if (base === 0 && exponent < 0) throw new SimError("EXPT: zero raised to a negative exponent is platform dependent and is not simulated", frame?.block.name, c.callee.start);
+          const powerArg = c.args.find((a) => a.name?.toUpperCase() === "IN2") ?? c.args[1];
+          if (!this.isIec(frame?.block) && powerArg && this.kindOf(powerArg.value, frame) === "real" && base <= 0) return NaN;
+          return Math.pow(base, exponent);
+        }
         case "SIN":
           return Math.sin(n(args[0]));
         case "COS":
@@ -994,7 +1074,7 @@ export class Simulator {
         case "TRUNC":
           return Math.trunc(n(args[0]));
         case "ROUND":
-          return roundHalfEven(n(args[0]));
+          return this.round(n(args[0]), frame);
         case "CEIL":
           return Math.ceil(n(args[0]));
         case "FLOOR":
@@ -1019,29 +1099,43 @@ export class Simulator {
         case "MID":
           return String(named("IN", 0)).substr(n(named("P", 2)) - 1, n(named("L", 1)));
         case "FIND":
-          return String(named("IN1", 0)).indexOf(String(named("IN2", 1))) + 1;
+          return this.isIec(frame?.block) && String(named("IN2", 1)) === "" ? 0 : String(named("IN1", 0)).indexOf(String(named("IN2", 1))) + 1;
+        case "ROL":
+        case "ROR": {
+          const v = n(named("IN", 0));
+          const by = n(named("N", 1));
+          if (!Number.isInteger(v) || !Number.isInteger(by) || by < 0) throw new SimError(`${upper}: IN and N must be integers (N at least 0)`, frame?.block.name, c.callee.start);
+          const d = this.staticDecl(c, frame);
+          const w = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).toUpperCase()] : undefined;
+          if (!w) throw new SimError(`${upper}: IN's width is unknown; use a typed operand`, frame?.block.name, c.callee.start);
+          const width = BigInt(w[0]);
+          const count = BigInt(by % w[0]);
+          const bits = BigInt.asUintN(w[0], BigInt(v));
+          return wrapBig(upper === "ROL" ? (bits << count) | (bits >> (width - count)) : (bits >> count) | (bits << (width - count)), w);
+        }
         case "SHL":
         case "SHR": {
           // in the width of IN's type (JavaScript shifts 32 bits and takes the count modulo 32)
           const v = n(named("IN", 0));
           const by = n(named("N", 1));
           if (!Number.isInteger(v) || !Number.isInteger(by) || by < 0) throw new SimError(`${upper}: IN and N must be integers (N at least 0)`, frame?.block.name, c.callee.start);
-          const count = BigInt(Math.min(by, 64)); // every bit is gone after 64, whatever the width
-          const shifted = upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count;
           // cut to IN's width before it becomes a number: LWORD 1 shifted left by 64 is 0, not 2^64
           const input = c.args.find((a) => a.name?.toUpperCase() === "IN") ?? c.args.find((a) => !a.name);
           const d = input ? this.staticDecl(input.value, frame) : undefined;
           const w = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()] : undefined;
+          // The recorded CODESYS simulation target masks DWORD counts; Siemens keeps full counts.
+          const count = BigInt(this.isIec(frame?.block) && w?.[0] === 32 ? by % 32 : Math.min(by, 64));
+          const shifted = upper === "SHL" ? BigInt(v) << count : BigInt(v) >> count;
           return w ? wrapBig(shifted, w) : exactInteger(shifted);
         }
       }
       const to = upper.split("_TO_")[1] ?? "";
       if (/^(BOOL)$/.test(to)) return !!args[0] && args[0] !== 0;
-      if (REAL_TYPES.test(to)) return Number(args[0]);
-      if (STRING_TYPES.test(to)) return String(args[0]);
+      if (REAL_TYPES.test(to)) return fitNumber(conversionNumber(args[0]), { type: to, isArray: false });
+      if (STRING_TYPES.test(to)) return this.isIec(frame?.block) && typeof args[0] === "boolean" ? (args[0] ? "TRUE" : "FALSE") : String(args[0]);
       // the value of the target type: WORD_TO_INT(16#FFFF) is -1 also inside an expression
-      if (INT_TYPES.test(to)) return wrapInteger(typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0])), { type: to, isArray: false });
-      if (TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : roundHalfEven(Number(args[0]));
+      if (INT_TYPES.test(to)) return wrapInteger(typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : this.round(conversionNumber(args[0]), frame), { type: to, isArray: false });
+      if (TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : this.round(conversionNumber(args[0]), frame);
       throw new SimError(`function ${name} is not supported by the simulator`, frame?.block.name, c.callee.start);
     }
     const g = this.index.global(name);
@@ -1092,7 +1186,7 @@ export class Simulator {
     const get = (at: Place): Value => (at.obj as Record<string | number, Value>)[at.key];
     // as write() stores a value, into a place that a VARIANT names
     const put = (at: Place, v: Value, d: Declared | undefined) =>
-      void ((at.obj as Record<string | number, Value>)[at.key] = typeof v === "number" ? wrapInteger(v, d) : typeof v === "string" ? fitString(v, d) : copyValue(v));
+      void ((at.obj as Record<string | number, Value>)[at.key] = typeof v === "number" ? fitNumber(v, d) : typeof v === "string" ? fitString(v, d) : copyValue(v));
     /** Where an operand is and its declared type; for a VARIANT parameter, the caller's variable it is bound to. */
     const bound = (param: string, pos: number): { at: Place; decl: Declared | undefined } => {
       const e = argOf(param, pos).value;
@@ -1288,10 +1382,30 @@ export class Simulator {
         return upper === "IS_NULL" ? none : !none;
       }
       case "DELETE":
+        if (this.isIec(frame?.block)) {
+          const s = String(input("IN", 0));
+          const l = number("L", 1);
+          const p = number("P", 2);
+          if (!Number.isInteger(l) || !Number.isInteger(p) || l < 0 || p < 1) throw new Unsupported("L must be nonnegative and P at least 1");
+          return s.slice(0, p - 1) + s.slice(p - 1 + l);
+        }
         return deleteChars(String(input("IN", 0)), number("L", 1), number("P", 2));
       case "INSERT":
+        if (this.isIec(frame?.block)) {
+          const s = String(input("IN1", 0));
+          const p = number("P", 2);
+          if (!Number.isInteger(p) || p < 0 || p > s.length) throw new Unsupported(`P ${p} is not within IN1 (0 to ${s.length})`);
+          return s.slice(0, p) + String(input("IN2", 1)) + s.slice(p);
+        }
         return insertChars(String(input("IN1", 0)), String(input("IN2", 1)), number("P", 2));
       case "REPLACE":
+        if (this.isIec(frame?.block)) {
+          const s = String(input("IN1", 0));
+          const l = number("L", 2);
+          const p = number("P", 3);
+          if (!Number.isInteger(l) || !Number.isInteger(p) || l < 0 || p < 0) throw new Unsupported("L and P must be nonnegative");
+          return p === 0 ? String(input("IN2", 1)) + s : s.slice(0, p - 1) + String(input("IN2", 1)) + s.slice(p - 1 + l);
+        }
         return replaceChars(String(input("IN1", 0)), String(input("IN2", 1)), number("L", 2), number("P", 3));
     }
     throw new SimError(`${upper} is not simulated: ${NOT_SIMULATED}`, frame?.block.name, c.callee.start);
@@ -1466,7 +1580,8 @@ export class Simulator {
       // an input gets a copy; an IN_OUT is the caller's variable itself (by reference)
       const inOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       const value = this.eval(a.value, caller);
-      mem[key] = inOut ? value : copyValue(value);
+      const d = params.find((p) => p.name.toUpperCase() === key);
+      mem[key] = inOut ? value : typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : copyValue(value);
     });
   }
 
@@ -1511,8 +1626,11 @@ export class Simulator {
   runInstance(inst: Instance, args: { name?: string; out?: boolean; value: Expr }[] = [], caller: Frame | null = null) {
     if (inst.stub || this.stubOf(inst.__fb)) return this.runStub(inst, args, caller);
     if (inst.std) {
-      this.bindInputs(inst.mem, null, args, caller);
-      this.stdStep(inst);
+      const iec = this.isIec(caller?.block);
+      const aliases: Record<string, string> = /^CT(U|D|UD)(_|$)/i.test(inst.__fb) ? { RESET: "R", LOAD: "LD" } : /^SR$/i.test(inst.__fb) ? { SET1: "S1", RESET: "R" } : /^RS$/i.test(inst.__fb) ? { SET: "S", RESET1: "R1" } : {};
+      const inputs = iec ? args.map((a) => ({ ...a, name: a.name && (aliases[a.name.toUpperCase()] ?? a.name) })) : args;
+      this.bindInputs(inst.mem, null, inputs, caller);
+      this.stdStep(inst, undefined, iec);
       this.bindOutputs(inst.mem, null, args, caller);
       return;
     }
@@ -1585,7 +1703,8 @@ export class Simulator {
       const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop, accessor);
       Object.assign(own, this.constants(prop, accessor));
       const key = prop.name.toUpperCase();
-      own[key] = accessor === "set" ? value : this.defaultValue({ type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false }, prop);
+      const decl = { type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false };
+      own[key] = accessor === "set" ? (typeof value === "number" ? fitNumber(value, decl) : value) : this.defaultValue(decl, prop);
       this.runBody(prop, { block: prop, mem: inst.mem, temps: own, inst, accessor }, accessor);
       return own[key];
     });
@@ -1613,7 +1732,7 @@ export class Simulator {
   }
 
   /** One step of a standard FB; `method` is the instruction called on IEC_TIMER/IEC_COUNTER data. */
-  private stdStep(inst: Instance, method?: string) {
+  private stdStep(inst: Instance, method?: string, iec = false) {
     const m = inst.mem;
     const s = inst.std!;
     const now = this.time;
@@ -1674,7 +1793,7 @@ export class Simulator {
         break;
       case "CTD":
         if (m.LD) m.CV = m.PV;
-        else if (m.CD && !s.prevD) m.CV = (m.CV as number) - 1;
+        else if (m.CD && !s.prevD && (!iec || (m.CV as number) > 0)) m.CV = (m.CV as number) - 1;
         setQ("QD", (m.CV as number) <= 0);
         s.prevD = !!m.CD;
         break;
@@ -1682,8 +1801,12 @@ export class Simulator {
         if (m.R) m.CV = 0;
         else if (m.LD) m.CV = m.PV;
         else {
-          if (m.CU && !s.prevU) m.CV = (m.CV as number) + 1;
-          if (m.CD && !s.prevD) m.CV = (m.CV as number) - 1;
+          const up = m.CU && !s.prevU;
+          const down = m.CD && !s.prevD;
+          if (!iec || !(up && down)) {
+            if (up) m.CV = (m.CV as number) + 1;
+            if (down && (!iec || (m.CV as number) > 0)) m.CV = (m.CV as number) - 1;
+          }
         }
         m.QU = (m.CV as number) >= (m.PV as number);
         m.QD = (m.CV as number) <= 0;
@@ -1827,7 +1950,7 @@ export class Simulator {
   callBlock(target: Instance | string, inputs: Record<string, Value> = {}): { returnValue?: Value; outputs: Struct } {
     this.steps = 0;
     this.depth = 0;
-    const lit = (v: Value): Expr => ({ k: "lit", value: v as never, type: typeof v === "boolean" ? "bool" : typeof v === "string" ? "string" : "real" });
+    const lit = (v: Value): Expr => ({ k: "lit", value: v as never, type: typeof v === "boolean" ? "bool" : typeof v === "string" ? "string" : "real", typeName: "LREAL" });
     const args = Object.entries(inputs).map(([name, value]) => ({ name, value: lit(value) }));
     try {
       if (typeof target === "string") {

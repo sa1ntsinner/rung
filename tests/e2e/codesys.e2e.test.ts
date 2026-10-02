@@ -3,42 +3,23 @@
 // a new FB in a folder, compile errors on their lines, and a download into CODESYS's own simulation.
 //   RUNG_E2E_CODESYS=1 pnpm vitest run tests/e2e/codesys.e2e.test.ts
 import { describe, it, expect, beforeAll } from "vitest";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { main } from "../../packages/cli/src/main.js";
-import { findCodesys } from "../../packages/cli/src/codesys.js";
+import { createCodesysFixture, codesysWorkspace } from "./codesys-helpers.js";
 
 const enabled = process.env.RUNG_E2E_CODESYS === "1";
-const repo = fileURLToPath(new URL("../..", import.meta.url));
 
 describe.runIf(enabled)("e2e: CODESYS", () => {
   const base = enabled ? mkdtempSync(join(tmpdir(), "rung-e2e-cds-")) : "";
   const project = join(base, "fixture", "RungCds.project");
   const dir = join(base, "ws");
-  const out: string[] = [];
-  const io = { cwd: dir, stdout: (s: string) => out.push(s), stderr: (s: string) => out.push(s), env: process.env };
-  const run = async (...args: string[]) => {
-    out.length = 0;
-    const code = await main(args, io);
-    return { code, text: out.join("") };
-  };
-  const file = (rel: string) => join(dir, ...rel.split("/"));
+  const { io, run, file } = codesysWorkspace(dir);
 
   beforeAll(() => {
-    const cds = findCodesys();
-    if (!cds) throw new Error("CODESYS is not installed");
     mkdirSync(dir, { recursive: true });
-    const r = spawnSync(cds.exe, [`--profile="${cds.profile}"`, "--noUI", `--runscript="${join(repo, "tools", "fixtures", "codesys", "new_fixture.py")}"`], {
-      env: { ...process.env, RUNG_CODESYS_FIXTURE: project },
-      windowsVerbatimArguments: true,
-      windowsHide: true,
-      timeout: 300_000,
-    });
-    const log = existsSync(project + ".log") ? readFileSync(project + ".log", "utf8") : `(no log; exit ${r.status})`;
-    if (!/^ok/.test(log)) throw new Error(`fixture generation failed:\n${log}`);
+    createCodesysFixture(project);
   }, 360_000);
 
   it("init and pull mirror POUs with their methods, DUTs and GVLs as .st files", async () => {

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Bits
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_byte_shl: 2
+          r_byte_shr: 64
+          r_byte_width: 0
+          r_byte_beyond: 0
+          r_word_width: 0
+          r_word_beyond: 0
+          r_dword_width: 2147483649
+          r_dword_beyond: 1073741824
+          r_and: 1
+          r_or: 33009
+          r_xor: 2147483646
+          r_not: 2147483646
+          r_bit_read: true
+          r_bit_write: 128

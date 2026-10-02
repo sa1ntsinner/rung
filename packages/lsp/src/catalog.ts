@@ -51,6 +51,7 @@ export const STANDARD: CatalogEntry[] = [
   fn("LN", [p("IN", "ANY_REAL")], "ANY_REAL", "Natural logarithm."),
   fn("LOG", [p("IN", "ANY_REAL")], "ANY_REAL", "Base-10 logarithm."),
   fn("EXP", [p("IN", "ANY_REAL")], "ANY_REAL", "Exponential function e^IN."),
+  fn("EXPT", [p("IN1", "ANY_NUM"), p("IN2", "ANY_NUM")], "ANY_REAL", "Power of IN1 raised to IN2; the result is floating point."),
   fn("SIN", [p("IN", "ANY_REAL")], "ANY_REAL", "Sine (radians)."),
   fn("COS", [p("IN", "ANY_REAL")], "ANY_REAL", "Cosine (radians)."),
   fn("TAN", [p("IN", "ANY_REAL")], "ANY_REAL", "Tangent (radians)."),

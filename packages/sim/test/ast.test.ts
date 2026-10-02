@@ -13,6 +13,14 @@ describe("parseTime", () => {
 });
 
 describe("parseBody", () => {
+  it("parses IEC numeric bit access for reading and writing, and keeps SCL slices", () => {
+    const [read, write] = parseBody("b := a[0].word.3; a[0].word.3 := FALSE;", 0, undefined, { iec: true });
+    expect(read).toMatchObject({ value: { ref: { path: [{ index: [{ value: 0 }] }, { member: "word" }, { slice: "X", n: 3 }] } } });
+    expect(write).toMatchObject({ target: { path: [{ index: [{ value: 0 }] }, { member: "word" }, { slice: "X", n: 3 }] } });
+    expect(parseBody("#w.%X3 := FALSE;")[0]).toMatchObject({ target: { path: [{ slice: "X", n: 3 }] } });
+    expect(() => parseBody("#w.3 := FALSE;")).toThrow(SclSyntaxError);
+  });
+
   it("respects operator precedence", () => {
     const [s] = parseBody("#x := 1 + 2 * 3 > 6 AND NOT #b OR #c;");
     expect(s).toMatchObject({ k: "assign", value: { k: "bin", op: "OR", l: { k: "bin", op: "AND", l: { k: "bin", op: ">", l: { k: "bin", op: "+" } }, r: { k: "un", op: "NOT" } } } });

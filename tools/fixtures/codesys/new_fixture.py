@@ -17,6 +17,18 @@ try:
     win = [d for d in device_repository.get_all_devices() if d.device_info.name == "CODESYS Control Win V3 x64"]
     proj.add("Device", win[0].device_id)
     app = proj.active_application
+    # Standard is required by the corpus and by the library-manager views test.
+    libman = app.get_library_manager()
+    if not any(r.name == "#Standard" or r.name.startswith("Standard,") for r in libman.references):
+        libraries = [lib for lib in librarymanager.get_all_libraries()
+                     if lib.title == "Standard" and lib.company == "System"]
+        if not libraries:
+            raise Exception("Standard library is not installed in the CODESYS library repository")
+        latest = max(libraries, key=lambda lib: tuple(int(n) for n in str(lib.version).split(".")))
+        libman.add_library(latest)
+    for reference in libman.references:
+        if reference.name == "#Standard" or reference.name.startswith("Standard,"):
+            reference.qualified_only = False
     tc = app.create_task_configuration()
     tc.create_task("MainTask")
     task = [c for c in tc.get_children(False) if c.get_name() == "MainTask"][0]

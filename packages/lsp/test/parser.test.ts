@@ -8,6 +8,15 @@ import { parse } from "../src/parser.js";
 const fixtures = fileURLToPath(new URL("../../../tools/fixtures/scl/", import.meta.url));
 
 describe("parse fixtures", () => {
+  it("records IEC bit access on the base variable with the correct read/write use", () => {
+    const result = parse("PROGRAM Bits\nVAR\n w : WORD;\n b : BOOL;\nEND_VAR\nb := w.3;\nw.3 := FALSE;\nEND_PROGRAM", { dialect: "iec" });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.blocks[0]!.refs.filter((r) => r.name === "w").map((r) => [r.members, r.access])).toEqual([[[], "read"], [[], "write"]]);
+    const scl = parse("FUNCTION_BLOCK Bits\nVAR\n w : WORD;\nEND_VAR\nBEGIN\n #w.%X3 := TRUE;\nEND_FUNCTION_BLOCK");
+    expect(scl.diagnostics).toEqual([]);
+    expect(scl.blocks[0]!.refs[0]).toMatchObject({ name: "w", members: [], access: "write" });
+  });
+
   for (const f of readdirSync(fixtures).filter((n) => /\.(scl|db|udt|awl)$/.test(n) && !n.includes("Broken"))) {
     it(`${f} parses without errors`, () => {
       const r = parse(readFileSync(join(fixtures, f), "utf8"));

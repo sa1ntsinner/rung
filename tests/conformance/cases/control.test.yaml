@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Control
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_case_range: 11
+          r_case_list: 22
+          r_case_else: 33
+          r_for_negative: 8
+          r_for_exit: 6
+          r_for_continue: 12
+          r_while: 4
+          r_repeat: 6
+          r_return_early: -3
+          r_return_normal: 13

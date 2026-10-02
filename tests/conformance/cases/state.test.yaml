@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_State
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 8
+      - expect:
+          done: true
+          cycle: 8
+          r_fb_first: 8
+          r_fb_second: 24
+          r_rising_count: 4
+          r_falling_count: 3
+          r_falling_initial: false
+          r_up_at_preset: 2
+          r_up_after_preset: 3
+          r_up_q: true
+          r_down_zero: 0
+          r_down_after_zero: 0
+          r_down_q: true
+          r_both_simultaneous: 1
+          r_both_reset_load: 0
+          r_both_qu: false
+          r_both_qd: true
+          r_sr_both: true
+          r_rs_both: false
+          r_sr_hold: true
+          r_rs_hold: false

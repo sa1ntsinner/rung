@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Data
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_array_low: 3
+          r_array_sum: 26
+          r_grid: 40
+          r_struct_number: 12
+          r_struct_flag: true
+          r_enum_default: 0
+          r_enum_typed: 10
+          r_enum_case: 42

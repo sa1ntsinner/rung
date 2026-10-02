@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Time
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_add: TIME#1s500ms
+          r_sub: TIME#500ms
+          r_equal: true
+          r_less: true
+          r_compound: TIME#1m2s3ms
+          r_milliseconds: 62003
+          r_min: TIME#500ms
+          r_limit: TIME#1s

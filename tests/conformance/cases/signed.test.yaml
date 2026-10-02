@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BUSL-1.1
+block: PRG_Signed
+cycle: 10ms
+cases:
+  - name: CODESYS
+    steps:
+      - cycle: 1
+      - expect:
+          done: true
+          cycle: 1
+          r_sint_overflow: -128
+          r_sint_underflow: 127
+          r_sint_mul: -2
+          r_int_overflow: -32768
+          r_int_underflow: 32767
+          r_int_mul: -2
+          r_dint_overflow: -2147483648
+          r_dint_underflow: 2147483647
+          r_dint_mul: -2
+          r_div_negative: -2
+          r_div_negative_divisor: 2
+          r_mod_negative: -1
+          r_mod_negative_divisor: 1
+          r_mixed_widen: 40120
+          r_intermediate: 32768
