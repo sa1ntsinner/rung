@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/sync.gif" width="920" alt="A file saved goes to TIA Portal and compiles; a line added in TIA Portal comes back to the file; edits on both sides merge; the same line edited on both sides stops as a conflict">
+  <img src="docs/media/sync.gif" width="920" alt="A number changed in the file goes to TIA Portal and compiles; changed back in TIA Portal, it comes back to the file">
 </p>
 
 rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text files in sync, both ways. Edit in your editor, review in git, test without a PLC.
@@ -36,7 +36,7 @@ rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text 
 
 ## Try a test
 
-<img src="docs/media/playground.gif" width="920" alt="The playground: a latch passes, one change breaks it, the failing step is marked, the restored latch passes again">
+<img src="docs/media/playground.gif" width="920" alt="The playground: a latch passes, Break it removes OR #Running and the test fails, Fix it restores it and the test passes again">
 
 The [playground](https://sa1ntsinner.github.io/rung/#play) runs rung's own simulator in your browser. The same tests run on your CI:
 
@@ -60,9 +60,9 @@ One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `netw
   <img src="docs/media/soak-light.png" width="920" alt="Twenty minutes of sync against TIA Portal V20: 247 actions, 78 syncs killed mid-run, 42 merges, 0 conflicts, 0 check failures">
 </picture>
 
-| Two 20-minute runs, two people, syncs killed at random | One production program | On every change |
+| Two 20-minute runs, two people, syncs killed at random | One production program | Tests |
 |---|---|---|
-| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([explore](https://sa1ntsinner.github.io/rung/#evidence)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 35/35 bridge tests on TIA Portal V20, 800+ TypeScript and 242 .NET tests, Windows and Linux |
+| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([evidence](docs/evidence.md)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 37/37 bridge tests on TIA Portal V20, 850+ TypeScript and 243 .NET tests, Windows and Linux |
 
 ## Quick start
 
