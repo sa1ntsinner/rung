@@ -567,7 +567,7 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
     for (const r of callee.refs) {
       if (r.kind !== "local" || r.name.toUpperCase() !== param.name.toUpperCase() || !same(r.members, rest.slice(0, r.members.length))) continue;
       if (r.members.length >= rest.length) {
-        const s = r.members[rest.length - 1]!;
+        const s = rest.length ? r.members[rest.length - 1]! : r;
         const k = kindOf(u)(r.start);
         if (counts(k)) add({ uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through }, callee);
         continue;
@@ -588,6 +588,9 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
         if (segs.length >= want.length) {
           const s = segs[want.length - 1]!;
           add({ uri: d.uri, start: s.start, end: s.end, kind: kindOf(d.uri)(r.start), block: b.name }, b);
+          // handed whole to an in/out or output (Parts := "Line_DB".PartsTotal): what the block does with it, too
+          const passed = segs.length === want.length ? passedTo(d.uri, r) : undefined;
+          if (passed && passed.param.section !== "Input") follow(passed.uri, passed.callee, passed.param, [], { block: b.name, uri: d.uri, start: r.start, param: passed.param.name }, 0);
           continue;
         }
         // the structure that holds it, handed to a block's parameter: its uses there
