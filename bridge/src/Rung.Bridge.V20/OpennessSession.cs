@@ -1457,9 +1457,11 @@ namespace Rung.Bridge.V20
                     tx.CommitOnDispose();
                 }
             }
-            catch (EngineeringException e) { throw new RpcException(ErrorCodes.ImportFailed, e.Message); }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.ImportFailed, "TIA Portal did not delete " + AddressFormat.Parse(address).Name + ": " + e.Message); }
             finally { _inImport = false; }
             _index.Remove(address);
+            // saved like an import: a watch that is killed, or a TIA Portal that crashes, must not bring the block back
+            if (_args.SaveAfterImport) { try { _project.Save(); } catch (EngineeringException) { } }
         }
 
         // ---------------------------------------------------------------- compile
