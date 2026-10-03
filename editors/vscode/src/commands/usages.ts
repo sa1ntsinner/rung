@@ -3,6 +3,7 @@
 // and for a writer where its block is called from. The language server finds them (rung/usages).
 import * as vscode from "vscode";
 import type { Lsp } from "../lsp";
+import type { UsagesView } from "../views/usagesView";
 
 interface Site {
   uri: string;
@@ -18,7 +19,16 @@ interface Site {
   handedTo?: { block: string; param: string };
 }
 
-export async function whoWrites(lsp: Lsp): Promise<void> {
+/** Who Writes This?: the uses of the name under the cursor, in the Usages view. */
+export async function whoWrites(usages: UsagesView): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return;
+  const word = editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active, /"[^"\n]+"|#?[A-Za-z_][\w]*/));
+  await usages.show(editor.document.uri, editor.selection.active, word || "this");
+}
+
+/** The same uses in a quick pick, for keyboard users who want to jump and go on. */
+export async function pickUsages(lsp: Lsp): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
   const word = editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active, /"[^"\n]+"|#?[A-Za-z_][\w]*/));

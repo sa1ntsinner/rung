@@ -788,6 +788,20 @@ describe("rung extension on a fake-bridge workspace", function () {
       await waitFor("the panel followed the active SCL editor", () => /Fx_Pump/.test(tab()?.label ?? ""));
       await closeAll();
     });
+
+    it("who writes a name fills the Usages tree, which stays while you open its places", async () => {
+      const editor = await openDoc(MOTOR);
+      const at = editor.document.getText().indexOf("#running") + 2;
+      editor.selection = new vscode.Selection(editor.document.positionAt(at), editor.document.positionAt(at));
+      await vscode.commands.executeCommand("rung.whoWrites");
+      const groups = await waitFor("the Usages tree has groups", () => {
+        const g = api.usages.getChildren();
+        return g.length > 1 ? g : undefined;
+      });
+      assert.equal(groups[0]!.label, "Writes");
+      assert.equal(groups.at(-1)!.label, "Workspace code only");
+      await closeAll();
+    });
   });
 
   after(async () => {

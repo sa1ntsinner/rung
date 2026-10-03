@@ -19,7 +19,8 @@ import { compareCommand, renameCommand } from "./compare";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
 import { registerPreview } from "./preview";
-import { whoWrites } from "./usages";
+import { pickUsages, whoWrites } from "./usages";
+import type { UsagesView } from "../views/usagesView";
 import { deviceTarget, fileTarget } from "./targets";
 
 export interface Services {
@@ -31,6 +32,7 @@ export interface Services {
   problems: CompileProblems;
   project: ProjectView;
   lsp: Lsp;
+  usages: UsagesView;
 }
 
 const DOCS = "https://github.com/sa1ntsinner/rung/blob/main/docs/editors/README.md";
@@ -107,7 +109,12 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.writes.on", setWrites(true));
   reg("rung.writes.off", setWrites(false));
   reg("rung.preview", inWs(registerPreview(context, ws, cli)));
-  reg("rung.whoWrites", () => whoWrites(s.lsp));
+  reg("rung.whoWrites", () => whoWrites(s.usages));
+  reg("rung.usages.pick", () => pickUsages(s.lsp));
+  reg("rung.usages.refresh", () => s.usages.refresh());
+  reg("rung.usages.show", (uri, position, symbol) => {
+    if (uri instanceof vscode.Uri && position instanceof vscode.Position) return s.usages.show(uri, position, typeof symbol === "string" ? symbol : "this");
+  });
 
   // --- compile / test
   reg(

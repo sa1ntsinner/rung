@@ -121,6 +121,12 @@
           "icon": "media/rung.svg",
           "contextualTitle": "rung",
           "visibility": "collapsed"
+        },
+        {
+          "id": "rung.usages",
+          "name": "Usages",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung"
         }
       ]
     },
@@ -144,6 +150,10 @@
         "view": "rung.plc",
         "contents": "PLC actions (online, compile, download) show up here once the folder has a rung.toml.",
         "when": "!rung.workspace"
+      },
+      {
+        "view": "rung.usages",
+        "contents": "Put the cursor on a name in an SCL file and run Who Writes This? (Alt+Q U).\n[Who Writes This?](command:rung.whoWrites)"
       }
     ],
     "commands": [
@@ -418,6 +428,22 @@
         "title": "Show Declarations",
         "category": "rung",
         "icon": "$(table)"
+      },
+      {
+        "command": "rung.usages.show",
+        "title": "Show Usages",
+        "category": "rung"
+      },
+      {
+        "command": "rung.usages.refresh",
+        "title": "Refresh Usages",
+        "category": "rung",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rung.usages.pick",
+        "title": "Who Writes This? (Quick Pick)",
+        "category": "rung"
       }
     ],
     "menus": {
@@ -553,6 +579,14 @@
         {
           "command": "rung.init",
           "when": "!rung.workspace"
+        },
+        {
+          "command": "rung.usages.show",
+          "when": "false"
+        },
+        {
+          "command": "rung.usages.refresh",
+          "when": "rung.hasUsages"
         }
       ],
       "view/title": [
@@ -640,6 +674,11 @@
           "command": "rung.showOutput",
           "when": "view == rung.plc",
           "group": "2_workspace@2"
+        },
+        {
+          "command": "rung.usages.refresh",
+          "when": "view == rung.usages && rung.hasUsages",
+          "group": "navigation"
         }
       ],
       "view/item/context": [

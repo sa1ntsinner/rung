@@ -4,6 +4,7 @@
 import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { DeclarationsPanel } from "./declarations/panel";
+import { UsagesView } from "./views/usagesView";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
 import { addToUserPath, installBundledRung, onPath } from "./bundled";
@@ -41,6 +42,7 @@ export interface RungExtensionApi {
   statusBar: StatusBar;
   decorations: ObjectDecorations;
   lsp: Lsp;
+  usages: UsagesView;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -124,7 +126,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       await environment.refresh();
     }),
   );
-  registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp });
+  const usages = new UsagesView(lsp);
+  context.subscriptions.push(usages);
+  registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp, usages });
   registerTests(context, ws, cli);
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
@@ -154,7 +158,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages };
 }
 
 export async function deactivate(): Promise<void> {
