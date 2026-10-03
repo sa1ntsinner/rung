@@ -156,6 +156,9 @@ describe("what TIA Portal would refuse, while typing", () => {
   it("a statement without its ';'", () => {
     const { found, text } = check("   IF #Out1 THEN\n      #Out1 := TRUE\n   END_IF;\n   #Count := 1\n   #Out1 := FALSE;\n");
     expect(found.filter((d) => d.message === "Missing ';'").map((d) => text.slice(d.start, d.end))).toEqual(["TRUE", "1"]);
+    // a statement that ends with a member: #Out1 := #m.Run
+    const member = check('   #Out1 := "Plant_DB".Pump.Running\n   #Count := 2;\n');
+    expect(member.found.filter((d) => d.message === "Missing ';'").map((d) => member.text.slice(d.start, d.end))).toEqual(["Running"]);
   });
 
   it("no false alarm on statements over several lines, calls, regions and CASE labels", () => {

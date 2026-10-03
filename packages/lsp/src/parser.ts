@@ -359,7 +359,9 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     while (peek().kind !== "eof" && !isKw(peek(), endKw) && !(iec && isHeaderAt(peek()))) {
       const t = next();
       const before = tokens[i - 2];
-      if (!iec && parens === 0 && endsValue(before) && !freeText.some(([a, b]) => before!.start >= a && before!.start < b)) {
+      // a member name ends a value too: #Run := #Motor.Run
+      const member = before?.kind === "ident" && tokens[i - 3]?.text === ".";
+      if (!iec && parens === 0 && (endsValue(before) || member) && !freeText.some(([a, b]) => before!.start >= a && before!.start < b)) {
         // a statement without its ';': the next one starts on a new line, or a closing keyword follows
         const starts = (t.kind === "local" || t.kind === "global" || (t.kind === "ident" && STATEMENT.has(t.upper))) && src.lastIndexOf("\n", t.start) > before!.start;
         if (starts || isKw(t, "END_IF", "ELSIF", "ELSE", "END_CASE", "END_FOR", "END_WHILE", "UNTIL", "END_REGION")) diagnostics.push({ message: "Missing ';'", start: before!.start, end: before!.end, severity: "error" });
