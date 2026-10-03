@@ -21,7 +21,7 @@ const VALUES: Record<string, string> = {
 };
 const DETAIL: Record<string, string> = {
   preview: "show the next sync without changing files or TIA Portal", json: "complete machine-readable report",
-  filter: "a part of a test file's path (any letter case) or a block name", writes: "turn writes to TIA Portal on (rung writes off stops them)",
+  filter: "a part of a test file's path or of a case's name (any letter case), or a block name", writes: "turn writes to TIA Portal on (rung writes off stops them)",
   ours: "keep your file", theirs: "take TIA Portal's version", merged: "use the file you merged; remove its conflict markers first",
   "pull.force": "replace local edits with TIA Portal's version (each kept in .rung/recovery)",
   "confirm-delete.force": "delete although other blocks use it (they stop compiling)",

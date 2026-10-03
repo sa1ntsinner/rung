@@ -213,7 +213,7 @@ describe("rung CLI", () => {
     }
     t.out.length = 0;
     await t.run("test", "-h");
-    expect(t.out.join("")).toContain("--filter <text>  a part of a test file's path (any letter case) or a block name");
+    expect(t.out.join("")).toContain("--filter <text>  a part of a test file's path or of a case's name (any letter case), or a block name");
     t.out.length = 0;
     expect(await t.run("bridge", "--help")).toBe(0);
     expect(t.out.join("")).toContain("Example:\n  rung bridge --tia V20\n");
@@ -525,6 +525,19 @@ describe("rung CLI", () => {
     await t.run("pull");
     t.out.length = 0;
     await t.run("status");
-    expect(t.out.join("")).toMatch(/^writes to TIA Portal: off \(rung writes on\)\n1 object, 1 synced, 0 read-only\n/);
+    expect(t.out.join("")).toMatch(/^writes to TIA Portal: off \(rung writes on\)\n1 object, 1 synced\n/);
+  });
+
+  it("status counts a read-only object among the objects, not beside them", async () => {
+    const t = setup();
+    await t.run("init");
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    const o = db.objects[0];
+    o.entry = { address: o.address, kind: "block", language: "SCL", knowHowProtected: false, isFailsafe: true, isSystem: false, fingerprint: "fp:safe" };
+    writeFileSync(t.objects, JSON.stringify(db));
+    await t.run("pull");
+    t.out.length = 0;
+    await t.run("status");
+    expect(t.out.join("")).toContain("2 objects, 2 synced; 1 of the 2 read-only (rung never changes it in TIA Portal)\n");
   });
 });

@@ -6,6 +6,7 @@ rung runs unit tests for SCL, LAD, FBD and STL function blocks and functions on 
 rung test                       # all tests/**/*.test.yaml
 rung test --filter motor        # path substring or exact block name (case-insensitive)
 rung test --filter Fx_Motor     # only the tests of the block Fx_Motor
+rung test --filter stuck        # only the cases whose name contains "stuck"
 rung test --junit report.xml    # JUnit XML for CI
 rung test --json                # every result with the line of its case, of each failing step and of the step an error stopped in (VS Code's Testing view uses it)
 ```
@@ -36,7 +37,7 @@ cases:
 - With several PLCs that each have a block of that name, say which: `plc: PLC_1` in the file, or keep the test under `tests/PLC_1/`. rung refuses to guess.
 - `expect` compares with a small tolerance for reals; TIME values accept the same durations as `advance` (`500ms`, `T#500ms`, `2s`).
 - `advance` needs a unit (`200ms`, not `200`). It runs whole cycles, rounded up, at least one: at `cycle: 10ms`, `15ms` runs two cycles and `0ms` runs one.
-- `--filter` matches a path substring or the exact `block:` name, case-insensitively on every platform. Paths accept `/` or `\\`; case names are not matched.
+- `--filter` matches a path substring or the exact `block:` name, case-insensitively on every platform. Paths accept `/` or `\\`. Otherwise it runs the cases whose name contains it (`--filter stuck`).
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
 - A step runs at most 10 000 000 cycles: `advance: T#1d` at the default 10 ms is 8 640 000. For longer times, set a longer `cycle:` at the top of the file.
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.

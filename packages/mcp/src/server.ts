@@ -532,7 +532,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const results = await runTests(ctx.root, index, filter);
       if (!results.length && filter) {
         const all = (await runTests(ctx.root, index)).length;
-        if (all) return text(`No tests match "${filter}" (by file path or block name); tests/**/*.test.yaml has ${all} file${all === 1 ? "" : "s"}.`);
+        if (all) return text(`No tests match "${filter}" (by file path, block name or case name); tests/**/*.test.yaml has ${all} file${all === 1 ? "" : "s"}.`);
       }
       if (!results.length) return text("No tests found. Add tests/<name>.test.yaml (see rung docs: block, cases, steps set/cycle/advance/expect).");
       return json(results);

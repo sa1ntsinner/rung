@@ -942,9 +942,10 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         // a block renamed by hand (git mv and its header): creating it would leave TIA Portal two blocks, the callers on the old one
         const from = await renamedBy(root, state, address, bundle["." + loc.form] ?? "");
         if (from) {
-          const how = `remove ${shellPath(loc.path)}, then rung restore ${shellPath(from.path)} and rung rename ${shellPath(from.path)} ${name}: TIA Portal keeps the block, its number and its callers (in this order, or rung watch creates the new file first). For a new block instead, rung confirm-delete ${shellPath(from.path)} first`;
-          diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `the block of ${from.path} (deleted here) under a new name, not created: ${how}` });
-          if (plan) planned({ address, path: loc.path, action: "conflict", detail: `looks like a rename of ${from.path}: ${how}` });
+          // the new file goes first: while it is there, rung watch would create it
+          const how = `to rename it in TIA Portal (its number and callers stay): 1. remove ${shellPath(loc.path)} 2. rung restore ${shellPath(from.path)} 3. rung rename ${shellPath(from.path)} ${name}. To make it a new block instead: rung confirm-delete ${shellPath(from.path)}`;
+          diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `${from.path} renamed by hand, not created; ${how}` });
+          if (plan) planned({ address, path: loc.path, action: "conflict", detail: `${from.path} renamed by hand: not created (the LOOKS_LIKE_RENAME error below says what to do)` });
           continue;
         }
         // the old file of a block rung renamed or deleted, brought back unchanged by git: that block, not a new one

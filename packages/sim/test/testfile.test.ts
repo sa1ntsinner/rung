@@ -55,4 +55,13 @@ describe("rung test --filter", () => {
     expect((await runTests(root, index(), "fx_motor")).map((f) => f.file)).toEqual(["tests/drive.test.yaml"]);
     expect(await runTests(root, index(), "Fx_Mot")).toEqual([]);
   });
+
+  it("a part of a case's name runs those cases of the file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-filter-"));
+    mkdirSync(join(root, "tests"), { recursive: true });
+    writeFileSync(join(root, "tests", "drive.test.yaml"), "block: Fx_Motor\ncases:\n  - name: starts\n    steps:\n      - cycle: 1\n  - name: stops when STUCK\n    steps:\n      - cycle: 1\n");
+    const r = await runTests(root, index(), "stuck");
+    expect(r.map((f) => [f.file, f.cases.map((c) => c.name)])).toEqual([["tests/drive.test.yaml", ["stops when STUCK"]]]);
+    expect(await runTests(root, index(), "nowhere")).toEqual([]);
+  });
 });

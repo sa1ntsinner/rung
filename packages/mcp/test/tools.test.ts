@@ -138,7 +138,7 @@ describe("rung mcp tools", () => {
     const call = await connect(root);
     expect((await call("rung_list", { status: "conflict" })).isError).toBe(true);
     expect(JSON.parse((await call("rung_list", { status: "synced" })).text)).toEqual([expect.objectContaining({ path: "plc/PLC_1/blocks/Fx_Motor.scl" })]);
-    expect(await call("rung_test", { filter: "valve" })).toEqual({ isError: false, text: 'No tests match "valve" (by file path or block name); tests/**/*.test.yaml has 1 file.' });
+    expect(await call("rung_test", { filter: "valve" })).toEqual({ isError: false, text: 'No tests match "valve" (by file path, block name or case name); tests/**/*.test.yaml has 1 file.' });
   });
 
   it("live reads never send the password over plain http to a PLC on the network", async () => {

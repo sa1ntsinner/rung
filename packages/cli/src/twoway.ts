@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
-import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, writesGranted, type RungConfig } from "@rung/core";
+import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, shellPath, writesGranted, type RungConfig } from "@rung/core";
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, restoreFile, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics, nearest, uriOf } from "@rung/lsp";
 import { readFile } from "node:fs/promises";
@@ -244,7 +244,7 @@ async function statusOf(state: StateStore, watcher?: Watcher) {
     readOnly: all.filter((o) => o.readOnly).length,
     conflicted: by("conflicted"),
     fileDirty: by("fileDirty"),
-    unsent: all.filter((o) => o.status === "fileDirty" || o.status === "conflicted").map((o) => ({ path: o.path, reason: o.status === "conflicted" ? "conflict" : o.notSent ? `${o.notSent.code}: ${o.notSent.message}` : o.readOnly ? "read-only" : undefined })),
+    unsent: all.filter((o) => o.status === "fileDirty" || o.status === "conflicted").map((o) => ({ path: o.path, reason: o.status === "conflicted" ? `conflict (rung resolve ${shellPath(o.path)} --ours, --theirs or --merged)` : o.notSent ? `${o.notSent.code}: ${o.notSent.message}` : o.readOnly ? "read-only" : undefined })),
     pendingDelete: by("pendingDelete"),
     recoveryRequired: by("recoveryRequired"),
     owner: watcher ? { lastPassAt: watcher.lastPassAt, lastError: watcher.lastError, scanAgeMs: watcher.lastPassAt ? Date.now() - watcher.lastPassAt : null } : null,
@@ -270,7 +270,9 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
     }
   }
   io.stdout(`writes to TIA Portal: ${writesLabel(config)}\n`);
-  io.stdout(`${s.objects} object${s.objects === 1 ? "" : "s"}, ${s.synced} synced, ${s.readOnly} read-only${s.owner ? `, watching (last pass ${s.owner.scanAgeMs ?? "-"} ms ago${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : ""}\n`);
+  // the read-only ones are among the objects (and among the synced), not a group of their own
+  const watching = s.owner ? `, watching (${s.owner.scanAgeMs === null ? "first pass running" : `last pass ${s.owner.scanAgeMs} ms ago`}${s.owner.lastError ? `, error: ${s.owner.lastError}` : ""})` : "";
+  io.stdout(`${s.objects} object${s.objects === 1 ? "" : "s"}, ${s.synced} synced${s.readOnly ? `; ${s.readOnly} of the ${s.objects} read-only (rung never changes ${s.readOnly === 1 ? "it" : "them"} in TIA Portal)` : ""}${watching}\n`);
   for (const [label, list] of [["pending delete", s.pendingDelete], ["recovery", s.recoveryRequired]] as const)
     for (const p of list) io.stdout(`  ${label.padEnd(16)} ${p}\n`);
   for (const u of s.unsent) io.stdout(`  edited, not sent ${u.path} — ${u.reason ?? (config.writesOff ? "writes off (rung writes on)" : config.sync.import === "manual" ? "sync.import = manual" : "rung sync")}\n`);

@@ -160,7 +160,7 @@ describe("two-way CLI", () => {
     expect(t.out.join("")).toContain("markers in plc/PLC_1/blocks/Fx_Motor.scl.conflict; run rung resolve plc/PLC_1/blocks/Fx_Motor.scl --ours|--theirs|--merged");
     t.out.length = 0;
     await t.run(["status"]);
-    expect(t.out.join("")).toContain("edited, not sent plc/PLC_1/blocks/Fx_Motor.scl — conflict");
+    expect(t.out.join("")).toContain("edited, not sent plc/PLC_1/blocks/Fx_Motor.scl — conflict (rung resolve plc/PLC_1/blocks/Fx_Motor.scl --ours, --theirs or --merged)");
     t.out.length = 0;
     await t.run(["sync"]);
     expect(t.out.join("").match(/run rung resolve plc\/PLC_1\/blocks\/Fx_Motor.scl --ours\|--theirs\|--merged/g)).toHaveLength(1);

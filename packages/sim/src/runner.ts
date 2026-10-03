@@ -724,8 +724,12 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     const text = await readFile(f, "utf8");
     // --filter matches the file path or the block under test (rung test --filter Fx_Motor), which may carry a
     // comment after it; block names ignore letter case as in TIA Portal
-    if (filter && !rel.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase()) && !new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text)) continue;
-    out.push(await runTestFile(index, rel, text));
+    const whole = !filter || rel.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase()) || new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text);
+    // or a part of a case's name (rung test --filter stuck): those cases of the file
+    if (!whole && !text.toLowerCase().includes(filter!.toLowerCase())) continue;
+    const r = await runTestFile(index, rel, text);
+    const cases = whole ? r.cases : r.cases.filter((c) => c.name.toLowerCase().includes(filter!.toLowerCase()));
+    if (whole || cases.length) out.push({ ...r, cases });
   }
   return out;
 }
