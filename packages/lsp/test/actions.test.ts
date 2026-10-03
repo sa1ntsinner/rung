@@ -33,7 +33,7 @@ describe("update block calls, like TIA Portal", () => {
     const d = diagnostics(idx, FB).filter((x) => x.code === "UNKNOWN_PARAMETER" || x.code === "MISSING_PARAMETER");
     expect(d.map((x) => `${x.code}: ${USER.slice(x.start, x.end)}: ${x.message}`)).toEqual([
       "UNKNOWN_PARAMETER: Offset: Offset is not a parameter of Fx_Scale (quick fix: remove it)",
-      'MISSING_PARAMETER: "Fx_Scale": This call of Fx_Scale leaves out Gain, Stats: an FC gets every input and in/out (quick fix: add them)',
+      'MISSING_PARAMETER: "Fx_Scale": This call of Fx_Scale leaves out Gain, Stats: an FC gets every input, in/out and output (quick fix: add the inputs)',
       "UNKNOWN_PARAMETER: PTT: PTT is not a parameter of TON (quick fix: remove it)",
       "UNKNOWN_PARAMETER: Old: Old is not a parameter of Fx_Motor (quick fix: remove it)",
     ]);

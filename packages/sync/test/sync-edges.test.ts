@@ -170,6 +170,20 @@ describe("sync and watch: the edges", () => {
     } finally { await t.state.close(); }
   });
 
+  it("a compile error stands while its file does, though TIA Portal's revision of an inconsistent block moves", async () => {
+    const t = await fixture();
+    try {
+      t.bridge.add(addr("A"), { content: empty });
+      await t.pass();
+      await recordCompile(t.root, "PLC_1", [addr("A")], [{ address: addr("A"), file: "plc/PLC_1/blocks/A.scl", severity: "error", description: "Unknown instruction." }], (a) => t.state.get(a)?.tiaFingerprint, (a) => t.state.get(a)?.fileHash);
+      // the next listing has another revision for the same text (TIA Portal does that for blocks that do not compile)
+      t.bridge.objects.get(addr("A"))!.entry.fingerprint = "fp:moved";
+      await t.pass();
+      const items = JSON.parse(readFileSync(join(t.root, ".rung/diagnostics.json"), "utf8")).items as { message: string }[];
+      expect(items.map((d) => d.message)).toEqual(["Unknown instruction."]);
+    } finally { await t.state.close(); }
+  });
+
   it("writes off and on again: the bridge that may import already is kept", async () => {
     const t = await fixture();
     const off = { ...t.config, writesOff: true as const, sync: { ...t.config.sync, import: "manual" as const } };

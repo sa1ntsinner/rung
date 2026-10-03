@@ -57,7 +57,8 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
       if (meant) out.push({ title: `Rename the argument ${a.name} to ${meant}`, code: "UNKNOWN_PARAMETER", edits: [{ uri, start: a.nameStart!, end: a.nameEnd!, newText: meant }], preferred: true });
       out.push({ title: `Remove the argument ${a.name} (${site.callee.name} has no such parameter)`, code: "UNKNOWN_PARAMETER", edits: [{ uri, ...range, newText: "" }], ...(meant ? {} : { preferred: true }) });
     });
-    const missing = missingParams(site);
+    // an output needs a variable of the caller's to go into: the person picks it; inputs get a value to start from
+    const missing = missingParams(site).filter((p) => p.section !== "Output");
     if (missing.length && site.ref.end >= start && site.ref.start <= end) {
       const text = (site.args.length ? ", " : "") + missing.map((p) => `${p.name} := ${defaultArgument(p)}`).join(", ");
       out.push({ title: `Add the missing parameters of ${site.callee.name}: ${missing.map((p) => p.name).join(", ")}`, code: "MISSING_PARAMETER", edits: [{ uri, start: site.close, end: site.close, newText: text }], preferred: true });

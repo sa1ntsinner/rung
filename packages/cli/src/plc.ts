@@ -159,7 +159,8 @@ async function printCompile(ws: string, _config: RungConfig, io: Io, raw: Compil
   const objects = await snapshot(ws);
   const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => objects.find((o) => o.address === a)?.path, raw, (f) => readFile(f, "utf8"));
   // rung status, the editors and the next sync see what TIA Portal said (a forced delete's broken users too)
-  await recordCompile(ws, device, scope, msgs, (a) => (objects.find((o) => o.address === a) as { tiaFingerprint?: string } | undefined)?.tiaFingerprint).catch(() => undefined);
+  const of = (a: string) => objects.find((o) => o.address === a) as { tiaFingerprint?: string; fileHash?: string } | undefined;
+  await recordCompile(ws, device, scope, msgs, (a) => of(a)?.tiaFingerprint, (a) => of(a)?.fileHash).catch(() => undefined);
   let errors = 0;
   let warnings = 0;
   for (const m of msgs) {

@@ -154,6 +154,9 @@ function literalMismatches(index: WorkspaceIndex, uri: string, tokens: Token[], 
     const type = d.type.replace(/\s+/g, "");
     const text = value.kind === "string";
     const number = value.kind === "number" && /^[+-]?\d[\d_]*(\.\d+)?(e[+-]?\d+)?$/i.test(value.text);
+    // one character ('A', '$02') is a Char, which TIA Portal converts into bit strings and integers: #stx := '$02';
+    const char = text && /^'(?:[^'$]|\$[0-9A-Fa-f]{2}|\$.)'$/.test(value.text);
+    if (char && !/^(BOOL|L?REAL|L?TIME|S5TIME|DATE|L?TOD|TIME_OF_DAY|L?DT|DTL|DATE_AND_TIME)$/i.test(type)) continue;
     if (text && NUMERIC_TYPE.test(type)) out.push({ start: value.start, end: value.end, severity: "error", message: `#${d.name} is ${d.type}: ${value.text} is text, TIA Portal does not convert it`, code: "TYPE_MISMATCH" });
     else if (number && TEXT_TYPE.test(type)) out.push({ start: value.start, end: value.end, severity: "error", message: `#${d.name} is ${d.type}: write the text in quotes, '${value.text}'`, code: "TYPE_MISMATCH" });
   }
@@ -222,7 +225,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       out.push({ start: a.nameStart!, end: a.nameEnd!, severity: "error", message: `${a.name} is not a parameter of ${site.callee.name} (quick fix: remove it)`, code: "UNKNOWN_PARAMETER" });
     const missing = missingParams(site);
     if (missing.length)
-      out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input and in/out (quick fix: add them)`, code: "MISSING_PARAMETER" });
+      out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input, in/out and output${missing.some((p) => p.section !== "Output") ? " (quick fix: add the inputs)" : ""}`, code: "MISSING_PARAMETER" });
   }
   for (const block of doc.parsed.blocks) {
     for (const ref of block.refs) {

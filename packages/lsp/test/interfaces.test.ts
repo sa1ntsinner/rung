@@ -176,6 +176,19 @@ describe("what TIA Portal would refuse, while typing", () => {
   it("text into a number and a number into text", () => {
     const { found } = check("   #Count := 'hello';\n   #Txt := 42;\n   #Txt := 'ok';\n   #Count := 42;\n");
     expect(found.filter((d) => d.code === "TYPE_MISMATCH").map((d) => d.message)).toEqual(["#Count is Int: 'hello' is text, TIA Portal does not convert it", "#Txt is String[10]: write the text in quotes, '42'"]);
+    // one character is a Char: TIA Portal converts it into an integer or a bit string, not into a Bool
+    const char = check("   #Count := 'A';\n   #Count := '$02';\n   #Out1 := 'A';\n");
+    expect(char.found.filter((d) => d.code === "TYPE_MISMATCH").map((d) => d.message)).toEqual(["#Out1 is Bool: 'A' is text, TIA Portal does not convert it"]);
+  });
+
+  it("a /* */ comment, which TIA Portal's SCL does not know, and an FC call that leaves out an output", () => {
+    const { found } = check('   #Out1 /* note */ := TRUE;\n   "FC_Out"(a := 1);\n');
+    expect(found.filter((d) => d.code === "SYNTAX").map((d) => d.message)).toEqual(["TIA Portal's SCL has no /* */ comments: write (* *) or //"]);
+    const index = workspace();
+    index.set(u("blocks/FC_Out.scl"), 'FUNCTION "FC_Out" : Void\n   VAR_INPUT\n      a : Int;\n   END_VAR\n   VAR_OUTPUT\n      o : Bool;\n   END_VAR\nBEGIN\n   #o := #a > 0;\nEND_FUNCTION\n', 0);
+    const uri = u("blocks/FB_Use.scl");
+    index.set(uri, 'FUNCTION_BLOCK "FB_Use"\nBEGIN\n   "FC_Out"(a := 1);\nEND_FUNCTION_BLOCK\n', 0);
+    expect(diagnostics(index, uri).find((d) => d.code === "MISSING_PARAMETER")?.message).toBe("This call of FC_Out leaves out o: an FC gets every input, in/out and output");
   });
 
   it("a misspelt member, with the name it meant and a quick fix", () => {

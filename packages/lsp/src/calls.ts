@@ -132,11 +132,11 @@ export function orderedParams(callee: CallSite["callee"]): CallParam[] {
   return ["Input", "InOut", "Output"].flatMap((section) => callee.params.filter((p) => p.section === section));
 }
 
-/** Parameters an FC call must supply but does not (named calls only; a positional call is left alone). */
+/** Parameters an FC call must supply but does not: TIA Portal wants every input, in/out and output of an FC (named calls only). */
 export function missingParams(site: CallSite): CallParam[] {
   if (site.callee.kind !== "FC" || site.args.some((a) => !a.name)) return [];
   const given = new Set(site.args.map((a) => a.name!.toUpperCase()));
-  return site.callee.params.filter((p) => (p.section === "Input" || p.section === "InOut") && !given.has(p.name.toUpperCase()));
+  return site.callee.params.filter((p) => !given.has(p.name.toUpperCase()));
 }
 
 export function unknownArgs(site: CallSite): CallArg[] {

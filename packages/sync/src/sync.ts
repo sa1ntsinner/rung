@@ -64,8 +64,11 @@ export interface Diagnostic {
   message: string;
   line?: number;
   column?: number;
-  /** TIA revision the object had when the message was produced (compile messages are kept while it holds). */
+  /** TIA revision the object had when the message was produced. */
   revision?: string;
+  /** The object's files when the message was produced: a compile message stands while they do (an inconsistent
+   *  block's TIA revision is not stable from one listing to the next, its files are). */
+  fileHash?: string;
 }
 
 export interface SyncReport {
@@ -404,13 +407,15 @@ export async function recordCompile(
   scope: string[] | "all",
   messages: readonly { address?: string; file?: string; severity: "error" | "warning" | "info"; description: string; line?: number; column?: number }[],
   revisionOf: (address: string) => string | undefined,
+  fileHashOf: (address: string) => string | undefined = () => undefined,
 ): Promise<void> {
   const items: Diagnostic[] = messages
     .filter((m) => !(m.severity === "info" && /^No block was compiled/i.test(m.description)))
     .map((m) => {
       const address = m.address ?? `plc:${device}`;
       const revision = revisionOf(address);
-      return { address, path: m.file ?? "", severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}) };
+      const fileHash = fileHashOf(address);
+      return { address, path: m.file ?? "", severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}), ...(fileHash ? { fileHash } : {}) };
     });
   const answered = (d: Diagnostic) => (scope === "all" ? d.address === `plc:${device}` || d.address.startsWith(`plc:${device}/`) : scope.includes(d.address)) || items.some((i) => i.address === d.address);
   await writeDiagnostics(root, items, (d) => !answered(d), (d) => d.code !== "COMPILE");
@@ -1178,7 +1183,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const target = m.address ?? `plc:${device}`;
           const path = (target && state.get(target)?.path) || "";
           const revision = target ? state.get(target)?.tiaFingerprint : undefined;
-          diag({ address: target, path, severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}) });
+          const fileHash = target ? state.get(target)?.fileHash : undefined;
+          diag({ address: target, path, severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}), ...(fileHash ? { fileHash } : {}) });
         }
       } catch (e) {
         if (!(e instanceof BridgeError)) throw e;
@@ -1195,7 +1201,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     (d) => {
       if (compiledAll || !d.address || compiled.has(d.address)) return false;
       const now = state.get(d.address);
-      return !!now && (!d.revision || now.tiaFingerprint === d.revision);
+      return !!now && (d.fileHash ? now.fileHash === d.fileHash : !d.revision || now.tiaFingerprint === d.revision);
     },
     (d) => !!quick && d.code !== "COMPILE" && !items.has(d.address),
   );

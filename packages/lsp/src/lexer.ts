@@ -88,6 +88,8 @@ export function lex(src: string, opts: LexOptions = {}): { tokens: Token[]; erro
         errors.push({ message: "Unterminated comment", start, end: n });
         i = n;
       } else i = endAt + 2;
+      // Siemens SCL knows // and (* *) only: TIA Portal turns /* */ into / * … * / and the block stops compiling
+      if (c === "/" && !opts.nestedComments) errors.push({ message: "TIA Portal's SCL has no /* */ comments: write (* *) or //", start, end: i });
       push("comment", start, i);
       continue;
     }
