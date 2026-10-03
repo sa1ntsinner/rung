@@ -1557,6 +1557,15 @@ describe("compile scope after an import", () => {
     expect(telling.compileCalls).toEqual([[B]]);
   });
 
+  it("a body fix of a block whose last compile failed compiles its callers too: TIA Portal left them uncompiled", async () => {
+    const t = make();
+    await t.sync();
+    writeFileSync(t.f(".rung/diagnostics.json"), JSON.stringify({ seq: 1, items: [{ address: A, path: pA, code: "COMPILE", severity: "error", message: "Semicolon missing." }] }));
+    t.write(pA, srcA.replace("#y := 2;", "#y := 20;"));
+    await t.sync(2000);
+    expect(t.bridge.compileCalls).toEqual([[B]]);
+  });
+
   it("an interface change compiles the callers too, not the block a second time", async () => {
     const t = make();
     await t.sync();

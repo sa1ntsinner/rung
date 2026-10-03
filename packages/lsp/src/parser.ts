@@ -339,9 +339,9 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
   /** Variables of the FB that owns the METHOD being parsed. */
   let ownerVars: VarDecl[] | undefined;
 
-  /** A token a statement can end with: a value, a name, a closing bracket. */
+  /** A token a statement can end with: a value, a name, a closing bracket, END_IF and its kin (TIA Portal wants END_IF;). */
   const endsValue = (x: Token | undefined) =>
-    !!x && (x.kind === "local" || x.kind === "global" || x.kind === "number" || x.kind === "string" || x.kind === "absolute" || x.text === ")" || x.text === "]" || isKw(x, "TRUE", "FALSE"));
+    !!x && (x.kind === "local" || x.kind === "global" || x.kind === "number" || x.kind === "string" || x.kind === "absolute" || x.text === ")" || x.text === "]" || isKw(x, "TRUE", "FALSE", "END_IF", "END_CASE", "END_FOR", "END_WHILE", "END_REPEAT"));
   const STATEMENT = new Set(["IF", "CASE", "FOR", "WHILE", "REPEAT", "RETURN", "EXIT", "CONTINUE", "REGION", "GOTO"]);
   const lineOf = (offset: number) => src.slice(0, offset).split("\n").length;
   /** An integer CASE label: 7, 16#FF, 2#1010, 1_000. */

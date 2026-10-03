@@ -45,7 +45,10 @@ class PlcLink {
   async call<T>(method: string, params: Record<string, unknown>, direct: (b: BridgeClient) => Promise<T>): Promise<T> {
     if (this.owner === undefined) this.owner = await OwnerClient.connect(this.ws);
     if (this.owner) return this.owner.request<T>(method, params);
-    this.bridge ??= bridgeFor(this.config, this.io, this.download && this.config.download.enabled ? ["--allow-download"] : []);
+    // a compile in a TIA Portal rung opened without a window is kept only if the project is saved when it closes;
+    // that is a write into the project, so only where this workspace may write
+    const save = this.config.sync.import === "auto" && !this.config.writesOff && this.config.sync.save !== "never";
+    this.bridge ??= bridgeFor(this.config, this.io, [...(this.download && this.config.download.enabled ? ["--allow-download"] : []), ...(save ? ["--save-after-import"] : [])]);
     return direct(await this.bridge);
   }
 

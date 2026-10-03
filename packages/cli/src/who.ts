@@ -42,8 +42,15 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     const pos = new LineIndex(text).position(start);
     return { path: relative(ws, fileURLToPath(uri)).split(sep).join("/"), line: pos.line + 1, text: text.split("\n")[pos.line]?.trim() ?? "" };
   };
-  const parts = partsOf(name);
   const scoped = file ? scopedTo(index, file) : index;
+  // an address (%I0.0) means the tag at it, as TIA Portal's cross-reference reads it
+  const address = /^%[A-Za-z]+[\d.]+$/.test(name.trim()) ? scoped.allGlobals().find((g) => g.tag?.address?.toUpperCase() === name.trim().toUpperCase()) : undefined;
+  if (/^%/.test(name.trim()) && !address) {
+    io.stderr(`rung: no PLC tag is at ${name.trim()} (rung assignments lists every address in use)\n`);
+    return 1;
+  }
+  if (address) io.stdout(`${name.trim()} is the PLC tag ${address.name}\n`);
+  const parts = partsOf(address ? address.name : name);
   const head = scoped.global(parts[0]!);
   let r: { writes: UsageSite[]; reads: UsageSite[] };
   let declared: { uri?: string; start?: number } | undefined;

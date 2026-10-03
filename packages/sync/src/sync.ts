@@ -956,6 +956,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   const compiledByImport = new Map<string, CompileMessage[]>();
   /** Imported objects whose users must compile too. */
   const withCallers: string[] = [];
+  // a block whose last compile failed left its instance DBs and callers uncompiled in TIA Portal: fixed, they compile too
+  const failedBefore = new Set<string>(
+    await readFile(join(root, ".rung", "diagnostics.json"), "utf8")
+      .then((t) => ((JSON.parse(t) as { items?: Diagnostic[] }).items ?? []).filter((d) => d.code === "COMPILE" && d.severity === "error").map((d) => d.address))
+      .catch(() => []),
+  );
   const byName = new Map(queue.map((j) => [j.name, j]));
   const order: ImportJob[] = [];
   const visiting = new Set<string>();
@@ -1134,7 +1140,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     const before = job.kind === "update" && st ? (await baseBundle(root, stemOf(st), st.files).catch(() => ({}) as Record<string, string>))["." + job.form] : undefined;
     const was = interfaceOf(job.form, before);
     // a DB is the exception: TIA Portal marks its users inconsistent after any import of it, a start value too
-    if (!result.compile || job.form === "db" || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
+    if (!result.compile || job.form === "db" || failedBefore.has(job.address) || was === undefined || was !== interfaceOf(job.form, job.bundle["." + job.form])) withCallers.push(job.address);
   }
   await checkpoint();
 
