@@ -729,7 +729,8 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     if (!whole && !text.toLowerCase().includes(filter!.toLowerCase())) continue;
     const r = await runTestFile(index, rel, text);
     const cases = whole ? r.cases : r.cases.filter((c) => c.name.toLowerCase().includes(filter!.toLowerCase()));
-    if (whole || cases.length) out.push({ ...r, cases });
+    // a file that cannot run says so, whatever selected it
+    if (whole || cases.length || r.error) out.push({ ...r, cases });
   }
   return out;
 }

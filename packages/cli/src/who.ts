@@ -31,6 +31,35 @@ function occurrence(index: WorkspaceIndex, parts: string[], file?: string): { ur
   return undefined;
 }
 
+/**
+ * An instance DB's uses: its FB's own code (#Jam, run for every instance), `"Belt1_DB".Jam` and the calls through it,
+ * not another instance's (`"Belt2_DB".Jam`, a multi-instance `#Belt.Jam` elsewhere). A use reached through a call
+ * counts by where it came from.
+ */
+function ofInstance(index: WorkspaceIndex, db: string, fb: string, u: Usages): Usages {
+  const is = (a: string, b: string) => a.toUpperCase() === b.toUpperCase();
+  const mine = (uri: string, start: number, block?: string): boolean => {
+    const doc = index.docs.get(uri);
+    for (const b of doc?.parsed?.blocks ?? [])
+      for (const r of b.refs) {
+        if (r.start !== start && !r.members.some((m) => m.start === start)) continue;
+        return r.kind === "global" ? is(r.name, db) : is(b.name, fb);
+      }
+    // a named argument: the instance the call is made through ("Belt1_DB"(Start := …), #Belt(Start := …))
+    const text = doc?.text ?? "";
+    for (let i = start - 1, depth = 0; i >= 0 && text[i] !== ";"; i--) {
+      if (text[i] === ")") depth++;
+      else if (text[i] === "(" && depth-- === 0) {
+        const callee = /("[^"]+"|#?[A-Za-z_]\w*)\s*$/.exec(text.slice(0, i))?.[1] ?? "";
+        return callee.startsWith('"') && is(callee.slice(1, -1), db);
+      }
+    }
+    return !!block && is(block, fb);
+  };
+  const keep = (s: UsageSite) => (s.through ? mine(s.through.uri, s.through.start) : mine(s.uri, s.start, s.block));
+  return { writes: u.writes.filter(keep), reads: u.reads.filter(keep), ...(u.handedOn ? { handedOn: u.handedOn.filter(keep) } : {}) };
+}
+
 /** The first place the code uses an address (`%M10.0` as TIA Portal writes it), in `file` first; `x AT %M10.0` declares. */
 function addressUse(index: WorkspaceIndex, key: string, file?: string): { uri: string; start: number } | undefined {
   const uris = [...index.docs.keys()].sort((a, b) => (a === file ? -1 : b === file ? 1 : 0));
@@ -62,8 +91,9 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     io.stderr(`rung: no PLC tag is at ${name.trim()}, and no code uses it (rung assignments lists every address in use)\n`);
     return 1;
   }
-  if (address) io.stdout(`${name.trim()} is the PLC tag ${address.name}\n`);
-  if (untagged) io.stdout(`no PLC tag is at ${name.trim()}; the code uses the address itself\n`);
+  // (in JSON: tag, the tag's name or null)
+  if (address && !v.json) io.stdout(`${name.trim()} is the PLC tag ${address.name}\n`);
+  if (untagged && !v.json) io.stdout(`no PLC tag is at ${name.trim()}; the code uses the address itself\n`);
   const parts = untagged ? [name.trim()] : partsOf(address ? address.name : name);
   const head = untagged ? undefined : scoped.global(parts[0]!);
   let r: Usages;
@@ -83,7 +113,7 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     declared = members.at(-1);
     // an instance DB is written by its FB's code (#Jam := …): its member's declaration in the FB finds those writes too
     const instance = head.block.dbOf && scoped.global(head.block.dbOf)?.block?.kind === "FB";
-    r = instance && declared?.uri !== undefined && declared.start !== undefined ? usagesAt(index, declared.uri, declared.start) : usagesOfPath(index, head, parts.slice(1));
+    r = instance && declared?.uri !== undefined && declared.start !== undefined ? ofInstance(index, head.name, head.block.dbOf!, usagesAt(index, declared.uri, declared.start)) : usagesOfPath(index, head, parts.slice(1));
   } else {
     const at = occurrence(index, parts, file);
     const tag = parts.length === 1 ? head : undefined;
@@ -121,7 +151,7 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
       ...(s.calledFrom ? { calledFrom: s.calledFrom.map((c) => ({ block: c.block, ...where(c.uri, c.start) })) } : {}),
       ...(s.handedTo ? { handedTo: s.handedTo } : {}),
     });
-    io.stdout(JSON.stringify({ name, ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site), ...(r.handedOn ? { handedOn: r.handedOn.map(site) } : {}) }, null, 2) + "\n");
+    io.stdout(JSON.stringify({ name, ...(key ? { tag: address?.name ?? null } : {}), ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site), ...(r.handedOn ? { handedOn: r.handedOn.map(site) } : {}) }, null, 2) + "\n");
     return 0;
   }
   if (!r.writes.length && !r.reads.length && !r.handedOn?.length && declared?.uri !== undefined) {

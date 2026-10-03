@@ -789,8 +789,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           // TIA Portal changed it as well: its change comes into the file now, nothing goes to TIA Portal; both on the
           // same lines is a conflict now, not a surprise once writes are on
           if (tiaChanged && staged && staged.result.form === cur.form && SOURCE_FORMS.has(cur.form)) {
-            const { bundle } = await localBundle(root, stemOf(cur), cur.path);
-            const m = mergeBundle(cur.form, await baseBundle(root, stemOf(cur), cur.files), bundle, Object.fromEntries(staged.texts));
+            const own = stemOf(cur);
+            const { bundle, captured } = await localBundle(root, own, cur.path);
+            const m = mergeBundle(cur.form, await baseBundle(root, own, cur.files), bundle, Object.fromEntries(staged.texts));
             if (m.kind === "conflict") {
               await writeConflict(cur, stem, m.files, staged, true);
               continue;
@@ -798,7 +799,16 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
             if (plan) planned({ address, path: cur.path, action: "export", detail: "TIA Portal's change merged into your edit, which stays in the file" });
             else {
               const recoveryDir = join(root, ".rung", "recovery", "merge-" + randomUUID());
-              for (const [suffix, text] of Object.entries(m.files)) await replaceGuarded(rel2abs(root, stem + suffix), Buffer.from(text, "utf8"), { expectedHash: await diskHash(root, stem + suffix), recoveryDir, force: true });
+              try {
+                // over the file as it was read: saved again meanwhile, that save stays and the next pass merges it
+                for (const [suffix, text] of Object.entries(m.files))
+                  await replaceGuarded(rel2abs(root, own + suffix), Buffer.from(text, "utf8"), { expectedHash: captured.find((f) => f.path === own + suffix)?.hash ?? "absent", recoveryDir });
+              } catch (e) {
+                if (!(e instanceof WorkspaceError && e.code === "LOCAL_CHANGES")) throw e;
+                state.upsert({ ...cur, status: "fileDirty", notSent: { code, message } });
+                warn(address, code, message, cur.path);
+                continue;
+              }
               // TIA Portal's version is the base now; the file is that plus the person's edit, sent once writes are on
               cur = { ...(await buildState(root, address, staged, readOnly, now())), status: "fileDirty" };
               report.changes!.push({ path: cur.path, action: "export" });
@@ -1179,6 +1189,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   // Compile what was imported and turn compiler messages into diagnostics.
   /** Everything this pass compiled: its old compile messages are answered by this one's. */
   const compiled = new Set(imported);
+  /** PLCs compiled whole (sync.compile = "all"): every old compile message of theirs is answered. */
+  const compiledPlcs = new Set<string>();
   if (imported.length && cfg.sync.compile !== "none") {
     const byDevice = new Map<string, string[]>();
     for (const a of imported) {
@@ -1189,8 +1201,10 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       try {
         let raw: CompileMessage[];
         if (withCallers.some((a) => addrs.includes(a)) || cfg.sync.compile === "all") opts.onPhase?.("compiling", cfg.sync.compile === "all" ? device : "what uses the changed blocks");
-        if (cfg.sync.compile === "all") raw = await bridge.compile(device, []);
-        else {
+        if (cfg.sync.compile === "all") {
+          raw = await bridge.compile(device, []);
+          compiledPlcs.add(device);
+        } else {
           // the import compiled the object itself already; what is left is its users, where they need it
           const own = addrs.filter((a) => compiledByImport.has(a));
           const order = new Map(imported.map((a, i) => [a, i]));
@@ -1198,10 +1212,11 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const lastChange = Math.max(-1, ...changed.map((a) => order.get(a)!));
           // a user imported before the last interface change of the pass compiled against the old interface: again
           const scope = (await withUsers(root, state, changed)).filter((a) => !compiledByImport.has(a) || order.get(a)! < lastChange);
-          for (const a of scope) compiled.add(a);
           // each object keeps the messages of the last compile that saw it: FB_Motor's import compiles its caller's
           // old text, the caller's own import a moment later compiles its new one (a renamed parameter in both)
           const events = [...own.map((a) => compiledByImport.get(a)!), ...(scope.length ? [await bridge.compile(device, scope)] : [])];
+          // only a compile that ran answers the old messages (one TIA Portal refused keeps them)
+          for (const a of scope) compiled.add(a);
           const covers = events.map((msgs, i) => new Set([...(i < own.length ? [own[i]!] : scope), ...msgs.flatMap((m) => (m.address ? [m.address] : []))]));
           const last = new Map<string, number>();
           covers.forEach((c, i) => c.forEach((a) => last.set(a, i)));
@@ -1225,12 +1240,11 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   }
 
   if (imported.length && cfg.sync.compile !== "none") report.compiled = [...compiled];
-  const compiledAll = imported.length > 0 && cfg.sync.compile === "all";
   await writeDiagnostics(
     root,
     report.diagnostics,
     (d) => {
-      if (compiledAll || !d.address || compiled.has(d.address)) return false;
+      if (!d.address || compiled.has(d.address) || compiledPlcs.has(/^plc:([^/]+)/.exec(d.address)?.[1] ?? "")) return false;
       const now = state.get(d.address);
       return !!now && (d.fileHash ? now.fileHash === d.fileHash : !d.revision || now.tiaFingerprint === d.revision);
     },

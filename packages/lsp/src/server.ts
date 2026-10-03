@@ -25,7 +25,7 @@ import {
 } from "vscode-languageserver/node.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
-import { WorkspaceIndex } from "./workspace.js";
+import { WorkspaceIndex, deviceOfUri } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
@@ -314,7 +314,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const block = decl && index.blockAt(decl.uri, decl.start);
     const v = block?.vars.find((x) => x.start === decl!.start);
     if (root && block && v && (block.kind === "FB" || block.kind === "FC") && ["Input", "Output", "InOut", "Static"].includes(v.section))
-      for (const [file, edits] of await testKeyEdits(root, block.name, v.name, p.newName)) changes[pathToFileURL(file).href] = edits;
+      for (const [file, edits] of await testKeyEdits(root, block.name, v.name, p.newName, deviceOfUri(decl!.uri))) changes[pathToFileURL(file).href] = edits;
     return { changes };
   });
   connection.onCodeAction((p) => {

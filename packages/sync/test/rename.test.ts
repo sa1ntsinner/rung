@@ -42,8 +42,12 @@ describe("rung rename", () => {
     writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ seq: 3, items: [{ address: "plc:PLC_1/blocks/Drives/Fx_Pulse", path: "plc/PLC_1/blocks/Drives/Fx_Pulse.scl", code: "LOOKS_LIKE_RENAME", severity: "error", message: "held back" }] }));
     // an FC's return value is named after it in its own tests (expect: { FC_Scale: 750.0 })
     writeFileSync(join(root, "tests", "drives", "ret.test.yaml"), "block: Fx_Counter\ncases:\n  - name: r\n    steps:\n      - expect: { Fx_Counter: 1, Other: 2 }\n");
+    // the tests of another PLC's block of the same name stay as they are
+    const other = "block: Fx_Counter\nplc: PLC_2\ncases:\n  - name: r\n    steps:\n      - expect: { Fx_Counter: 1 }\n";
+    writeFileSync(join(root, "tests", "drives", "plc2.test.yaml"), other);
     const r = await renameObject(root, bridge, state, config, "plc:PLC_1/blocks/Drives/Fx_Counter", "Fx_Pulse");
     expect(readFileSync(join(root, "tests", "drives", "ret.test.yaml"), "utf8")).toContain("expect: { Fx_Pulse: 1, Other: 2 }");
+    expect(readFileSync(join(root, "tests", "drives", "plc2.test.yaml"), "utf8")).toBe(other);
     expect(JSON.parse(readFileSync(join(root, ".rung", "diagnostics.json"), "utf8")).items).toEqual([]);
     expect(readFileSync(join(root, "tests", "drives", "counter.test.yaml"), "utf8")).toBe("block: Fx_Pulse # the FB\ncases:\n  - steps:\n      - expect: { '\"Fx_Pulse\".x': 1 }\n");
     expect(r.users).toContain("tests/drives/counter.test.yaml");

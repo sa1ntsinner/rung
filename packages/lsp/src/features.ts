@@ -605,7 +605,7 @@ function usageCollector(index: WorkspaceIndex) {
   };
   const same = (segs: { name: string }[], names: string[]) => segs.slice(0, names.length).every((s, i) => s.name.toUpperCase() === names[i]);
   /** The block and parameter a reference is handed to as the whole value of an argument. */
-  const passedTo = (u: string, r: Ref): { uri: string; callee: BlockModel; param: VarDecl } | undefined => {
+  const passedTo = (u: string, r: Pick<Ref, "start" | "end" | "members">): { uri: string; callee: BlockModel; param: VarDecl } | undefined => {
     const text = index.docs.get(u)?.text ?? "";
     const end = (r.members.at(-1) ?? r).end;
     for (const site of callsIn(u)) {
@@ -630,7 +630,7 @@ function usageCollector(index: WorkspaceIndex) {
         const site: UsageSite = { uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through };
         // handed on whole to the next block's in/out or output ("Increment"(N := #N)): what that one does with it (an
         // input's copy written there is not the value)
-        if (r.members.length === rest.length && param.section !== "Input") whole(u, r, site, callee, depth + 1);
+        if (r.members.length === rest.length && param.section !== "Input") whole(u, r, site, callee, depth + 1, counts(k));
         else if (counts(k)) add(site, callee);
         continue;
       }
@@ -638,10 +638,13 @@ function usageCollector(index: WorkspaceIndex) {
       if (next) follow(next.uri, next.callee, next.param, rest.slice(r.members.length), { block: callee.name, uri: u, start: r.start, param: next.param.name }, depth + 1);
     }
   };
-  /** A use of the whole value: handed to an in/out or output, followed into that block (`depth` calls deep, at most 3). */
-  function whole(u: string, r: Ref, site: UsageSite, b: BlockModel | undefined, depth: number): void {
+  /**
+   * A use of the whole value: handed to an in/out or output, followed into that block (`depth` calls deep, at most 3).
+   * `keep`: whether the use counts where it is when it is not handed on (an output's local reads do not).
+   */
+  function whole(u: string, r: Pick<Ref, "start" | "end" | "members">, site: UsageSite, b: BlockModel | undefined, depth: number, keep = true): void {
     const on = depth <= 3 ? passedTo(u, r) : undefined;
-    if (!on || on.param.section === "Input") return add(site, b);
+    if (!on || on.param.section === "Input") return void (keep && add(site, b));
     add({ ...site, handedTo: { block: on.callee.name, param: on.param.name } }, b);
     follow(on.uri, on.callee, on.param, [], { block: b?.name ?? "", uri: u, start: r.start, param: on.param.name }, depth);
   }
@@ -678,7 +681,8 @@ export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): Us
     if (ref) whole(r.uri, ref, site, block, 0);
     else add(site, block);
   }
-  if (at) for (const s of addressUses(index, own?.uri ?? uri, at)) add(s, s.block !== undefined ? index.blockAt(s.uri, s.start) : undefined);
+  // an address handed whole to an in/out (N := %MW0) is followed like a name
+  if (at) for (const s of addressUses(index, own?.uri ?? uri, at)) whole(s.uri, { start: s.start, end: s.end, members: [] }, s, s.block !== undefined ? index.blockAt(s.uri, s.start) : undefined, 0);
   return result();
 }
 

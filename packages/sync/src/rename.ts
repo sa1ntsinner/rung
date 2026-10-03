@@ -54,7 +54,7 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
   await state.flush();
   const report = await pull(root, bridge, state, { config });
   for (const w of report.warnings) if (w.code === "INCONSISTENT" && inconsistent.has(w.address)) w.message = `already inconsistent before rename; ${w.message ?? "run rung compile"}`;
-  users.push(...(await renameInTests(root, oldName, newName)));
+  users.push(...(await renameInTests(root, oldName, newName, parseAddress(address).device)));
   // what the last pass said about either name (a hand rename held back, a missing block) is answered now
   const gone = new Set([address, to, st.path, state.get(to)?.path].filter((x): x is string => !!x));
   const file = join(root, ".rung", "diagnostics.json");
@@ -69,7 +69,8 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
 }
 
 /** Unit tests name blocks too (`block: Fx_Counter`, `"Fx_Counter".member`); they follow the rename. */
-async function renameInTests(root: string, oldName: string, newName: string): Promise<string[]> {
+/** The tests that name the old block, unless they name another PLC (`plc: PLC_2`: another block of that name). */
+async function renameInTests(root: string, oldName: string, newName: string, device: string): Promise<string[]> {
   const changed: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -83,6 +84,8 @@ async function renameInTests(root: string, oldName: string, newName: string): Pr
       if (e.isDirectory()) await walk(rel);
       else if (/\.test\.ya?ml$/i.test(e.name)) {
         const text = await readFile(join(root, rel), "utf8");
+        const plc = /^plc:\s*["']?([^"'#\n]*?)["']?\s*(#.*)?$/im.exec(text)?.[1]?.trim();
+        if (plc && plc.toUpperCase() !== device.toUpperCase()) continue;
         const own = new RegExp(`^\\s*block:\\s*"?${escapeRe(oldName)}"?\\s*(?:#.*)?$`, "m").test(text);
         let next = text
           .replace(new RegExp(`^(\\s*block:\\s*)"?${escapeRe(oldName)}"?(\\s*(?:#.*)?)$`, "gm"), `$1${newName}$2`)
