@@ -443,9 +443,12 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
     removed: first.removed + second.removed,
     pendingDeletes: second.pendingDeletes,
     warnings: unique([...first.warnings.filter((w) => w.code !== "STALE_REVISION"), ...second.warnings]),
-    diagnostics: unique([...first.diagnostics, ...second.diagnostics]),
+    // what the second pass compiled again answers the first pass's messages about it (a caller compiled in its old
+    // text before its own import, refused as stale until the block it calls was in)
+    diagnostics: unique([...first.diagnostics.filter((d) => !(d.code === "COMPILE" && second.compiled?.includes(d.address))), ...second.diagnostics]),
     changes: [...(first.changes ?? []), ...(second.changes ?? [])],
     ...((first.backup ?? second.backup) ? { backup: first.backup ?? second.backup } : {}),
+    ...(first.compiled || second.compiled ? { compiled: [...new Set([...(first.compiled ?? []), ...(second.compiled ?? [])])] } : {}),
   };
 }
 

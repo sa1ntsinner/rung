@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateStore, defaultConfig } from "@rung/core";
-import type { ExportResult } from "@rung/bridge-client";
+import { BridgeError, type ExportResult } from "@rung/bridge-client";
 import { syncOnce, confirmDelete, recordCompile, Watcher } from "../src/index.js";
 import { FakeBridge } from "./fake-bridge.js";
 
@@ -207,6 +207,37 @@ describe("sync and watch: the edges", () => {
       // changed, it is meant as a new block
       writeFileSync(fileA, a.replace("#x := 1;", "#x := 2;"));
       expect((await t.pass()).created).toBe(1);
+    } finally { await t.state.close(); }
+  });
+
+  it("a caller refused as stale in the first pass and imported in the second: its old text's errors are not reported", async () => {
+    class Renaming extends EdgeBridge {
+      override async importObject(address: string, form: string, path: string, expected = ""): Promise<ExportResult> {
+        // like TIA Portal: an import against a revision the object no longer has is refused
+        const now = this.objects.get(address)?.entry.fingerprint;
+        if (now && expected && expected !== "absent" && now !== expected) throw new BridgeError("STALE_REVISION", `${address} changed in TIA Portal`);
+        const r = await super.importObject(address, form, path);
+        // TIA Portal moves the caller's revision when the block it calls changes
+        if (address === addr("A")) this.objects.get(addr("B"))!.entry.fingerprint = "fp:moved";
+        return r;
+      }
+      override async compile(_device: string, addresses: string[] = []) {
+        this.compileCalls.push(addresses);
+        const oldCall = (this.objects.get(addr("B"))!.files[".scl"] ?? "").includes("x := TRUE");
+        return addresses.includes(addr("B")) && oldCall ? [{ address: addr("B"), severity: "error" as const, description: "The formal parameter 'x' is invalid." }] : [];
+      }
+    }
+    const t = await fixture();
+    const bridge = Object.assign(new Renaming(), { objects: t.bridge.objects });
+    try {
+      t.bridge.add(addr("A"), { content: 'FUNCTION "A" : Void\nVAR_INPUT\n x : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION\n' });
+      t.bridge.add(addr("B"), { content: 'FUNCTION "B" : Void\nBEGIN\n "A"(x := TRUE);\nEND_FUNCTION\n' });
+      await syncOnce(t.root, bridge, t.state, { config: t.config });
+      writeFileSync(join(t.root, "plc/PLC_1/blocks/A.scl"), 'FUNCTION "A" : Void\nVAR_INPUT\n y : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION\n');
+      writeFileSync(join(t.root, "plc/PLC_1/blocks/B.scl"), 'FUNCTION "B" : Void\nBEGIN\n "A"(y := TRUE);\nEND_FUNCTION\n');
+      const r = await syncOnce(t.root, bridge, t.state, { config: t.config });
+      expect(r.imported).toBe(2);
+      expect(r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     } finally { await t.state.close(); }
   });
 
