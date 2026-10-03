@@ -5,6 +5,7 @@ import { Journal, WorkspaceError, parseAddress, pathKey, publishBundle, shellPat
 import { BridgeError } from "@rung/bridge-client";
 import { takeInventory, type Warning } from "./inventory.js";
 import { buildState, diskHash, isLockError, isReadOnlyEntry, isStrong, localStatus, planPublication, stageExport, type BridgeLike } from "./objects.js";
+import { recordTombstone } from "./tombstones.js";
 
 export { STAGED_STEM, isReadOnlyEntry, type BridgeLike } from "./objects.js";
 
@@ -175,6 +176,8 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
       continue;
     }
     if (removes.length) await publishBundle(root, { opId: randomUUID(), address: s.address, targets: [], removes, nextState: s });
+    const gone = s.files.find((f) => f.role === "primary") ?? s.files[0];
+    if (gone) await recordTombstone(root, { address: s.address, path: s.path, hash: gone.hash, by: "tia", at: Date.now() }).catch(() => undefined);
     state.remove(s.address);
     report.removed++;
   }

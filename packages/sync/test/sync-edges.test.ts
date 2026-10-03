@@ -184,6 +184,32 @@ describe("sync and watch: the edges", () => {
     } finally { await t.state.close(); }
   });
 
+  it("the old file of a block deleted (here or in TIA Portal) that git brings back unchanged is held, an edited one is created", async () => {
+    const t = await fixture();
+    try {
+      const a = 'FUNCTION "A" : Void\nBEGIN\n  #x := 1;\nEND_FUNCTION\n';
+      const b = 'FUNCTION "B" : Void\nBEGIN\n  #y := 1;\nEND_FUNCTION\n';
+      t.bridge.add(addr("A"), { content: a }).add(addr("B"), { content: b });
+      await t.pass();
+      const fileA = join(t.root, "plc/PLC_1/blocks/A.scl");
+      const fileB = join(t.root, "plc/PLC_1/blocks/B.scl");
+      // A deleted by rung, B deleted in TIA Portal by someone else
+      unlinkSync(fileA);
+      await confirmDelete(t.root, t.bridge, t.state, addr("A"));
+      t.bridge.objects.delete(addr("B"));
+      await t.pass();
+      // a git checkout brings both old files back
+      writeFileSync(fileA, a);
+      writeFileSync(fileB, b);
+      const r = await t.pass();
+      expect(r.created).toBe(0);
+      expect(r.diagnostics.filter((d) => d.code === "CAME_BACK").map((d) => d.message.split(";")[0])).toEqual(["A was deleted in TIA Portal", "B is gone from TIA Portal (renamed or deleted there)"]);
+      // changed, it is meant as a new block
+      writeFileSync(fileA, a.replace("#x := 1;", "#x := 2;"));
+      expect((await t.pass()).created).toBe(1);
+    } finally { await t.state.close(); }
+  });
+
   it("writes off and on again: the bridge that may import already is kept", async () => {
     const t = await fixture();
     const off = { ...t.config, writesOff: true as const, sync: { ...t.config.sync, import: "manual" as const } };

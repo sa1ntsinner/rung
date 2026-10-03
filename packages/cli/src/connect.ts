@@ -2,6 +2,7 @@
 // Finding the PLC on the network, the way TIA Portal's "Go online" dialog does, but without the dialog:
 // the project knows the CPU's addresses, the bridge lists what every PG/PC interface can reach, and the one
 // match is remembered in rung.toml. Several matches or none: rung explains and lets the user choose.
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WorkspaceError, writeFileAtomic, type RungConfig } from "@rung/core";
@@ -66,8 +67,21 @@ export function notFoundMessage(device: string, options: ConnectionOptions): str
     addrs.length ? `The project gives it ${addrs.map((a) => `${a.address} (${a.interface})`).join(", ")}.` : "The project gives it no IP address.",
     adapters.length ? `rung looked on: ${adapters.join(", ")}.` : "TIA Portal offers no PG/PC interface on this PC.",
     seen.length ? `Found there instead: ${seen.map(describe).join("; ")}. Choose one with: rung connect --pick` : "No Siemens device answered.",
-    "Check the cable and that this PC has an address in the PLC's subnet (for 192.168.0.1, e.g. 192.168.0.100/24). For a simulation, start S7-PLCSIM.",
+    addrs[0] ? `Check the cable and that this PC has an address in the PLC's subnet (for ${addrs[0].address}, e.g. ${addrs[0].address.replace(/\.\d+$/, ".100")}/24).` : "Check the cable and the PLC's address in the project.",
+    // TIA Portal lists the PLCSIM interface only when it started after PLCSIM: every TIA Portal on the PC, not only rung's
+    adapters.some((a) => /plcsim/i.test(a))
+      ? "For a simulation: S7-PLCSIM is listed; check that its instance runs and has the project's address (after the first download it does)."
+      : plcsimRunning()
+        ? "S7-PLCSIM runs, but TIA Portal does not list its interface: TIA Portal shows it only when it started after PLCSIM. Close every TIA Portal (and stop rung watch), then run this again."
+        : "For a simulation, start S7-PLCSIM first, then TIA Portal.",
   ].join("\n");
+}
+
+/** Whether S7-PLCSIM (V18 and newer) runs on this PC. */
+function plcsimRunning(): boolean {
+  if (process.platform !== "win32") return false;
+  const r = spawnSync("tasklist", ["/FO", "CSV", "/NH"], { encoding: "utf8", windowsHide: true });
+  return /"S7PLCSIMV\d+\.exe"/i.test(r.stdout ?? "");
 }
 
 /** Adds (or replaces) [plc.<device>] in rung.toml, keeping everything else of the file as the user wrote it. */

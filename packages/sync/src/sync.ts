@@ -52,6 +52,7 @@ import {
 import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
 import { placeCompileMessages } from "./compile-lines.js";
 import { dryState, type Plan, type PlanEntry } from "./plan.js";
+import { readTombstones, recordTombstone } from "./tombstones.js";
 
 export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts" | "archive">>;
 
@@ -892,6 +893,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           if (h !== "absent") removes.push({ path: f.path, prevHash: h });
         }
         if (removes.length) await publishBundle(root, { opId: randomUUID(), address, targets: [], removes, nextState: st });
+        // gone from TIA Portal (renamed or deleted there): its old file coming back with git is not a new block
+        const gone = st.files.find((f) => f.role === "primary") ?? st.files[0];
+        if (gone) await recordTombstone(root, { address, path: st.path, hash: gone.hash, by: "tia", at: Date.now() }).catch(() => undefined);
         state.remove(address);
         report.changes!.push({ path: st.path, action: "remove" });
         report.removed++;
@@ -931,6 +935,16 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const how = `remove ${shellPath(loc.path)}, then rung restore ${shellPath(from.path)} and rung rename ${shellPath(from.path)} ${name}: TIA Portal keeps the block, its number and its callers (in this order, or rung watch creates the new file first). For a new block instead, rung confirm-delete ${shellPath(from.path)} first`;
           diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `the block of ${from.path} (deleted here) under a new name, not created: ${how}` });
           if (plan) planned({ address, path: loc.path, action: "conflict", detail: `looks like a rename of ${from.path}: ${how}` });
+          continue;
+        }
+        // the old file of a block rung renamed or deleted, brought back unchanged by git: that block, not a new one
+        const tomb = (await readTombstones(root)).find((x) => x.address === address);
+        const old = tomb && (await new BlobStore(root).get(tomb.hash).then((b) => normalizeText(b.toString("utf8")), () => undefined));
+        if (tomb && old === normalizeText(bundle["." + loc.form] ?? "")) {
+          const went = tomb.to ? `was renamed to ${parseAddress(tomb.to).name} in TIA Portal` : tomb.by === "tia" ? "is gone from TIA Portal (renamed or deleted there)" : "was deleted in TIA Portal";
+          const how = `delete ${shellPath(loc.path)} (git brought back the old file?); change it and it is created as a new block`;
+          diag({ address, path: loc.path, severity: "error", code: "CAME_BACK", message: `${name} ${went}; this is its old file, not created: ${how}` });
+          if (plan) planned({ address, path: loc.path, action: "conflict", detail: `${name} ${went}: ${how}` });
           continue;
         }
         queue.push({ address, name, form: loc.form, stem, bundle, expected: "absent", captured, kind: "create", rank: rankOf(loc.form, texts), deps: referencedNames(texts, name) });
@@ -1301,6 +1315,8 @@ export async function confirmDelete(
   if (users.length && !opts.force)
     throw new WorkspaceError("IN_USE", `${name} is used by ${users.map((a) => state.get(a)?.path ?? a).join(", ")}; they will not compile without it. rung confirm-delete ${shellPath(st.path)} --force deletes it anyway`);
   await bridge.deleteObject(address, st.tiaFingerprint, randomUUID());
+  const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
+  if (primary) await recordTombstone(root, { address, path: st.path, hash: primary.hash, at: Date.now() }).catch(() => undefined);
   state.remove(address);
   await state.flush();
   return { users };
