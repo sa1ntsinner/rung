@@ -21,11 +21,15 @@ export class BlockCodeLens implements vscode.CodeLensProvider, vscode.Disposable
   }
 
   provideCodeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
-    if (!readSettings().codeLens || !this.ws.hasConfig || !this.ws.rel(doc.uri.fsPath)) return [];
+    if (!readSettings().codeLens) return [];
+    // the declarations table needs only the language server; the rest needs a rung workspace
+    const inWorkspace = this.ws.hasConfig && !!this.ws.rel(doc.uri.fsPath);
     const lenses: vscode.CodeLens[] = [];
-    const mirrored = !!this.ws.objectAt(doc.uri.fsPath);
+    const mirrored = inWorkspace && !!this.ws.objectAt(doc.uri.fsPath);
     for (const h of findBlockHeaders(doc.getText())) {
       const range = new vscode.Range(h.line, h.column, h.line, h.column);
+      lenses.push(new vscode.CodeLens(range, { title: "Declarations", tooltip: `The interface of ${h.name} as a table`, command: "rung.declarations.open", arguments: [doc.uri, new vscode.Position(h.line, h.column)] }));
+      if (!inWorkspace) continue;
       if (mirrored) lenses.push(new vscode.CodeLens(range, { title: "Compile", tooltip: `rung compile --file (${h.name})`, command: "rung.compileFile", arguments: [doc.uri] }));
       if (h.keyword === "FUNCTION_BLOCK" || h.keyword === "FUNCTION")
         lenses.push(new vscode.CodeLens(range, { title: "Test", tooltip: `rung test --filter ${h.name} (offline simulator)`, command: "rung.testBlock", arguments: [doc.uri, h.name] }));

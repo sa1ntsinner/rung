@@ -23,6 +23,8 @@ export interface DeclRow {
   start?: string;
   comment?: string;
   attrs: { accessible: AttrState; visible: AttrState; writable: AttrState; setpoint: AttrState };
+  /** whether TIA's HMI/OPC UA attributes apply (not to temporaries and constants) */
+  hmi: boolean;
   /** attributes the table has no column for, shown in the inspector */
   other: { key: string; value: string }[];
   ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange };
@@ -54,7 +56,7 @@ const TITLE: Record<Section, string> = { Input: "Input", Output: "Output", InOut
 const STANDARD_FB = /^(TON|TOF|TP|TONR|CTU|CTD|CTUD|R_TRIG|F_TRIG)(_|$)/i;
 const KNOWN = new Set(Object.values(EXPOSURE).map((k) => k.toUpperCase()));
 
-function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (name: string) => boolean): DeclRow {
+function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (name: string) => boolean, hmi: boolean): DeclRow {
   const id = parent ? `${parent}/${v.name}` : v.name;
   const src = v.src;
   const list = src?.attrs ? parseAttributes(text, src.attrs) : undefined;
@@ -69,11 +71,12 @@ function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (nam
     ...(v.init !== undefined ? { start: v.init } : {}),
     ...(v.comment ? { comment: v.comment } : {}),
     attrs: { accessible: attrState(list, EXPOSURE.accessible), visible: attrState(list, EXPOSURE.visible), writable: attrState(list, EXPOSURE.writable), setpoint: attrState(list, EXPOSURE.setpoint) },
+    hmi,
     other: (list?.entries ?? []).filter((e) => !KNOWN.has(e.key.toUpperCase())).map((e) => ({ key: e.key, value: e.value })),
     ranges: src
       ? { whole: src.whole, name: src.name, type: src.type, ...(src.init ? { start: src.init } : {}), ...(src.comment ? { comment: src.comment } : {}), ...(src.attrs ? { attrs: src.attrs } : {}) }
       : { whole: { start: v.start, end: v.end }, name: { start: v.start, end: v.end }, type: { start: v.end, end: v.end } },
-    ...(v.members?.length ? { children: v.members.map((m) => row(text, m, id, depth + 1, isFb)) } : {}),
+    ...(v.members?.length ? { children: v.members.map((m) => row(text, m, id, depth + 1, isFb, hmi)) } : {}),
   };
 }
 
@@ -87,7 +90,7 @@ export function declarationModel(uri: string, version: number, text: string, par
     title: TITLE[s.section] ?? s.section,
     keyword: s.keyword,
     modifiers: s.modifiers,
-    rows: block.vars.filter((v) => v.start >= s.whole.start && v.end <= s.whole.end).map((v) => row(text, v, "", 0, isFb)),
+    rows: block.vars.filter((v) => v.start >= s.whole.start && v.end <= s.whole.end).map((v) => row(text, v, "", 0, isFb, s.section !== "Temp" && s.section !== "Constant")),
     range: s.whole,
   }));
   const readOnly = !!block.xml || !!block.stl || /\.protected\.yaml$/i.test(uri);

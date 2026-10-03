@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: MIT */
+/* rung's webview tokens: VS Code's theme first, rung's semantic names on top. rung has no colour of its own. */
+:root {
+  --rg-bg: var(--vscode-editor-background);
+  --rg-fg: var(--vscode-editor-foreground);
+  --rg-muted: var(--vscode-descriptionForeground);
+  --rg-line: var(--vscode-editorGroup-border, var(--vscode-panel-border, transparent));
+  --rg-hairline: var(--vscode-tree-indentGuidesStroke, var(--rg-line));
+  --rg-hover: var(--vscode-list-hoverBackground);
+  --rg-sel-bg: var(--vscode-list-activeSelectionBackground);
+  --rg-sel-fg: var(--vscode-list-activeSelectionForeground);
+  --rg-sel-idle-bg: var(--vscode-list-inactiveSelectionBackground);
+  --rg-sel-idle-fg: var(--vscode-list-inactiveSelectionForeground, var(--rg-fg));
+  --rg-focus: var(--vscode-focusBorder);
+  --rg-error: var(--vscode-errorForeground);
+  --rg-warn: var(--vscode-editorWarning-foreground);
+  --rg-input-bg: var(--vscode-input-background);
+  --rg-input-fg: var(--vscode-input-foreground);
+  --rg-input-border: var(--vscode-input-border, transparent);
+  --rg-input-placeholder: var(--vscode-input-placeholderForeground);
+  --rg-btn-hover: var(--vscode-toolbar-hoverBackground);
+  --rg-contrast: var(--vscode-contrastBorder, transparent);
+  --rg-contrast-active: var(--vscode-contrastActiveBorder, transparent);
+  --rg-ui: var(--vscode-font-family);
+  --rg-ui-size: var(--vscode-font-size);
+  --rg-code: var(--vscode-editor-font-family);
+  --rg-code-size: var(--vscode-editor-font-size);
+  --rg-row: 24px;
+  --rg-head: 28px;
+  --rg-indent: 16px;
+  --rg-s1: 4px;
+  --rg-s2: 8px;
+  --rg-s3: 12px;
+  --rg-s4: 16px;
+  --rg-s5: 24px;
+  --rg-radius: 2px;
+  --rg-fade: 100ms;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--rg-bg);
+  color: var(--rg-fg);
+  font-family: var(--rg-ui);
+  font-size: var(--rg-ui-size);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

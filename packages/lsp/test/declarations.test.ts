@@ -53,6 +53,16 @@ describe("declarationModel", () => {
     expect(m.sections[1]!.rows[1]!.other.map((o) => o.key)).toEqual(["InstructionName", "LibVersion"]);
   });
 
+  it("HMI/OPC UA attributes apply to interface and static rows, not to temporaries and constants", () => {
+    const src = 'FUNCTION "F" : Void\n   VAR_INPUT\n      a : Int;\n   END_VAR\n   VAR_TEMP\n      t : Int;\n   END_VAR\n   VAR CONSTANT\n      K : Int := 1;\n   END_VAR\nBEGIN\nEND_FUNCTION\n';
+    const m = model(src);
+    expect(m.sections.map((s) => [s.title, s.rows[0]!.hmi])).toEqual([
+      ["Input", true],
+      ["Temp", false],
+      ["Constant", false],
+    ]);
+  });
+
   it("ranges point at the exact text", () => {
     const m = model(FB);
     const start = m.sections[0]!.rows[0]!;

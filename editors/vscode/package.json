@@ -6,47 +6,122 @@
   "publisher": "sa1ntsinner",
   "license": "MIT",
   "icon": "media/icon.png",
-  "repository": { "type": "git", "url": "https://github.com/sa1ntsinner/rung" },
-  "bugs": { "url": "https://github.com/sa1ntsinner/rung/issues" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Programming Languages", "Linters", "Other"],
-  "keywords": ["scl", "siemens", "tia portal", "plc", "structured text", "iec 61131-3", "twincat", "s7"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sa1ntsinner/rung"
+  },
+  "bugs": {
+    "url": "https://github.com/sa1ntsinner/rung/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "scl",
+    "siemens",
+    "tia portal",
+    "plc",
+    "structured text",
+    "iec 61131-3",
+    "twincat",
+    "s7"
+  ],
   "main": "./out/extension.js",
-  "activationEvents": ["onView:rung.environment", "workspaceContains:rung.toml", "workspaceContains:**/*.TcPOU", "workspaceContains:**/*.st", "onLanguage:scl", "onLanguage:s7dcl"],
+  "activationEvents": [
+    "onView:rung.environment",
+    "workspaceContains:rung.toml",
+    "workspaceContains:**/*.TcPOU",
+    "workspaceContains:**/*.st",
+    "onLanguage:scl",
+    "onLanguage:s7dcl",
+    "onWebviewPanel:rung.declarations"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
       "description": "In restricted mode rung.command from workspace settings is ignored.",
-      "restrictedConfigurations": ["rung.command"]
+      "restrictedConfigurations": [
+        "rung.command"
+      ]
     }
   },
   "contributes": {
     "languages": [
       {
         "id": "scl",
-        "aliases": ["SCL", "Siemens SCL", "IEC Structured Text"],
-        "extensions": [".scl", ".db", ".udt", ".awl", ".st"],
+        "aliases": [
+          "SCL",
+          "Siemens SCL",
+          "IEC Structured Text"
+        ],
+        "extensions": [
+          ".scl",
+          ".db",
+          ".udt",
+          ".awl",
+          ".st"
+        ],
         "configuration": "./language-configuration.json"
       },
       {
         "id": "s7dcl",
-        "aliases": ["LAD (SIMATIC SD)", "s7dcl"],
-        "extensions": [".s7dcl"],
+        "aliases": [
+          "LAD (SIMATIC SD)",
+          "s7dcl"
+        ],
+        "extensions": [
+          ".s7dcl"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
-      { "language": "scl", "scopeName": "source.scl", "path": "./syntaxes/scl.tmLanguage.json" },
-      { "language": "s7dcl", "scopeName": "source.s7dcl", "path": "./syntaxes/s7dcl.tmLanguage.json" }
+      {
+        "language": "scl",
+        "scopeName": "source.scl",
+        "path": "./syntaxes/scl.tmLanguage.json"
+      },
+      {
+        "language": "s7dcl",
+        "scopeName": "source.s7dcl",
+        "path": "./syntaxes/s7dcl.tmLanguage.json"
+      }
     ],
     "viewsContainers": {
-      "activitybar": [{ "id": "rung", "title": "rung", "icon": "media/rung.svg" }]
+      "activitybar": [
+        {
+          "id": "rung",
+          "title": "rung",
+          "icon": "media/rung.svg"
+        }
+      ]
     },
     "views": {
       "rung": [
-        { "id": "rung.project", "name": "Project", "icon": "media/rung.svg", "contextualTitle": "rung" },
-        { "id": "rung.plc", "name": "PLC", "icon": "media/rung.svg", "contextualTitle": "rung" },
-        { "id": "rung.environment", "name": "Environment", "icon": "media/rung.svg", "contextualTitle": "rung", "visibility": "collapsed" }
+        {
+          "id": "rung.project",
+          "name": "Project",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung"
+        },
+        {
+          "id": "rung.plc",
+          "name": "PLC",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung"
+        },
+        {
+          "id": "rung.environment",
+          "name": "Environment",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung",
+          "visibility": "collapsed"
+        }
       ]
     },
     "viewsWelcome": [
@@ -72,174 +147,806 @@
       }
     ],
     "commands": [
-      { "command": "rung.assignments", "title": "Assignment List (Used I/O and Memory)", "category": "rung", "icon": "$(list-tree)" },
-      { "command": "rung.monitor.toggle", "title": "Monitor Values (Live)", "category": "rung", "icon": "$(eye)" },
-      { "command": "rung.monitor.stop", "title": "Stop Monitoring", "category": "rung", "icon": "$(eye-closed)" },
-      { "command": "rung.env.refresh", "title": "Check This PC Again", "category": "rung", "icon": "$(refresh)" },
-      { "command": "rung.installCommand", "title": "Put rung on PATH (for Terminals and Agents)", "category": "rung", "icon": "$(terminal)" },
-      { "command": "rung.env.fix", "title": "Fix", "category": "rung" },
-      { "command": "rung.setup", "title": "Set Up Editors and Agents…", "category": "rung", "icon": "$(tools)" },
-      { "command": "rung.pull", "title": "Pull from TIA Portal", "category": "rung", "icon": "$(cloud-download)" },
-      { "command": "rung.sync", "title": "Sync Now", "category": "rung", "icon": "$(sync)" },
-      { "command": "rung.watch.start", "title": "Start Watch", "category": "rung", "icon": "$(eye)" },
-      { "command": "rung.watch.stop", "title": "Stop Watch", "category": "rung", "icon": "$(debug-stop)" },
-      { "command": "rung.watch.toggle", "title": "Toggle Watch", "category": "rung", "icon": "$(eye)" },
-      { "command": "rung.watch.show", "title": "Show Watch Terminal", "category": "rung" },
-      { "command": "rung.status", "title": "Show Status", "category": "rung", "icon": "$(info)" },
-      { "command": "rung.preview", "title": "Preview Sync", "category": "rung", "icon": "$(eye)" },
-      { "command": "rung.whoWrites", "title": "Who Writes This?", "category": "rung", "icon": "$(references)" },
-      { "command": "rung.writes.on", "title": "Turn On Writes to TIA Portal", "category": "rung", "icon": "$(unlock)" },
-      { "command": "rung.writes.off", "title": "Turn Off Writes to TIA Portal", "category": "rung", "icon": "$(lock)" },
-      { "command": "rung.quickPick", "title": "Actions…", "category": "rung", "icon": "$(list-flat)" },
-      { "command": "rung.views", "title": "Write Read-Only Views (Hardware, HMI, Tags)", "category": "rung" },
-      { "command": "rung.compileFile", "title": "Compile This File", "category": "rung", "icon": "$(tools)" },
-      { "command": "rung.compilePlc", "title": "Compile PLC", "category": "rung", "icon": "$(tools)" },
-      { "command": "rung.compileHardware", "title": "Compile Hardware", "category": "rung", "icon": "$(circuit-board)" },
-      { "command": "rung.testAll", "title": "Test All", "category": "rung", "icon": "$(beaker)" },
-      { "command": "rung.testBlock", "title": "Test This Block", "category": "rung", "icon": "$(beaker)" },
-      { "command": "rung.goOnline", "title": "Go Online", "category": "rung", "icon": "$(plug)" },
-      { "command": "rung.goOffline", "title": "Go Offline", "category": "rung", "icon": "$(debug-disconnect)" },
-      { "command": "rung.onlineState", "title": "Online State", "category": "rung", "icon": "$(pulse)" },
-      { "command": "rung.refreshPlc", "title": "Refresh Online State", "category": "rung", "icon": "$(refresh)" },
-      { "command": "rung.connect", "title": "Connect… (Find the PLC, Choose the Connection)", "category": "rung", "icon": "$(link)" },
-      { "command": "rung.interfaces", "title": "Interfaces and Reachable Devices…", "category": "rung", "icon": "$(radio-tower)" },
-      { "command": "rung.download", "title": "Download to PLC…", "category": "rung", "icon": "$(desktop-download)", "enablement": "!rung.downloading" },
-      { "command": "rung.compare", "title": "Compare with PLC", "category": "rung", "icon": "$(diff-multiple)" },
-      { "command": "rung.rename", "title": "Rename in TIA Portal…", "category": "rung", "icon": "$(edit)" },
-      { "command": "rung.openInTia", "title": "Open in TIA Portal", "category": "rung", "icon": "$(link-external)" },
-      { "command": "rung.resolveOurs", "title": "Resolve Conflict: Keep My File", "category": "rung", "icon": "$(file)" },
-      { "command": "rung.resolveTheirs", "title": "Resolve Conflict: Take TIA Version", "category": "rung", "icon": "$(cloud)" },
-      { "command": "rung.openConfig", "title": "Open rung.toml", "category": "rung", "icon": "$(settings-gear)" },
-      { "command": "rung.showOutput", "title": "Show Output", "category": "rung", "icon": "$(output)" },
-      { "command": "rung.refresh", "title": "Refresh", "category": "rung", "icon": "$(refresh)" },
-      { "command": "rung.projectView.groupByKind", "title": "Group by Block Type", "category": "rung", "icon": "$(symbol-class)" },
-      { "command": "rung.projectView.groupByFolder", "title": "Group by Folder", "category": "rung", "icon": "$(list-tree)" },
-      { "command": "rung.init", "title": "Initialize from a TIA Portal Project…", "category": "rung", "icon": "$(add)" },
-      { "command": "rung.openDocs", "title": "Open Documentation", "category": "rung" },
-      { "command": "rung.restartServer", "title": "Restart Language Server", "category": "rung" }
+      {
+        "command": "rung.assignments",
+        "title": "Assignment List (Used I/O and Memory)",
+        "category": "rung",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "rung.monitor.toggle",
+        "title": "Monitor Values (Live)",
+        "category": "rung",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "rung.monitor.stop",
+        "title": "Stop Monitoring",
+        "category": "rung",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "rung.env.refresh",
+        "title": "Check This PC Again",
+        "category": "rung",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rung.installCommand",
+        "title": "Put rung on PATH (for Terminals and Agents)",
+        "category": "rung",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "rung.env.fix",
+        "title": "Fix",
+        "category": "rung"
+      },
+      {
+        "command": "rung.setup",
+        "title": "Set Up Editors and Agents…",
+        "category": "rung",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "rung.pull",
+        "title": "Pull from TIA Portal",
+        "category": "rung",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "rung.sync",
+        "title": "Sync Now",
+        "category": "rung",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "rung.watch.start",
+        "title": "Start Watch",
+        "category": "rung",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "rung.watch.stop",
+        "title": "Stop Watch",
+        "category": "rung",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "rung.watch.toggle",
+        "title": "Toggle Watch",
+        "category": "rung",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "rung.watch.show",
+        "title": "Show Watch Terminal",
+        "category": "rung"
+      },
+      {
+        "command": "rung.status",
+        "title": "Show Status",
+        "category": "rung",
+        "icon": "$(info)"
+      },
+      {
+        "command": "rung.preview",
+        "title": "Preview Sync",
+        "category": "rung",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "rung.whoWrites",
+        "title": "Who Writes This?",
+        "category": "rung",
+        "icon": "$(references)"
+      },
+      {
+        "command": "rung.writes.on",
+        "title": "Turn On Writes to TIA Portal",
+        "category": "rung",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "rung.writes.off",
+        "title": "Turn Off Writes to TIA Portal",
+        "category": "rung",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "rung.quickPick",
+        "title": "Actions…",
+        "category": "rung",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "rung.views",
+        "title": "Write Read-Only Views (Hardware, HMI, Tags)",
+        "category": "rung"
+      },
+      {
+        "command": "rung.compileFile",
+        "title": "Compile This File",
+        "category": "rung",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "rung.compilePlc",
+        "title": "Compile PLC",
+        "category": "rung",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "rung.compileHardware",
+        "title": "Compile Hardware",
+        "category": "rung",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "rung.testAll",
+        "title": "Test All",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "rung.testBlock",
+        "title": "Test This Block",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "rung.goOnline",
+        "title": "Go Online",
+        "category": "rung",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "rung.goOffline",
+        "title": "Go Offline",
+        "category": "rung",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "rung.onlineState",
+        "title": "Online State",
+        "category": "rung",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "rung.refreshPlc",
+        "title": "Refresh Online State",
+        "category": "rung",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rung.connect",
+        "title": "Connect… (Find the PLC, Choose the Connection)",
+        "category": "rung",
+        "icon": "$(link)"
+      },
+      {
+        "command": "rung.interfaces",
+        "title": "Interfaces and Reachable Devices…",
+        "category": "rung",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "rung.download",
+        "title": "Download to PLC…",
+        "category": "rung",
+        "icon": "$(desktop-download)",
+        "enablement": "!rung.downloading"
+      },
+      {
+        "command": "rung.compare",
+        "title": "Compare with PLC",
+        "category": "rung",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "rung.rename",
+        "title": "Rename in TIA Portal…",
+        "category": "rung",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "rung.openInTia",
+        "title": "Open in TIA Portal",
+        "category": "rung",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "rung.resolveOurs",
+        "title": "Resolve Conflict: Keep My File",
+        "category": "rung",
+        "icon": "$(file)"
+      },
+      {
+        "command": "rung.resolveTheirs",
+        "title": "Resolve Conflict: Take TIA Version",
+        "category": "rung",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "rung.openConfig",
+        "title": "Open rung.toml",
+        "category": "rung",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "rung.showOutput",
+        "title": "Show Output",
+        "category": "rung",
+        "icon": "$(output)"
+      },
+      {
+        "command": "rung.refresh",
+        "title": "Refresh",
+        "category": "rung",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rung.projectView.groupByKind",
+        "title": "Group by Block Type",
+        "category": "rung",
+        "icon": "$(symbol-class)"
+      },
+      {
+        "command": "rung.projectView.groupByFolder",
+        "title": "Group by Folder",
+        "category": "rung",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "rung.init",
+        "title": "Initialize from a TIA Portal Project…",
+        "category": "rung",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rung.openDocs",
+        "title": "Open Documentation",
+        "category": "rung"
+      },
+      {
+        "command": "rung.restartServer",
+        "title": "Restart Language Server",
+        "category": "rung"
+      },
+      {
+        "command": "rung.declarations.open",
+        "title": "Show Declarations",
+        "category": "rung",
+        "icon": "$(table)"
+      }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "rung.env.fix", "when": "false" },
-        { "command": "rung.compare", "when": "rung.workspace" },
-        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/" },
-        { "command": "rung.pull", "when": "rung.workspace" },
-        { "command": "rung.sync", "when": "rung.workspace" },
-        { "command": "rung.watch.start", "when": "rung.workspace && !rung.watching" },
-        { "command": "rung.watch.stop", "when": "rung.workspace && rung.watching" },
-        { "command": "rung.watch.toggle", "when": "rung.workspace" },
-        { "command": "rung.watch.show", "when": "false" },
-        { "command": "rung.status", "when": "rung.workspace" },
-        { "command": "rung.preview", "when": "rung.workspace" },
-        { "command": "rung.writes.on", "when": "rung.workspace" },
-        { "command": "rung.writes.off", "when": "rung.workspace" },
-        { "command": "rung.views", "when": "rung.workspace" },
-        { "command": "rung.compileFile", "when": "rung.workspace && editorLangId == scl" },
-        { "command": "rung.compilePlc", "when": "rung.workspace" },
-        { "command": "rung.compileHardware", "when": "rung.workspace" },
-        { "command": "rung.testBlock", "when": "editorLangId == scl" },
-        { "command": "rung.goOnline", "when": "rung.workspace" },
-        { "command": "rung.goOffline", "when": "rung.workspace" },
-        { "command": "rung.onlineState", "when": "rung.workspace" },
-        { "command": "rung.refreshPlc", "when": "false" },
-        { "command": "rung.connect", "when": "rung.workspace" },
-        { "command": "rung.interfaces", "when": "rung.workspace" },
-        { "command": "rung.download", "when": "rung.workspace" },
-        { "command": "rung.openInTia", "when": "rung.workspace && editorLangId == scl" },
-        { "command": "rung.resolveOurs", "when": "rung.workspace && rung.hasConflicts" },
-        { "command": "rung.resolveTheirs", "when": "rung.workspace && rung.hasConflicts" },
-        { "command": "rung.openConfig", "when": "rung.workspace" },
-        { "command": "rung.refresh", "when": "false" },
-        { "command": "rung.projectView.groupByKind", "when": "false" },
-        { "command": "rung.projectView.groupByFolder", "when": "false" },
-        { "command": "rung.init", "when": "!rung.workspace" }
+        {
+          "command": "rung.env.fix",
+          "when": "false"
+        },
+        {
+          "command": "rung.compare",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.rename",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/"
+        },
+        {
+          "command": "rung.pull",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.sync",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.watch.start",
+          "when": "rung.workspace && !rung.watching"
+        },
+        {
+          "command": "rung.watch.stop",
+          "when": "rung.workspace && rung.watching"
+        },
+        {
+          "command": "rung.watch.toggle",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.watch.show",
+          "when": "false"
+        },
+        {
+          "command": "rung.status",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.preview",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.writes.on",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.writes.off",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.views",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.compileFile",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.compilePlc",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.compileHardware",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.testBlock",
+          "when": "editorLangId == scl"
+        },
+        {
+          "command": "rung.goOnline",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.goOffline",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.onlineState",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.refreshPlc",
+          "when": "false"
+        },
+        {
+          "command": "rung.connect",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.interfaces",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.download",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.openInTia",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.resolveOurs",
+          "when": "rung.workspace && rung.hasConflicts"
+        },
+        {
+          "command": "rung.resolveTheirs",
+          "when": "rung.workspace && rung.hasConflicts"
+        },
+        {
+          "command": "rung.openConfig",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.refresh",
+          "when": "false"
+        },
+        {
+          "command": "rung.projectView.groupByKind",
+          "when": "false"
+        },
+        {
+          "command": "rung.projectView.groupByFolder",
+          "when": "false"
+        },
+        {
+          "command": "rung.init",
+          "when": "!rung.workspace"
+        }
       ],
       "view/title": [
-        { "command": "rung.env.refresh", "when": "view == rung.environment", "group": "navigation@1" },
-        { "command": "rung.setup", "when": "view == rung.environment", "group": "navigation@2" },
-        { "command": "rung.sync", "when": "view == rung.project", "group": "navigation@1" },
-        { "command": "rung.projectView.groupByKind", "when": "view == rung.project && config.rung.projectView.grouping != kind", "group": "navigation@2" },
-        { "command": "rung.projectView.groupByFolder", "when": "view == rung.project && config.rung.projectView.grouping == kind", "group": "navigation@2" },
-        { "command": "rung.refresh", "when": "view == rung.project", "group": "navigation@3" },
-        { "command": "rung.pull", "when": "view == rung.project", "group": "1_sync@1" },
-        { "command": "rung.status", "when": "view == rung.project", "group": "1_sync@2" },
-        { "command": "rung.views", "when": "view == rung.project", "group": "1_sync@3" },
-        { "command": "rung.assignments", "when": "view == rung.project", "group": "1_sync@4" },
-        { "command": "rung.openConfig", "when": "view == rung.project", "group": "2_workspace@1" },
-        { "command": "rung.showOutput", "when": "view == rung.project", "group": "2_workspace@2" },
-        { "command": "rung.refreshPlc", "when": "view == rung.plc && rung.workspace", "group": "navigation@1" },
-        { "command": "rung.connect", "when": "view == rung.plc && rung.workspace", "group": "1_plc@0" },
-        { "command": "rung.interfaces", "when": "view == rung.plc && rung.workspace", "group": "1_plc@1" },
-        { "command": "rung.openConfig", "when": "view == rung.plc && rung.workspace", "group": "2_workspace@1" },
-        { "command": "rung.showOutput", "when": "view == rung.plc", "group": "2_workspace@2" }
+        {
+          "command": "rung.env.refresh",
+          "when": "view == rung.environment",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.setup",
+          "when": "view == rung.environment",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.sync",
+          "when": "view == rung.project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.projectView.groupByKind",
+          "when": "view == rung.project && config.rung.projectView.grouping != kind",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.projectView.groupByFolder",
+          "when": "view == rung.project && config.rung.projectView.grouping == kind",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.refresh",
+          "when": "view == rung.project",
+          "group": "navigation@3"
+        },
+        {
+          "command": "rung.pull",
+          "when": "view == rung.project",
+          "group": "1_sync@1"
+        },
+        {
+          "command": "rung.status",
+          "when": "view == rung.project",
+          "group": "1_sync@2"
+        },
+        {
+          "command": "rung.views",
+          "when": "view == rung.project",
+          "group": "1_sync@3"
+        },
+        {
+          "command": "rung.assignments",
+          "when": "view == rung.project",
+          "group": "1_sync@4"
+        },
+        {
+          "command": "rung.openConfig",
+          "when": "view == rung.project",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "rung.showOutput",
+          "when": "view == rung.project",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "rung.refreshPlc",
+          "when": "view == rung.plc && rung.workspace",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.connect",
+          "when": "view == rung.plc && rung.workspace",
+          "group": "1_plc@0"
+        },
+        {
+          "command": "rung.interfaces",
+          "when": "view == rung.plc && rung.workspace",
+          "group": "1_plc@1"
+        },
+        {
+          "command": "rung.openConfig",
+          "when": "view == rung.plc && rung.workspace",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "rung.showOutput",
+          "when": "view == rung.plc",
+          "group": "2_workspace@2"
+        }
       ],
       "view/item/context": [
-        { "command": "rung.compileFile", "when": "view == rung.project && viewItem =~ /\\bcompilable\\b/", "group": "inline@1" },
-        { "command": "rung.openInTia", "when": "view == rung.project && viewItem =~ /\\bopenable\\b/", "group": "inline@2" },
-        { "command": "rung.compileFile", "when": "view == rung.project && viewItem =~ /\\bcompilable\\b/", "group": "1_build@1" },
-        { "command": "rung.testBlock", "when": "view == rung.project && viewItem =~ /\\btestable\\b/", "group": "1_build@2" },
-        { "command": "rung.openInTia", "when": "view == rung.project && viewItem =~ /\\bopenable\\b/", "group": "1_build@3" },
-        { "command": "rung.resolveOurs", "when": "view == rung.project && viewItem =~ /\\bconflicted\\b/", "group": "0_conflict@1" },
-        { "command": "rung.resolveTheirs", "when": "view == rung.project && viewItem =~ /\\bconflicted\\b/", "group": "0_conflict@2" },
-        { "command": "rung.compilePlc", "when": "view == rung.project && viewItem == rung.device", "group": "1_build@1" },
-        { "command": "rung.watch.start", "when": "view == rung.plc && viewItem == rung.watch.stopped", "group": "inline" },
-        { "command": "rung.watch.stop", "when": "view == rung.plc && viewItem == rung.watch.running", "group": "inline" },
-        { "command": "rung.goOnline", "when": "view == rung.plc && viewItem == rung.plc", "group": "inline@1" },
-        { "command": "rung.goOffline", "when": "view == rung.plc && viewItem =~ /^rung\\.plc online$/", "group": "inline@1" },
-        { "command": "rung.onlineState", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "inline@2" },
-        { "command": "rung.goOnline", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@1" },
-        { "command": "rung.goOffline", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@2" },
-        { "command": "rung.onlineState", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@3" },
-        { "command": "rung.compilePlc", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "2_build@1" },
-        { "command": "rung.compileHardware", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "2_build@2" },
-        { "command": "rung.connect", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@0" },
-        { "command": "rung.interfaces", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@1" },
-        { "command": "rung.openConfig", "when": "view == rung.plc && viewItem == rung.connection", "group": "inline" },
-        { "command": "rung.download", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "3_plc@2" },
-        { "command": "rung.compare", "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/", "group": "1_online@4" }
+        {
+          "command": "rung.compileFile",
+          "when": "view == rung.project && viewItem =~ /\\bcompilable\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "rung.openInTia",
+          "when": "view == rung.project && viewItem =~ /\\bopenable\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "rung.compileFile",
+          "when": "view == rung.project && viewItem =~ /\\bcompilable\\b/",
+          "group": "1_build@1"
+        },
+        {
+          "command": "rung.testBlock",
+          "when": "view == rung.project && viewItem =~ /\\btestable\\b/",
+          "group": "1_build@2"
+        },
+        {
+          "command": "rung.openInTia",
+          "when": "view == rung.project && viewItem =~ /\\bopenable\\b/",
+          "group": "1_build@3"
+        },
+        {
+          "command": "rung.resolveOurs",
+          "when": "view == rung.project && viewItem =~ /\\bconflicted\\b/",
+          "group": "0_conflict@1"
+        },
+        {
+          "command": "rung.resolveTheirs",
+          "when": "view == rung.project && viewItem =~ /\\bconflicted\\b/",
+          "group": "0_conflict@2"
+        },
+        {
+          "command": "rung.compilePlc",
+          "when": "view == rung.project && viewItem == rung.device",
+          "group": "1_build@1"
+        },
+        {
+          "command": "rung.watch.start",
+          "when": "view == rung.plc && viewItem == rung.watch.stopped",
+          "group": "inline"
+        },
+        {
+          "command": "rung.watch.stop",
+          "when": "view == rung.plc && viewItem == rung.watch.running",
+          "group": "inline"
+        },
+        {
+          "command": "rung.goOnline",
+          "when": "view == rung.plc && viewItem == rung.plc",
+          "group": "inline@1"
+        },
+        {
+          "command": "rung.goOffline",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc online$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "rung.onlineState",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "rung.goOnline",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "1_online@1"
+        },
+        {
+          "command": "rung.goOffline",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "1_online@2"
+        },
+        {
+          "command": "rung.onlineState",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "1_online@3"
+        },
+        {
+          "command": "rung.compilePlc",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "2_build@1"
+        },
+        {
+          "command": "rung.compileHardware",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "2_build@2"
+        },
+        {
+          "command": "rung.connect",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "3_plc@0"
+        },
+        {
+          "command": "rung.interfaces",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "3_plc@1"
+        },
+        {
+          "command": "rung.openConfig",
+          "when": "view == rung.plc && viewItem == rung.connection",
+          "group": "inline"
+        },
+        {
+          "command": "rung.download",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "3_plc@2"
+        },
+        {
+          "command": "rung.compare",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "1_online@4"
+        }
       ],
       "editor/title": [
-        { "command": "rung.compileFile", "when": "rung.workspace && resourceLangId == scl", "group": "navigation@1" },
-        { "command": "rung.testBlock", "when": "rung.workspace && resourceLangId == scl", "group": "navigation@2" },
-        { "command": "rung.openInTia", "when": "rung.workspace && resourceLangId == scl", "group": "navigation@3" },
-        { "command": "rung.monitor.toggle", "when": "rung.workspace && resourceLangId == scl && !rung.monitoring", "group": "navigation@4" },
-        { "command": "rung.monitor.stop", "when": "rung.workspace && rung.monitoring", "group": "navigation@4" }
+        {
+          "command": "rung.declarations.open",
+          "when": "resourceLangId == scl",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rung.compileFile",
+          "when": "rung.workspace && resourceLangId == scl",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.testBlock",
+          "when": "rung.workspace && resourceLangId == scl",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.openInTia",
+          "when": "rung.workspace && resourceLangId == scl",
+          "group": "navigation@3"
+        },
+        {
+          "command": "rung.monitor.toggle",
+          "when": "rung.workspace && resourceLangId == scl && !rung.monitoring",
+          "group": "navigation@4"
+        },
+        {
+          "command": "rung.monitor.stop",
+          "when": "rung.workspace && rung.monitoring",
+          "group": "navigation@4"
+        }
       ],
       "editor/context": [
-        { "command": "rung.resolveOurs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@1" },
-        { "command": "rung.resolveTheirs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@2" },
-        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl)$/", "group": "rung@3" },
-        { "command": "rung.whoWrites", "when": "editorLangId == scl || editorLangId == s7dcl", "group": "navigation@9" }
+        {
+          "command": "rung.resolveOurs",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@1"
+        },
+        {
+          "command": "rung.resolveTheirs",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@2"
+        },
+        {
+          "command": "rung.rename",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl)$/",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.whoWrites",
+          "when": "editorLangId == scl || editorLangId == s7dcl",
+          "group": "navigation@9"
+        }
       ],
       "explorer/context": [
-        { "command": "rung.rename", "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/", "group": "rung@5" },
-        { "command": "rung.compileFile", "when": "rung.workspace && resourceLangId == scl", "group": "rung@1" },
-        { "command": "rung.openInTia", "when": "rung.workspace && resourceLangId == scl", "group": "rung@2" },
-        { "command": "rung.resolveOurs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@3" },
-        { "command": "rung.resolveTheirs", "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/", "group": "rung@4" }
+        {
+          "command": "rung.rename",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(scl|db|udt|s7dcl|xml)$/",
+          "group": "rung@5"
+        },
+        {
+          "command": "rung.compileFile",
+          "when": "rung.workspace && resourceLangId == scl",
+          "group": "rung@1"
+        },
+        {
+          "command": "rung.openInTia",
+          "when": "rung.workspace && resourceLangId == scl",
+          "group": "rung@2"
+        },
+        {
+          "command": "rung.resolveOurs",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.resolveTheirs",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@4"
+        }
       ]
     },
     "keybindings": [
-      { "key": "alt+q s", "command": "rung.sync", "when": "rung.workspace" },
-      { "key": "alt+q shift+s", "command": "rung.preview", "when": "rung.workspace" },
-      { "key": "alt+q u", "command": "rung.whoWrites", "when": "editorLangId == scl || editorLangId == s7dcl" },
-      { "key": "alt+q v", "command": "rung.monitor.toggle", "when": "rung.workspace && editorLangId == scl" },
-      { "key": "alt+q w", "command": "rung.watch.toggle", "when": "rung.workspace" },
-      { "key": "alt+q b", "command": "rung.compileFile", "when": "rung.workspace && editorLangId == scl" },
-      { "key": "alt+q shift+b", "command": "rung.compilePlc", "when": "rung.workspace" },
-      { "key": "alt+q h", "command": "rung.compileHardware", "when": "rung.workspace" },
-      { "key": "alt+q t", "command": "rung.testBlock", "when": "rung.workspace && editorLangId == scl" },
-      { "key": "alt+q shift+t", "command": "rung.testAll", "when": "rung.workspace" },
-      { "key": "alt+q o", "command": "rung.goOnline", "when": "rung.workspace" },
-      { "key": "alt+q f", "command": "rung.goOffline", "when": "rung.workspace" },
-      { "key": "alt+q c", "command": "rung.connect", "when": "rung.workspace" },
-      { "key": "alt+q i", "command": "rung.interfaces", "when": "rung.workspace" },
-      { "key": "alt+q d", "command": "rung.download", "when": "rung.workspace" },
-      { "key": "alt+q m", "command": "rung.compare", "when": "rung.workspace" },
-      { "key": "alt+q r", "command": "rung.rename", "when": "rung.workspace && editorLangId =~ /^(scl|s7dcl)$/" },
-      { "key": "alt+q e", "command": "rung.openInTia", "when": "rung.workspace && editorLangId == scl" },
-      { "key": "alt+q p", "command": "rung.pull", "when": "rung.workspace" },
-      { "key": "alt+q q", "command": "rung.quickPick", "when": "rung.workspace" }
+      {
+        "key": "alt+q s",
+        "command": "rung.sync",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q shift+s",
+        "command": "rung.preview",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q u",
+        "command": "rung.whoWrites",
+        "when": "editorLangId == scl || editorLangId == s7dcl"
+      },
+      {
+        "key": "alt+q v",
+        "command": "rung.monitor.toggle",
+        "when": "rung.workspace && editorLangId == scl"
+      },
+      {
+        "key": "alt+q w",
+        "command": "rung.watch.toggle",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q b",
+        "command": "rung.compileFile",
+        "when": "rung.workspace && editorLangId == scl"
+      },
+      {
+        "key": "alt+q shift+b",
+        "command": "rung.compilePlc",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q h",
+        "command": "rung.compileHardware",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q t",
+        "command": "rung.testBlock",
+        "when": "rung.workspace && editorLangId == scl"
+      },
+      {
+        "key": "alt+q shift+t",
+        "command": "rung.testAll",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q o",
+        "command": "rung.goOnline",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q f",
+        "command": "rung.goOffline",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q c",
+        "command": "rung.connect",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q i",
+        "command": "rung.interfaces",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q d",
+        "command": "rung.download",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q m",
+        "command": "rung.compare",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q r",
+        "command": "rung.rename",
+        "when": "rung.workspace && editorLangId =~ /^(scl|s7dcl)$/"
+      },
+      {
+        "key": "alt+q e",
+        "command": "rung.openInTia",
+        "when": "rung.workspace && editorLangId == scl"
+      },
+      {
+        "key": "alt+q p",
+        "command": "rung.pull",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q q",
+        "command": "rung.quickPick",
+        "when": "rung.workspace"
+      },
+      {
+        "key": "alt+q d",
+        "command": "rung.declarations.open",
+        "when": "editorLangId == scl"
+      }
     ],
     "configuration": [
       {
@@ -248,8 +955,12 @@
         "properties": {
           "rung.command": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["rung"],
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "rung"
+            ],
             "scope": "machine-overridable",
             "markdownDescription": "How to start the rung CLI: the program and any leading arguments. `[\"rung\"]` uses `rung` from PATH. For a source checkout: `[\"node\", \"C:/path/to/rung/packages/cli/dist/index.js\"]`. The language server, the views and all commands use it."
           },
@@ -265,14 +976,26 @@
           },
           "rung.output.verbosity": {
             "type": "string",
-            "enum": ["quiet", "normal", "verbose"],
-            "enumDescriptions": ["Only failures.", "Command lines and the output of background commands.", "Also background refreshes, how rung is started and workspace reloads."],
+            "enum": [
+              "quiet",
+              "normal",
+              "verbose"
+            ],
+            "enumDescriptions": [
+              "Only failures.",
+              "Command lines and the output of background commands.",
+              "Also background refreshes, how rung is started and workspace reloads."
+            ],
             "default": "normal",
             "description": "How much the extension writes to the rung output channel."
           },
           "rung.trace.server": {
             "type": "string",
-            "enum": ["off", "messages", "verbose"],
+            "enum": [
+              "off",
+              "messages",
+              "verbose"
+            ],
             "default": "off",
             "description": "Log the messages between VS Code and the rung language server."
           }
@@ -305,8 +1028,14 @@
           },
           "rung.projectView.grouping": {
             "type": "string",
-            "enum": ["folder", "kind"],
-            "enumDescriptions": ["TIA Portal folders, as in the project tree.", "Blocks split into OB, FB, FC and DB; the folder is shown next to each block."],
+            "enum": [
+              "folder",
+              "kind"
+            ],
+            "enumDescriptions": [
+              "TIA Portal folders, as in the project tree.",
+              "Blocks split into OB, FB, FC and DB; the folder is shown next to each block."
+            ],
             "default": "folder",
             "description": "How the Project view groups program blocks."
           },
@@ -335,8 +1064,14 @@
         "properties": {
           "rung.download.confirmation": {
             "type": "string",
-            "enum": ["typeName", "modal"],
-            "enumDescriptions": ["After the warning dialog, type the PLC name to start the download.", "The warning dialog alone starts the download."],
+            "enum": [
+              "typeName",
+              "modal"
+            ],
+            "enumDescriptions": [
+              "After the warning dialog, type the PLC name to start the download.",
+              "The warning dialog alone starts the download."
+            ],
             "default": "typeName",
             "scope": "application",
             "markdownDescription": "How a download is confirmed. There is always a warning dialog naming the PLC and what is downloaded. User settings only, so a workspace cannot weaken it."
@@ -348,8 +1083,16 @@
           },
           "rung.download.hardware": {
             "type": "string",
-            "enum": ["rungToml", "include", "exclude"],
-            "enumDescriptions": ["Use [download].hardware from rung.toml (off unless set).", "Pass --hw: include the hardware configuration.", "Pass --no-hw: software only."],
+            "enum": [
+              "rungToml",
+              "include",
+              "exclude"
+            ],
+            "enumDescriptions": [
+              "Use [download].hardware from rung.toml (off unless set).",
+              "Pass --hw: include the hardware configuration.",
+              "Pass --no-hw: software only."
+            ],
             "default": "rungToml",
             "description": "Whether a download includes the hardware configuration."
           },
@@ -367,8 +1110,34 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["stop-cpu", "stop-h-system", "reinit-db", "init-memory", "reset-module", "overwrite-system-data", "different-target", "abort-active-test", "protection-level-changed", "overwrite-memory-card", "switch-to-primary", "selective-delete"],
-              "enumDescriptions": ["Stop the CPU.", "Stop the H system.", "Reinitialise data blocks (actual values are lost).", "Initialise memory.", "Reset the module (delete all).", "Overwrite system data.", "Download although the target configuration differs.", "Abort an active test or force job.", "Continue although the protection level changed.", "Overwrite the memory card.", "Switch the backup CPU to primary.", "Delete blocks that are not in the project."]
+              "enum": [
+                "stop-cpu",
+                "stop-h-system",
+                "reinit-db",
+                "init-memory",
+                "reset-module",
+                "overwrite-system-data",
+                "different-target",
+                "abort-active-test",
+                "protection-level-changed",
+                "overwrite-memory-card",
+                "switch-to-primary",
+                "selective-delete"
+              ],
+              "enumDescriptions": [
+                "Stop the CPU.",
+                "Stop the H system.",
+                "Reinitialise data blocks (actual values are lost).",
+                "Initialise memory.",
+                "Reset the module (delete all).",
+                "Overwrite system data.",
+                "Download although the target configuration differs.",
+                "Abort an active test or force job.",
+                "Continue although the protection level changed.",
+                "Overwrite the memory card.",
+                "Switch the backup CPU to primary.",
+                "Delete blocks that are not in the project."
+              ]
             },
             "uniqueItems": true,
             "default": [],
@@ -381,11 +1150,13 @@
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",
-    "build": "tsc -p . --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=out/extension.js --sourcemap --log-level=warning",
-    "package": "npm run build -- --minify && vsce package --no-dependencies -o rung-scl.vsix",
-    "test:e2e": "tsc -p test-e2e && npm run build && node test-e2e/out/test-e2e/runTest.js"
+    "build": "tsc -p . --noEmit && npm run build:ext && node scripts/build-webview.mjs",
+    "package": "tsc -p . --noEmit && npm run build:ext -- --minify && node scripts/build-webview.mjs --minify && vsce package --no-dependencies -o rung-scl.vsix",
+    "test:e2e": "tsc -p test-e2e && npm run build && node test-e2e/out/test-e2e/runTest.js",
+    "build:ext": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=out/extension.js --sourcemap --log-level=warning"
   },
   "dependencies": {
+    "lit": "^3.3.3",
     "smol-toml": "^1.9.0",
     "vscode-languageclient": "^9.0.1"
   },
@@ -393,6 +1164,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.18.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/codicons": "^0.0.36",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.12",

@@ -774,6 +774,22 @@ describe("rung extension on a fake-bridge workspace", function () {
     });
   });
 
+  describe("declarations", () => {
+    it("opens beside the SCL editor, follows it and changes nothing", async () => {
+      await closeAll();
+      const editor = await openDoc(MOTOR);
+      await vscode.commands.executeCommand("rung.declarations.open");
+      const tab = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs).find((t) => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith("rung.declarations"));
+      await waitFor("the declarations panel opened", () => !!tab());
+      await waitFor("the panel is titled after the block", () => /Fx_Motor/.test(tab()!.label));
+      assert.notEqual(tab()!.group.viewColumn, editor.viewColumn);
+      assert.equal(editor.document.isDirty, false);
+      await openDoc(PUMP);
+      await waitFor("the panel followed the active SCL editor", () => /Fx_Pump/.test(tab()?.label ?? ""));
+      await closeAll();
+    });
+  });
+
   after(async () => {
     await closeAll();
   });

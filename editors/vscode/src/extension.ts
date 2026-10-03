@@ -3,6 +3,7 @@
 // Every action runs the rung CLI (setting rung.command); workspace files are only read here.
 import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
+import { DeclarationsPanel } from "./declarations/panel";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
 import { addToUserPath, installBundledRung, onPath } from "./bundled";
@@ -78,6 +79,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     vscode.commands.registerCommand("rung.monitor.stop", () => monitor.stop()),
   );
   context.subscriptions.push(project, plc, environment, decorations, statusBar, new BlockCodeLens(ws));
+  context.subscriptions.push(
+    DeclarationsPanel.register(context, { lsp, ws }),
+    vscode.commands.registerCommand("rung.declarations.open", (uri?: vscode.Uri, position?: vscode.Position) =>
+      DeclarationsPanel.show(context, { lsp: lsp!, ws }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
+    ),
+  );
   context.subscriptions.push(
     vscode.commands.registerCommand("rung.env.refresh", () => environment.refresh()),
     vscode.commands.registerCommand("rung.installCommand", async () => {
