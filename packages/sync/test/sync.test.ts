@@ -708,6 +708,14 @@ describe("syncOnce", () => {
     expect(after.pendingDeletes + after.exported).toBe(0);
   });
 
+  it("a file deleted since the last pass can be confirmed at once, as rung status already lists it", async () => {
+    const t = setup();
+    await t.sync();
+    unlinkSync(t.f(pA));
+    await t.withState((s) => confirmDelete(t.root, t.bridge, s, A));
+    expect(t.bridge.deletes).toEqual([A]);
+  });
+
   it("a block others still use: the confirmation names them and only --force deletes it", async () => {
     const t = setup((b) => b.add(A, { content: srcA }).add(B, { content: 'FUNCTION "Fx_B" : Void\nBEGIN\n  "Fx_A"();\nEND_FUNCTION\n' }));
     await t.sync();

@@ -37,7 +37,11 @@ describe("rung rename", () => {
     const { root, bridge, config, state } = await setup();
     mkdirSync(join(root, "tests", "drives"), { recursive: true });
     writeFileSync(join(root, "tests", "drives", "counter.test.yaml"), "block: Fx_Counter # the FB\ncases:\n  - steps:\n      - expect: { '\"Fx_Counter\".x': 1 }\n");
+    // what an earlier pass said about the new name (a hand rename it held back) is answered by the rename
+    mkdirSync(join(root, ".rung"), { recursive: true });
+    writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ seq: 3, items: [{ address: "plc:PLC_1/blocks/Drives/Fx_Pulse", path: "plc/PLC_1/blocks/Drives/Fx_Pulse.scl", code: "LOOKS_LIKE_RENAME", severity: "error", message: "held back" }] }));
     const r = await renameObject(root, bridge, state, config, "plc:PLC_1/blocks/Drives/Fx_Counter", "Fx_Pulse");
+    expect(JSON.parse(readFileSync(join(root, ".rung", "diagnostics.json"), "utf8")).items).toEqual([]);
     expect(readFileSync(join(root, "tests", "drives", "counter.test.yaml"), "utf8")).toBe("block: Fx_Pulse # the FB\ncases:\n  - steps:\n      - expect: { '\"Fx_Pulse\".x': 1 }\n");
     expect(r.users).toContain("tests/drives/counter.test.yaml");
     expect(r).toMatchObject({ from: "plc:PLC_1/blocks/Drives/Fx_Counter", to: "plc:PLC_1/blocks/Drives/Fx_Pulse", oldPath: "plc/PLC_1/blocks/Drives/Fx_Counter.scl", newPath: "plc/PLC_1/blocks/Drives/Fx_Pulse.scl" });

@@ -52,6 +52,16 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
   const report = await pull(root, bridge, state, { config });
   for (const w of report.warnings) if (w.code === "INCONSISTENT" && inconsistent.has(w.address)) w.message = `already inconsistent before rename; ${w.message ?? "run rung compile"}`;
   users.push(...(await renameInTests(root, oldName, newName)));
+  // what the last pass said about either name (a hand rename held back, a missing block) is answered now
+  const gone = new Set([address, to, st.path, state.get(to)?.path].filter((x): x is string => !!x));
+  const file = join(root, ".rung", "diagnostics.json");
+  try {
+    const doc = JSON.parse(await readFile(file, "utf8")) as { seq?: number; items?: { address?: string; path?: string; code?: string }[] };
+    const items = (doc.items ?? []).filter((d) => d.code === "COMPILE" || !(gone.has(d.address ?? "") || gone.has(d.path ?? "")));
+    if (items.length !== (doc.items ?? []).length) await writeFile(file, JSON.stringify({ ...doc, items }, null, 2) + "\n");
+  } catch {
+    /* no diagnostics yet */
+  }
   return { from: address, to, oldPath: st.path, ...(state.get(to) ? { newPath: state.get(to)!.path } : {}), users, pull: report };
 }
 

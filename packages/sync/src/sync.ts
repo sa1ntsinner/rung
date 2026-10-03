@@ -1274,9 +1274,10 @@ export async function confirmDelete(
   opts: { force?: boolean } = {},
 ): Promise<{ users: string[] }> {
   const st = state.get(address);
-  if (!st || st.status !== "pendingDelete") throw new WorkspaceError("NOTHING_PENDING", `${address} has no pending delete (rung status lists them)`);
-  if ((await localStatus(root, st.files)) !== "missing" || (await Promise.all(st.files.map((f) => diskHash(root, f.path)))).some((h) => h !== "absent"))
-    throw new WorkspaceError("LOCAL_CHANGES", `${address} has files again; delete not confirmed`);
+  const gone = !!st && (await Promise.all(st.files.map((f) => diskHash(root, f.path)))).every((h) => h === "absent");
+  // a file deleted since the last pass is a pending delete as well: rung status lists it so
+  if (!st || (st.status !== "pendingDelete" && !(st.status === "synced" && gone))) throw new WorkspaceError("NOTHING_PENDING", `${address} has no pending delete (rung status lists them)`);
+  if (!gone) throw new WorkspaceError("LOCAL_CHANGES", `${address} has files again; delete not confirmed`);
   const { name } = parseAddress(address);
   if (isDefaultTagTable(address))
     throw new WorkspaceError("NOT_DELETABLE", `TIA Portal never deletes a PLC's default tag table; restore ${st.path} (git checkout -- "${st.path}", or rung pull)`);
