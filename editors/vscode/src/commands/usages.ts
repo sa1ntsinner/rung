@@ -14,18 +14,20 @@ interface Site {
   /** Reached inside a block the structure holding it is handed to: that call. */
   through?: { block: string; param: string; uri: string; range: vscode.Range; text: string };
   whole?: boolean;
+  /** A call that hands the value on to this block's in/out or output; what that block does with it is listed. */
+  handedTo?: { block: string; param: string };
 }
 
 export async function whoWrites(lsp: Lsp): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
   const word = editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active, /"[^"\n]+"|#?[A-Za-z_][\w]*/));
-  const r = await lsp.request<{ writes: Site[]; reads: Site[] }>("rung/usages", { textDocument: { uri: editor.document.uri.toString() }, position: editor.selection.active });
+  const r = await lsp.request<{ writes: Site[]; reads: Site[]; handedOn?: Site[] }>("rung/usages", { textDocument: { uri: editor.document.uri.toString() }, position: editor.selection.active });
   if (!r) {
     void vscode.window.showWarningMessage("The rung language server is not running.");
     return;
   }
-  if (!r.writes.length && !r.reads.length) {
+  if (!r.writes.length && !r.reads.length && !r.handedOn?.length) {
     void vscode.window.showInformationMessage(`rung finds no use of ${word || "this"} in the workspace.`);
     return;
   }
@@ -42,6 +44,8 @@ export async function whoWrites(lsp: Lsp): Promise<void> {
   }
   items.push({ label: `reads (${r.reads.length})`, kind: vscode.QuickPickItemKind.Separator });
   for (const s of r.reads) items.push({ label: `$(eye) ${s.text}`, description: block(s), detail: where(s), site: s }, ...through(s));
+  if (r.handedOn?.length) items.push({ label: `handed on (${r.handedOn.length})`, kind: vscode.QuickPickItemKind.Separator });
+  for (const s of r.handedOn ?? []) items.push({ label: `$(arrow-right) ${s.text}`, description: `${block(s)}, to ${s.handedTo!.block} as ${s.handedTo!.param}`, detail: where(s), site: s }, ...through(s));
   const pick = await vscode.window.showQuickPick(items, {
     title: `Who writes ${word}? (HMI, communication and indirect access are not seen)`,
     matchOnDescription: true,

@@ -1495,7 +1495,7 @@ describe("syncQuick: the files rung watch saw change, without listing the projec
     await t.sync();
     t.bridge.edit(A, { ".scl": srcA.replace("#z := 3;", "#z := 30;") });
     t.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
-    expect(await quick(t, [pA])).toBeNull();
+    expect(await quick(t, [pA])).toMatchObject({ imported: 0, needsComplete: true });
     const r = await t.sync(6000);
     expect(r.merged).toBe(1);
     const text = t.bridge.objects.get(A)!.files[".scl"]!;

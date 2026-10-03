@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { RungConfig, StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
-import { syncOnce, syncQuick, type Refusal, type SyncBridge, type SyncOptions, type SyncReport } from "./sync.js";
+import { mergePasses, syncOnce, syncQuick, type Refusal, type SyncBridge, type SyncOptions, type SyncReport } from "./sync.js";
 
 export interface ClosableBridge extends SyncBridge {
   close(): Promise<void>;
@@ -185,18 +185,21 @@ export class Watcher {
       this.bridge ??= await this.newBridge();
       await this.reload();
       const options = { validateTags: this.opts.validateTags, config: this.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
+      let partial: SyncReport | null = null;
       if (!full) {
         // a saved file goes to TIA Portal without listing the whole project; what it cannot handle, the complete pass does
         const quick = files.length ? await syncQuick(this.root, this.bridge, this.state, options, files) : null;
-        if (quick) return this.reported(mergeQuick(this.lastReport, quick), now);
-        if (!files.length) return this.lastReport;
+        if (quick && !quick.needsComplete) return this.reported(mergeQuick(this.lastReport, quick), now);
+        if (!quick && !files.length) return this.lastReport;
+        // what went in before TIA Portal refused a caller as stale is reported with the complete pass that merges it
+        partial = quick;
       }
       const t0 = Date.now();
       const r = await syncOnce(this.root, this.bridge, this.state, options).finally(() => {
         this.lastPassMs = Date.now() - t0;
         this.lastPassEnd = (this.opts.now ?? Date.now)();
       });
-      return this.reported(r, now);
+      return this.reported(partial ? mergePasses(partial, r) : r, now);
     } catch (e) {
       const err = e as Error;
       this.lastError = err.message;

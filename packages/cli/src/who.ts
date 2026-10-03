@@ -4,7 +4,7 @@
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { WorkspaceError } from "@rung/core";
-import { LineIndex, WorkspaceIndex, nearest, scopedTo, usagesAt, usagesOfPath, type UsageSite } from "@rung/lsp";
+import { LineIndex, WorkspaceIndex, nearest, parseAbsolute, scopedTo, usagesAt, usagesOfPath, type UsageSite, type Usages } from "@rung/lsp";
 import { findWorkspace, type Io } from "./common.js";
 
 /** `"Line_DB".Pump.Running`, `Line_DB.Speed`, `#Speed`, `Levels[2]`: the names without quotes, # or index (any element counts). */
@@ -31,6 +31,17 @@ function occurrence(index: WorkspaceIndex, parts: string[], file?: string): { ur
   return undefined;
 }
 
+/** The first place the code uses an address (`%M10.0` as TIA Portal writes it), in `file` first; `x AT %M10.0` declares. */
+function addressUse(index: WorkspaceIndex, key: string, file?: string): { uri: string; start: number } | undefined {
+  const uris = [...index.docs.keys()].sort((a, b) => (a === file ? -1 : b === file ? 1 : 0));
+  for (const uri of uris) {
+    const code = (index.docs.get(uri)?.parsed?.tokens ?? []).filter((t) => t.kind !== "comment");
+    const i = code.findIndex((t, j) => t.kind === "absolute" && code[j - 1]?.text.toUpperCase() !== "AT" && parseAbsolute(t.text)?.address === key);
+    if (i >= 0) return { uri, start: code[i]!.start };
+  }
+  return undefined;
+}
+
 export async function cmdWho(dir: string, name: string | undefined, v: Record<string, unknown>, io: Io): Promise<number> {
   if (!name?.trim()) throw new WorkspaceError("BAD_ARGUMENT", 'rung who needs a name: a tag, a DB member or a variable (rung who "Line_DB".Speed)');
   const ws = await findWorkspace(dir).catch(() => dir);
@@ -43,18 +54,23 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     return { path: relative(ws, fileURLToPath(uri)).split(sep).join("/"), line: pos.line + 1, text: text.split("\n")[pos.line]?.trim() ?? "" };
   };
   const scoped = file ? scopedTo(index, file) : index;
-  // an address (%I0.0) means the tag at it, as TIA Portal's cross-reference reads it
-  const address = /^%[A-Za-z]+[\d.]+$/.test(name.trim()) ? scoped.allGlobals().find((g) => g.tag?.address?.toUpperCase() === name.trim().toUpperCase()) : undefined;
-  if (/^%/.test(name.trim()) && !address) {
-    io.stderr(`rung: no PLC tag is at ${name.trim()} (rung assignments lists every address in use)\n`);
+  // an address (%I0.0) means the tag at it, as TIA Portal's cross-reference reads it; without a tag, its uses in the code
+  const key = /^%/.test(name.trim()) ? parseAbsolute(name.trim())?.address : undefined;
+  const address = key ? scoped.allGlobals().find((g) => g.tag?.address !== undefined && parseAbsolute(g.tag.address)?.address === key) : undefined;
+  const untagged = key && !address ? addressUse(index, key, file) : undefined;
+  if (/^%/.test(name.trim()) && !address && !untagged) {
+    io.stderr(`rung: no PLC tag is at ${name.trim()}, and no code uses it (rung assignments lists every address in use)\n`);
     return 1;
   }
   if (address) io.stdout(`${name.trim()} is the PLC tag ${address.name}\n`);
-  const parts = partsOf(address ? address.name : name);
-  const head = scoped.global(parts[0]!);
-  let r: { writes: UsageSite[]; reads: UsageSite[] };
+  if (untagged) io.stdout(`no PLC tag is at ${name.trim()}; the code uses the address itself\n`);
+  const parts = untagged ? [name.trim()] : partsOf(address ? address.name : name);
+  const head = untagged ? undefined : scoped.global(parts[0]!);
+  let r: Usages;
   let declared: { uri?: string; start?: number } | undefined;
-  if (parts.length > 1 && head?.block?.kind === "DB") {
+  if (untagged) {
+    r = usagesAt(index, untagged.uri, untagged.start);
+  } else if (parts.length > 1 && head?.block?.kind === "DB") {
     // a DB member: this DB's, not every member of that name in the data type
     const members = scoped.resolveChain(scoped.membersOfType(head.name), parts.slice(1).map((n) => ({ name: n })));
     const miss = members.findIndex((m) => !m);
@@ -70,9 +86,11 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     r = instance && declared?.uri !== undefined && declared.start !== undefined ? usagesAt(index, declared.uri, declared.start) : usagesOfPath(index, head, parts.slice(1));
   } else {
     const at = occurrence(index, parts, file);
-    if (!at) {
+    const tag = parts.length === 1 ? head : undefined;
+    // a tag whose address is written in the code (a file TIA Portal has not rewritten to the name yet) is used there
+    const byAddress = !at && tag?.tag?.address !== undefined ? usagesAt(index, tag.uri, tag.start) : undefined;
+    if (!at && !(byAddress && byAddress.writes.length + byAddress.reads.length)) {
       // declared but used nowhere, or a name that is not there at all (a typo)
-      const tag = parts.length === 1 ? head : undefined;
       const local = [...index.docs.values()].flatMap((d) => (d.parsed?.blocks ?? []).flatMap((b) => b.vars.filter((x) => x.name.toUpperCase() === parts.at(-1)!.toUpperCase()).map((x) => ({ uri: d.uri, block: b.name, start: x.start }))))[0];
       if (tag) {
         const w = where(tag.uri, tag.start);
@@ -89,10 +107,10 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
       io.stderr(`rung: no tag, DB member or variable named ${name} in ${ws}${hint ? ` (did you mean ${hint}?)` : ""}\n`);
       return 1;
     }
-    r = usagesAt(index, at.uri, at.offset);
+    r = at ? usagesAt(index, at.uri, at.offset) : byAddress!;
   }
-  // an input tag is written by its input module, through the process image, before every cycle
-  const input = parts.length === 1 && head?.tag?.address && /^%I/i.test(head.tag.address) ? head.tag.address : undefined;
+  // an input is written by its input module, through the process image, before every cycle
+  const input = untagged ? (/^%I/.test(key!) ? key : undefined) : parts.length === 1 && head?.tag?.address && /^%I/i.test(head.tag.address) ? head.tag.address : undefined;
   if (v.json) {
     const site = (s: UsageSite) => ({
       ...where(s.uri, s.start),
@@ -101,11 +119,12 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
       ...(s.whole ? { whole: true } : {}),
       ...(s.through ? { through: { block: s.through.block, param: s.through.param, ...where(s.through.uri, s.through.start) } } : {}),
       ...(s.calledFrom ? { calledFrom: s.calledFrom.map((c) => ({ block: c.block, ...where(c.uri, c.start) })) } : {}),
+      ...(s.handedTo ? { handedTo: s.handedTo } : {}),
     });
-    io.stdout(JSON.stringify({ name, ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site) }, null, 2) + "\n");
+    io.stdout(JSON.stringify({ name, ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site), ...(r.handedOn ? { handedOn: r.handedOn.map(site) } : {}) }, null, 2) + "\n");
     return 0;
   }
-  if (!r.writes.length && !r.reads.length && declared?.uri !== undefined) {
+  if (!r.writes.length && !r.reads.length && !r.handedOn?.length && declared?.uri !== undefined) {
     const w = where(declared.uri, declared.start!);
     io.stdout(`${name}: declared (${w.path}:${w.line}), used nowhere\n`);
     return 0;
@@ -131,6 +150,12 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
   }
   if (r.reads.length) io.stdout("reads\n");
   for (const s of r.reads) line(s);
+  // a call that only hands it on to an in/out or output: what that block does with it is listed above
+  if (r.handedOn?.length) io.stdout("handed on\n");
+  for (const s of r.handedOn ?? []) {
+    line(s);
+    io.stdout(`  ${"".padEnd(20)}   to ${s.handedTo!.block} as ${s.handedTo!.param}\n`);
+  }
   io.stdout("not seen: HMI, communication blocks, indirect access (pointers, VARIANT, PEEK/POKE)\n");
   return 0;
 }

@@ -357,8 +357,10 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const hit = refAt(index, uri, offset);
   const out: Location[] = [];
+  // a PLC tag's declaration in its tag table: the tag, used by name
+  const tagDecl = !hit && TAG_TEXT.test(uri) ? index.allGlobals().find((s) => s.uri === uri && s.tag && offset >= s.start && offset <= s.end) : undefined;
   // a member (`"Db".x.y`, `#inst.x`), a DB start value (`x := 1;` in a DB), a named argument, or a declaration (in an FC: its own uses)
-  const onDecl = !hit ? declAt(index.blockAt(uri, offset)?.vars ?? [], offset) : undefined;
+  const onDecl = !hit && !tagDecl ? declAt(index.blockAt(uri, offset)?.vars ?? [], offset) : undefined;
   const arg = !hit && !onDecl ? argAt(index, uri, offset)?.param : undefined;
   const memberTarget =
     hit && (hit.member >= 0 || (hit.ref.kind === "local" && hit.block.kind === "DB")) ? definition(index, uri, offset)
@@ -377,7 +379,7 @@ export function references(index: WorkspaceIndex, uri: string, offset: number, i
     return out;
   }
   // a global (under the cursor as a reference or as a block header name)
-  let name = hit && hit.member < 0 ? hit.ref.name : undefined;
+  let name = hit && hit.member < 0 ? hit.ref.name : tagDecl?.name;
   if (!name) {
     const b = index.blockAt(uri, offset);
     if (b && offset >= b.nameStart && offset <= b.nameEnd) name = b.name;
@@ -478,6 +480,8 @@ export interface UsageSite extends Location {
   through?: { block: string; uri: string; start: number; param: string };
   /** A use of the whole structure that holds it (`"Plant_DB".Pump := #Spare;`). */
   whole?: boolean;
+  /** A call that hands the value whole to this block's in/out or output: followed there (Usages.handedOn). */
+  handedTo?: { block: string; param: string };
 }
 
 type Call = { block: string; uri: string; start: number };
@@ -537,8 +541,52 @@ function dbPathAt(index: WorkspaceIndex, uri: string, offset: number): { db: Glo
  * its uses, and the uses inside the blocks the structure holding it is handed to (`Data := "Plant_DB".Pump` → `#Data.Running`
  * in FB_Motor), three calls deep. An input is a copy, so only its reads count there; an output only its writes.
  */
-export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: string[]): { writes: UsageSite[]; reads: UsageSite[] } {
+export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: string[]): Usages {
   const want = chain.map((n) => n.toUpperCase());
+  const { kindOf, add, same, whole, passedTo, follow, result } = usageCollector(index);
+  for (const d of index.docs.values()) {
+    if (scopedTo(index, d.uri).global(db.name)?.uri !== db.uri) continue; // another PLC's DB of that name
+    for (const b of d.parsed?.blocks ?? [])
+      for (const r of b.refs) {
+        // a start value in the DB itself, or "Db".member anywhere
+        const own = d.uri === db.uri && r.kind === "local" && b.kind === "DB";
+        if (!own && !(r.kind === "global" && r.name.toUpperCase() === db.name.toUpperCase())) continue;
+        const segs = own ? [{ name: r.name, start: r.start, end: r.end }, ...r.members] : r.members;
+        if (!same(segs, want.slice(0, segs.length))) continue;
+        if (segs.length >= want.length) {
+          const s = segs[want.length - 1]!;
+          const site: UsageSite = { uri: d.uri, start: s.start, end: s.end, kind: kindOf(d.uri)(r.start), block: b.name };
+          // handed whole to an in/out or output (Parts := "Line_DB".PartsTotal): what the block does with it
+          if (segs.length === want.length) whole(d.uri, r, site, b, 0);
+          else add(site, b);
+          continue;
+        }
+        // the structure that holds it, handed to a block's parameter: its uses there
+        const passed = passedTo(d.uri, r);
+        if (passed) {
+          follow(passed.uri, passed.callee, passed.param, want.slice(segs.length), { block: b.name, uri: d.uri, start: r.start, param: passed.param.name }, 0);
+          continue;
+        }
+        const last = segs.at(-1) ?? r;
+        add({ uri: d.uri, start: last.start, end: last.end, kind: kindOf(d.uri)(r.start), block: b.name, whole: true }, b);
+      }
+  }
+  return result();
+}
+
+export interface Usages {
+  writes: UsageSite[];
+  reads: UsageSite[];
+  /** The calls that hand the value whole to an in/out or output of a block rung followed it into (`handedTo`). */
+  handedOn?: UsageSite[];
+}
+
+/**
+ * Uses sorted into writes, reads and hand-overs. A value handed whole to another block's in/out or output is followed
+ * into that block, three calls deep: the uses there are listed, and the call that hands it on writes nothing itself.
+ * An input is a copy, so only its reads count there; an output only its writes.
+ */
+function usageCollector(index: WorkspaceIndex) {
   const kinds = new Map<string, (start: number) => "read" | "write">();
   const kindOf = (u: string) => kinds.get(u) ?? (kinds.set(u, accessIn(scopedTo(index, u), u)), kinds.get(u)!)!;
   const sites = new Map<string, CallSite[]>();
@@ -546,8 +594,10 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
   const callers = new Map<BlockModel, Call[]>();
   const writes: UsageSite[] = [];
   const reads: UsageSite[] = [];
-  const add = (site: UsageSite, b: BlockModel) => {
-    if (site.kind === "write" && !site.through) {
+  const handedOn: UsageSite[] = [];
+  const add = (site: UsageSite, b: BlockModel | undefined) => {
+    if (site.handedTo) return void handedOn.push(site);
+    if (site.kind === "write" && !site.through && b) {
       const from = callers.get(b) ?? (callers.set(b, callsOf(index, b, site.uri)), callers.get(b)!);
       if (from.length) site.calledFrom = from;
     }
@@ -577,44 +627,26 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
       if (r.members.length >= rest.length) {
         const s = rest.length ? r.members[rest.length - 1]! : r;
         const k = kindOf(u)(r.start);
-        if (counts(k)) add({ uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through }, callee);
-        // handed on whole to the next block's in/out or output ("Increment"(N := #N)): what that one does with it
-        const on = r.members.length === rest.length && depth < 3 ? passedTo(u, r) : undefined;
-        if (on && on.param.section !== "Input") follow(on.uri, on.callee, on.param, [], { block: callee.name, uri: u, start: r.start, param: on.param.name }, depth + 1);
+        const site: UsageSite = { uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through };
+        // handed on whole to the next block's in/out or output ("Increment"(N := #N)): what that one does with it (an
+        // input's copy written there is not the value)
+        if (r.members.length === rest.length && param.section !== "Input") whole(u, r, site, callee, depth + 1);
+        else if (counts(k)) add(site, callee);
         continue;
       }
       const next = depth < 3 ? passedTo(u, r) : undefined;
       if (next) follow(next.uri, next.callee, next.param, rest.slice(r.members.length), { block: callee.name, uri: u, start: r.start, param: next.param.name }, depth + 1);
     }
   };
-  for (const d of index.docs.values()) {
-    if (scopedTo(index, d.uri).global(db.name)?.uri !== db.uri) continue; // another PLC's DB of that name
-    for (const b of d.parsed?.blocks ?? [])
-      for (const r of b.refs) {
-        // a start value in the DB itself, or "Db".member anywhere
-        const own = d.uri === db.uri && r.kind === "local" && b.kind === "DB";
-        if (!own && !(r.kind === "global" && r.name.toUpperCase() === db.name.toUpperCase())) continue;
-        const segs = own ? [{ name: r.name, start: r.start, end: r.end }, ...r.members] : r.members;
-        if (!same(segs, want.slice(0, segs.length))) continue;
-        if (segs.length >= want.length) {
-          const s = segs[want.length - 1]!;
-          add({ uri: d.uri, start: s.start, end: s.end, kind: kindOf(d.uri)(r.start), block: b.name }, b);
-          // handed whole to an in/out or output (Parts := "Line_DB".PartsTotal): what the block does with it, too
-          const passed = segs.length === want.length ? passedTo(d.uri, r) : undefined;
-          if (passed && passed.param.section !== "Input") follow(passed.uri, passed.callee, passed.param, [], { block: b.name, uri: d.uri, start: r.start, param: passed.param.name }, 0);
-          continue;
-        }
-        // the structure that holds it, handed to a block's parameter: its uses there
-        const passed = passedTo(d.uri, r);
-        if (passed) {
-          follow(passed.uri, passed.callee, passed.param, want.slice(segs.length), { block: b.name, uri: d.uri, start: r.start, param: passed.param.name }, 0);
-          continue;
-        }
-        const last = segs.at(-1) ?? r;
-        add({ uri: d.uri, start: last.start, end: last.end, kind: kindOf(d.uri)(r.start), block: b.name, whole: true }, b);
-      }
+  /** A use of the whole value: handed to an in/out or output, followed into that block (`depth` calls deep, at most 3). */
+  function whole(u: string, r: Ref, site: UsageSite, b: BlockModel | undefined, depth: number): void {
+    const on = depth <= 3 ? passedTo(u, r) : undefined;
+    if (!on || on.param.section === "Input") return add(site, b);
+    add({ ...site, handedTo: { block: on.callee.name, param: on.param.name } }, b);
+    follow(on.uri, on.callee, on.param, [], { block: b?.name ?? "", uri: u, start: r.start, param: on.param.name }, depth);
   }
-  return { writes, reads };
+  const result = (): Usages => ({ writes, reads, ...(handedOn.length ? { handedOn } : {}) });
+  return { kindOf, add, same, whole, passedTo, follow, result };
 }
 
 /**
@@ -622,26 +654,55 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
  * workspace: the commissioning question "what sets this?". Indirect access (pointers, VARIANT, PEEK/POKE), HMI and
  * communication are not seen; the report says so where it shows.
  */
-export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): { writes: UsageSite[]; reads: UsageSite[] } {
-  const path = dbPathAt(scopedTo(index, uri), uri, offset);
+export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): Usages {
+  const scoped = scopedTo(index, uri);
+  const path = dbPathAt(scoped, uri, offset);
   if (path) return usagesOfPath(index, path.db, path.chain);
-  const kinds = new Map<string, (start: number) => "read" | "write">();
-  const kindOf = (u: string) => kinds.get(u) ?? (kinds.set(u, accessIn(index, u)), kinds.get(u)!)!;
-  const callers = new Map<BlockModel, Call[]>();
-  const writes: UsageSite[] = [];
-  const reads: UsageSite[] = [];
-  for (const r of references(index, uri, offset, false) as (Location & { arg?: string })[]) {
+  // an address (%I0.2) means the tag at it, as TIA Portal's cross-reference reads it; a tag's address written in the
+  // code (TIA Portal puts the name there once it has the block) is a use of the tag
+  const token = index.docs.get(uri)?.parsed?.tokens.find((t) => t.kind === "absolute" && offset >= t.start && offset <= t.end);
+  const key = token ? addressKey(token.text) : undefined;
+  const tag = key ? scoped.allGlobals().find((g) => g.tag?.address !== undefined && addressKey(g.tag.address) === key) : undefined;
+  const named = key && !tag ? [] : ((tag ? references(index, tag.uri, tag.start, false) : references(index, uri, offset, false)) as (Location & { arg?: string })[]);
+  const hit = tag || key ? undefined : refAt(scoped, uri, offset);
+  const own = tag ?? (hit?.ref.kind === "global" ? scoped.global(hit.ref.name) : TAG_TEXT.test(uri) ? scoped.allGlobals().find((s) => s.uri === uri && s.tag && offset >= s.start && offset <= s.end) : undefined);
+  const at = key ?? (own?.tag?.address !== undefined ? addressKey(own.tag.address) : undefined);
+  const { kindOf, add, whole, result } = usageCollector(index);
+  for (const r of named) {
     const block = index.blockAt(r.uri, r.start);
     // a call's argument sets the block's input (and in/out); it reads an output
     const kind = r.arg ? (r.arg === "Output" ? "read" : "write") : kindOf(r.uri)(r.start);
     const site: UsageSite = { uri: r.uri, start: r.start, end: r.end, kind, ...(block ? { block: block.name } : {}) };
-    if (kind === "write" && block) {
-      const from = callers.get(block) ?? (callers.set(block, callsOf(index, block, r.uri)), callers.get(block)!);
-      if (from.length) site.calledFrom = from;
-    }
-    (kind === "write" ? writes : reads).push(site);
+    // the whole value handed to an in/out or output (Cnt := #Total): what that block does with it
+    const ref = r.arg ? undefined : block?.refs.find((x) => x.start === r.start && !x.members.length);
+    if (ref) whole(r.uri, ref, site, block, 0);
+    else add(site, block);
   }
-  return { writes, reads };
+  if (at) for (const s of addressUses(index, own?.uri ?? uri, at)) add(s, s.block !== undefined ? index.blockAt(s.uri, s.start) : undefined);
+  return result();
+}
+
+/** `%IX0.2`, `%E0.2`: the address as TIA Portal writes it (`%I0.2`); undefined for what is no address. */
+const addressKey = (text: string) => parseAbsolute(text)?.address;
+
+/**
+ * An address written in the code (`%I0.2`) in the files of `uri`'s PLC: a use of whatever is at that address. The
+ * left of `:=` and an output argument (`Q => %Q0.0`) write; `x AT %I0.0` declares, it is no use.
+ */
+function addressUses(index: WorkspaceIndex, uri: string, key: string): UsageSite[] {
+  const device = deviceOfUri(uri);
+  const out: UsageSite[] = [];
+  for (const d of index.docs.values()) {
+    if (!d.parsed || deviceOfUri(d.uri) !== device) continue;
+    const code = d.parsed.tokens.filter((t) => t.kind !== "comment");
+    code.forEach((t, i) => {
+      if (t.kind !== "absolute" || code[i - 1]?.text.toUpperCase() === "AT" || addressKey(t.text) !== key) return;
+      const block = d.parsed!.blocks.find((b) => t.start >= b.start && t.end <= b.end);
+      const write = code[i + 1]?.text === ":=" || code[i - 1]?.text === "=>";
+      out.push({ uri: d.uri, start: t.start, end: t.end, kind: write ? "write" : "read", ...(block ? { block: block.name } : {}) });
+    });
+  }
+  return out;
 }
 
 const describeMember = (m: Member) => `${m.section ? `${SECTION_LABEL[m.section] ?? m.section} ` : ""}**${m.name}** : \`${m.type}\`${m.comment ? ` — ${m.comment}` : ""}`;

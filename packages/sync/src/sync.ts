@@ -85,6 +85,8 @@ export interface SyncReport {
   diagnostics: Diagnostic[];
   /** A quick pass (syncQuick): the objects it looked at; its warnings and diagnostics are about those alone. */
   objects?: string[];
+  /** A quick pass TIA Portal refused an import of as stale: a complete pass merges that object and reports with this one. */
+  needsComplete?: boolean;
   /** Files moved in this pass; JSON carries every file, terminals show a bounded sample. */
   changes?: { path: string; action: "export" | "import" | "create" | "merge" | "remove" | "restore" }[];
   /** A preview (SyncOptions.preview): what the pass would have done. */
@@ -430,7 +432,11 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
   if (opts.preview) return syncPass(root, bridge, dryState(state), opts);
   const first = await syncPass(root, bridge, state, opts);
   if (first.imported + first.created === 0 || !first.warnings.some((w) => w.code === "STALE_REVISION")) return first;
-  const second = await syncPass(root, bridge, state, opts);
+  return mergePasses(first, await syncPass(root, bridge, state, opts));
+}
+
+/** A pass TIA Portal refused an import of as stale, and the pass that ran right after it, reported as one. */
+export function mergePasses(first: SyncReport, second: SyncReport): SyncReport {
   const key = (x: { address: string; code: string; message?: string }) => `${x.address}\u0000${x.code}\u0000${x.message ?? ""}`;
   const unique = <T extends { address: string; code: string; message?: string }>(list: T[]) => [...new Map(list.map((x) => [key(x), x])).values()];
   return {
@@ -459,7 +465,8 @@ const emptyReport = (): SyncReport => ({ exported: 0, imported: 0, created: 0, m
  * listing the project. Each import names the revision TIA Portal had at the last complete pass and TIA Portal refuses
  * it if the object changed since, so nothing of TIA's is overwritten. Anything else (a new, deleted or renamed file,
  * a conflict, an interrupted send, an object marked stale or read-only) needs a complete pass: then this returns null,
- * having changed nothing, or, when TIA Portal refused an import as stale, having marked that object for the merge.
+ * having changed nothing. When TIA Portal refused an import as stale (a caller whose revision the block it calls just
+ * moved), that object is marked for the merge and the report, with what did go in, says `needsComplete`.
  */
 export async function syncQuick(root: string, bridge: SyncBridge, state: StateStore, opts: SyncOptions, paths: readonly string[]): Promise<SyncReport | null> {
   const picked = new Map<string, LocalFile>();
@@ -479,7 +486,7 @@ export async function syncQuick(root: string, bridge: SyncBridge, state: StateSt
   }
   if (!picked.size) return { ...emptyReport(), objects: [] };
   const r = await syncPass(root, bridge, state, opts, picked);
-  return r.warnings.some((w) => w.code === "STALE_REVISION") ? null : { ...r, objects: [...picked.keys()] };
+  return { ...r, objects: [...picked.keys()], ...(r.warnings.some((w) => w.code === "STALE_REVISION") ? { needsComplete: true } : {}) };
 }
 
 /** The objects of a quick pass as the last complete pass left them; TIA Portal's real revision is checked by the import. */

@@ -279,8 +279,10 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       ...(s.calledFrom ? { calledFrom: s.calledFrom.map((c) => ({ block: c.block, uri: c.uri, range: range(c.uri, c.start, c.start) })) } : {}),
       ...(s.through ? { through: { block: s.through.block, param: s.through.param, uri: s.through.uri, range: range(s.through.uri, s.through.start, s.through.start), text: line(s.through.uri, s.through.start) } } : {}),
       ...(s.whole ? { whole: true } : {}),
+      ...(s.handedTo ? { handedTo: s.handedTo } : {}),
     });
-    return { writes: r.writes.filter((s) => index.docs.get(s.uri)).map(out), reads: r.reads.filter((s) => index.docs.get(s.uri)).map(out) };
+    const list = (l: UsageSite[]) => l.filter((s) => index.docs.get(s.uri)).map(out);
+    return { writes: list(r.writes), reads: list(r.reads), ...(r.handedOn ? { handedOn: list(r.handedOn) } : {}) };
   });
   connection.onRenameRequest(async (p) => {
     const uri = p.textDocument.uri;

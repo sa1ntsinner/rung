@@ -241,6 +241,36 @@ describe("sync and watch: the edges", () => {
     } finally { await t.state.close(); }
   });
 
+  it("rung watch: a block and its caller saved together, the caller refused as stale in the quick pass: both imports are reported", async () => {
+    class Renaming extends EdgeBridge {
+      override async importObject(address: string, form: string, path: string, expected = ""): Promise<ExportResult> {
+        const now = this.objects.get(address)?.entry.fingerprint;
+        if (now && expected && expected !== "absent" && now !== expected) throw new BridgeError("STALE_REVISION", `${address} changed in TIA Portal`);
+        const r = await super.importObject(address, form, path);
+        if (address === addr("A")) this.objects.get(addr("B"))!.entry.fingerprint = "fp:moved";
+        return r;
+      }
+    }
+    const t = await fixture();
+    const bridge = Object.assign(new Renaming(), { objects: t.bridge.objects });
+    const reports: { imported: number; changes?: { path: string }[] }[] = [];
+    const watcher = new Watcher(t.root, t.state, { config: t.config, bridgeFactory: async () => bridge, onReport: (r) => reports.push(r), debounceMs: 60_000 });
+    try {
+      t.bridge.add(addr("A"), { content: 'FUNCTION "A" : Void\nVAR_INPUT\n x : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION\n' });
+      t.bridge.add(addr("B"), { content: 'FUNCTION "B" : Void\nBEGIN\n "A"(x := TRUE);\nEND_FUNCTION\n' });
+      await watcher.syncNow();
+      writeFileSync(join(t.root, "plc/PLC_1/blocks/A.scl"), 'FUNCTION "A" : Void\nVAR_INPUT\n y : Bool;\nEND_VAR\nBEGIN\nEND_FUNCTION\n');
+      writeFileSync(join(t.root, "plc/PLC_1/blocks/B.scl"), 'FUNCTION "B" : Void\nBEGIN\n "A"(y := TRUE);\nEND_FUNCTION\n');
+      watcher.poke("plc/PLC_1/blocks/A.scl");
+      watcher.poke("plc/PLC_1/blocks/B.scl");
+      await watcher.syncNow(false, true);
+      expect(bridge.imports).toEqual([addr("A"), addr("B")]);
+      const last = reports.at(-1)!;
+      expect(last.imported).toBe(2);
+      expect(last.changes!.map((c) => c.path).sort()).toEqual(["plc/PLC_1/blocks/A.scl", "plc/PLC_1/blocks/B.scl"]);
+    } finally { await watcher.stop(); await t.state.close(); }
+  });
+
   it("writes off and on again: the bridge that may import already is kept", async () => {
     const t = await fixture();
     const off = { ...t.config, writesOff: true as const, sync: { ...t.config.sync, import: "manual" as const } };

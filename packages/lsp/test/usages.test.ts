@@ -29,3 +29,76 @@ describe("usagesAt: who writes and who reads it", () => {
     expect(r.reads).toEqual([]);
   });
 });
+
+describe("usagesAt: an address written in the code is a use of the tag at it", () => {
+  const t = (p: string, plc = "PLC_1") => `file:///w/plc/${plc}/${p}`;
+  const TAGS = "VAR_GLOBAL\n    Start_PB AT %I0.0 : Bool;\n    Reset_PB AT %I0.2 : Bool;\n    Lamp AT %Q0.0 : Bool;\nEND_VAR\n";
+  const OB = 'ORGANIZATION_BLOCK "Main"\nBEGIN\n   "Line_DB".Running := %I0.2 AND "Start_PB";\n   %Q0.0 := %IX0.2;\nEND_ORGANIZATION_BLOCK\n';
+  const OTHER = 'FUNCTION "Fx_Reset" : Void\nBEGIN\n   "Line_DB".Running := "Reset_PB";\nEND_FUNCTION\n';
+  const PLC2 = 'ORGANIZATION_BLOCK "Main"\nBEGIN\n   %Q0.0 := %I0.2;\nEND_ORGANIZATION_BLOCK\n';
+  const index = new WorkspaceIndex();
+  index.set(t("tags/IO.tags.st"), TAGS, 0);
+  index.set(t("blocks/Line_DB.db"), DB, 0);
+  index.set(t("blocks/Main.scl"), OB, 0);
+  index.set(t("blocks/Fx_Reset.scl"), OTHER, 0);
+  index.set(t("blocks/Main.scl", "PLC_2"), PLC2, 0);
+  const at = (uri: string, s: { start: number }) => [uri, s.start];
+
+  it("from the tag's declaration: its name and its address, in this PLC only", () => {
+    const r = usagesAt(index, t("tags/IO.tags.st"), TAGS.indexOf("Reset_PB"));
+    expect(r.reads.map((s) => at(s.uri, s)).sort()).toEqual([
+      [t("blocks/Fx_Reset.scl"), OTHER.indexOf('"Reset_PB"')],
+      [t("blocks/Main.scl"), OB.indexOf("%I0.2")],
+      [t("blocks/Main.scl"), OB.indexOf("%IX0.2")],
+    ].sort());
+    expect(r.reads.find((s) => s.uri === t("blocks/Main.scl"))!.block).toBe("Main");
+    expect(r.writes).toEqual([]);
+  });
+
+  it("from the address in a block: the tag's uses too; the left of := writes", () => {
+    const r = usagesAt(index, t("blocks/Main.scl"), OB.indexOf("%I0.2") + 2);
+    expect(r.reads).toHaveLength(3);
+    const q = usagesAt(index, t("blocks/Main.scl"), OB.indexOf("%Q0.0") + 1);
+    expect(q.writes.map((s) => at(s.uri, s))).toEqual([[t("blocks/Main.scl"), OB.indexOf("%Q0.0")]]);
+    expect(q.reads).toEqual([]);
+  });
+
+  it("an address no tag has: its own uses", () => {
+    const r = usagesAt(index, t("blocks/Main.scl", "PLC_2"), PLC2.indexOf("%I0.2") + 1);
+    expect(r.reads.map((s) => at(s.uri, s))).toEqual([[t("blocks/Main.scl", "PLC_2"), PLC2.indexOf("%I0.2")]]);
+  });
+});
+
+describe("usagesAt: a value handed on to in/outs, down to the block that really writes it", () => {
+  const LDB = 'DATA_BLOCK "Line_DB"\n   VAR\n      PartsTotal : DInt;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n';
+  const COUNT = 'FUNCTION "FC_Count" : Void\n   VAR_IN_OUT\n      Cnt : DInt;\n   END_VAR\nBEGIN\n   #Cnt := #Cnt + 1;\nEND_FUNCTION\n';
+  const WRAP = 'FUNCTION_BLOCK "FB_Wrap"\n   VAR_IN_OUT\n      Total : DInt;\n   END_VAR\nBEGIN\n   "FC_Count"(Cnt := #Total);\nEND_FUNCTION_BLOCK\n';
+  const CONV = 'FUNCTION_BLOCK "FB_Conveyor"\n   VAR_IN_OUT\n      Parts : DInt;\n   END_VAR\n   VAR\n      Wrap : "FB_Wrap";\n   END_VAR\nBEGIN\n   #Wrap(Total := #Parts);\nEND_FUNCTION_BLOCK\n';
+  const OB = 'ORGANIZATION_BLOCK "Main"\n   VAR_TEMP\n      n : DInt;\n   END_VAR\nBEGIN\n   "Conv_DB"(Parts := "Line_DB".PartsTotal);\n   "FC_Count"(Cnt := #n);\nEND_ORGANIZATION_BLOCK\n';
+  const index = new WorkspaceIndex();
+  index.set(u("Line_DB.db"), LDB, 0);
+  index.set(u("FC_Count.scl"), COUNT, 0);
+  index.set(u("FB_Wrap.scl"), WRAP, 0);
+  index.set(u("FB_Conveyor.scl"), CONV, 0);
+  index.set(u("Conv_DB.db"), 'DATA_BLOCK "Conv_DB"\n"FB_Conveyor"\nBEGIN\nEND_DATA_BLOCK\n', 0);
+  index.set(u("Main.scl"), OB, 0);
+
+  it("from the DB member: one write, in FC_Count; the calls that hand it on are not writes", () => {
+    const r = usagesAt(index, u("Main.scl"), OB.indexOf("PartsTotal"));
+    expect(r.writes.map((s) => [s.block, s.through?.param])).toEqual([["FC_Count", "Cnt"]]);
+    expect(r.handedOn!.map((s) => [s.block, s.handedTo])).toEqual([["Main", { block: "FB_Conveyor", param: "Parts" }], ["FB_Conveyor", { block: "FB_Wrap", param: "Total" }], ["FB_Wrap", { block: "FC_Count", param: "Cnt" }]]);
+  });
+
+  it("from an in/out inside a block: followed down into the block it is handed to", () => {
+    const r = usagesAt(index, u("FB_Wrap.scl"), WRAP.indexOf("#Total") + 1);
+    expect(r.writes.filter((s) => s.block === "FC_Count").map((s) => [s.uri, s.start, s.through?.block])).toEqual([[u("FC_Count.scl"), COUNT.indexOf("#Cnt :="), "FB_Wrap"]]);
+    expect(r.handedOn!.map((s) => s.block)).toEqual(["FB_Wrap"]);
+    expect(r.writes.some((s) => s.uri === u("FB_Wrap.scl"))).toBe(false);
+  });
+
+  it("from a temp handed to an in/out: the block that writes it", () => {
+    const r = usagesAt(index, u("Main.scl"), OB.indexOf("#n") + 1);
+    expect(r.writes.map((s) => s.block)).toEqual(["FC_Count"]);
+    expect(r.handedOn!.map((s) => s.block)).toEqual(["Main"]);
+  });
+});

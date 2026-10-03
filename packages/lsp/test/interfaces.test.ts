@@ -97,9 +97,10 @@ describe("a block's interface from its callers", () => {
   });
 
   it("follows a data type handed to an in/out: who writes \"Plant_DB\".Pump.Running", () => {
-    // the whole Pump handed to an in/out: the call, and what FB_Motor writes into it
+    // the whole Pump handed to an in/out: what FB_Motor writes into it; the call hands it on
     const r = usagesAt(index, u("blocks/Plant_DB.db"), DB.indexOf("Pump :") + 1);
-    expect(r.writes.map((w) => [w.block, w.start, w.through?.param])).toEqual([["FB_Line", LINE.indexOf("Pump);"), undefined], ["FB_Motor", MOTOR.indexOf("#Data.Running"), "Data"]]);
+    expect(r.writes.map((w) => [w.block, w.start, w.through?.param])).toEqual([["FB_Motor", MOTOR.indexOf("#Data.Running"), "Data"]]);
+    expect(r.handedOn!.map((w) => [w.block, w.start, w.handedTo])).toEqual([["FB_Line", LINE.indexOf("Pump);"), { block: "FB_Motor", param: "Data" }]]);
   });
 
   it("a member handed whole to an in/out: the write inside the block, reached through that call", () => {
@@ -122,7 +123,8 @@ END_ORGANIZATION_BLOCK
 `;
     index2.set(u("blocks/Main.scl"), main, 0);
     const r = usagesAt(index2, u("blocks/Main.scl"), main.indexOf("MaxSpeed"));
-    expect(r.writes.map((w) => [w.block, w.through?.param])).toEqual([["Plant_DB", undefined], ["Main", undefined], ["FB_Count", "N"]]);
+    expect(r.writes.map((w) => [w.block, w.through?.param])).toEqual([["Plant_DB", undefined], ["FB_Count", "N"]]);
+    expect(r.handedOn!.map((w) => w.block)).toEqual(["Main"]);
     expect(r.reads.map((x) => [x.block, x.through?.block])).toEqual([["FB_Count", "Main"]]);
   });
 
