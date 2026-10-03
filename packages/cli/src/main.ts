@@ -42,7 +42,7 @@ import { cmdWho } from "./who.js";
 
 export type { Io } from "./common.js";
 
-export const VERSION = "0.1.0-dev";
+export const VERSION = "0.1.0";
 
 export const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
