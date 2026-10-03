@@ -5,7 +5,7 @@
        (see tools/openness/Register-OpennessWhitelist.ps1 -GrantUser) or when RUNG_NO_WHITELIST is set.
        Release only, and only into the project's own bin folder: TIA keeps one entry per file name, the CLI runs that
        bridge, and a build elsewhere (dotnet build -o) would take the entry from it. -->
-  <Target Name="RungOpennessWhitelist" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' AND '$(RUNG_NO_WHITELIST)' == '' AND '$(CI)' == '' AND '$(Configuration)' == 'Release' AND $([System.String]::Copy('$(TargetPath)').StartsWith('$(MSBuildProjectDirectory)'))">
+  <Target Name="RungOpennessWhitelist" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' AND '$(RUNG_NO_WHITELIST)' == '' AND '$(CI)' == '' AND '$(Configuration)' == 'Release' AND $([System.String]::Copy('$(TargetPath)').StartsWith('$(MSBuildProjectDirectory)\bin\'))">
     <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)Register-OpennessWhitelist.ps1&quot; -Path &quot;$(TargetPath)&quot; -Version $(RungOpennessWhitelistVersion) -Quiet" ContinueOnError="true" StandardOutputImportance="low" />
   </Target>
 </Project>

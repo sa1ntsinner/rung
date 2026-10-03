@@ -57,6 +57,21 @@ describe("BridgeClient", () => {
     expect(slow).toBe(1);
   });
 
+  it("the slow-start note: never for a quick answer, an error or an exit; once for a late answer, and not after it", async () => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const run = async (mode: string, request: (c: BridgeClient) => Promise<unknown>) => {
+      let slow = 0;
+      const c = await spawn(fake(mode, { onSlowStart: () => slow++, slowStartMs: 150 }));
+      await request(c).catch(() => undefined);
+      await wait(300);
+      return slow;
+    };
+    expect(await run("ok", (c) => c.listObjects("PLC_1"))).toBe(0);
+    expect(await run("list-fails", (c) => c.listObjects("PLC_1"))).toBe(0);
+    expect(await run("exit-on-list", (c) => c.listObjects("PLC_1"))).toBe(0);
+    expect(await run("delayed", (c) => c.listObjects("PLC_1"))).toBe(1);
+  });
+
   it.runIf(process.platform === "win32")("a bridge that will not end is ended with what it started (a TIA Portal opening a project)", async () => {
     const c = await BridgeClient.spawn({ ...fake("stuck-with-child"), closeTimeoutMs: 300 });
     let pid = 0;

@@ -36,6 +36,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return fail("TIA_NOT_RUNNING", "no portal");
     case "objects.list":
       if (mode === "slow") return;
+      if (mode === "delayed") return void setTimeout(() => reply(objects), 300);
+      if (mode === "list-fails") return fail("NOT_FOUND", "no PLC named " + req.params.device);
+      if (mode === "exit-on-list") process.exit(3);
       if (mode === "garbage-line") process.stdout.write("Siemens says hello\n");
       if (mode === "event") out({ event: "log", params: { level: "info", message: "listing" } });
       if (mode === "unicode") return reply([{ ...objects[0], address: "plc:PLC_1/blocks/Überwachung 😀" }]);
