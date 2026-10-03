@@ -343,8 +343,9 @@ async function withUsers(root: string, state: StateStore, imported: string[]): P
   const devices = new Set(imported.map((a) => parseAddress(a).device));
   const texts = new Map<string, string>();
   const candidates = state.all().filter((s) => !s.readOnly && s.files[0] && devices.has(parseAddress(s.address).device));
-  for (const s of candidates) texts.set(s.address, await readFile(join(root, s.files[0]!.path), "utf8").catch(() => ""));
-  const usersOf = (names: string[]) => candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n}"`)));
+  // TIA Portal's names ignore letter case: "a"() calls A
+  for (const s of candidates) texts.set(s.address, (await readFile(join(root, s.files[0]!.path), "utf8").catch(() => "")).toLowerCase());
+  const usersOf = (names: string[]) => candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n.toLowerCase()}"`)));
   const first = usersOf(imported.map((a) => parseAddress(a).name));
   for (const s of first) out.add(s.address);
   // a call goes through the instance DB ("FB_Pump_DB"()), so the blocks that use those DBs follow too
@@ -858,7 +859,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         // a file being written (an editor's new file, a quick fix's DB before it is saved) creates nothing yet
         if (!(bundle["." + loc.form] ?? "").trim()) continue;
         // a block renamed by hand (git mv and its header): creating it would leave TIA Portal two blocks, the callers on the old one
-        const from = await renamedBy(root, state, name, bundle["." + loc.form] ?? "");
+        const from = await renamedBy(root, state, address, bundle["." + loc.form] ?? "");
         if (from) {
           const how = `rung restore ${from.path}, remove ${loc.path}, then rung rename ${from.path} ${name}: TIA Portal keeps the block, its number and its callers. For a new block instead, rung confirm-delete ${from.path} first`;
           diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `the block of ${from.path} (deleted here) under a new name, not created: ${how}` });
@@ -1078,6 +1079,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   }
 
   // Compile what was imported and turn compiler messages into diagnostics.
+  /** Everything this pass compiled: its old compile messages are answered by this one's. */
+  const compiled = new Set(imported);
   if (imported.length && cfg.sync.compile !== "none") {
     const byDevice = new Map<string, string[]>();
     for (const a of imported) {
@@ -1097,6 +1100,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           const lastChange = Math.max(-1, ...changed.map((a) => order.get(a)!));
           // a user imported before the last interface change of the pass compiled against the old interface: again
           const scope = (await withUsers(root, state, changed)).filter((a) => !compiledByImport.has(a) || order.get(a)! < lastChange);
+          for (const a of scope) compiled.add(a);
           // each object keeps the messages of the last compile that saw it: FB_Motor's import compiles its caller's
           // old text, the caller's own import a moment later compiles its new one (a renamed parameter in both)
           const events = [...own.map((a) => compiledByImport.get(a)!), ...(scope.length ? [await bridge.compile(device, scope)] : [])];
@@ -1122,7 +1126,6 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   }
 
   const compiledAll = imported.length > 0 && cfg.sync.compile === "all";
-  const compiled = new Set(imported);
   await writeDiagnostics(
     root,
     report.diagnostics,
@@ -1162,12 +1165,13 @@ export async function restoreFile(root: string, state: StateStore, path: string)
 }
 
 /** An object whose files are gone here and whose block is this new file's under another name: a rename by hand. */
-async function renamedBy(root: string, state: StateStore, name: string, text: string): Promise<ObjectState | undefined> {
+async function renamedBy(root: string, state: StateStore, address: string, text: string): Promise<ObjectState | undefined> {
+  const { name, device } = parseAddress(address);
   const blobs = new BlobStore(root);
   const squeeze = (s: string) => normalizeText(s).replace(/[ \t]+$/gm, "");
   for (const st of state.all()) {
     const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
-    if (!primary || st.readOnly || (st.status !== "pendingDelete" && (st.status !== "synced" || existsSync(rel2abs(root, primary.path))))) continue;
+    if (!primary || st.readOnly || parseAddress(st.address).device !== device || (st.status !== "pendingDelete" && (st.status !== "synced" || existsSync(rel2abs(root, primary.path))))) continue;
     const old = parseAddress(st.address).name;
     if (old.toLowerCase() === name.toLowerCase()) continue;
     const before = await blobs.get(primary.hash).then((b) => b.toString("utf8"), () => undefined);

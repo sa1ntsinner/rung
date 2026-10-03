@@ -259,12 +259,13 @@ async function cmdPull(dir: string, v: Record<string, unknown>, io: Io): Promise
       );
       // a notice already shown on the last pull (a block kept as XML, one TIA has not compiled) is counted, not repeated
       const seenFile = join(dir, ".rung", "notices.json");
-      const seen = new Set<string>(await readFile(seenFile, "utf8").then((t) => JSON.parse(t) as string[], () => []));
+      // a cache, nothing more: unreadable or cut short, every notice is simply new again
+      const seen = new Set<string>(await readFile(seenFile, "utf8").then((t) => (JSON.parse(t) as string[]).filter((x) => typeof x === "string")).catch(() => []));
       const key = (w: { address: string; code: string; message?: string }) => `${w.address}\t${w.code}\t${w.message ?? ""}`;
       const known = v.verbose ? [] : report.warnings.filter((w) => isNotice(w.code) && seen.has(key(w)));
       printWarnings(io, report.warnings.filter((w) => !known.includes(w)));
       if (known.length) io.stdout(`  (${known.length} notice${known.length === 1 ? "" : "s"} as on the last pull: ${[...new Set(known.map((w) => w.code))].join(", ")}; rung pull --verbose shows them)\n`);
-      await writeFile(seenFile, JSON.stringify(report.warnings.filter((w) => isNotice(w.code)).map(key))).catch(() => undefined);
+      await writeFileAtomic(seenFile, JSON.stringify(report.warnings.filter((w) => isNotice(w.code)).map(key))).catch(() => undefined);
       for (const o of report.overwritten) io.stdout(`overwrote your edit of ${o.path} with TIA Portal's version; yours is kept in ${o.copy}\n`);
       await writeAgentsFile(dir, config.project.path, await agentsTemplate(config.project.path)).catch(() => undefined);
       return report.warnings.some((w) => !isNotice(w.code)) ? 2 : 0;

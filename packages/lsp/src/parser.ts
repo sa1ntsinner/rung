@@ -376,6 +376,8 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         }
         continue;
       }
+      // a quoted parameter name in a call (#m("Start request" := TRUE)) names the callee's parameter, no global
+      if (!iec && t.kind === "global" && parens > 0 && (peek().text === ":=" || peek().text === "=>") && (tokens[i - 2]?.text === "(" || tokens[i - 2]?.text === ",")) continue;
       if (t.kind === "local" || t.kind === "global") {
         // a DB's start value of a member with a quoted name ("Valve 1".Delay := T#2s;) is the DB's own, like Counter := 0;
         const dbStart = block.kind === "DB" && t.kind === "global" && (tokens[i - 2]?.text === ";" || isKw(tokens[i - 2]!, "BEGIN"));

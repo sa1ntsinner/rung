@@ -174,15 +174,16 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return { resolved: true };
     },
     restore: async (p) => restoreFile(dir, state, String(p.path)),
+    // the write right as it is now, not as the last pass read it: rung writes off may have come in between
     confirmDelete: async (p) => {
-      mayWrite(live, "deleted");
+      mayWrite((live = await loadConfig(dir)), "deleted");
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       const { users } = await confirmDelete(dir, b as never, state, String(p.address), { force: !!p.force });
       return { deleted: true, users: users.map((a) => state.get(a)?.path ?? a) };
     },
     rename: async (p) => {
-      mayWrite(live, "renamed");
+      mayWrite((live = await loadConfig(dir)), "renamed");
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
       return renameObject(dir, b as never, state, config, String(p.address), String(p.newName));

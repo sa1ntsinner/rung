@@ -307,6 +307,11 @@ function visibleOutside(block: BlockModel, v: VarDecl): boolean {
   return block.kind === "FC" && (v.section === "Input" || v.section === "Output" || v.section === "InOut");
 }
 
+/** Whether `inner` is declared somewhere inside the STRUCT `v`. */
+function contains(v: VarDecl, inner: VarDecl): boolean {
+  return !!v.members?.some((m) => m === inner || contains(m, inner));
+}
+
 /** Declaration (possibly nested in a STRUCT) whose name is under the cursor. */
 function declAt(vars: VarDecl[], offset: number): VarDecl | undefined {
   for (const v of vars) {
@@ -570,6 +575,9 @@ export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: str
         const s = rest.length ? r.members[rest.length - 1]! : r;
         const k = kindOf(u)(r.start);
         if (counts(k)) add({ uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through }, callee);
+        // handed on whole to the next block's in/out or output ("Increment"(N := #N)): what that one does with it
+        const on = r.members.length === rest.length && depth < 3 ? passedTo(u, r) : undefined;
+        if (on && on.param.section !== "Input") follow(on.uri, on.callee, on.param, [], { block: callee.name, uri: u, start: r.start, param: on.param.name }, depth + 1);
         continue;
       }
       const next = depth < 3 ? passedTo(u, r) : undefined;
@@ -823,13 +831,18 @@ export function rename(index: WorkspaceIndex, uri: string, offset: number, newNa
     return undefined;
   })(block.vars) ?? block.vars;
   if (siblings.some((v) => v !== decl && v.name.toUpperCase() === newName.toUpperCase())) return { error: `${newName} already exists in ${block.name}` };
-  if (visibleOutside(block, decl)) {
+  // a member of a STRUCT is seen from outside when the variable holding it is
+  const top = block.vars.find((v) => v === decl || contains(v, decl)) ?? decl;
+  const outside = visibleOutside(block, top);
+  if (outside || top !== decl) {
     // every file that names it must be text the editor can change: a LAD/FBD block from XML or a TwinCAT POU is not
     const at = memberReferences(index, { uri, start: decl.start, end: decl.end }, true);
-    const text = (l: { uri: string }) => index.docs.get(l.uri)?.code === undefined && /\.(scl|db|udt)$/i.test(l.uri);
-    // a LAD/FBD block from XML, STL or a TwinCAT POU that names the block (or its instance DBs) may use it unseen
+    const text = (l: { uri: string }) => index.docs.get(l.uri)?.code === undefined && /\.(scl|db|udt|st)$/i.test(l.uri);
+    // a LAD/FBD block from XML, STL or a TwinCAT POU of this PLC that names the block (or its instance DBs) may use it unseen
     const names = [block.name, ...index.allGlobals().filter((g) => g.block?.dbOf?.toUpperCase() === block.name.toUpperCase()).map((g) => g.name)].map((n) => n.toUpperCase());
-    const locked = at.find((l) => !text(l)) ?? [...index.docs.values()].find((d) => !text(d) && d.uri !== uri && !TAG_TEXT.test(d.uri) && names.some((n) => d.text.toUpperCase().includes(n)));
+    const plc = deviceOfUri(uri);
+    const unseen = (d: { uri: string; text: string }) => outside && !text(d) && d.uri !== uri && !TAG_TEXT.test(d.uri) && deviceOfUri(d.uri) === plc && names.some((n) => d.text.toUpperCase().includes(n));
+    const locked = at.find((l) => !text(l)) ?? [...index.docs.values()].find(unseen);
     const where = locked && ("start" in locked ? index.blockAt(locked.uri, locked.start)?.name : locked.parsed?.blocks[0]?.name);
     if (locked) return { error: `${decl.name} may be used in ${where ?? locked.uri.split("/").at(-1)}, which the editor cannot change: rename it in TIA Portal` };
     return at.map((l) => ({ uri: l.uri, start: l.start, end: l.end, newText: index.docs.get(l.uri)!.text[l.start] === "#" ? "#" + newName : newName }));

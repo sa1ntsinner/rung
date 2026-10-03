@@ -98,6 +98,12 @@ describe.runIf(enabled)("e2e: two-way sync against the fixture project", () => {
 
   it("a software unit is a folder: a new file there creates the block in the unit, an edit goes there, a delete too", async () => {
     const inUnit = join(dir, "plc", "PLC_1", "units", "Fx_Unit", "blocks", "30_E2E", "Fx_E2E_Unit.scl");
+    // a run that stopped half way left the block in TIA Portal (the pull brought it here): take it out first
+    if (existsSync(inUnit)) {
+      unlinkSync(inUnit);
+      await main(["sync"], io);
+      await main(["confirm-delete", "plc:PLC_1/units/Fx_Unit/blocks/30_E2E/Fx_E2E_Unit", "--force", "--dir", dir], io);
+    }
     mkdirSync(join(inUnit, ".."), { recursive: true });
     writeFileSync(inUnit, 'FUNCTION "Fx_E2E_Unit" : Void\n{ S7_Optimized_Access := \'TRUE\' }\nVERSION : 0.1\n   VAR_INPUT\n      A : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION\n');
     out.length = 0;

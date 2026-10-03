@@ -139,8 +139,14 @@ export class Watcher {
     return next;
   }
 
+  private reloading: Promise<void> | null = null;
+  /** One reload at a time: two previews arriving together restart the bridge once, not twice. */
+  private reload(): Promise<void> {
+    return (this.reloading ??= this.reloadNow().finally(() => (this.reloading = null)));
+  }
+
   /** What this watch may do now: writes turned off stop the next import; turned on, the bridge (started without import rights) starts again. */
-  private async reload(): Promise<void> {
+  private async reloadNow(): Promise<void> {
     if (!this.opts.reloadConfig) return;
     const next = await this.opts.reloadConfig().catch(() => this.config);
     const writes = (c: RungConfig) => !c.writesOff && c.sync.import === "auto";

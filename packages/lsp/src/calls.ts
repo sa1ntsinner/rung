@@ -101,7 +101,9 @@ function argsAfter(tokens: Token[], from: number, incomplete: boolean): { open: 
       if (!cur) {
         cur = { start: t.start, end: t.end };
         const next = tokens[i + 1];
-        if (depth === 1 && t.kind === "ident" && (next?.text === ":=" || next?.text === "=>" || (incomplete && next?.text === ":"))) Object.assign(cur, { name: t.text, nameStart: t.start, nameEnd: t.end, out: next!.text === "=>" });
+        // a parameter whose name is no plain identifier is written quoted: #m("Start request" := TRUE)
+        if (depth === 1 && (t.kind === "ident" || t.kind === "global") && (next?.text === ":=" || next?.text === "=>" || (incomplete && next?.text === ":")))
+          Object.assign(cur, { name: t.text.replace(/^"|"$/g, ""), nameStart: t.start, nameEnd: t.end, out: next!.text === "=>" });
       }
       prevEnd = t.end;
     }
