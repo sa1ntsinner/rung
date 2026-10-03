@@ -27,6 +27,8 @@ export interface WatcherOptions {
   now?: () => number;
 }
 
+const writes = (c: RungConfig) => !c.writesOff && c.sync.import === "auto";
+
 /** rung watch checks watch and force tables again (an export each) at most this often; file edits go at once. */
 const UNVERSIONED_MS = 60_000;
 
@@ -140,6 +142,14 @@ export class Watcher {
   }
 
   private reloading: Promise<void> | null = null;
+  /** Whether the running bridge was started with the right to import (writes on then). */
+  private bridgeWrites = false;
+
+  private async newBridge(): Promise<ClosableBridge> {
+    const b = await this.opts.bridgeFactory();
+    this.bridgeWrites = writes(this.config);
+    return b;
+  }
   /** One reload at a time: two previews arriving together restart the bridge once, not twice. */
   private reload(): Promise<void> {
     return (this.reloading ??= this.reloadNow().finally(() => (this.reloading = null)));
@@ -149,10 +159,11 @@ export class Watcher {
   private async reloadNow(): Promise<void> {
     if (!this.opts.reloadConfig) return;
     const next = await this.opts.reloadConfig().catch(() => this.config);
-    const writes = (c: RungConfig) => !c.writesOff && c.sync.import === "auto";
-    if (writes(next) && !writes(this.config) && this.bridge) {
+    // a bridge started while writes were off has no import rights; one started with them keeps them through off and on
+    if (writes(next) && this.bridge && !this.bridgeWrites) {
       await this.bridge.close().catch(() => undefined);
-      this.bridge = await this.opts.bridgeFactory();
+      this.config = next;
+      this.bridge = await this.newBridge();
     }
     this.config = next;
   }
@@ -165,7 +176,7 @@ export class Watcher {
     this.dirty.clear();
     this.wantFull = false;
     try {
-      this.bridge ??= await this.opts.bridgeFactory();
+      this.bridge ??= await this.newBridge();
       await this.reload();
       const options = { validateTags: this.opts.validateTags, config: this.config, refused: this.refused, unversionedMs: UNVERSIONED_MS, ...(this.opts.onPhase ? { onPhase: this.opts.onPhase } : {}) };
       if (!full) {

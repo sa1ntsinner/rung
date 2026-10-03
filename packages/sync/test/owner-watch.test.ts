@@ -197,7 +197,7 @@ describe("Watcher", () => {
     await state.close();
   });
 
-  it("writes turned off while it runs: the next saved file stays in the files; turned on again, the bridge starts anew", async () => {
+  it("writes turned off while it runs: the next saved file stays in the files; turned on again, it goes, through the same bridge", async () => {
     class Importing extends ClosableFake {
       imported: string[] = [];
       override async importObject(address: string, form: string, path: string, expected: string): Promise<never> {
@@ -224,7 +224,7 @@ describe("Watcher", () => {
     now = config;
     await w.syncNow();
     expect(b.imported).toEqual(["plc:PLC_1/blocks/Fx_A"]);
-    expect(bridges).toBe(2);
+    expect(bridges).toBe(1); // started with writes on, it may import all along
     await w.stop();
     await state.close();
   });

@@ -6,7 +6,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
 import { WorkspaceError, loadConfig, parseAddress, type RungConfig } from "@rung/core";
 import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus, ProjectInfo, UploadOutcome, UploadRequest } from "@rung/bridge-client";
-import { OwnerClient, placeCompileMessages } from "@rung/sync";
+import { OwnerClient, placeCompileMessages, recordCompile } from "@rung/sync";
 import { bridgeFor, findWorkspace, importFlags, type Io } from "./common.js";
 
 /**
@@ -155,9 +155,11 @@ async function workspace(dir: string, io: Io, download = false) {
   return { ws, config, link: new PlcLink(ws, config, io, download) };
 }
 
-async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[], device: string): Promise<number> {
+async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[], device: string, scope: string[] | "all" = "all"): Promise<number> {
   const objects = await snapshot(ws);
   const msgs: (CompileMessage & { file?: string })[] = await placeCompileMessages(ws, (a) => objects.find((o) => o.address === a)?.path, raw, (f) => readFile(f, "utf8"));
+  // rung status, the editors and the next sync see what TIA Portal said (a forced delete's broken users too)
+  await recordCompile(ws, device, scope, msgs, (a) => (objects.find((o) => o.address === a) as { tiaFingerprint?: string } | undefined)?.tiaFingerprint).catch(() => undefined);
   let errors = 0;
   let warnings = 0;
   for (const m of msgs) {
@@ -176,7 +178,7 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
   const device = await deviceOf(config, v, ws, link);
   if (v.hw) {
     const msgs = await link.call<CompileMessage[]>("compileHardware", { device }, (b) => b.compileHardware(device));
-    return printCompile(ws, config, io, msgs, device);
+    return printCompile(ws, config, io, msgs, device, []);
   }
   const files = ((v.file as string[] | undefined) ?? []).map((f) => relative(ws, resolve(io.cwd, f)).split(sep).join("/"));
   let addresses: string[] = [];
@@ -189,7 +191,7 @@ export async function cmdCompile(dir: string, v: Record<string, unknown>, io: Io
     });
   }
   const msgs = await link.call<CompileMessage[]>("compile", { device, addresses }, (b) => b.compile(device, addresses));
-  return printCompile(ws, config, io, msgs, device);
+  return printCompile(ws, config, io, msgs, device, addresses.length ? addresses : "all");
 }
 
 export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {

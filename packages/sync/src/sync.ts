@@ -338,6 +338,12 @@ function rankOf(form: string, texts: string[]): number {
  * The imported objects plus every mirrored object that names one of them: instance DBs of a changed FB and
  * the blocks that call it are inconsistent in TIA until they are compiled too.
  */
+/** The tags and constants of a tag table, as text (`Start AT %I0.0 : Bool;`, `Max : Int := 5;`) or SimaticML. */
+function tagNames(text: string): string[] {
+  if (text.trimStart().startsWith("<")) return [...text.matchAll(/<SW\.Tags\.Plc(?:Tag|UserConstant)\b[\s\S]*?<Name>([^<]+)<\/Name>/g)].map((m) => m[1]!);
+  return [...text.matchAll(/^[ \t]*(?:"([^"\r\n]+)"|([A-Za-z_]\w*))(?:[ \t]*\{[^}]*\})?[ \t]+(?:AT\b|:)/gim)].map((m) => m[1] ?? m[2]!).filter((n) => !/^(VAR_GLOBAL|END_VAR|CONSTANT)$/i.test(n));
+}
+
 async function withUsers(root: string, state: StateStore, imported: string[]): Promise<string[]> {
   const out = new Set(imported);
   const devices = new Set(imported.map((a) => parseAddress(a).device));
@@ -346,7 +352,19 @@ async function withUsers(root: string, state: StateStore, imported: string[]): P
   // TIA Portal's names ignore letter case: "a"() calls A
   for (const s of candidates) texts.set(s.address, (await readFile(join(root, s.files[0]!.path), "utf8").catch(() => "")).toLowerCase());
   const usersOf = (names: string[]) => candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n.toLowerCase()}"`)));
-  const first = usersOf(imported.map((a) => parseAddress(a).name));
+  // a tag table is used through its tags ("Start_PB"), not its own name; a deleted one is read from its last version
+  const blobs = new BlobStore(root);
+  const names: string[] = [];
+  for (const a of imported) {
+    if (parseAddress(a).kind !== "tagtable") {
+      names.push(parseAddress(a).name);
+      continue;
+    }
+    const f = state.get(a)?.files[0];
+    const text = f ? await readFile(join(root, f.path), "utf8").catch(() => blobs.get(f.hash).then((b) => b.toString("utf8"), () => "")) : "";
+    names.push(...tagNames(text));
+  }
+  const first = usersOf(names);
   for (const s of first) out.add(s.address);
   // a call goes through the instance DB ("FB_Pump_DB"()), so the blocks that use those DBs follow too
   for (const s of usersOf(first.filter((s) => s.form === "db").map((s) => parseAddress(s.address).name))) out.add(s.address);
@@ -371,6 +389,28 @@ async function writeDiagnostics(root: string, items: Diagnostic[], keep: (d: Dia
   const all = [...kept.filter((d) => !seen.has(key(d))), ...items];
   await writeFileAtomic(file, JSON.stringify({ seq: seq + 1, items: all }, null, 2) + "\n");
   return seq + 1;
+}
+
+/**
+ * What `rung compile` found, recorded where `rung status` and the editors look. A compile of the whole PLC answers
+ * for every compile message of that PLC; a compile of some objects for theirs.
+ */
+export async function recordCompile(
+  root: string,
+  device: string,
+  scope: string[] | "all",
+  messages: readonly { address?: string; file?: string; severity: "error" | "warning" | "info"; description: string; line?: number; column?: number }[],
+  revisionOf: (address: string) => string | undefined,
+): Promise<void> {
+  const items: Diagnostic[] = messages
+    .filter((m) => !(m.severity === "info" && /^No block was compiled/i.test(m.description)))
+    .map((m) => {
+      const address = m.address ?? `plc:${device}`;
+      const revision = revisionOf(address);
+      return { address, path: m.file ?? "", severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}) };
+    });
+  const answered = (d: Diagnostic) => (scope === "all" ? d.address === `plc:${device}` || d.address.startsWith(`plc:${device}/`) : scope.includes(d.address)) || items.some((i) => i.address === d.address);
+  await writeDiagnostics(root, items, (d) => !answered(d), (d) => d.code !== "COMPILE");
 }
 
 /**
