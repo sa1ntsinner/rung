@@ -165,6 +165,7 @@ export class RungWorkspace implements vscode.Disposable {
       set("rung.workspace", this.hasConfig),
       set("rung.hasConflicts", this.conflicts.length > 0),
       set("rung.hasObjects", this.objects.length > 0),
+      set("rung.writesOn", this.writes === "on"),
     ]);
   }
 

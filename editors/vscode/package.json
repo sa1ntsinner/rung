@@ -1185,6 +1185,92 @@
           }
         }
       }
+    ],
+    "walkthroughs": [
+      {
+        "id": "rung.getStarted",
+        "title": "Get started with rung",
+        "description": "From a TIA Portal project to text files, tables and tests, in a few steps.",
+        "steps": [
+          {
+            "id": "check",
+            "title": "Check this computer",
+            "description": "See what is installed and what is missing.\n[Check this computer](command:rung.env.refresh)",
+            "media": {
+              "markdown": "media/walkthrough/check.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.env.refresh"
+            ]
+          },
+          {
+            "id": "project",
+            "title": "Mirror a TIA Portal project",
+            "description": "Pull a project into a folder of text files. Writes stay off.\n[Mirror a project](command:rung.init)",
+            "media": {
+              "markdown": "media/walkthrough/project.md"
+            },
+            "completionEvents": [
+              "onContext:rung.workspace"
+            ]
+          },
+          {
+            "id": "declarations",
+            "title": "See a block's interface",
+            "description": "Open an SCL block and show its declarations as a table.\n[Show declarations](command:rung.declarations.open)",
+            "media": {
+              "markdown": "media/walkthrough/declarations.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.declarations.open"
+            ]
+          },
+          {
+            "id": "usages",
+            "title": "Find who writes a value",
+            "description": "Put the cursor on a name and list its writers and readers.\n[Who writes this?](command:rung.whoWrites)",
+            "media": {
+              "markdown": "media/walkthrough/usages.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.whoWrites"
+            ]
+          },
+          {
+            "id": "test",
+            "title": "Run the tests",
+            "description": "Run the YAML tests on the offline simulator.\n[Run all tests](command:rung.testAll)",
+            "media": {
+              "markdown": "media/walkthrough/test.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.testAll"
+            ]
+          },
+          {
+            "id": "preview",
+            "title": "Preview a sync",
+            "description": "See what would go to TIA Portal and what would come back. Nothing is written.\n[Preview sync](command:rung.preview)",
+            "media": {
+              "markdown": "media/walkthrough/preview.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.preview"
+            ]
+          },
+          {
+            "id": "writes",
+            "title": "Turn on writes when you are ready",
+            "description": "Let saved files go to TIA Portal.\n[Turn on writes](command:rung.writes.on)",
+            "media": {
+              "markdown": "media/walkthrough/writes.md"
+            },
+            "completionEvents": [
+              "onContext:rung.writesOn"
+            ]
+          }
+        ]
+      }
     ]
   },
   "scripts": {
