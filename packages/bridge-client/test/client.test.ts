@@ -50,6 +50,28 @@ describe("BridgeClient", () => {
     expect(child.stdout.destroyed).toBe(true);
   });
 
+  it("says when the first request is slow (TIA Portal opening a project) and stops saying it once answered", async () => {
+    let slow = 0;
+    const c = await spawn(fake("slow", { requestTimeoutMs: 600, onSlowStart: () => slow++, slowStartMs: 100 }));
+    await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(slow).toBe(1);
+  });
+
+  it.runIf(process.platform === "win32")("a bridge that will not end is ended with what it started (a TIA Portal opening a project)", async () => {
+    const c = await BridgeClient.spawn({ ...fake("stuck-with-child"), closeTimeoutMs: 300 });
+    let pid = 0;
+    c.onEvent((e) => {
+      const m = e.event === "stderr" ? /child (\d+)/.exec(String(e.params)) : null;
+      if (m) pid = Number(m[1]);
+    });
+    await expect(c.listObjects("PLC_1")).resolves.toBeDefined();
+    for (let i = 0; !pid && i < 50; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(pid).toBeGreaterThan(0);
+    await c.close();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
   it("times out read requests with TIMEOUT", async () => {
     const c = await spawn(fake("slow", { requestTimeoutMs: 1000 }));
     await expect(c.listObjects("PLC_1")).rejects.toMatchObject({ code: "TIMEOUT" });

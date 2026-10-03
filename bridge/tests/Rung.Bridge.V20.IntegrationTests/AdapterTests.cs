@@ -507,6 +507,13 @@ public class TwoWayAdapterTests : IClassFixture<FixtureSession>
         }
     }
 
+    [Fact] public void ArchivesIntoAFolderOfThisProjectFileNotOfItsName()
+    {
+        var a = _fx.Session.Archive(null, 10);
+        try { Assert.Matches(@"\\rung\\backups\\RungFixture-[0-9a-f]{8}\\RungFixture_\d{8}_\d{6}\.zap20$", a.Path); }
+        finally { try { File.Delete(a.Path); } catch (IOException) { } }
+    }
+
     [Fact] public void ACopyInAnotherFolderNeverOverwritesTheOriginal()
     {
         // GenerateBlocksFromSource replaces a same-named block wherever it lives

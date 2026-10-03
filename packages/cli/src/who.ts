@@ -58,7 +58,9 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
       return 1;
     }
     declared = members.at(-1);
-    r = usagesOfPath(index, head, parts.slice(1));
+    // an instance DB is written by its FB's code (#Jam := …): its member's declaration in the FB finds those writes too
+    const instance = head.block.dbOf && scoped.global(head.block.dbOf)?.block?.kind === "FB";
+    r = instance && declared?.uri !== undefined && declared.start !== undefined ? usagesAt(index, declared.uri, declared.start) : usagesOfPath(index, head, parts.slice(1));
   } else {
     const at = occurrence(index, parts, file);
     if (!at) {

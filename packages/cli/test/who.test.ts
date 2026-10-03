@@ -40,4 +40,15 @@ describe("rung who", () => {
     expect(j.reads).toHaveLength(1);
     expect((await run("who", "Nowhere")).code).toBe(1);
   });
+
+  it("an instance DB's member is written by its FB's code, called through that DB", async () => {
+    const dir = join(ws, "plc", "PLC_1", "blocks");
+    writeFileSync(join(dir, "Fx_Belt.scl"), 'FUNCTION_BLOCK "Fx_Belt"\n   VAR_OUTPUT\n      Jam : Bool;\n   END_VAR\nBEGIN\n   #Jam := TRUE;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(dir, "Belt_DB.db"), 'DATA_BLOCK "Belt_DB"\n"Fx_Belt"\nBEGIN\nEND_DATA_BLOCK\n');
+    writeFileSync(join(dir, "Cell.scl"), 'ORGANIZATION_BLOCK "Cell"\nBEGIN\n   "Belt_DB"();\n   "Lamp" := "Belt_DB".Jam;\nEND_ORGANIZATION_BLOCK\n');
+    const r = await run("who", '"Belt_DB".Jam');
+    expect(r.text).toMatch(/Fx_Belt\s+plc\/PLC_1\/blocks\/Fx_Belt\.scl:6 {2}#Jam := TRUE;/);
+    expect(r.text).toMatch(/called from Cell \(plc\/PLC_1\/blocks\/Cell\.scl:3\)/);
+    expect(r.text).toMatch(/Cell\s+plc\/PLC_1\/blocks\/Cell\.scl:4/);
+  });
 });

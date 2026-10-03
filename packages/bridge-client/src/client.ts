@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
@@ -35,6 +35,9 @@ export interface BridgeClientOptions {
   requestTimeoutMs?: number;
   /** The first request after the handshake, which may start TIA Portal without window and open the project. Default: requestTimeoutMs. */
   firstRequestTimeoutMs?: number;
+  /** Called when that first request has not been answered after slowStartMs (default 10 s). */
+  onSlowStart?: () => void;
+  slowStartMs?: number;
   /** Frames above this size terminate the bridge. Default 64 MiB. */
   maxLineBytes?: number;
   /**
@@ -73,7 +76,7 @@ export class BridgeClient {
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
-    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "firstRequestTimeoutMs" | "maxLineBytes">> & { remote: boolean; closeTimeoutMs: number },
+    private readonly opts: Required<Pick<BridgeClientOptions, "requestTimeoutMs" | "firstRequestTimeoutMs" | "maxLineBytes">> & { remote: boolean; closeTimeoutMs: number; onSlowStart?: () => void; slowStartMs?: number },
   ) {
     this.exitPromise = new Promise((resolve) => {
       const done = () => {
@@ -111,6 +114,7 @@ export class BridgeClient {
       maxLineBytes: opts.maxLineBytes ?? 64 * 1024 * 1024,
       remote: !!opts.remote,
       closeTimeoutMs: opts.closeTimeoutMs ?? 5_000,
+      ...(opts.onSlowStart ? { onSlowStart: opts.onSlowStart, slowStartMs: opts.slowStartMs ?? 10_000 } : {}),
     });
     try {
       const hello = (await client.request("bridge.hello", {})) as HelloResult;
@@ -131,14 +135,18 @@ export class BridgeClient {
   request(method: string, params: Record<string, unknown>, timeoutMs = this.opts.requestTimeoutMs): Promise<unknown> {
     if (this.exited) return Promise.reject(new BridgeError(ErrorCodes.BRIDGE_EXITED, "rung-bridge is not running"));
     // the first request after the handshake may start TIA Portal and open the project: minutes on a cold start
+    let slow: NodeJS.Timeout | undefined;
     if (method !== "bridge.hello" && !this.opened) {
       this.opened = true;
       timeoutMs = Math.max(timeoutMs, this.opts.firstRequestTimeoutMs);
+      // a person waiting minutes in silence thinks rung hangs: say what it waits for
+      if (this.opts.onSlowStart) slow = setTimeout(this.opts.onSlowStart, this.opts.slowStartMs ?? 10_000);
     }
     const id = this.nextId++;
     const mutation = MUTATIONS.has(method);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        clearTimeout(slow);
         this.pending.delete(id);
         reject(
           mutation
@@ -146,7 +154,7 @@ export class BridgeClient {
             : new BridgeError(ErrorCodes.TIMEOUT, `${method} timed out after ${timeoutMs} ms`),
         );
       }, timeoutMs);
-      this.pending.set(id, { method, mutation, resolve, reject, timer });
+      this.pending.set(id, { method, mutation, resolve: (v) => (clearTimeout(slow), resolve(v)), reject: (e) => (clearTimeout(slow), reject(e)), timer });
       this.sentMethods.push(method);
       this.child.stdin.write(JSON.stringify({ id, method, params }) + "\n");
     });
@@ -265,10 +273,22 @@ export class BridgeClient {
     return this.request("plc.read", { device, expressions }, 30_000) as Promise<{ name: string; value?: unknown; error?: string }[]>;
   }
 
+  /**
+   * Ends the bridge and what it started: a TIA Portal it opened without a window is its child, and left behind (the
+   * bridge killed while TIA Portal was still opening a project) it would run on, invisible, holding the project.
+   */
+  private kill(): void {
+    if (process.platform === "win32" && !this.opts.remote && this.child.pid) {
+      const r = spawnSync("taskkill", ["/PID", String(this.child.pid), "/T", "/F"], { windowsHide: true });
+      if (r.status === 0) return;
+    }
+    this.child.kill();
+  }
+
   async close(): Promise<void> {
     if (!this.exited) {
       this.child.stdin.end();
-      const killer = setTimeout(() => this.child.kill(), this.opts.closeTimeoutMs);
+      const killer = setTimeout(() => this.kill(), this.opts.closeTimeoutMs);
       await this.exitPromise;
       clearTimeout(killer);
     }
@@ -286,7 +306,7 @@ export class BridgeClient {
     if (Buffer.byteLength(this.buffer) > this.opts.maxLineBytes) {
       this.buffer = "";
       this.emit({ event: "protocol-error", params: "frame too large" });
-      this.child.kill();
+      this.kill();
     }
   }
 
@@ -297,7 +317,7 @@ export class BridgeClient {
       if (typeof msg !== "object" || msg === null) throw new Error("not an object");
     } catch {
       this.emit({ event: "stdout-noise", params: line.slice(0, MAX_NOISE) });
-      if (++this.malformed > MAX_MALFORMED) this.child.kill();
+      if (++this.malformed > MAX_MALFORMED) this.kill();
       return;
     }
     if (typeof msg.event === "string") {

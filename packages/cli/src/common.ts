@@ -80,7 +80,13 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   // the first request may start TIA Portal without window and open the project: minutes on a cold start
-  const client = await BridgeClient.spawn({ command, args, env: bridgeEnv(io.env, {}, extra.includes("--allow-download")), firstRequestTimeoutMs: 300_000 });
+  const client = await BridgeClient.spawn({
+    command,
+    args,
+    env: bridgeEnv(io.env, {}, extra.includes("--allow-download")),
+    firstRequestTimeoutMs: 300_000,
+    onSlowStart: () => io.stderr("rung: waiting for TIA Portal: opening the project without a window can take a minute or two\n"),
+  });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
 }

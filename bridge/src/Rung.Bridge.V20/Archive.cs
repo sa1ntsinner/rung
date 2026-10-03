@@ -16,12 +16,20 @@ namespace Rung.Bridge.V20
         /// <summary>TIA Portal refuses an archive path longer than this (V20, without the extension).</summary>
         const int MaxArchivePath = 143;
 
+        /// <summary>Eight hex digits that tell projects of the same name apart: their full paths, letter case aside.</summary>
+        static string PathId(string fullPath)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return string.Concat(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(fullPath.ToLowerInvariant())).Take(4).Select(b => b.ToString("x2")));
+        }
+
         public ArchiveOutcome Archive(string directory, int keep)
         {
             Alive();
             var project = Path.GetFileNameWithoutExtension(_project.Path.Name);
+            // one folder per project, not per name: two copies of Line1.ap20 must not rotate each other's archives away
             var dir = string.IsNullOrEmpty(directory)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "rung", "backups", project)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "rung", "backups", project + "-" + PathId(_project.Path.FullName))
                 : directory;
             // .ap20 → .zap20, .ap21 → .zap21
             var ext = ".z" + _project.Path.Extension.TrimStart('.');

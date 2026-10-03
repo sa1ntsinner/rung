@@ -20,6 +20,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "bridge.hello":
       reply({ protocol: mode === "protocol2" ? 2 : 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: ["export"] });
       if (mode === "crash-after-hello") setTimeout(() => process.exit(3), 20);
+      // like a bridge stuck while TIA Portal opens a project: it ignores the end of its input, its child runs on
+      if (mode === "stuck-with-child") {
+        const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+        process.stderr.write(`child ${c.pid}\n`);
+        setInterval(() => {}, 1000);
+      }
       // like a bridge whose TIA Portal outlives it: a child that inherited the pipes keeps them open
       if (mode === "orphan-after-hello") {
         spawn(process.execPath, ["-e", "setTimeout(() => {}, 8000)"], { stdio: "inherit" });
