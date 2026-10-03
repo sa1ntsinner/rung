@@ -23,6 +23,44 @@ export interface VarDecl {
   at?: string;
   /** A local of one accessor of an IEC PROPERTY: visible only in its GET or its SET. */
   accessor?: "get" | "set";
+  /** Exact source spans, for editors that change one field without touching the rest. */
+  src?: DeclSource;
+}
+
+export interface Span {
+  start: number;
+  end: number;
+}
+
+/** Where each part of a declaration stands in the source (offsets into the parsed text). */
+export interface DeclSource {
+  /** name start .. end of the closing ';' (for a Struct: through END_STRUCT and its ';') */
+  whole: Span;
+  /** the name as written, quotes included ("30msPls") */
+  name: Span;
+  /** the { … } attribute pragma between name and ':', braces included */
+  attrs?: Span;
+  /** the type as written; for a Struct only its STRUCT keyword */
+  type: Span;
+  /** the start value after ':=' */
+  init?: Span;
+  /** the // comment token on the name's line */
+  comment?: Span;
+}
+
+/** A VAR … END_VAR section of a block as written. */
+export interface SectionSource {
+  section: Section;
+  /** the header keyword as written: VAR, VAR_INPUT, … */
+  keyword: string;
+  /** RETAIN, NON_RETAIN, DB_SPECIFIC, CONSTANT, in source order */
+  modifiers: string[];
+  /** header keyword .. END_VAR end */
+  whole: Span;
+  /** header keyword .. end of its last modifier */
+  header: Span;
+  /** after the header .. start of END_VAR: where new declarations go */
+  body: Span;
 }
 
 /** The accessor of a PROPERTY block whose code holds `offset`, if any. */
@@ -67,6 +105,8 @@ export interface BlockModel {
   end: number;
   returnType?: string;
   vars: VarDecl[];
+  /** Its VAR … END_VAR sections as written. */
+  sections?: SectionSource[];
   /** DATA_BLOCK "X" of type "UDT"/"FB" (instance or typed DB). */
   dbOf?: string;
   regions: Region[];
@@ -174,10 +214,13 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
   const isKw = (t: Token, ...kw: string[]) => t.kind === "ident" && kw.includes(t.upper);
   const err = (message: string, t: Token, severity: "error" | "warning" = "error") => diagnostics.push({ message, start: t.start, end: Math.max(t.end, t.start + 1), severity });
   /** Trailing // comment on the same line as offset. */
-  const lineComment = (offset: number): string | undefined => {
+  const lineCommentToken = (offset: number): Token | undefined => {
     const eol = src.indexOf("\n", offset);
     const lineEnd = eol < 0 ? src.length : eol;
-    const c = comments.find((c) => c.start >= offset && c.start < lineEnd);
+    return comments.find((c) => c.start >= offset && c.start < lineEnd);
+  };
+  const lineComment = (offset: number): string | undefined => {
+    const c = lineCommentToken(offset);
     return c ? c.text.replace(/^\/\/\s?|^\(\*\s?|\s?\*\)$|^\/\*\s?|\s?\*\/$/g, "").trim() : undefined;
   };
   /**
@@ -244,17 +287,23 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     return { type: "?", isArray: false };
   }
 
+  /** The section modifiers (RETAIN, CONSTANT, …) the last parseDecls call read before its first declaration. */
+  let lastModifiers: Token[] = [];
+
   function parseDecls(section: Section, ...stop: string[]): VarDecl[] {
     const vars: VarDecl[] = [];
     let local = section;
+    const modifiers: Token[] = [];
     while (peek().kind !== "eof" && !(isKw(peek(), ...stop, "END_VAR", "BEGIN", ...Object.values(HEADERS).map((h) => h.end)) && !declared())) {
       const t = peek();
       if (isKw(t, "CONSTANT") && !declared()) {
+        if (!vars.length) modifiers.push(t);
         next();
         local = "Constant";
         continue;
       }
       if (isKw(t, "RETAIN", "NON_RETAIN", "DB_SPECIFIC") && !declared()) {
+        if (!vars.length) modifiers.push(t);
         next();
         continue;
       }
@@ -264,7 +313,11 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       next();
-      while (peek().kind === "pragma") next();
+      let attrs: Span | undefined;
+      while (peek().kind === "pragma") {
+        const p = next();
+        attrs ??= { start: p.start, end: p.end };
+      }
       let at: string | undefined;
       if (isKw(peek(), "AT")) {
         next();
@@ -276,19 +329,37 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       next();
+      const typeStart = peek().start;
       const ty = parseType();
+      // a Struct's type is its STRUCT keyword (Struct and STRUCT are both six letters)
+      const typeEnd = ty.type === "Struct" ? typeStart + 6 : tokens[i - 1]!.end;
       let init: string | undefined;
+      let initSpan: Span | undefined;
       if (peek().text === ":=") {
         next();
         const s = peek().start;
         while (peek().kind !== "eof" && peek().text !== ";" && !isKw(peek(), "END_VAR", "END_STRUCT")) next();
         init = src.slice(s, tokens[i - 1]!.end);
+        initSpan = { start: s, end: tokens[i - 1]!.end };
       }
       const semi = peek();
-      if (semi.text === ";") next();
+      let wholeEnd = tokens[i - 1]!.end;
+      if (semi.text === ";") wholeEnd = next().end;
       else err("Missing ';'", semi);
-      vars.push({ name: unquote(t.text), start: t.start, end: t.end, section: local, ...ty, ...(at ? { at } : {}), ...(init !== undefined ? { init } : {}), ...(lineComment(t.end) ? { comment: lineComment(t.end)! } : {}) });
+      const ct = lineCommentToken(t.end);
+      const decl: DeclSource = {
+        whole: { start: t.start, end: wholeEnd },
+        name: { start: t.start, end: t.end },
+        type: { start: typeStart, end: typeEnd },
+        ...(attrs ? { attrs } : {}),
+        ...(initSpan ? { init: initSpan } : {}),
+        // a // comment ends before the line's CR in a CRLF file
+        ...(ct ? { comment: { start: ct.start, end: src[ct.end - 1] === "\r" ? ct.end - 1 : ct.end } } : {}),
+      };
+      vars.push({ name: unquote(t.text), start: t.start, end: t.end, section: local, ...ty, ...(at ? { at } : {}), ...(init !== undefined ? { init } : {}), ...(ct ? { comment: lineComment(t.end)! } : {}), src: decl });
     }
+    // set last: a Struct inside parses its members with its own call
+    lastModifiers = modifiers;
     return vars;
   }
 
@@ -518,9 +589,23 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       }
       if (x.kind === "ident" && SECTIONS[x.upper]) {
         next();
-        block.vars.push(...parseDecls(SECTIONS[x.upper]!));
-        if (isKw(peek(), "END_VAR")) next();
-        else err("Missing END_VAR", peek());
+        const vars = parseDecls(SECTIONS[x.upper]!);
+        const mods = lastModifiers;
+        const headerEnd = mods.length ? mods[mods.length - 1]!.end : x.end;
+        block.vars.push(...vars);
+        const endTok = peek();
+        const closed = isKw(endTok, "END_VAR");
+        if (closed) next();
+        else err("Missing END_VAR", endTok);
+        const section: Section = mods.some((m) => m.upper === "CONSTANT") ? "Constant" : SECTIONS[x.upper]!;
+        (block.sections ??= []).push({
+          section,
+          keyword: x.text,
+          modifiers: mods.map((m) => m.upper),
+          whole: { start: x.start, end: closed ? endTok.end : endTok.start },
+          header: { start: x.start, end: headerEnd },
+          body: { start: headerEnd, end: endTok.start },
+        });
         continue;
       }
       if (iec && h.kind === "UDT" && x.text === "(") {
