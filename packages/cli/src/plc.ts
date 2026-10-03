@@ -38,6 +38,8 @@ class PlcLink {
     private readonly io: Io,
     /** Only rung download's own bridge may download (the bridge refuses plc.download without --allow-download). */
     private readonly download = false,
+    /** Whether its own bridge may open the project in a TIA Portal without window ([tia] start). */
+    private readonly headless = true,
   ) {
     PlcLink.open.add(this);
   }
@@ -48,7 +50,8 @@ class PlcLink {
     // a compile in a TIA Portal rung opened without a window is kept only if the project is saved when it closes;
     // that is a write into the project, so only where this workspace may write
     const save = this.config.sync.import === "auto" && !this.config.writesOff && this.config.sync.save !== "never";
-    this.bridge ??= bridgeFor(this.config, this.io, [...(this.download && this.config.download.enabled ? ["--allow-download"] : []), ...(save ? ["--save-after-import"] : [])]);
+    const config = this.headless ? this.config : { ...this.config, tia: { ...this.config.tia, start: "never" as const } };
+    this.bridge ??= bridgeFor(config, this.io, [...(this.download && this.config.download.enabled ? ["--allow-download"] : []), ...(save ? ["--save-after-import"] : [])]);
     return direct(await this.bridge);
   }
 
@@ -133,13 +136,38 @@ function interfaceNumber(v: Record<string, unknown>): number {
   return n;
 }
 
+/** A connection typed on the command line, as TIA Portal spells it; one TIA Portal does not offer is refused with what it does offer. */
+function offeredTarget(t: ConnectionTarget, c: ConnectionOptions): ConnectionTarget {
+  const same = (a: string, b: string) => a.toUpperCase() === b.toUpperCase();
+  const refuse = (what: string, has: string[]) =>
+    new WorkspaceError("BAD_ARGUMENT", `TIA Portal has no ${what} for ${c.device}; it has ${[...new Set(has)].join(", ") || "none"} (rung interfaces lists them; rung connect --pick chooses)`);
+  const mode = c.modes.find((m) => same(m.name, t.mode));
+  if (!mode) throw refuse(`mode "${t.mode}"`, c.modes.map((m) => `"${m.name}"`));
+  const pc = mode.pcInterfaces.find((p) => same(p.name, t.pcInterface) && p.number === (t.pcInterfaceNumber ?? 1));
+  if (!pc) throw refuse(`PG/PC interface "${t.pcInterface}" (${t.pcInterfaceNumber ?? 1}) in mode "${mode.name}"`, mode.pcInterfaces.map((p) => `"${p.name}" (${p.number})`));
+  const target = t.targetInterface === undefined ? undefined : pc.targetInterfaces.find((x) => same(x, t.targetInterface!));
+  if (t.targetInterface !== undefined && !target) throw refuse(`target interface "${t.targetInterface}" through "${pc.name}"`, pc.targetInterfaces.map((x) => `"${x}"`));
+  return { ...t, mode: mode.name, pcInterface: pc.name, ...(target ? { targetInterface: target } : {}) };
+}
+
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v, ws, link);
   if (v.use) {
-    const t: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v), ...(v.target ? { targetInterface: String(v.target) } : {}) };
+    const typed: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v), ...(v.target ? { targetInterface: String(v.target) } : {}) };
+    // checked against what TIA Portal offers now, not at the first online command; without TIA Portal, saved as typed
+    // (CODESYS takes any gateway address: --use 192.168.1.10 --mode TCP)
+    const offered =
+      config.project.tiaVersion === "CODESYS"
+        ? undefined
+        : await link.call<ConnectionOptions>("connections", { device, scan: false }, (b) => b.connections(device, false)).catch((e: { code?: string }) => {
+            if (["TIA_NOT_RUNNING", "NO_PROJECT"].includes(e.code ?? "")) return undefined;
+            throw e;
+          });
+    const checked = offered !== undefined || config.project.tiaVersion === "CODESYS";
+    const t = offered ? offeredTarget(typed, offered) : typed;
     await saveTarget(ws, device, t);
-    io.stdout(`${device}: ${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}; saved as [plc.${device}] in rung.toml\n`);
+    io.stdout(`${device}: ${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}; saved as [plc.${device}] in rung.toml${checked ? "" : " (not checked: no TIA Portal has the project open)"}\n`);
     return 0;
   }
   if (v.json) {
@@ -152,10 +180,10 @@ export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io
   return 0;
 }
 
-async function workspace(dir: string, io: Io, download = false) {
+async function workspace(dir: string, io: Io, download = false, headless = true) {
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
-  return { ws, config, link: new PlcLink(ws, config, io, download) };
+  return { ws, config, link: new PlcLink(ws, config, io, download, headless) };
 }
 
 async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[], device: string, scope: string[] | "all" = "all"): Promise<number> {
@@ -319,11 +347,18 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 }
 
 export async function cmdOpen(dir: string, file: string, io: Io): Promise<number> {
-  const { ws, config, link } = await workspace(dir, io);
+  // a TIA Portal started without a window has no editors: rung open never starts one, it would wait a minute to fail
+  const { ws, config, link } = await workspace(dir, io, false, false);
   const rel = relative(ws, resolve(io.cwd, file)).split(sep).join("/");
   const s = (await snapshot(ws)).find((x) => x.path === rel);
   if (!s) throw new WorkspaceError("NOT_MIRRORED", `${rel} is not a mirrored object`);
-  await link.call("show", { address: s.address }, (b) => b.show(s.address));
+  try {
+    await link.call("show", { address: s.address }, (b) => b.show(s.address));
+  } catch (e) {
+    if (["TIA_NOT_RUNNING", "NO_PROJECT", "UNSUPPORTED_CAPABILITY"].includes((e as { code?: string }).code ?? ""))
+      throw new WorkspaceError("NO_TIA_WINDOW", `rung open shows ${rel} in TIA Portal's editor: open ${config.project.path} in TIA Portal (with its window) first`);
+    throw e;
+  }
   io.stdout(`opened ${s.address} in TIA Portal\n`);
   return 0;
 }

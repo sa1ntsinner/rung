@@ -247,11 +247,16 @@ describe("PLC commands", () => {
     expect(t.db().onlineTarget).toMatchObject({ pcInterface: "Wi-Fi" });
   });
 
-  it("connect --use saves a hand-picked connection", async () => {
+  it("connect --use saves a hand-picked connection TIA Portal offers, in its spelling; one it does not offer is refused", async () => {
     const t = setup();
     await t.run(["init"]);
-    expect(await t.run(["connect", "--use", "PLCSIM", "--target", "1 X1"])).toBe(0);
-    expect(readFileSync(t.toml, "utf8")).toMatch(/pc_interface = "PLCSIM"/);
+    expect(await t.run(["connect", "--use", "PLCSIM", "--target", "1 X1"])).toBe(1);
+    expect(t.err.join("")).toContain('TIA Portal has no PG/PC interface "PLCSIM" (1) in mode "PN/IE" for PLC_1; it has "Ethernet" (1), "Wi-Fi" (1)');
+    expect(await t.run(["connect", "--use", "Ethernet", "--target", "1 X3"])).toBe(1);
+    expect(t.err.join("")).toContain('it has "1 X1", "1 X2"');
+    expect(readFileSync(t.toml, "utf8")).not.toMatch(/pc_interface/);
+    expect(await t.run(["connect", "--use", "wi-fi", "--target", "1 x1"])).toBe(0);
+    expect(readFileSync(t.toml, "utf8")).toMatch(/pc_interface = "Wi-Fi"[\s\S]*target_interface = "1 X1"/);
     expect(await t.run(["connect", "--use", "Ethernet", "--target", "1 X2"])).toBe(0);
     const toml = readFileSync(t.toml, "utf8");
     expect(toml.match(/\[plc\.PLC_1\]/g)).toHaveLength(1); // replaced, not duplicated
@@ -279,13 +284,15 @@ describe("PLC commands", () => {
     expect(t.db().online).toBe("Offline");
   });
 
-  it("compile --hw compiles the hardware; open explains a headless TIA", async () => {
+  it("compile --hw compiles the hardware; open never starts a TIA Portal without window and says to open the project", async () => {
     const t = setup();
     await t.run(["init"]);
     await t.run(["pull"]);
     expect(await t.run(["compile", "--hw"])).toBe(0);
     expect(t.out.join("")).toMatch(/Hardware compiled/);
     expect(await t.run(["open", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(1);
-    expect(t.err.join("")).toMatch(/without user interface/);
+    expect(t.err.join("")).toMatch(/NO_TIA_WINDOW: rung open shows plc\/PLC_1\/blocks\/Fx_Motor\.scl in TIA Portal's editor: open .* in TIA Portal \(with its window\) first/);
+    expect(t.err.join("")).not.toMatch(/without user interface/);
+    expect(t.db().startArgs.at(-1)).not.toContain("--open-headless");
   });
 });
