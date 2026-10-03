@@ -24,12 +24,12 @@ describe("parseAttributes", () => {
     expect(list.entries.map((e) => e.value)).toEqual(["a;b}c'd", "True"]);
   });
 
-  it("states: explicit on/off in any case, implicit when absent", () => {
+  it("states: explicit values in any case; absent means TIA's default, marked as not explicit", () => {
     const src = "{ ExternalWritable := 'false'; S7_SetPoint := 'TRUE'}";
     const list = parseAttributes(src, { start: 0, end: src.length });
-    expect(attrState(list, "ExternalWritable")).toBe("off");
-    expect(attrState(list, "S7_SetPoint")).toBe("on");
-    expect(attrState(list, "ExternalVisible")).toBe("implicit");
-    expect(attrState(undefined, "ExternalVisible")).toBe("implicit");
+    expect(attrState(list, "ExternalWritable")).toEqual({ value: false, explicit: true });
+    expect(attrState(list, "S7_SetPoint")).toEqual({ value: true, explicit: true });
+    expect(attrState(list, "ExternalVisible")).toEqual({ value: true, explicit: false });
+    expect(attrState(undefined, "S7_SetPoint")).toEqual({ value: false, explicit: false });
   });
 });

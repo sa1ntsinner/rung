@@ -23,8 +23,18 @@ export interface AttrList {
 /** The four attributes TIA's interface table shows as columns, by their source keys. */
 export const EXPOSURE = { accessible: "ExternalAccessible", visible: "ExternalVisible", writable: "ExternalWritable", setpoint: "S7_SetPoint" } as const;
 
-/** An attribute as a table shows it: absent is "implicit" (TIA's default applies), never "off". */
-export type AttrState = "on" | "off" | "implicit" | "n/a";
+/**
+ * TIA Portal's value when the attribute is absent. TIA V20 writes none of these when they equal this value: an
+ * exported block carries ExternalWritable := 'False' but never 'True', S7_SetPoint := 'True' but never 'False'
+ * (checked against TIA V20 by import, compile and export).
+ */
+export const ATTR_DEFAULT: Record<string, boolean> = { EXTERNALACCESSIBLE: true, EXTERNALVISIBLE: true, EXTERNALWRITABLE: true, S7_SETPOINT: false };
+
+/** An attribute as a table shows it: its value, and whether the source says so or TIA's default applies. */
+export interface AttrState {
+  value: boolean;
+  explicit: boolean;
+}
 
 export function parseAttributes(src: string, span: Span): AttrList {
   const entries: AttrEntry[] = [];
@@ -70,6 +80,7 @@ export function parseAttributes(src: string, span: Span): AttrList {
 
 export function attrState(list: AttrList | undefined, key: string): AttrState {
   const e = list?.entries.find((x) => x.key.toUpperCase() === key.toUpperCase());
-  if (!e) return "implicit";
-  return /^true$/i.test(e.value) ? "on" : /^false$/i.test(e.value) ? "off" : "implicit";
+  const fallback = ATTR_DEFAULT[key.toUpperCase()] ?? false;
+  if (!e || !/^(true|false)$/i.test(e.value)) return { value: fallback, explicit: false };
+  return { value: /^true$/i.test(e.value), explicit: true };
 }

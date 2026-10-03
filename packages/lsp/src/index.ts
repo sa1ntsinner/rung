@@ -16,3 +16,6 @@ export * from "./simaticml.js";
 export * from "./simaticsd.js";
 export { type MonitorProvider, type MonitorReader, type MonitorValues } from "./monitor.js";
 export * from "./testkeys.js";
+export * from "./declarations.js";
+export * from "./declarationEdit.js";
+export { ATTR_DEFAULT, EXPOSURE, attrState, parseAttributes, type AttrEntry, type AttrList } from "./attributes.js";

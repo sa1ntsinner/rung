@@ -25,7 +25,9 @@ import {
 } from "vscode-languageserver/node.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
-import { WorkspaceIndex, deviceOfUri } from "./workspace.js";
+import { WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
+import { declarationModel } from "./declarations.js";
+import { planDeclarationEdit, type DeclOp } from "./declarationEdit.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
@@ -262,6 +264,25 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       .map((l) => ({ uri: l.uri, range: range(l.uri, l.start, l.end) })),
   );
   // rung's own request: who writes and who reads what is under the cursor, with the line and the block
+  // the declaration table: the block at the position (or the file's first) as sections and rows with exact ranges
+  connection.onRequest("rung/declarations", (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {
+    const doc = index.docs.get(p.textDocument.uri);
+    if (!doc?.parsed) return null;
+    const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
+    const isFb = (name: string) => scopedTo(index, p.textDocument.uri).global(name)?.block?.kind === "FB";
+    return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb);
+  });
+  // a declaration table's edit: the text edits for one operation, against the version the table showed
+  connection.onRequest("rung/declarationEdit", (p: { textDocument: { uri: string; version: number }; position?: { line: number; character: number }; op: DeclOp }) => {
+    const doc = index.docs.get(p.textDocument.uri);
+    const live = documents.get(p.textDocument.uri)?.version ?? 0;
+    if (!doc?.parsed) return { ok: false, reason: "The file is not open" };
+    if (p.textDocument.version !== live) return { ok: false, reason: "The file changed. Review this value again." };
+    const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
+    const plan = planDeclarationEdit(doc.text, declarationModel(p.textDocument.uri, live, doc.text, doc.parsed, offset), p.op);
+    if (!plan.ok) return plan;
+    return { ok: true, version: plan.version, edits: plan.edits.map((e) => ({ range: range(p.textDocument.uri, e.start, e.end), old: e.old, newText: e.text })) };
+  });
   connection.onRequest("rung/usages", (p: { textDocument: { uri: string }; position: { line: number; character: number } }) => {
     const r = usagesAt(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position));
     const line = (uri: string, start: number) => {
