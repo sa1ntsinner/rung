@@ -27,6 +27,12 @@ describe("manifest", () => {
     expect(pkg.contributes.menus["editor/title"].some((m: { command: string }) => m.command === "rung.declarations.open")).toBe(true);
   });
 
+  it("no two keybindings share a key (Alt+Q D is download; declarations are Alt+Q A)", () => {
+    const keys = pkg.contributes.keybindings.map((k: { key: string }) => k.key);
+    expect(keys.filter((k: string, i: number) => keys.indexOf(k) !== i)).toEqual([]);
+    expect(pkg.contributes.keybindings.find((k: { command: string }) => k.command === "rung.declarations.open").key).toBe("alt+q a");
+  });
+
   it("every command in a menu is a contributed command", () => {
     for (const [, items] of Object.entries(pkg.contributes.menus as Record<string, { command?: string }[]>)) for (const i of items) if (i.command) expect(commands.has(i.command)).toBe(true);
   });

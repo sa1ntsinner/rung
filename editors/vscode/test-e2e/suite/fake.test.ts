@@ -180,7 +180,7 @@ describe("rung extension on a fake-bridge workspace", function () {
       });
       assert.deepEqual(
         lenses.map((l) => `${l.range.start.line}:${l.command?.title}`),
-        ["0:Compile", "0:Test", "0:Open in TIA Portal"],
+        ["0:Declarations", "0:Compile", "0:Test", "0:Open in TIA Portal"],
       );
       assert.ok(!lenses.some((l) => /download/i.test(l.command?.command ?? "")));
     });
@@ -234,7 +234,7 @@ describe("rung extension on a fake-bridge workspace", function () {
       await vscode.commands.executeCommand("rung.openInTia");
       assert.deepEqual(cli.find("open")?.args, ["open", PUMP]);
       assert.equal(d.texts.length, 1, d.texts.join("\n"));
-      assert.match(d.texts[0]!, /^warning: TIA Portal runs without a user interface on this PC, so it cannot show Fx_Pump/);
+      assert.match(d.texts[0]!, /^warning: No TIA Portal window has this project open, so TIA Portal cannot show Fx_Pump/);
     });
   });
 
@@ -395,7 +395,7 @@ describe("rung extension on a fake-bridge workspace", function () {
 
     it("status runs rung status", async () => {
       await vscode.commands.executeCommand("rung.status");
-      assert.match(cli.find("status")!.result.output, /conflicted\s+plc\/PLC_1\/blocks\/10_Drives\/Fx_Motor\.scl/);
+      assert.match(cli.find("status")!.result.output, /edited, not sent plc\/PLC_1\/blocks\/10_Drives\/Fx_Motor\.scl — conflict \(rung resolve/);
     });
   });
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**VS Code**
+- Declarations: a block's interface as a table beside the SCL code, with TIA Portal's sections, structures that open into their members, three column presets (Code, HMI access, Commissioning), a filter and an inspector. HMI/OPC UA attributes show TIA Portal's default faint and an explicit setting plainly.
+- Usages: Who Writes This? fills a sidebar view that stays while you open the places it lists.
+- Get started: a short walkthrough from checking the PC to the first sync.
+
+**Language server**
+- `rung/declarations` and `rung/declarationEdit`: the interface with exact source ranges, and edits that change only their own text, written the way TIA Portal exports them (checked by import, compile and export in TIA Portal V20).
+
 ## 0.1.0 — 2026-10-03 (pre-release)
 
 The first public release. TIA Portal V20 on Windows; the language server, `rung test` and the MCP server also run on Linux and macOS (the bridge then runs on a Windows PC over ssh).

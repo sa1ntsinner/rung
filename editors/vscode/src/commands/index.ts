@@ -231,10 +231,9 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
       if (!t) return;
       const r = await cli.capture(Args.open(t.rel), { progress: `rung: opening ${t.name ?? t.rel} in TIA Portal…` });
       if (r.error || r.code === 0) return;
-      if (/without (a )?user interface/i.test(r.output))
-        void vscode.window.showWarningMessage(
-          `TIA Portal runs without a user interface on this PC, so it cannot show ${t.name ?? t.rel}. Open the project in a TIA Portal window to use Open in TIA Portal.`,
-        );
+      // rung open never starts a TIA Portal without window (it has no editors): it says so at once
+      if (/NO_TIA_WINDOW|without (a )?user interface/i.test(r.output))
+        void vscode.window.showWarningMessage(`No TIA Portal window has this project open, so TIA Portal cannot show ${t.name ?? t.rel}. Open the project in TIA Portal first.`);
       else void showFailure(out, "Could not open it in TIA Portal", r.output);
     }),
   );

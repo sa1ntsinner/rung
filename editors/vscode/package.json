@@ -982,7 +982,7 @@
         "when": "rung.workspace"
       },
       {
-        "key": "alt+q d",
+        "key": "alt+q a",
         "command": "rung.declarations.open",
         "when": "editorLangId == scl"
       }
