@@ -815,7 +815,9 @@ export function renameTarget(index: WorkspaceIndex, uri: string, offset: number)
  */
 export function rename(index: WorkspaceIndex, uri: string, offset: number, newName: string): TextEdit[] | { error: string } {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
-  if (!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(newName)) return { error: `${newName} is not a valid SCL identifier` };
+  // a keyword or a name with spaces is a name TIA Portal takes quoted: "Valve 1" : Bool;, #"Valve 1"
+  if (!newName.trim() || /["\u0000-\u001f]/.test(newName)) return { error: `${newName} cannot be a name in TIA Portal` };
+  const name = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(newName) && !KEYWORDS.includes(newName.toUpperCase()) ? newName : `"${newName}"`;
   const block = index.blockAt(uri, offset);
   if (!block) return { error: "Nothing to rename here" };
   let decl = declAt(block.vars, offset);
@@ -848,15 +850,15 @@ export function rename(index: WorkspaceIndex, uri: string, offset: number, newNa
     const locked = at.find((l) => !text(l)) ?? [...index.docs.values()].find(unseen);
     const where = locked && ("start" in locked ? index.blockAt(locked.uri, locked.start)?.name : locked.parsed?.blocks[0]?.name);
     if (locked) return { error: `${decl.name} may be used in ${where ?? locked.uri.split("/").at(-1)}, which the editor cannot change: rename it in TIA Portal` };
-    return at.map((l) => ({ uri: l.uri, start: l.start, end: l.end, newText: index.docs.get(l.uri)!.text[l.start] === "#" ? "#" + newName : newName }));
+    return at.map((l) => ({ uri: l.uri, start: l.start, end: l.end, newText: index.docs.get(l.uri)!.text[l.start] === "#" ? "#" + name : name }));
   }
   const u = decl.name.toUpperCase();
   const text = index.docs.get(uri)?.code ?? index.docs.get(uri)?.text ?? "";
-  const edits: TextEdit[] = [{ uri, start: decl.start, end: decl.end, newText: newName }];
+  const edits: TextEdit[] = [{ uri, start: decl.start, end: decl.end, newText: name }];
   // only the references to this declaration (a PROPERTY's GET and SET may each have a local of the name), written
   // as they were: #x in SCL, a bare x in IEC structured text
   for (const r of block.refs)
     if (r.kind === "local" && r.name.toUpperCase() === u && localDecl(block, r.name, r.start) === decl)
-      edits.push({ uri, start: r.start, end: r.end, newText: text[r.start] === "#" ? "#" + newName : newName });
+      edits.push({ uri, start: r.start, end: r.end, newText: text[r.start] === "#" ? "#" + name : name });
   return edits;
 }

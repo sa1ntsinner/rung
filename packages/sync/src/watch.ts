@@ -142,6 +142,12 @@ export class Watcher {
   }
 
   private reloading: Promise<void> | null = null;
+
+  /** Takes the write right as it is now before a request changes the project (rename, delete): writes just turned
+   *  on restart a bridge started without import rights at once, not at the next pass. */
+  async refresh(): Promise<void> {
+    await this.reload();
+  }
   /** Whether the running bridge was started with the right to import (writes on then). */
   private bridgeWrites = false;
 

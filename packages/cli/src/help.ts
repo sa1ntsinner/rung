@@ -3,13 +3,13 @@
 const EXAMPLES: Record<string, string> = {
   setup: "setup --dry-run", check: "check --json", init: "init --project Line.ap20",
   writes: "writes off", backup: "backup", pull: "pull", sync: "sync --preview", watch: "watch", status: "status",
-  resolve: "resolve plc/PLC_1/blocks/Valve.scl --merged", restore: "restore plc/PLC_1/blocks/Valve.scl", "confirm-delete": "confirm-delete plc/PLC_1/blocks/Valve.scl",
-  rename: "rename plc/PLC_1/blocks/Valve.scl ValveCtl", test: "test --filter Valve", live: "live read StartButton",
+  resolve: "resolve plc/PLC_1/blocks/Line/FB_Motor.scl --merged", restore: "restore plc/PLC_1/blocks/Line/FB_Motor.scl", "confirm-delete": "confirm-delete plc/PLC_1/blocks/FC_Old.scl",
+  rename: "rename plc/PLC_1/blocks/Line/FB_Motor.scl FB_Drive", test: "test --filter Motor", live: "live read Start_PB",
   views: "views --offline", agents: "agents", mcp: "mcp", lsp: "lsp --stdio", doctor: "doctor --fixture",
-  compile: "compile --file plc/PLC_1/blocks/Valve.scl", online: "online --state", compare: "compare --json",
-  connect: "connect --pick", interfaces: "interfaces --scan", download: "download --plc PLC_1", open: "open plc/PLC_1/blocks/Valve.scl",
-  simulate: "simulate --block Valve", "codesys-bridge": "codesys-bridge --project Line.project", assignments: "assignments --json",
-  who: "who StartButton", upload: "upload --ip 192.168.0.1",
+  compile: "compile --file plc/PLC_1/blocks/Line/FB_Motor.scl", online: "online --state", compare: "compare --json",
+  connect: "connect --pick", interfaces: "interfaces --scan", download: "download --plc PLC_1", open: "open plc/PLC_1/blocks/Line/FB_Motor.scl",
+  simulate: "simulate --block FB_Conveyor", "codesys-bridge": "codesys-bridge --project Line.project", assignments: "assignments --json",
+  who: `who '"Line_DB".PartsTotal'`, upload: "upload --ip 192.168.0.1",
   bridge: "bridge --tia V20",
 };
 const VALUES: Record<string, string> = {
@@ -23,7 +23,10 @@ const DETAIL: Record<string, string> = {
   preview: "show the next sync without changing files or TIA Portal", json: "complete machine-readable report",
   filter: "a part of a test file's path (any letter case) or a block name", writes: "turn writes to TIA Portal on (rung writes off stops them)",
   ours: "keep your file", theirs: "take TIA Portal's version", merged: "use the file you merged; remove its conflict markers first",
-  force: "pull: replace local edits (each kept in .rung/recovery); confirm-delete: delete although other blocks use it",
+  "pull.force": "replace local edits with TIA Portal's version (each kept in .rung/recovery)",
+  "confirm-delete.force": "delete although other blocks use it (they stop compiling)",
+  "compile.hw": "compile the hardware configuration instead of the program",
+  "setup.yes": "skip the questions", args: "the bridge's own arguments, encoded (editors and agents pass them)",
   dir: "the workspace (default: the current folder)", file: "a workspace file", project: "the TIA Portal project (.ap20)",
   tia: "TIA Portal version (V20, V21)", device: "mirror only this PLC (repeat for more)", rebind: "bind the folder to another project",
   plc: "the PLC (when the project has several)", pick: "choose among the connections that answer", use: "the PG/PC interface (rung interfaces lists them)",
@@ -48,6 +51,14 @@ const EXIT: Record<string, string> = {
   test: "0 all passed, 1 rung could not run, 2 a case failed, 3 no tests matched",
   compare: "0 the PLC runs what the project has, 2 they differ",
   assignments: "0 no overlapping accesses, 2 two accesses overlap",
+  pull: "0 done, 1 rung could not run, 2 something needs attention (a local edit not overwritten, a warning)",
+  "confirm-delete": "0 deleted, 1 not deleted (in use without --force, writes off, not a pending delete, or rung could not run)",
+  rename: "0 renamed in TIA Portal and in the files, 1 not renamed",
+  restore: "0 TIA Portal's version is back, 1 not a file rung mirrors",
+  resolve: "0 resolved, 1 not resolved (no conflict, markers left in the file)",
+  who: "0 answered (also when nothing uses the name), 1 no tag, DB member or variable of that name",
+  backup: "0 archived, 1 not archived",
+  writes: "0",
 };
 
 export function commandHelp(cmd: string, options: readonly string[], help: string): string {
@@ -58,6 +69,10 @@ export function commandHelp(cmd: string, options: readonly string[], help: strin
     while (rows[i + 1]?.startsWith("             ")) usage.push(rows[++i]!);
   }
   if (!usage.length) usage.push(`  rung ${cmd}${cmd === "codesys-bridge" ? " --project <file.project>" : ""}`);
-  const flags = options.map((o) => `  --${o}${VALUES[o] ? ` <${VALUES[o]}>` : ""}${DETAIL[o] ? `  ${DETAIL[o]}` : ""}`);
+  // what an option means for this command, else what it means everywhere
+  const flags = options.map((o) => {
+    const detail = DETAIL[`${cmd}.${o}`] ?? DETAIL[o];
+    return `  --${o}${VALUES[o] ? ` <${VALUES[o]}>` : ""}${detail ? `  ${detail}` : ""}`;
+  });
   return `Usage:\n${usage.join("\n")}\n\nOptions:\n${[...flags, "  -h, --help  show this usage"].join("\n")}\n\nExample:\n  rung ${EXAMPLES[cmd] ?? cmd}\n${EXIT[cmd] ? `\nExit code: ${EXIT[cmd]}\n` : ""}`;
 }

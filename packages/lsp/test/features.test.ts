@@ -122,7 +122,11 @@ describe("workspace features", () => {
     expect(Array.isArray(edits) && edits.map((e) => e.newText)).toEqual(["velocity", "#velocity"]);
     expect(rename(idx, user(), at(user(), '"Fx_Global"'), "X")).toMatchObject({ error: expect.stringMatching(/Only variables/) });
     expect(rename(idx, user(), at(user(), "#speed :="), "Motor")).toMatchObject({ error: expect.stringMatching(/already exists/) });
-    expect(rename(idx, user(), at(user(), "#speed :="), "1bad")).toMatchObject({ error: expect.stringMatching(/not a valid/) });
+    // a name TIA Portal takes only quoted is written quoted; one with a quote in it is refused
+    const quoted = rename(idx, user(), at(user(), "#speed :="), "END_IF");
+    expect(Array.isArray(quoted) && quoted.map((e) => e.newText)).toEqual(['"END_IF"', '#"END_IF"']);
+    expect(Array.isArray(rename(idx, user(), at(user(), "#speed :="), "speed 2")) && (rename(idx, user(), at(user(), "#speed :="), "speed 2") as { newText: string }[])[1]!.newText).toBe('#"speed 2"');
+    expect(rename(idx, user(), at(user(), "#speed :="), 'a"b')).toMatchObject({ error: expect.stringMatching(/cannot be a name/) });
   });
 
   it("outlines blocks with sections and variables", () => {
