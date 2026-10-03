@@ -15,3 +15,4 @@ export * from "./twincat.js";
 export * from "./simaticml.js";
 export * from "./simaticsd.js";
 export { type MonitorProvider, type MonitorReader, type MonitorValues } from "./monitor.js";
+export * from "./testkeys.js";

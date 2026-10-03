@@ -29,6 +29,7 @@ import { WorkspaceIndex } from "./workspace.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
+import { testKeyEdits } from "./testkeys.js";
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
@@ -306,6 +307,12 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (!Array.isArray(r)) throw new Error(r.error);
     const changes: Record<string, { range: ReturnType<typeof range>; newText: string }[]> = {};
     for (const e of r) (changes[e.uri] ??= []).push({ range: range(e.uri, e.start, e.end), newText: e.newText });
+    // a block's parameter is named by its tests too: set: { Start: true }, expect: { "Data.Running": true }
+    const decl = r[0];
+    const block = decl && index.blockAt(decl.uri, decl.start);
+    const v = block?.vars.find((x) => x.start === decl!.start);
+    if (root && block && v && (block.kind === "FB" || block.kind === "FC") && ["Input", "Output", "InOut", "Static"].includes(v.section))
+      for (const [file, edits] of await testKeyEdits(root, block.name, v.name, p.newName)) changes[pathToFileURL(file).href] = edits;
     return { changes };
   });
   connection.onCodeAction((p) => {

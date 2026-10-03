@@ -211,7 +211,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
           const bits = TYPE_BITS[v.type.toUpperCase()];
           // 64-bit tags: TIA Portal has no L size and writes them at a bit address, %I1000.0
           const fits = !a || !bits || a.bits === bits || (bits === 64 && a.bit === 0) || a.area === "T" || a.area === "C";
-          if (a && bits && !fits) flag(v, "ADDRESS_SIZE", `${v.name} is a ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`);
+          if (a && bits && !fits) flag(v, "ADDRESS_SIZE", `${v.name} is ${/^[aeiou]/i.test(v.type) ? "an" : "a"} ${v.type} (${bits === 1 ? "one bit" : bits + " bits"}) but ${v.at} is ${a.bits === 1 ? "a bit" : a.bits + " bits"}: use ${suggestAddress(a, bits)}`);
         }
       }
     out.push(...table.sort((a, b) => a.start - b.start));

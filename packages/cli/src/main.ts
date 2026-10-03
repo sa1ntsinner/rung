@@ -204,7 +204,9 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     }
     const gi = join(dir, ".gitignore");
     const current = (await exists(gi)) ? await readFile(gi, "utf8") : "";
-    if (!current.split(/\r?\n/).includes(".rung/")) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ".rung/\n");
+    // .rung/ is machine state; a conflict's helper files are not part of the project either
+    const ignore = [".rung/", "*.conflict", "*.tia"].filter((l) => !current.split(/\r?\n/).includes(l));
+    if (ignore.length) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ignore.join("\n") + "\n");
     // git for Windows checks text out with CRLF by default; the files stay as TIA Portal's export writes them
     const ga = join(dir, ".gitattributes");
     if (!(await exists(ga))) await writeFile(ga, "* text=auto eol=lf\n");

@@ -87,6 +87,8 @@ export interface SyncReport {
   plan?: Plan;
   /** The archive TIA Portal wrote before this pass's first write of the day (sync.backup = "daily"). */
   backup?: { path: string; bytes: number };
+  /** What this pass compiled in TIA Portal (addresses), so a clean compile can say so. */
+  compiled?: string[];
 }
 
 const backupsFile = (root: string) => join(root, ".rung", "backups.json");
@@ -1185,6 +1187,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     }
   }
 
+  if (imported.length && cfg.sync.compile !== "none") report.compiled = [...compiled];
   const compiledAll = imported.length > 0 && cfg.sync.compile === "all";
   await writeDiagnostics(
     root,

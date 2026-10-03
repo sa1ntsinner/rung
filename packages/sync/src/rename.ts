@@ -80,10 +80,13 @@ async function renameInTests(root: string, oldName: string, newName: string): Pr
       if (e.isDirectory()) await walk(rel);
       else if (/\.test\.ya?ml$/i.test(e.name)) {
         const text = await readFile(join(root, rel), "utf8");
-        const next = text
+        const own = new RegExp(`^\\s*block:\\s*"?${escapeRe(oldName)}"?\\s*(?:#.*)?$`, "m").test(text);
+        let next = text
           .replace(new RegExp(`^(\\s*block:\\s*)"?${escapeRe(oldName)}"?(\\s*(?:#.*)?)$`, "gm"), `$1${newName}$2`)
           .split(`"${oldName}"`)
           .join(`"${newName}"`);
+        // an FC's return value is named after the FC: expect: { FC_Scale: 750.0 } in its own tests
+        if (own) next = next.replace(new RegExp(`(?<=[{,]\\s*)${escapeRe(oldName)}(?=\\s*:)`, "g"), newName);
         if (next !== text) {
           await writeFile(join(root, rel), next);
           changed.push(rel);

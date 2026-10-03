@@ -112,7 +112,7 @@ describe("two-way CLI", () => {
     t.out.length = 0;
     expect(await t.run(["sync"])).toBe(2);
     expect(t.out.join("")).toMatch(/NO_ADDRESS\s+plc\/PLC_1\/tags\/Inputs.tags.st:2 — NoAddr has no address/);
-    expect(t.out.join("")).toMatch(/ADDRESS_SIZE\s+plc\/PLC_1\/tags\/Inputs.tags.st:3 — BadType is a Int/);
+    expect(t.out.join("")).toMatch(/ADDRESS_SIZE\s+plc\/PLC_1\/tags\/Inputs.tags.st:3 — BadType is an Int/);
     expect(t.db().objects[0]!.content).toBe(content);
     expect(validateTags("Inputs.tags.st", "VAR_GLOBAL\n    Fine AT %IW2 : Int;\nEND_VAR\n")).toEqual([]);
     writeFileSync(file, "VAR_GLOBAL\n    Fine AT %IW2 : Int;\nEND_VAR\n");
