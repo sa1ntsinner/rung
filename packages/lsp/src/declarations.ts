@@ -13,7 +13,7 @@ export interface DRange {
 }
 
 export interface DeclRow {
-  /** names from the section down: "Settings/Speed" (valid for one document version) */
+  /** names from the section down, each with % and / escaped: "Settings/Speed" (valid for one document version) */
   id: string;
   depth: number;
   name: string;
@@ -57,7 +57,9 @@ const STANDARD_FB = /^(TON|TOF|TP|TONR|CTU|CTD|CTUD|R_TRIG|F_TRIG)(_|$)/i;
 const KNOWN = new Set(Object.values(EXPOSURE).map((k) => k.toUpperCase()));
 
 function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (name: string) => boolean, hmi: boolean): DeclRow {
-  const id = parent ? `${parent}/${v.name}` : v.name;
+  // names joined by "/", each with "%" and "/" escaped: "a/b" (a quoted name) is not member b of a
+  const segment = v.name.replace(/%/g, "%25").replace(/\//g, "%2F");
+  const id = parent ? `${parent}/${segment}` : segment;
   const src = v.src;
   const list = src?.attrs ? parseAttributes(text, src.attrs) : undefined;
   const kind: DeclRow["kind"] = v.isArray ? "array" : v.members && v.type === "Struct" ? "struct" : v.typeRef && (STANDARD_FB.test(v.typeRef) || isFb(v.typeRef)) ? "instance" : "plain";

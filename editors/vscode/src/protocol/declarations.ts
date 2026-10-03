@@ -15,6 +15,7 @@ export interface DRange {
 }
 
 export interface DeclRow {
+  /** names from the section down, each with % and / escaped */
   id: string;
   depth: number;
   name: string;

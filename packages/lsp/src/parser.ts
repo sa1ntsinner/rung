@@ -338,9 +338,13 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       if (peek().text === ":=") {
         next();
         const s = peek().start;
+        const before = i;
         while (peek().kind !== "eof" && peek().text !== ";" && !isKw(peek(), "END_VAR", "END_STRUCT")) next();
-        init = src.slice(s, tokens[i - 1]!.end);
-        initSpan = { start: s, end: tokens[i - 1]!.end };
+        // `a : Int :=` with nothing typed yet has no start value to replace
+        if (i > before) {
+          init = src.slice(s, tokens[i - 1]!.end);
+          initSpan = { start: s, end: tokens[i - 1]!.end };
+        }
       }
       const semi = peek();
       let wholeEnd = tokens[i - 1]!.end;
@@ -633,9 +637,20 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       if (isKw(x, "STRUCT") && (h.kind === "UDT" || h.kind === "DB")) {
-        // UDT, or a standard-access DB declared as STRUCT ... END_STRUCT
+        // UDT, or a standard-access DB declared as STRUCT ... END_STRUCT: its members are one section
         const ty = parseType();
-        block.vars.push(...(ty.members ?? []));
+        const members = ty.members ?? [];
+        block.vars.push(...members);
+        const endTok = tokens[i - 1]!;
+        const closed = isKw(endTok, "END_STRUCT");
+        (block.sections ??= []).push({
+          section: "Static",
+          keyword: x.text,
+          modifiers: [],
+          whole: { start: x.start, end: endTok.end },
+          header: { start: x.start, end: x.end },
+          body: { start: x.end, end: closed ? endTok.start : endTok.end },
+        });
         if (peek().text === ";") next();
         continue;
       }

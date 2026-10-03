@@ -204,7 +204,8 @@ export class RgDeclarations extends LitElement {
   }
 
   private renderInspector(row: DeclRow, section: string) {
-    const path = row.id.split("/");
+    // the id's parts carry % and / escaped
+    const path = row.id.split("/").map((p) => p.replace(/%2F/g, "/").replace(/%25/g, "%"));
     const field = (label: string, value: unknown, mono = false, title?: string) => html`<div class="rg-field"><span class="rg-field-label" title=${title ?? label}>${label}</span><span class="rg-field-value ${mono ? "rg-mono" : ""}">${value}</span></div>`;
     const typeValue = row.typeRef && row.kind !== "struct"
       ? html`<button class="rg-link rg-mono" title="Open type" @click=${() => this.post({ v: 1, kind: "openType", rowId: row.id })}>${row.type}</button>`

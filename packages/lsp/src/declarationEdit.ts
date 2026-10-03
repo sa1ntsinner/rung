@@ -52,12 +52,18 @@ export function planDeclarationEdit(text: string, model: DeclModel, op: DeclOp):
   if (op.op === "setComment") {
     const v = op.value?.trim();
     if (row.ranges.comment) {
-      if (v) return edit(row.ranges.comment.start, row.ranges.comment.end, `// ${v}`);
+      // the comment keeps its kind: a block comment may have code after it on the line
+      const old = text.slice(row.ranges.comment.start, row.ranges.comment.end);
+      const block = old.startsWith("(*") ? ["(* ", " *)"] : old.startsWith("/*") ? ["/* ", " */"] : undefined;
+      if (v) return edit(row.ranges.comment.start, row.ranges.comment.end, block ? `${block[0]}${v}${block[1]}` : `// ${v}`);
       let s = row.ranges.comment.start;
       while (s > 0 && (text[s - 1] === " " || text[s - 1] === "\t")) s--;
       return edit(s, row.ranges.comment.end, "");
     }
     if (!v) return none;
+    // a // comment would hide what else stands on the line (a second declaration)
+    const eol = text.indexOf("\n", row.ranges.whole.end);
+    if (text.slice(row.ranges.whole.end, eol < 0 ? text.length : eol).trim()) return { ok: false, reason: "Another declaration follows on this line; put it on a line of its own first" };
     // TIA's export puts three spaces before a declaration's comment
     return edit(row.ranges.whole.end, row.ranges.whole.end, `   // ${v}`);
   }

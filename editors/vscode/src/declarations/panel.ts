@@ -49,6 +49,8 @@ export class DeclarationsPanel implements vscode.Disposable {
   private position: vscode.Position | undefined;
   private model: DeclModel | undefined;
   private ready = false;
+  /** the latest refresh; an older one's answer is dropped */
+  private seq = 0;
   private readonly subs: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
   private revealTimer: NodeJS.Timeout | undefined;
@@ -92,6 +94,8 @@ export class DeclarationsPanel implements vscode.Disposable {
   ) {
     this.binding = binding;
     this.position = position;
+    // remembered from the start, so a reload restores this file even if nothing moves it
+    void ctx.workspaceState.update(BINDING_KEY, binding);
     const web = panel.webview;
     const asset = (f: string) => web.asWebviewUri(vscode.Uri.joinPath(ctx.extensionUri, "out", "webview", f)).toString();
     web.html = webviewHtml({ cspSource: web.cspSource, nonce: nonce(), script: asset("declarations.js"), styles: [asset("codicon.css"), asset("tokens.css"), asset("rung.css")], title: "Declarations" });
@@ -125,7 +129,8 @@ export class DeclarationsPanel implements vscode.Disposable {
   private bind(b: Binding, position?: vscode.Position) {
     const moved = b.uri !== this.binding.uri;
     this.binding = b;
-    if (moved) this.position = position;
+    // a position names the block (a second block's CodeLens in the same file); a new file without one starts at its first
+    if (position || moved) this.position = position;
     void this.ctx.workspaceState.update(BINDING_KEY, b);
     this.scheduleRefresh(0);
   }
@@ -143,7 +148,11 @@ export class DeclarationsPanel implements vscode.Disposable {
     if (this.revealTimer) clearTimeout(this.revealTimer);
     this.revealTimer = setTimeout(() => {
       if (!this.model || !this.position) return;
-      const row = rowAt(this.model, doc.offsetAt(this.position));
+      const offset = doc.offsetAt(this.position);
+      const block = this.model.block?.range;
+      // the cursor went into another block of the file: that block's table
+      if (block && (offset < block.start || offset > block.end)) return void this.refresh();
+      const row = rowAt(this.model, offset);
       if (row) this.post({ v: 1, kind: "reveal", rowId: row.id });
     }, 300);
   }
@@ -165,11 +174,17 @@ export class DeclarationsPanel implements vscode.Disposable {
       this.post({ v: 1, kind: "state", state: "noBlock" });
       return;
     }
-    const uri = vscode.Uri.parse(this.binding.uri);
+    const target = this.binding.uri;
+    const seq = ++this.seq;
+    const uri = vscode.Uri.parse(target);
     const doc = this.document() ?? (await vscode.workspace.openTextDocument(uri).then((d) => d, () => undefined));
-    const model = await this.deps.lsp.request<DeclModel | null>("rung/declarations", { textDocument: { uri: this.binding.uri }, ...(this.position ? { position: this.position } : {}) }).catch(() => undefined);
+    const model = await this.deps.lsp.request<DeclModel | null>("rung/declarations", { textDocument: { uri: target }, ...(this.position ? { position: this.position } : {}) }).catch(() => undefined);
+    // a later refresh (another file, another block, a newer text) answers instead
+    if (seq !== this.seq || target !== this.binding.uri) return;
     if (model === undefined) {
       this.post({ v: 1, kind: "state", state: "noServer", context: this.context(doc) });
+      // the language server may still be starting: ask again until it answers
+      this.scheduleRefresh(1000);
       return;
     }
     if (!model || !model.block) {

@@ -3,6 +3,7 @@
 // active cell moved by the keyboard (WAI-ARIA treegrid), and nothing else. Drawn in the page's own DOM so VS Code's
 // theme and codicons apply as they are.
 import { LitElement, html, nothing, type TemplateResult } from "lit";
+import { styleMap } from "lit/directives/style-map.js";
 import type { GridColumn, GridRow, GridSection } from "./types";
 
 type Line<R> = { kind: "band"; section: GridSection<R & GridRow> } | { kind: "row"; row: R; level: number; parentId?: string };
@@ -67,8 +68,11 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   /** Opens the rows above `rowId` and makes it the active row. */
   reveal(rowId: string): void {
     const parts = rowId.split("/");
-    for (let i = 1; i < parts.length; i++) this.expanded.add(parts.slice(0, i).join("/"));
-    this.expanded = new Set(this.expanded);
+    const next = new Set(this.expanded);
+    for (let i = 1; i < parts.length; i++) next.add(parts.slice(0, i).join("/"));
+    this.expanded = next;
+    // the owner keeps the expansion: told, so its next render does not close them again
+    this.dispatchEvent(new CustomEvent("rg-expand", { detail: { expanded: [...next] }, bubbles: true }));
     this.activate(rowId);
   }
 
@@ -90,6 +94,8 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   protected override willUpdate() {
     const rows = this.rowLines();
     if (!rows.some((l) => l.row.id === this.activeRow)) this.activeRow = rows[0]?.row.id;
+    // fewer columns (another preset): the active cell stays on the grid
+    this.activeCol = Math.max(0, Math.min(this.activeCol, this.columns.length - 1));
   }
 
   private onKey(e: KeyboardEvent) {
@@ -152,8 +158,11 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
 
   protected override render() {
     const lines = this.lines();
-    const cellId = (rowId: string, col: number) => `rg-c-${rowId.replace(/[^\w-]/g, "_")}-${col}`;
-    const activeId = this.activeRow ? cellId(this.activeRow, this.activeCol) : undefined;
+    // ids by position: names (温度, "A B") are not safe ids, positions are unique
+    const index = new Map(lines.flatMap((l, n) => (l.kind === "row" ? [[l.row.id, n] as const] : [])));
+    const cellId = (rowId: string, col: number) => `rg-c-${index.get(rowId) ?? "x"}-${col}`;
+    const activeId = this.activeRow && index.has(this.activeRow) ? cellId(this.activeRow, this.activeCol) : undefined;
+    // styles through the CSSOM (styleMap): the webview's CSP refuses style attributes
     return html`<div
       class="rg-grid ${this.focused ? "rg-focused" : ""}"
       role="treegrid"
@@ -161,7 +170,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
       aria-rowcount=${lines.length}
       aria-colcount=${this.columns.length}
       aria-activedescendant=${activeId ?? nothing}
-      style="--rg-cols: ${this.template()}; min-width: ${this.minWidth()}px"
+      style=${styleMap({ "--rg-cols": this.template(), "min-width": `${this.minWidth()}px` })}
       @keydown=${(e: KeyboardEvent) => this.onKey(e)}
       @focus=${() => (this.focused = true)}
       @blur=${() => (this.focused = false)}
@@ -211,7 +220,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
           @dblclick=${() => this.dispatchEvent(new CustomEvent("rg-open", { detail: { rowId: row.id, column: c.key }, bubbles: true }))}
         >
           ${ci === 0
-            ? html`<span class="rg-indent" style="width: ${(row.depth ?? 0) * 16}px"></span><span
+            ? html`<span class="rg-indent" style=${styleMap({ width: `${(row.depth ?? 0) * 16}px` })}></span><span
                   class="rg-twisty codicon ${hasKids ? (open ? "codicon-chevron-down" : "codicon-chevron-right") : ""}"
                   @click=${(e: MouseEvent) => {
                     if (!hasKids) return;

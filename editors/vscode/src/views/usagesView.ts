@@ -18,8 +18,10 @@ export class UsagesView implements vscode.TreeDataProvider<UNode>, vscode.Dispos
 
   /** Finds the uses of the name at `position` and shows them, the view brought to front. */
   async show(uri: vscode.Uri, position: vscode.Position, symbol: string): Promise<void> {
-    this.last = { uri, position, symbol };
+    const asked = (this.last = { uri, position, symbol });
     const r = await this.lsp.request<Usages>("rung/usages", { textDocument: { uri: uri.toString() }, position });
+    // asked again meanwhile: the newer question's answer is the one shown
+    if (this.last !== asked) return;
     if (!r) {
       void vscode.window.showWarningMessage("The rung language server is not running.");
       return;
