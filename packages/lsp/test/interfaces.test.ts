@@ -2,7 +2,7 @@
 // A block's interface seen from its callers: the types in declarations, named arguments, renaming a parameter, and
 // who writes a member of a data type handed to a block (the UDT-on-an-in/out pattern of most Siemens motor blocks).
 import { describe, it, expect } from "vitest";
-import { WorkspaceIndex, codeActions, definition, diagnostics, hover, references, rename, usagesAt } from "../src/index.js";
+import { WorkspaceIndex, codeActions, complete, definition, diagnostics, hover, references, rename, usagesAt } from "../src/index.js";
 
 const u = (p: string) => `file:///w/plc/PLC_1/${p}`;
 const UDT = 'TYPE "UDT_Motor"\nVERSION : 0.1\n   STRUCT\n      Running : Bool;\n      Speed : Real;\n   END_STRUCT;\nEND_TYPE\n';
@@ -57,6 +57,15 @@ describe("a block's interface from its callers", () => {
     expect(definition(index, motor, MOTOR.indexOf('"UDT_Motor"') + 3)).toMatchObject({ uri: u("types/UDT_Motor.udt") });
     expect(definition(index, line, LINE.indexOf('"FB_Motor"') + 3)).toMatchObject({ uri: motor });
     expect(definition(index, u("blocks/Pump_DB.db"), PUMP_DB.indexOf('"FB_Motor"') + 3)).toMatchObject({ uri: motor });
+  });
+
+  it("offers the parameters a call does not name yet where an argument's name goes", () => {
+    const text = LINE.replace("#Pump(Start := #Start, Data := \"Plant_DB\".Pump);", "#Pump(Start := #Start, ");
+    const index2 = workspace();
+    index2.set(line, text, 0);
+    const at = text.indexOf("#Pump(Start := #Start, ") + "#Pump(Start := #Start, ".length;
+    const c = complete(index2, line, at);
+    expect(c.map((x) => x.insertText)).toEqual(["Data := ", "Run => "]);
   });
 
   it("knows a named argument: hover, definition and references of the parameter", () => {

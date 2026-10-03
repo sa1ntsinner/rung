@@ -722,6 +722,15 @@ export function complete(index: WorkspaceIndex, uri: string, offset: number, sni
   if (!doc) return [];
   const line = doc.text.slice(doc.text.lastIndexOf("\n", offset - 1) + 1, offset);
   const block = index.blockAt(uri, offset);
+  // where an argument's name goes (right after "(" or ","): the parameters of the block called that the call does not name yet
+  const site = callSites(index, uri, (b, n) => scopeDecl(index, uri, b, n), true).filter((s) => offset > s.open && offset <= s.close).sort((a, b) => b.open - a.open)[0];
+  if (site && /(?:^|[(,])\s*[\p{L}_]?[\p{L}\p{N}_]*$/u.test(doc.text.slice(site.open, offset)) && !/:=|=>/.test(doc.text.slice(Math.max(site.open, doc.text.lastIndexOf(",", offset - 1)), offset))) {
+    const given = new Set(site.args.map((a) => a.name?.toUpperCase()).filter(Boolean));
+    const word = /[\p{L}\p{N}_]*$/u.exec(line)![0];
+    return orderedParams(site.callee)
+      .filter((p) => !given.has(p.name.toUpperCase()) || p.name.toUpperCase() === word.toUpperCase())
+      .map((p) => ({ label: p.name, kind: "field" as const, detail: `${p.section} : ${p.type}`, insertText: `${p.name} ${p.section === "Output" ? "=>" : ":="} `, ...(p.documentation ? { documentation: p.documentation } : {}) }));
+  }
   const templates = snippetSupport && /\.scl$/i.test(uri) && block?.bodyStart !== undefined && offset >= block.bodyStart;
   const template = (c: Completion, callee: CallSite["callee"] | undefined): Completion => {
     if (!templates || !callee) return c;
