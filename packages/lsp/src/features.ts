@@ -485,6 +485,8 @@ export interface UsageSite extends Location {
 }
 
 type Call = { block: string; uri: string; start: number };
+/** Which uses count inside a block a value is handed to: only reads (an input), only writes (an output), none. */
+type Only = "read" | "write" | "none";
 
 /** Where `block` is called: `"FC"(...)`, an instance DB `"Motor_DB"(...)`, a multi-instance `#Pump(...)`. OBs run by themselves, DBs are not called. */
 export function callsOf(index: WorkspaceIndex, block: BlockModel, uri: string): Call[] {
@@ -612,7 +614,8 @@ function usageCollector(index: WorkspaceIndex) {
       const i = site.args.findIndex((a) => r.start >= a.start && end <= a.end);
       if (i < 0) continue;
       const a = site.args[i]!;
-      if (text.slice(a.nameEnd ?? a.start, a.end).replace(/^\s*(:=|=>)?\s*/, "").trim() !== text.slice(r.start, end)) return undefined;
+      // a part of a bigger argument (ABS("Increment"(N := x))): the call inside may take it whole
+      if (text.slice(a.nameEnd ?? a.start, a.end).replace(/^\s*(:=|=>)?\s*/, "").trim() !== text.slice(r.start, end)) continue;
       const g = site.callee.kind === "std" ? undefined : scopedTo(index, u).global(site.callee.name);
       const name = (a.name ?? orderedParams(site.callee)[i]?.name)?.toUpperCase();
       const param = g?.block?.vars.find((v) => v.name.toUpperCase() === name);
@@ -620,8 +623,14 @@ function usageCollector(index: WorkspaceIndex) {
     }
     return undefined;
   };
-  const follow = (u: string, callee: BlockModel, param: VarDecl, rest: string[], through: NonNullable<UsageSite["through"]>, depth: number) => {
-    const counts = (k: "read" | "write") => param.section === "InOut" || (param.section === "Input" ? k === "read" : param.section === "Output" && k === "write");
+  /**
+   * The uses inside `callee` of the value handed to `param`. An input is a copy, so only its reads count there; an
+   * output only its writes; `only`: what the calls above already allow (an output handed on to an in/out stays writes).
+   */
+  const follow = (u: string, callee: BlockModel, param: VarDecl, rest: string[], through: NonNullable<UsageSite["through"]>, depth: number, only?: Only) => {
+    const own: Only | undefined = param.section === "Output" ? "write" : param.section === "Input" ? "read" : undefined;
+    const inner: Only | undefined = !only ? own : !own || own === only ? only : "none";
+    const counts = (k: "read" | "write") => inner === undefined || inner === k;
     for (const r of callee.refs) {
       if (r.kind !== "local" || r.name.toUpperCase() !== param.name.toUpperCase() || !same(r.members, rest.slice(0, r.members.length))) continue;
       if (r.members.length >= rest.length) {
@@ -630,23 +639,23 @@ function usageCollector(index: WorkspaceIndex) {
         const site: UsageSite = { uri: u, start: s.start, end: s.end, kind: k, block: callee.name, through };
         // handed on whole to the next block's in/out or output ("Increment"(N := #N)): what that one does with it (an
         // input's copy written there is not the value)
-        if (r.members.length === rest.length && param.section !== "Input") whole(u, r, site, callee, depth + 1, counts(k));
+        if (r.members.length === rest.length && param.section !== "Input") whole(u, r, site, callee, depth + 1, counts(k), inner);
         else if (counts(k)) add(site, callee);
         continue;
       }
       const next = depth < 3 ? passedTo(u, r) : undefined;
-      if (next) follow(next.uri, next.callee, next.param, rest.slice(r.members.length), { block: callee.name, uri: u, start: r.start, param: next.param.name }, depth + 1);
+      if (next) follow(next.uri, next.callee, next.param, rest.slice(r.members.length), { block: callee.name, uri: u, start: r.start, param: next.param.name }, depth + 1, inner);
     }
   };
   /**
    * A use of the whole value: handed to an in/out or output, followed into that block (`depth` calls deep, at most 3).
    * `keep`: whether the use counts where it is when it is not handed on (an output's local reads do not).
    */
-  function whole(u: string, r: Pick<Ref, "start" | "end" | "members">, site: UsageSite, b: BlockModel | undefined, depth: number, keep = true): void {
+  function whole(u: string, r: Pick<Ref, "start" | "end" | "members">, site: UsageSite, b: BlockModel | undefined, depth: number, keep = true, only?: Only): void {
     const on = depth <= 3 ? passedTo(u, r) : undefined;
     if (!on || on.param.section === "Input") return void (keep && add(site, b));
     add({ ...site, handedTo: { block: on.callee.name, param: on.param.name } }, b);
-    follow(on.uri, on.callee, on.param, [], { block: b?.name ?? "", uri: u, start: r.start, param: on.param.name }, depth);
+    follow(on.uri, on.callee, on.param, [], { block: b?.name ?? "", uri: u, start: r.start, param: on.param.name }, depth, only);
   }
   const result = (): Usages => ({ writes, reads, ...(handedOn.length ? { handedOn } : {}) });
   return { kindOf, add, same, whole, passedTo, follow, result };

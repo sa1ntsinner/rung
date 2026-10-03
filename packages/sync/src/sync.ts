@@ -52,7 +52,7 @@ import {
 import { FATAL_BRIDGE_CODES, isFresh } from "./pull.js";
 import { placeCompileMessages } from "./compile-lines.js";
 import { dryState, type Plan, type PlanEntry } from "./plan.js";
-import { readTombstones, recordTombstone } from "./tombstones.js";
+import { readTombstones, recordTombstone, sameAsTombstone, tombstoneOf } from "./tombstones.js";
 
 export type SyncBridge = BridgeLike & Pick<BridgeClient, "importObject" | "compile"> & Partial<Pick<BridgeClient, "receipts" | "archive">>;
 
@@ -95,6 +95,8 @@ export interface SyncReport {
   backup?: { path: string; bytes: number };
   /** What this pass compiled in TIA Portal (addresses), so a clean compile can say so. */
   compiled?: string[];
+  /** The PLCs this pass compiled whole (sync.compile = "all"): their compile messages answer every older one. */
+  compiledPlcs?: string[];
 }
 
 const backupsFile = (root: string) => join(root, ".rung", "backups.json");
@@ -348,8 +350,13 @@ function rankOf(form: string, texts: string[]): number {
  * the blocks that call it are inconsistent in TIA until they are compiled too.
  */
 /** The tags and constants of a tag table, as text (`Start AT %I0.0 : Bool;`, `Max : Int := 5;`) or SimaticML. */
+/** XML text as written in a SimaticML file (`Start &amp; Go`) back to the name. */
+const fromXml = (s: string) => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+/** A name as a SimaticML attribute writes it (Name="Start &amp; Go"). */
+const toXml = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 function tagNames(text: string): string[] {
-  if (text.trimStart().startsWith("<")) return [...text.matchAll(/<SW\.Tags\.Plc(?:Tag|UserConstant)\b[\s\S]*?<Name>([^<]+)<\/Name>/g)].map((m) => m[1]!);
+  if (text.trimStart().startsWith("<")) return [...text.matchAll(/<SW\.Tags\.Plc(?:Tag|UserConstant)\b[\s\S]*?<Name>([^<]+)<\/Name>/g)].map((m) => fromXml(m[1]!));
   return [...text.matchAll(/^[ \t]*(?:"([^"\r\n]+)"|([A-Za-z_]\w*))(?:[ \t]*\{[^}]*\})?[ \t]+(?:AT\b|:)/gim)].map((m) => m[1] ?? m[2]!).filter((n) => !/^(VAR_GLOBAL|END_VAR|CONSTANT)$/i.test(n));
 }
 
@@ -360,7 +367,9 @@ async function withUsers(root: string, state: StateStore, imported: string[]): P
   const candidates = state.all().filter((s) => !s.readOnly && s.files[0] && devices.has(parseAddress(s.address).device));
   // TIA Portal's names ignore letter case: "a"() calls A
   for (const s of candidates) texts.set(s.address, (await readFile(join(root, s.files[0]!.path), "utf8").catch(() => "")).toLowerCase());
-  const usersOf = (names: string[]) => candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n.toLowerCase()}"`)));
+  // "Start & Go" in SCL and SD text, Name="Start &amp; Go" in a SimaticML (LAD/FBD) block
+  const usersOf = (names: string[]) =>
+    candidates.filter((s) => !out.has(s.address) && names.some((n) => texts.get(s.address)!.includes(`"${n.toLowerCase()}"`) || texts.get(s.address)!.includes(`"${toXml(n).toLowerCase()}"`)));
   // a tag table is used through its tags ("Start_PB"), not its own name; a deleted one is read from its last version
   const blobs = new BlobStore(root);
   const names: string[] = [];
@@ -420,7 +429,7 @@ export async function recordCompile(
       const fileHash = fileHashOf(address);
       return { address, path: m.file ?? "", severity: m.severity, code: "COMPILE", message: m.description, ...(m.line ? { line: m.line } : {}), ...(m.column ? { column: m.column } : {}), ...(revision ? { revision } : {}), ...(fileHash ? { fileHash } : {}) };
     });
-  const answered = (d: Diagnostic) => (scope === "all" ? d.address === `plc:${device}` || d.address.startsWith(`plc:${device}/`) : scope.includes(d.address)) || items.some((i) => i.address === d.address);
+  const answered = (d: Diagnostic) => (scope === "all" ? ofPlcs(d.address, [device]) : scope.includes(d.address)) || items.some((i) => i.address === d.address);
   await writeDiagnostics(root, items, (d) => !answered(d), (d) => d.code !== "COMPILE");
 }
 
@@ -433,6 +442,12 @@ export async function syncOnce(root: string, bridge: SyncBridge, state: StateSto
   const first = await syncPass(root, bridge, state, opts);
   if (first.imported + first.created === 0 || !first.warnings.some((w) => w.code === "STALE_REVISION")) return first;
   return mergePasses(first, await syncPass(root, bridge, state, opts));
+}
+
+/** Whether an address is one of these PLCs' objects (the name escaped in it: CON → %43ON) or the PLC itself. */
+function ofPlcs(address: string, plcs: Iterable<string> | undefined): boolean {
+  for (const p of plcs ?? []) if (address === `plc:${p}` || address === `plc:${escapeSegment(p)}` || address.startsWith(`plc:${escapeSegment(p)}/`)) return true;
+  return false;
 }
 
 /** A pass TIA Portal refused an import of as stale, and the pass that ran right after it, reported as one. */
@@ -451,10 +466,11 @@ export function mergePasses(first: SyncReport, second: SyncReport): SyncReport {
     warnings: unique([...first.warnings.filter((w) => w.code !== "STALE_REVISION"), ...second.warnings]),
     // what the second pass compiled again answers the first pass's messages about it (a caller compiled in its old
     // text before its own import, refused as stale until the block it calls was in)
-    diagnostics: unique([...first.diagnostics.filter((d) => !(d.code === "COMPILE" && second.compiled?.includes(d.address))), ...second.diagnostics]),
+    diagnostics: unique([...first.diagnostics.filter((d) => !(d.code === "COMPILE" && (second.compiled?.includes(d.address) || ofPlcs(d.address, second.compiledPlcs)))), ...second.diagnostics]),
     changes: [...(first.changes ?? []), ...(second.changes ?? [])],
     ...((first.backup ?? second.backup) ? { backup: first.backup ?? second.backup } : {}),
     ...(first.compiled || second.compiled ? { compiled: [...new Set([...(first.compiled ?? []), ...(second.compiled ?? [])])] } : {}),
+    ...(first.compiledPlcs || second.compiledPlcs ? { compiledPlcs: [...new Set([...(first.compiledPlcs ?? []), ...(second.compiledPlcs ?? [])])] } : {}),
   };
 }
 
@@ -914,8 +930,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         }
         if (removes.length) await publishBundle(root, { opId: randomUUID(), address, targets: [], removes, nextState: st });
         // gone from TIA Portal (renamed or deleted there): its old file coming back with git is not a new block
-        const gone = st.files.find((f) => f.role === "primary") ?? st.files[0];
-        if (gone) await recordTombstone(root, { address, path: st.path, hash: gone.hash, by: "tia", at: Date.now() }).catch(() => undefined);
+        const gone = tombstoneOf(st, { by: "tia" });
+        if (gone) await recordTombstone(root, gone).catch(() => undefined);
         state.remove(address);
         report.changes!.push({ path: st.path, action: "remove" });
         report.removed++;
@@ -959,9 +975,11 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           continue;
         }
         // the old file of a block rung renamed or deleted, brought back unchanged by git: that block, not a new one
+        // (all its files: an edited companion, a LAD block's .s7res, makes it new)
         const tomb = (await readTombstones(root)).find((x) => x.address === address);
-        const old = tomb && (await new BlobStore(root).get(tomb.hash).then((b) => normalizeText(b.toString("utf8")), () => undefined));
-        if (tomb && old === normalizeText(bundle["." + loc.form] ?? "")) {
+        const blobs = new BlobStore(root);
+        const oldText = (hash: string) => blobs.get(hash).then((b) => normalizeText(b.toString("utf8")), () => undefined);
+        if (tomb && (await sameAsTombstone(tomb, loc.path.slice(loc.stem.length), Object.fromEntries(Object.entries(bundle).map(([k, v]) => [k, normalizeText(v)])), oldText))) {
           const went = tomb.to ? `was renamed to ${parseAddress(tomb.to).name} in TIA Portal` : tomb.by === "tia" ? "is gone from TIA Portal (renamed or deleted there)" : "was deleted in TIA Portal";
           const how = `delete ${shellPath(loc.path)} (git brought back the old file?); change it and it is created as a new block`;
           diag({ address, path: loc.path, severity: "error", code: "CAME_BACK", message: `${name} ${went}; this is its old file, not created: ${how}` });
@@ -1240,11 +1258,12 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   }
 
   if (imported.length && cfg.sync.compile !== "none") report.compiled = [...compiled];
+  if (compiledPlcs.size) report.compiledPlcs = [...compiledPlcs];
   await writeDiagnostics(
     root,
     report.diagnostics,
     (d) => {
-      if (!d.address || compiled.has(d.address) || compiledPlcs.has(/^plc:([^/]+)/.exec(d.address)?.[1] ?? "")) return false;
+      if (!d.address || compiled.has(d.address) || ofPlcs(d.address, compiledPlcs)) return false;
       const now = state.get(d.address);
       return !!now && (d.fileHash ? now.fileHash === d.fileHash : !d.revision || now.tiaFingerprint === d.revision);
     },
@@ -1340,8 +1359,8 @@ export async function confirmDelete(
   if (users.length && !opts.force)
     throw new WorkspaceError("IN_USE", `${name} is used by ${users.map((a) => state.get(a)?.path ?? a).join(", ")}; they will not compile without it. rung confirm-delete ${shellPath(st.path)} --force deletes it anyway`);
   await bridge.deleteObject(address, st.tiaFingerprint, randomUUID());
-  const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
-  if (primary) await recordTombstone(root, { address, path: st.path, hash: primary.hash, at: Date.now() }).catch(() => undefined);
+  const tomb = tombstoneOf(st, {});
+  if (tomb) await recordTombstone(root, tomb).catch(() => undefined);
   state.remove(address);
   await state.flush();
   return { users };

@@ -19,8 +19,9 @@ export async function testKeyEdits(root: string, block: string, name: string, ne
   const out = new Map<string, KeyEdit[]>();
   const files = await readdir(join(root, "tests"), { recursive: true }).catch(() => [] as string[]);
   const ofBlock = new RegExp(`^block:\\s*["']?${escape(block)}["']?\\s*(#.*)?$`, "im");
-  // a key: after {, a comma or the indent, quoted or not, the name alone or the first part of a dotted path (the rest)
-  const key = new RegExp(`(?<=(?:^|[{,])\\s*["']?)${escape(name)}(?=((?:\\.[^"':,{}\\s]+)*)["']?\\s*:)`, "gi");
+  // a key: after {, a comma or the indent, quoted or not, the name alone or the first part of a path (the rest:
+  // .x members and [2] elements, "Points[2].x")
+  const key = new RegExp(`(?<=(?:^|[{,])\\s*["']?)${escape(name)}(?=((?:\\[[^\\]]*\\]|\\.[^"':,{}\\s\\[]+)*)["']?\\s*:)`, "gi");
   // a name YAML takes unquoted as a key; "Reset: Manual" needs quotes
   const plain = /^[A-Za-z_]\w*$/.test(newName);
   for (const f of files.map(String).filter((f) => /\.test\.ya?ml$/i.test(f))) {

@@ -8,7 +8,7 @@ import { WorkspaceError, parseAddress, type RungConfig, type StateStore } from "
 import type { BridgeClient } from "@rung/bridge-client";
 import { localStatus, type BridgeLike } from "./objects.js";
 import { pull, type PullReport } from "./pull.js";
-import { recordTombstone } from "./tombstones.js";
+import { recordTombstone, tombstoneOf } from "./tombstones.js";
 
 export type RenameBridge = BridgeLike & Pick<BridgeClient, "renameObject">;
 
@@ -39,8 +39,8 @@ export async function renameObject(root: string, bridge: RenameBridge, state: St
 
   const inconsistent = new Set((await bridge.listObjects(parseAddress(address).device)).filter((o) => o.isConsistent === false).map((o) => o.address));
   const { address: to } = await bridge.renameObject(address, newName, st.tiaFingerprint, randomUUID());
-  const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
-  if (primary) await recordTombstone(root, { address, path: st.path, hash: primary.hash, to, at: Date.now() }).catch(() => undefined);
+  const tomb = tombstoneOf(st, { to });
+  if (tomb) await recordTombstone(root, tomb).catch(() => undefined);
 
   // every other file that names the old object is re-exported, even though TIA reports it unchanged
   const users: string[] = [];

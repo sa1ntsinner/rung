@@ -146,14 +146,18 @@ export class Watcher {
   /** Takes the write right as it is now before a request changes the project (rename, delete): writes just turned
    *  on restart a bridge started without import rights at once, not at the next pass. */
   async refresh(): Promise<void> {
+    // a pass in flight keeps its bridge until it is done: the restart waits for it
+    await this.running?.catch(() => null);
     await this.reload();
   }
   /** Whether the running bridge was started with the right to import (writes on then). */
   private bridgeWrites = false;
 
   private async newBridge(): Promise<ClosableBridge> {
+    // its rights are those of the configuration when it was asked for, not when its slow start ended
+    const may = writes(this.config);
     const b = await this.opts.bridgeFactory();
-    this.bridgeWrites = writes(this.config);
+    this.bridgeWrites = may;
     return b;
   }
   /** One reload at a time: two previews arriving together restart the bridge once, not twice. */
