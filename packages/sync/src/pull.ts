@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung pull: one-way, incremental TIA → workspace mirror that never destroys local work.
 import { randomUUID } from "node:crypto";
-import { Journal, WorkspaceError, parseAddress, pathKey, publishBundle, type ObjectState, type RungConfig, type StateStore } from "@rung/core";
+import { Journal, WorkspaceError, parseAddress, pathKey, publishBundle, shellPath, type ObjectState, type RungConfig, type StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
 import { takeInventory, type Warning } from "./inventory.js";
 import { buildState, diskHash, isLockError, isReadOnlyEntry, isStrong, localStatus, planPublication, stageExport, type BridgeLike } from "./objects.js";
@@ -106,7 +106,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
           continue;
         }
         if (fresh && local === "modified") {
-          warn(entry.address, "LOCAL_CHANGES", readOnly ? `read-only in rung, but edited here: rung restore ${prev.path} takes TIA Portal's version back` : `file edited locally; TIA unchanged (rung sync sends it, rung restore ${prev.path} takes TIA Portal's version back)`);
+          warn(entry.address, "LOCAL_CHANGES", readOnly ? `read-only in rung, but edited here: rung restore ${shellPath(prev.path)} takes TIA Portal's version back` : `file edited locally; TIA unchanged (rung sync sends it, rung restore ${shellPath(prev.path)} takes TIA Portal's version back)`);
           continue;
         }
       }

@@ -164,3 +164,6 @@ export function findCaseCollisions(paths: readonly string[]): [string, string][]
   }
   return out;
 }
+
+/** A workspace path as it can be pasted into a command line: quoted when it holds a space (TIA's "Default tag table"). */
+export const shellPath = (p: string): string => (/[\s"'$`&|;<>()]/.test(p) ? `"${p}"` : p);

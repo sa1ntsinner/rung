@@ -11,7 +11,7 @@ export interface PlanEntry {
   /**
    * create, update, merge: sent to TIA Portal (a merge with what changed there); export: TIA Portal's change comes
    * into the file; remove: deleted in TIA Portal, the file goes; restore: the file comes back from TIA Portal;
-   * conflict: changed on both sides on the same lines, nothing is sent; pending-delete: deleted here, waits for
+   * conflict: changed on both sides on the same or neighbouring lines, nothing is sent; pending-delete: deleted here, waits for
    * rung confirm-delete.
    */
   action: "create" | "update" | "merge" | "export" | "remove" | "restore" | "conflict" | "pending-delete";

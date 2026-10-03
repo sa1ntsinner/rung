@@ -66,7 +66,7 @@ The right is kept in `.rung/`, never in git, and names the project: a colleague 
 
 - Save `plc/PLC_1/blocks/.../Fx_Motor.scl` → rung imports it into TIA Portal, compiles it and writes TIA's formatting back. Compile errors appear on their line in the editor.
 - Change a block in TIA Portal → the file updates.
-- Both changed → edits on different lines merge. Edits on the same line give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`. LAD and FBD blocks merge network by network: one person's change to network 2 and another's to network 5 both stay; the same network changed on both sides is a conflict (`.tia` shows TIA Portal's version).
+- Both changed → edits on different lines merge. Edits on the same or neighbouring lines give `Fx_Motor.scl.conflict`; finish with `rung resolve <file> --ours|--theirs|--merged`. LAD and FBD blocks merge network by network: one person's change to network 2 and another's to network 5 both stay; the same network changed on both sides is a conflict (`.tia` shows TIA Portal's version).
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`; a block other blocks still use needs `--force`, and the list of them comes first.
 - `rung restore <file>` puts TIA Portal's version of one file back (yours is kept in `.rung/recovery`): an edit you do not want, a read-only file edited by mistake, a file deleted by mistake.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.

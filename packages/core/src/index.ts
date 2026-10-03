@@ -15,6 +15,7 @@ export {
   pathToAddress,
   ignoredSourceReason,
   findCaseCollisions,
+  shellPath,
 } from "./address.js";
 export { WorkspaceError, type WorkspaceErrorCode } from "./errors.js";
 export { sha256, normalizeText, writeFileAtomic, replaceGuarded, type GuardOptions, type GuardResult } from "./atomic.js";

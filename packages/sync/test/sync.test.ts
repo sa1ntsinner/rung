@@ -743,7 +743,7 @@ describe("syncOnce", () => {
     expect(kept.some((f) => readFileSync(join(t.f(r.copy!), f), "utf8") === "my edit\n")).toBe(true);
     unlinkSync(t.f(pA));
     await t.sync(2000); // a pending delete now
-    await t.withState((s) => restoreFile(t.root, s, pA));
+    expect((await t.withState((s) => restoreFile(t.root, s, pA))).wasDeleted).toBe(true);
     expect(t.read(pA)).toBe(srcA);
     const after = await t.sync(3000);
     expect(after.pendingDeletes + after.imported).toBe(0);

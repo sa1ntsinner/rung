@@ -122,6 +122,54 @@ describe("sync and watch: the edges", () => {
     } finally { await t.state.close(); }
   });
 
+  it("a hand rename of an FC with a return value, written with its header unquoted, is still recognised; the advice is in a safe order", async () => {
+    const t = await fixture();
+    try {
+      const fc = 'FUNCTION "Scale" : Real\nVAR_INPUT\n Raw : Int;\nEND_VAR\nBEGIN\n #Scale := INT_TO_REAL(#Raw) / 27.648;\nEND_FUNCTION\n';
+      t.bridge.add(addr("Scale"), { content: fc });
+      await t.pass();
+      unlinkSync(join(t.root, "plc/PLC_1/blocks/Scale.scl"));
+      writeFileSync(join(t.root, "plc/PLC_1/blocks/Scale2.scl"), fc.replace('FUNCTION "Scale"', "FUNCTION Scale2").replace("#Scale :=", "#Scale2 :="));
+      const r = await t.pass();
+      expect(r.created).toBe(0);
+      const d = r.diagnostics.find((x) => x.code === "LOOKS_LIKE_RENAME")!;
+      expect(d.message.indexOf("remove plc/PLC_1/blocks/Scale2.scl")).toBeLessThan(d.message.indexOf("rung restore plc/PLC_1/blocks/Scale.scl"));
+    } finally { await t.state.close(); }
+  });
+
+  it("a path with a space is quoted in the command a message suggests", async () => {
+    const t = await fixture();
+    try {
+      t.bridge.add(addr("Valve 1"), { content: empty.replace('"A"', '"Valve 1"') });
+      await t.pass();
+      unlinkSync(join(t.root, "plc/PLC_1/blocks/Valve 1.scl"));
+      const r = await t.pass();
+      expect(r.diagnostics.find((x) => x.code === "DELETE_PENDING")!.message).toContain('rung confirm-delete "plc/PLC_1/blocks/Valve 1.scl"');
+    } finally { await t.state.close(); }
+  });
+
+  it("with writes off, TIA Portal's change comes into an edited file; the same line is a conflict now", async () => {
+    const t = await fixture();
+    const off = { ...t.config, writesOff: true as const, sync: { ...t.config.sync, import: "manual" as const } };
+    try {
+      const src = 'FUNCTION "A" : Void\nBEGIN\n  #x := 1;\n  #y := 2;\n  #z := 3;\n  #w := 4;\nEND_FUNCTION\n';
+      t.bridge.add(addr("A"), { content: src });
+      await syncOnce(t.root, t.bridge, t.state, { config: off });
+      const file = join(t.root, "plc/PLC_1/blocks/A.scl");
+      writeFileSync(file, src.replace("#x := 1;", "#x := 10;"));
+      t.bridge.edit(addr("A"), { ".scl": src.replace("#w := 4;", "#w := 40;") });
+      const r = await syncOnce(t.root, t.bridge, t.state, { config: off });
+      expect(readFileSync(file, "utf8")).toContain("#x := 10;");
+      expect(readFileSync(file, "utf8")).toContain("#w := 40;");
+      expect(t.bridge.imports).toEqual([]);
+      expect(r.warnings.map((w) => w.code)).toContain("WRITES_OFF");
+      t.bridge.edit(addr("A"), { ".scl": src.replace("#x := 1;", "#x := 11;").replace("#w := 4;", "#w := 40;") });
+      const c = await syncOnce(t.root, t.bridge, t.state, { config: off });
+      expect(c.conflicts).toBe(1);
+      expect(t.bridge.imports).toEqual([]);
+    } finally { await t.state.close(); }
+  });
+
   it("writes off and on again: the bridge that may import already is kept", async () => {
     const t = await fixture();
     const off = { ...t.config, writesOff: true as const, sync: { ...t.config.sync, import: "manual" as const } };

@@ -22,6 +22,7 @@ import {
   publishBundle,
   replaceGuarded,
   sha256,
+  shellPath,
   writeFileAtomic,
   type ObjectState,
   type RungConfig,
@@ -581,7 +582,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   };
   const writeConflict = async (st: ObjectState, stem: string, files: Record<string, string>, staged: StagedExport, source: boolean) => {
     if (plan) {
-      planned({ address: st.address, path: st.path, action: "conflict", detail: `changed here and in TIA Portal on the same lines; run rung resolve ${st.path} --ours|--theirs|--merged after sync writes the conflict helpers` });
+      planned({ address: st.address, path: st.path, action: "conflict", detail: `changed here and in TIA Portal on the same or neighbouring lines; run rung resolve ${shellPath(st.path)} --ours|--theirs|--merged after sync writes the conflict helpers` });
       report.conflicts++;
       return;
     }
@@ -605,7 +606,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       sent: undefined,
     });
     report.conflicts++;
-    diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: `Edited here and in TIA Portal; ${source ? `markers in ${st.path}.conflict` : `TIA version in ${st.path}.tia`}; run rung resolve ${st.path} --ours|--theirs|--merged` });
+    diag({ address: st.address, path: st.path, severity: "error", code: "CONFLICT", message: `Edited here and in TIA Portal; ${source ? `markers in ${shellPath(st.path + ".conflict")}` : `TIA version in ${shellPath(st.path + ".tia")}`}; run rung resolve ${shellPath(st.path)} --ours|--theirs|--merged` });
   };
 
   /**
@@ -694,14 +695,14 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       }
 
       if (st?.status === "conflicted") {
-        const hint = `Unresolved conflict; check ${st.path}.conflict or ${st.path}.tia; run rung resolve ${st.path} --ours|--theirs|--merged`;
+        const hint = `Unresolved conflict; check ${shellPath(st.path + ".conflict")} or ${shellPath(st.path + ".tia")}; run rung resolve ${shellPath(st.path)} --ours|--theirs|--merged`;
         warn(address, "CONFLICT", hint, st.path);
         report.conflicts++;
         diag({ address, path: st.path, severity: "error", code: "CONFLICT", message: hint });
         continue;
       }
       if (st?.status === "recoveryRequired") {
-        warn(address, "RECOVERY_REQUIRED", `the last import has an unknown outcome; check TIA Portal, then run rung resolve ${st.path} --ours|--theirs|--merged`, st.path);
+        warn(address, "RECOVERY_REQUIRED", `the last import has an unknown outcome; check TIA Portal, then run rung resolve ${shellPath(st.path)} --ours|--theirs|--merged`, st.path);
         continue;
       }
 
@@ -746,8 +747,8 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
           if (deletable && !tiaChanged && !readOnly && cfg.sync.delete === "confirm") {
             state.upsert({ ...cur, status: "pendingDelete" });
             report.pendingDeletes++;
-            if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: `deleted here: rung confirm-delete ${cur.path} deletes it in TIA Portal, or restore the file` });
-            const how = cfg.writesOff ? `with writes on (rung writes on), rung confirm-delete ${cur.path} deletes it in TIA Portal` : `run rung confirm-delete ${cur.path} to delete it in TIA Portal`;
+            if (plan) planned({ address, path: cur.path, action: "pending-delete", detail: `deleted here: rung confirm-delete ${shellPath(cur.path)} deletes it in TIA Portal, or restore the file` });
+            const how = cfg.writesOff ? `with writes on (rung writes on), rung confirm-delete ${shellPath(cur.path)} deletes it in TIA Portal` : `run rung confirm-delete ${shellPath(cur.path)} to delete it in TIA Portal`;
             diag({ address, path: cur.path, severity: "warning", code: "DELETE_PENDING", message: `Deleted in the workspace; ${how}, or restore the file` });
             continue;
           }
@@ -762,11 +763,30 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         state.upsert(cur);
         if (readOnly) {
           state.upsert({ ...cur, status: "fileDirty" });
-          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; rung restore ${cur.path} takes TIA Portal's version back` });
+          diag({ address, path: cur.path, severity: "error", code: "READ_ONLY_EDIT", message: `Read-only in rung: ${readOnlyReason(item.entry)}. The edit is not sent to TIA Portal; rung restore ${shellPath(cur.path)} takes TIA Portal's version back` });
           continue;
         }
         if (cfg.sync.import === "manual") {
           const [code, message] = notSent(cfg, "local edit");
+          // TIA Portal changed it as well: its change comes into the file now, nothing goes to TIA Portal; both on the
+          // same lines is a conflict now, not a surprise once writes are on
+          if (tiaChanged && staged && staged.result.form === cur.form && SOURCE_FORMS.has(cur.form)) {
+            const { bundle } = await localBundle(root, stemOf(cur), cur.path);
+            const m = mergeBundle(cur.form, await baseBundle(root, stemOf(cur), cur.files), bundle, Object.fromEntries(staged.texts));
+            if (m.kind === "conflict") {
+              await writeConflict(cur, stem, m.files, staged, true);
+              continue;
+            }
+            if (plan) planned({ address, path: cur.path, action: "export", detail: "TIA Portal's change merged into your edit, which stays in the file" });
+            else {
+              const recoveryDir = join(root, ".rung", "recovery", "merge-" + randomUUID());
+              for (const [suffix, text] of Object.entries(m.files)) await replaceGuarded(rel2abs(root, stem + suffix), Buffer.from(text, "utf8"), { expectedHash: await diskHash(root, stem + suffix), recoveryDir, force: true });
+              // TIA Portal's version is the base now; the file is that plus the person's edit, sent once writes are on
+              cur = { ...(await buildState(root, address, staged, readOnly, now())), status: "fileDirty" };
+              report.changes!.push({ path: cur.path, action: "export" });
+            }
+            report.exported++;
+          }
           state.upsert({ ...cur, status: "fileDirty", notSent: { code, message } });
           warn(address, code, message, cur.path);
           continue;
@@ -849,9 +869,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
       if (!item && st) {
         const status = await localStatus(root, st.files);
         if (status === "modified") {
-          warn(address, "LOCAL_CHANGES", `deleted in TIA but edited locally; file kept (rung resolve ${st.path} --ours recreates it in TIA; rung resolve ${st.path} --theirs accepts the delete)`, st.path);
+          warn(address, "LOCAL_CHANGES", `deleted in TIA but edited locally; file kept (rung resolve ${shellPath(st.path)} --ours recreates it in TIA; rung resolve ${shellPath(st.path)} --theirs accepts the delete)`, st.path);
           state.upsert({ ...st, status: "conflicted", conflict: { tiaFingerprint: "absent", tiaFiles: st.files, deletedInTia: true } });
-          if (plan) planned({ address, path: st.path, action: "conflict", detail: `deleted in TIA Portal but edited here; file kept until rung resolve ${st.path} --ours|--theirs|--merged` });
+          if (plan) planned({ address, path: st.path, action: "conflict", detail: `deleted in TIA Portal but edited here; file kept until rung resolve ${shellPath(st.path)} --ours|--theirs|--merged` });
           continue;
         }
         if (plan) {
@@ -901,7 +921,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         // a block renamed by hand (git mv and its header): creating it would leave TIA Portal two blocks, the callers on the old one
         const from = await renamedBy(root, state, address, bundle["." + loc.form] ?? "");
         if (from) {
-          const how = `rung restore ${from.path}, remove ${loc.path}, then rung rename ${from.path} ${name}: TIA Portal keeps the block, its number and its callers. For a new block instead, rung confirm-delete ${from.path} first`;
+          const how = `remove ${shellPath(loc.path)}, then rung restore ${shellPath(from.path)} and rung rename ${shellPath(from.path)} ${name}: TIA Portal keeps the block, its number and its callers (in this order, or rung watch creates the new file first). For a new block instead, rung confirm-delete ${shellPath(from.path)} first`;
           diag({ address, path: loc.path, severity: "error", code: "LOOKS_LIKE_RENAME", message: `the block of ${from.path} (deleted here) under a new name, not created: ${how}` });
           if (plan) planned({ address, path: loc.path, action: "conflict", detail: `looks like a rename of ${from.path}: ${how}` });
           continue;
@@ -1185,37 +1205,57 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
  * TIA Portal's version of one object as rung last had it, back in its files (a deleted file too); the person's
  * version is kept in .rung/recovery. Offline: the next pass brings anything newer from TIA Portal.
  */
-export async function restoreFile(root: string, state: StateStore, path: string): Promise<{ copy?: string }> {
+export async function restoreFile(root: string, state: StateStore, path: string): Promise<{ copy?: string; wasDeleted?: boolean }> {
   const st = state.byPath(path);
   if (!st) throw new WorkspaceError("NOT_MIRRORED", `${path} is not a file rung mirrors (rung status lists them)`);
-  if (st.status === "conflicted") throw new WorkspaceError("BAD_ARGUMENT", `${path} is in conflict: rung resolve ${st.path} --theirs takes TIA Portal's version`);
+  if (st.status === "conflicted") throw new WorkspaceError("BAD_ARGUMENT", `${path} is in conflict: rung resolve ${shellPath(st.path)} --theirs takes TIA Portal's version`);
   const opId = randomUUID();
   const recoveryDir = join(root, ".rung", "recovery", "restore-" + opId);
   const blobs = new BlobStore(root);
   let kept = false;
+  let wasDeleted = false;
   for (const f of st.files) {
     const now = await diskHash(root, f.path, f.hash);
     if (now === f.hash) continue;
     if (now !== "absent") kept = true;
+    else wasDeleted = true;
     await replaceGuarded(rel2abs(root, f.path), await blobs.get(f.hash), { expectedHash: now, recoveryDir, force: true });
   }
   state.upsert({ ...st, status: st.status === "pendingDelete" || st.status === "fileDirty" ? "synced" : st.status, notSent: undefined });
   await state.flush();
-  return kept ? { copy: relative(root, recoveryDir).split(sep).join("/") } : {};
+  return { ...(kept ? { copy: relative(root, recoveryDir).split(sep).join("/") } : {}), ...(wasDeleted ? { wasDeleted } : {}) };
 }
 
 /** An object whose files are gone here and whose block is this new file's under another name: a rename by hand. */
 async function renamedBy(root: string, state: StateStore, address: string, text: string): Promise<ObjectState | undefined> {
   const { name, device } = parseAddress(address);
   const blobs = new BlobStore(root);
-  const squeeze = (s: string) => normalizeText(s).replace(/[ \t]+$/gm, "");
+  // the block's own name in every form a rename touches ("Old", Old in the header, #Old for an FC's return value)
+  // stands for one placeholder; trailing blanks and line endings do not count
+  const lines = (s: string, own: string) => {
+    const word = new RegExp(`("|#|\\b)${own.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}("|\\b)`, "gi");
+    return normalizeText(s).replace(/[ \t]+$/gm, "").replace(word, "\u0000").split("\n").filter((l) => l.trim());
+  };
+  const mine = lines(text, name);
   for (const st of state.all()) {
     const primary = st.files.find((f) => f.role === "primary") ?? st.files[0];
     if (!primary || st.readOnly || parseAddress(st.address).device !== device || (st.status !== "pendingDelete" && (st.status !== "synced" || existsSync(rel2abs(root, primary.path))))) continue;
     const old = parseAddress(st.address).name;
     if (old.toLowerCase() === name.toLowerCase()) continue;
     const before = await blobs.get(primary.hash).then((b) => b.toString("utf8"), () => undefined);
-    if (before && squeeze(before.split(`"${old}"`).join(`"${name}"`)) === squeeze(text)) return st;
+    if (!before) continue;
+    // the same block, give or take a small edit made with the rename: lines on one side only, few of them
+    const theirs = lines(before, old);
+    const left = new Map<string, number>();
+    for (const l of theirs) left.set(l, (left.get(l) ?? 0) + 1);
+    let differ = 0;
+    for (const l of mine) {
+      const n = left.get(l) ?? 0;
+      if (n) left.set(l, n - 1);
+      else differ++;
+    }
+    for (const n of left.values()) differ += n;
+    if (differ <= Math.max(2, Math.floor(Math.max(theirs.length, mine.length) / 10)) && Math.min(theirs.length, mine.length) >= 3) return st;
   }
   return undefined;
 }
@@ -1243,7 +1283,7 @@ export async function confirmDelete(
   // what still names it stops compiling: say so first, and only --force deletes it anyway
   const users = (await withUsers(root, state, [address])).filter((a) => a !== address);
   if (users.length && !opts.force)
-    throw new WorkspaceError("IN_USE", `${name} is used by ${users.map((a) => state.get(a)?.path ?? a).join(", ")}; they will not compile without it. rung confirm-delete ${st.path} --force deletes it anyway`);
+    throw new WorkspaceError("IN_USE", `${name} is used by ${users.map((a) => state.get(a)?.path ?? a).join(", ")}; they will not compile without it. rung confirm-delete ${shellPath(st.path)} --force deletes it anyway`);
   await bridge.deleteObject(address, st.tiaFingerprint, randomUUID());
   state.remove(address);
   await state.flush();

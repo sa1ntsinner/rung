@@ -278,7 +278,16 @@ export async function cmdStatus(dir: string, io: Io): Promise<number> {
     /* no pass yet */
   }
   for (const d of compileErrors) io.stdout(`  ${"compile error".padEnd(16)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
-  return s.conflicted.length || s.recoveryRequired.length || compileErrors.length ? 2 : 0;
+  // what the last pass held back that no line above names yet: a block renamed by hand, a new file TIA Portal refused
+  let held: typeof compileErrors = [];
+  try {
+    const listed = new Set([...s.unsent.map((u) => u.path), ...s.conflicted]);
+    held = ((JSON.parse(await readFile(join(dir, ".rung", "diagnostics.json"), "utf8")) as { items?: typeof compileErrors }).items ?? []).filter((d) => d.severity === "error" && d.code !== "COMPILE" && d.code !== "CONFLICT" && !listed.has(d.path ?? ""));
+  } catch {
+    /* no pass yet */
+  }
+  for (const d of held) io.stdout(`  ${"held back".padEnd(16)} ${diagnosticTarget(d)} — ${d.code}: ${d.message}\n`);
+  return s.conflicted.length || s.recoveryRequired.length || compileErrors.length || held.length ? 2 : 0;
 }
 
 export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged", io: Io): Promise<number> {
@@ -315,10 +324,10 @@ export async function cmdRestore(file: string, io: Io): Promise<number> {
   const dir = await findWorkspace(resolve(io.cwd, file, ".."));
   const rel = relative(dir, resolve(io.cwd, file)).split(sep).join("/");
   const owner = await OwnerClient.connect(dir);
-  let r: { copy?: string };
+  let r: { copy?: string; wasDeleted?: boolean };
   if (owner) {
     try {
-      r = await owner.request<{ copy?: string }>("restore", { path: rel });
+      r = await owner.request<{ copy?: string; wasDeleted?: boolean }>("restore", { path: rel });
     } finally {
       owner.close();
     }
@@ -331,7 +340,7 @@ export async function cmdRestore(file: string, io: Io): Promise<number> {
       await state.close();
     }
   }
-  io.stdout(`${rel}: TIA Portal's version is back${r.copy ? `; yours is kept in ${r.copy}` : " (it was not changed)"}\n`);
+  io.stdout(`${rel}: TIA Portal's version is back${r.copy ? `; yours is kept in ${r.copy}` : r.wasDeleted ? " (the file had been deleted)" : " (it was not changed)"}\n`);
   return 0;
 }
 
