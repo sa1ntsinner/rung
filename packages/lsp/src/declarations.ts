@@ -28,7 +28,21 @@ export interface DeclRow {
   /** attributes the table has no column for, shown in the inspector */
   other: { key: string; value: string }[];
   ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange };
+  /** the language server's errors and warnings about this declaration's name, type or value */
+  problems?: DeclProblem[];
   children?: DeclRow[];
+}
+
+export interface DeclProblem {
+  column: "name" | "type" | "start";
+  severity: "error" | "warning";
+  message: string;
+}
+
+/** A diagnostic of the file, as the language server reports it. */
+export interface FileProblem extends DRange {
+  severity: string;
+  message: string;
 }
 
 export interface DeclSection {
@@ -58,12 +72,28 @@ const TITLE: Record<Section, string> = { Input: "Input", Output: "Output", InOut
 const STANDARD_FB = /^(TON|TOF|TP|TONR|CTU|CTD|CTUD|R_TRIG|F_TRIG)(_|$)/i;
 const KNOWN = new Set(Object.values(EXPOSURE).map((k) => k.toUpperCase()));
 
-function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (name: string) => boolean, hmi: boolean): DeclRow {
+/** The problems about a row's own name, type or value (a member's are its own). */
+function problemsOf(r: Pick<DeclRow, "ranges">, problems: FileProblem[]): DeclProblem[] {
+  const out: DeclProblem[] = [];
+  for (const p of problems) {
+    if (p.severity !== "error" && p.severity !== "warning") continue;
+    const hits = (x?: DRange) => !!x && p.start < Math.max(x.end, x.start + 1) && p.end > x.start;
+    const column = hits(r.ranges.name) ? "name" : hits(r.ranges.type) ? "type" : hits(r.ranges.start) ? "start" : undefined;
+    if (column) out.push({ column, severity: p.severity, message: p.message });
+  }
+  return out;
+}
+
+function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (name: string) => boolean, hmi: boolean, problems: FileProblem[]): DeclRow {
   // names joined by "/", each with "%" and "/" escaped: "a/b" (a quoted name) is not member b of a
   const segment = v.name.replace(/%/g, "%25").replace(/\//g, "%2F");
   const id = parent ? `${parent}/${segment}` : segment;
   const src = v.src;
   const list = src?.attrs ? parseAttributes(text, src.attrs) : undefined;
+  const ranges: DeclRow["ranges"] = src
+    ? { whole: src.whole, name: src.name, type: src.type, ...(src.init ? { start: src.init } : {}), ...(src.comment ? { comment: src.comment } : {}), ...(src.attrs ? { attrs: src.attrs } : {}) }
+    : { whole: { start: v.start, end: v.end }, name: { start: v.start, end: v.end }, type: { start: v.end, end: v.end } };
+  const found = problemsOf({ ranges }, problems);
   const kind: DeclRow["kind"] = v.isArray ? "array" : v.members && v.type === "Struct" ? "struct" : v.typeRef && (STANDARD_FB.test(v.typeRef) || isFb(v.typeRef)) ? "instance" : "plain";
   return {
     id,
@@ -77,15 +107,14 @@ function row(text: string, v: VarDecl, parent: string, depth: number, isFb: (nam
     attrs: { accessible: attrState(list, EXPOSURE.accessible), visible: attrState(list, EXPOSURE.visible), writable: attrState(list, EXPOSURE.writable), setpoint: attrState(list, EXPOSURE.setpoint) },
     hmi,
     other: (list?.entries ?? []).filter((e) => !KNOWN.has(e.key.toUpperCase())).map((e) => ({ key: e.key, value: e.value })),
-    ranges: src
-      ? { whole: src.whole, name: src.name, type: src.type, ...(src.init ? { start: src.init } : {}), ...(src.comment ? { comment: src.comment } : {}), ...(src.attrs ? { attrs: src.attrs } : {}) }
-      : { whole: { start: v.start, end: v.end }, name: { start: v.start, end: v.end }, type: { start: v.end, end: v.end } },
-    ...(v.members?.length ? { children: v.members.map((m) => row(text, m, id, depth + 1, isFb, hmi)) } : {}),
+    ranges,
+    ...(found.length ? { problems: found } : {}),
+    ...(v.members?.length ? { children: v.members.map((m) => row(text, m, id, depth + 1, isFb, hmi, problems)) } : {}),
   };
 }
 
 /** The interface of the block at `offset` (or the file's first block). `isFb` tells instances of project FBs. */
-export function declarationModel(uri: string, version: number, text: string, parsed: ParsedDocument, offset?: number, isFb: (name: string) => boolean = () => false): DeclModel {
+export function declarationModel(uri: string, version: number, text: string, parsed: ParsedDocument, offset?: number, isFb: (name: string) => boolean = () => false, problems: FileProblem[] = []): DeclModel {
   const blocks = parsed.blocks.filter((b) => b.kind !== "GVL");
   const block: BlockModel | undefined = (offset !== undefined ? blocks.find((b) => offset >= b.start && offset <= b.end) : undefined) ?? blocks[0];
   if (!block) return { uri, version, sections: [], editable: false, reason: "No block in this file", unavailable: [] };
@@ -94,7 +123,7 @@ export function declarationModel(uri: string, version: number, text: string, par
     title: TITLE[s.section] ?? s.section,
     keyword: s.keyword,
     modifiers: s.modifiers,
-    rows: block.vars.filter((v) => v.start >= s.whole.start && v.end <= s.whole.end).map((v) => row(text, v, "", 0, isFb, s.section !== "Temp" && s.section !== "Constant")),
+    rows: block.vars.filter((v) => v.start >= s.whole.start && v.end <= s.whole.end).map((v) => row(text, v, "", 0, isFb, s.section !== "Temp" && s.section !== "Constant", problems)),
     range: s.whole,
     body: s.body,
   }));

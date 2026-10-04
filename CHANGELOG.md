@@ -6,6 +6,8 @@
 - Declarations: a block's interface as a table beside the SCL code, with TIA Portal's sections, structures that open into their members, three column presets (Code, HMI access, Commissioning), a filter and an inspector. HMI/OPC UA attributes show TIA Portal's default faint and an explicit setting plainly.
 - Declarations are edited in the table: names (a rename the code follows), data types with the PLC's types suggested, default values, comments, HMI/OPC UA attributes with a click or Space (Reset goes back to TIA Portal's default), new declarations with Insert or a section's +, deletion that asks first when the declaration is used. Rows copied from Excel or TIA Portal paste with a preview; Ctrl+C copies a row. Every edit is one text edit of the open file, undone with Ctrl+Z; one made on text that has changed since is refused.
 - UDT files open as a table too (Open as Table, or Open With… → UDT Table).
+- A type set to `Struct` opens a structure with its first member ready to name; *Add member* adds more. Errors and warnings of the language server underline the cell they are about.
+- Usages keeps the earlier questions (the history button in its title).
 - Usages: Who Writes This? fills a sidebar view that stays while you open the places it lists.
 - Get started: a short walkthrough from checking the PC to the first sync.
 

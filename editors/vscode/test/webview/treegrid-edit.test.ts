@@ -125,6 +125,47 @@ describe("tree-grid editing", () => {
     expect(input(g)?.closest('[role="row"]')?.getAttribute("data-row")).toBe("b");
   });
 
+  it("new rows arriving while a cell is open keep what was typed", async () => {
+    const { g, grid } = await mount();
+    await key(g, grid, "Enter");
+    input(g)!.value = "typed";
+    input(g)!.dispatchEvent(new Event("input", { bubbles: true }));
+    g.sections = [{ ...sections[0]!, rows: [...sections[0]!.rows] }];
+    await g.updateComplete;
+    expect(input(g)?.value).toBe("typed");
+  });
+
+  it("the open cell's row is gone after new rows: the edit closes without a commit", async () => {
+    const { g, grid, events } = await mount();
+    await key(g, grid, "ArrowDown");
+    await key(g, grid, "Enter");
+    g.sections = [{ ...sections[0]!, rows: [sections[0]!.rows[0]!] }];
+    await g.updateComplete;
+    expect(input(g)).toBeNull();
+    expect(events).toEqual([]);
+  });
+
+  it("a row that goes while its cell is open says so, with what was typed", async () => {
+    const { g, grid } = await mount();
+    const lost: unknown[] = [];
+    g.addEventListener("rg-edit-lost", (e) => lost.push((e as CustomEvent).detail));
+    await key(g, grid, "ArrowDown");
+    await key(g, grid, "Enter");
+    input(g)!.value = "typed";
+    input(g)!.dispatchEvent(new Event("input", { bubbles: true }));
+    g.sections = [{ ...sections[0]!, rows: [sections[0]!.rows[0]!] }];
+    await g.updateComplete;
+    expect(lost).toEqual([{ rowId: "b", column: "name", value: "typed" }]);
+  });
+
+  it("undo and redo work in a table without rows", async () => {
+    const { g, grid, events } = await mount();
+    g.sections = [{ id: "st", title: "Static", rows: [] }];
+    await g.updateComplete;
+    await key(g, grid, "z", { ctrlKey: true });
+    expect(events.map((e) => e.type)).toEqual(["rg-undo"]);
+  });
+
   it("without editable, Enter still opens the text and nothing edits", async () => {
     const { g, grid, events } = await mount(false);
     await key(g, grid, "Enter");

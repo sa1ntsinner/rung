@@ -43,6 +43,16 @@ describe("setType", () => {
     expect(apply(SRC, { op: "setType", row: "Speed", type: "LReal" })).toBe(SRC.replace("Speed : Real :=", "Speed : LReal :="));
     expect(apply(SRC, { op: "setType", row: "Fb/a", type: "DInt" })).toBe(SRC.replace("a : Int;", "a : DInt;"));
   });
+  it("to Struct: the row opens a structure with one member (TIA compiles no empty one); its value goes, its comment stays", () => {
+    expect(apply(SRC, { op: "setType", row: "Speed", type: "Struct" })).toBe(
+      SRC.replace("      Speed : Real := 1500.0;\n", "      Speed : Struct\n         Tag_1 : Bool;\n      END_STRUCT;\n"),
+    );
+    expect(apply(SRC, { op: "setType", row: "Enable", type: "Array[0..3] of Struct" })).toBe(
+      SRC.replace("      Enable : Bool;   // run request\n", "      Enable : Array[0..3] of Struct   // run request\n         Tag_1 : Bool;\n      END_STRUCT;\n"),
+    );
+    const crlf = SRC.replace(/\n/g, "\r\n");
+    expect(apply(crlf, { op: "setType", row: "Fb/a", type: "struct" })).toBe(crlf.replace("         a : Int;\r\n", "         a : Struct\r\n            Tag_1 : Bool;\r\n         END_STRUCT;\r\n"));
+  });
   it("refuses a struct and an empty type", () => {
     expect(plan(SRC, { op: "setType", row: "Fb", type: "Int" })).toMatchObject({ ok: false });
     expect(plan(SRC, { op: "setType", row: "Speed", type: "  " })).toMatchObject({ ok: false });
@@ -130,6 +140,21 @@ describe("values TIA would not accept are refused, never written", () => {
     expect(plan(CONST, { op: "setStart", row: "K", value: null })).toEqual({ ok: false, reason: "A constant needs a value." });
     expect(plan(CONST, { op: "insertRows", after: "K", rows: [{ name: "L", type: "Int" }] })).toEqual({ ok: false, reason: "A constant needs a value." });
     expect(plan(CONST, { op: "insertRows", after: "t", rows: [{ name: "u", type: "Int", start: "1" }] })).toEqual({ ok: false, reason: "Temporary variables have no default value." });
+  });
+  it("a data type is a whole type expression", () => {
+    for (const bad of ["Int garbage", "Array[0..3] Int", "String[", '"T_Pos', "Int Int", "1Int"]) expect(plan(SRC, { op: "setType", row: "Speed", type: bad }), bad).toMatchObject({ ok: false });
+    for (const good of ["LReal", '"T_Pos"', "String[20]", "WString", "Array[0..3] of Int", "Array[1..2, 0..9] of \"T_Pos\"", "Array[*] of Byte", "DTL", "TON_TIME"])
+      expect(plan(SRC, { op: "setType", row: "Speed", type: good }), good).toMatchObject({ ok: true });
+    // a new declaration is never written as an empty structure
+    expect(plan(SRC, { op: "insertRows", after: "Speed", rows: [{ name: "s", type: "Struct" }] })).toMatchObject({ ok: false });
+  });
+  it("HMI attributes are refused where TIA has none (temporaries, constants)", () => {
+    const T = SRC.replace("   VAR_TEMP\n   END_VAR\n", "   VAR_TEMP\n      t : Int;\n   END_VAR\n");
+    expect(plan(T, { op: "setAttr", row: "t", key: "ExternalVisible", state: "off" })).toMatchObject({ ok: false });
+  });
+  it("an attribute key is a name, nothing else", () => {
+    expect(plan(SRC, { op: "setAttr", row: "Speed", key: "X := 'a'} : Int; evil : Bool; {Y", state: "on" })).toMatchObject({ ok: false });
+    expect(plan(SRC, { op: "setAttr", row: "Speed", key: "", state: "on" })).toMatchObject({ ok: false });
   });
   it("an FC's parameters have no default value", () => {
     const FC = 'FUNCTION "Calc" : Int\n   VAR_INPUT\n      a : Int;\n   END_VAR\nBEGIN\nEND_FUNCTION\n';

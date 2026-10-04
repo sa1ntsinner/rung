@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // The text edits a declaration table makes (rung/declarationEdit): each replaces only its own span, in TIA's export
 // style, and carries the old text so a stale apply can be refused. Nothing else in the file changes.
-import { ATTR_DEFAULT, parseAttributes } from "./attributes.js";
+import { ATTR_DEFAULT, EXPOSURE, parseAttributes } from "./attributes.js";
 import type { DeclModel, DeclRow, DeclSection } from "./declarations.js";
 import { ELEMENTARY_TYPES, KEYWORDS } from "./catalog.js";
 
@@ -89,6 +89,18 @@ function startRule(model: DeclModel, section: DeclSection | undefined, start: st
   return undefined;
 }
 
+const ARRAY_OF = /^Array\s*\[[^[\]]+\]\s*of\s+/i;
+/** a structure, plain or as an array's element */
+export const STRUCT_TYPE = /^(Array\s*\[[^[\]]+\]\s*of\s+)?Struct$/i;
+
+/** Why a data type is not one SCL can declare (a name, "UDT", String[n], Array[..] of …), or undefined. */
+export function typeError(type: string): string | undefined {
+  let t = type.trim();
+  while (ARRAY_OF.test(t)) t = t.replace(ARRAY_OF, "");
+  if (/^"[^"]+"$/.test(t) || /^[A-Za-z_][A-Za-z0-9_]*(\s*\[[^[\]]+\])?$/.test(t)) return undefined;
+  return `"${type.trim()}" is not a data type.`;
+}
+
 /** A row as TIA exports it, or why it cannot be written. */
 function rowText(r: NewRow, indent: string): string | { reason: string } {
   const name = r.name.trim();
@@ -99,7 +111,9 @@ function rowText(r: NewRow, indent: string): string | { reason: string } {
   if (!type) return { reason: `"${name}" needs a data type.` };
   if ([name, type, start ?? "", comment ?? ""].some((v) => /[\r\n]/.test(v))) return { reason: "A value cannot span lines." };
   if (name.includes('"')) return { reason: `A name cannot contain '"'.` };
-  if (/[;{}]|:=|\(\*|\/\/|\/\*/.test(type)) return { reason: `"${type}" is not a data type.` };
+  const typeBad = typeError(type);
+  if (typeBad) return { reason: typeBad };
+  if (STRUCT_TYPE.test(type)) return { reason: "Add the declaration first, then set its type to Struct." };
   if (start && /;|\/\/|\(\*|\/\*/.test(start.replace(/'(?:[^']|'')*'/g, "''"))) return { reason: `"${start}" is not a start value.` };
   const quoted = PLAIN_NAME.test(name) && !RESERVED.has(name.toUpperCase()) ? name : `"${name}"`;
   const instr = instruction(type);
@@ -117,6 +131,7 @@ export function instruction(type: string): string | undefined {
 /** what TIA's export writes on an instruction instance (V20) */
 const instructionPragma = (instr: string) => `{InstructionName := '${instr}'; LibVersion := '1.0'}`;
 const INSTRUCTION_KEYS = new Set(["INSTRUCTIONNAME", "LIBVERSION"]);
+const EXPOSURE_KEYS = new Set(Object.values(EXPOSURE).map((k) => k.toUpperCase()));
 
 function planRows(text: string, model: DeclModel, op: Extract<DeclOp, { op: "insertRows" }>): EditPlan {
   let at: number;
@@ -180,8 +195,27 @@ export function planDeclarationEdit(text: string, model: DeclModel, op: DeclOp):
 
   if (op.op === "setType") {
     if (row.kind === "struct") return { ok: false, reason: "A structure's members are edited one by one" };
-    const t = rowText({ name: row.name, type: op.type }, "");
-    if (typeof t !== "string") return { ok: false, reason: t.reason };
+    const bad = !op.type.trim() ? "A declaration needs a data type." : typeError(op.type);
+    if (bad) return { ok: false, reason: bad };
+    // a new structure: TIA compiles no empty one, so it opens with one member (as Add names one)
+    if (STRUCT_TYPE.test(op.type.trim())) {
+      if (row.children?.length) return { ok: false, reason: "This declaration already has members." };
+      const tail = Math.max(row.ranges.whole.end, row.ranges.comment?.end ?? 0);
+      if (text.slice(tail, lineEnd(text, tail)).trim()) return { ok: false, reason: "Another declaration follows on this line; put it on a line of its own first" };
+      const eol = eolOf(text);
+      const indent = indentOf(text, row.ranges.whole.start);
+      const at = lineEnd(text, tail - 1);
+      const lead = at === text.length && text[at - 1] !== "\n" ? eol : "";
+      return {
+        ok: true,
+        version: model.version,
+        edits: [
+          // the type and what followed it (a start value): a structure has none of its own
+          { start: row.ranges.type.start, end: row.ranges.whole.end, old: text.slice(row.ranges.type.start, row.ranges.whole.end), text: op.type.trim().replace(/struct$/i, "Struct") },
+          { start: at, end: at, old: "", text: `${lead}${indent}   Tag_1 : Bool;${eol}${indent}END_STRUCT;${eol}` },
+        ],
+      };
+    }
     const instr = instruction(op.type);
     const v = instr ?? op.type.trim();
     const edits: PlannedEdit[] = [];
@@ -263,6 +297,8 @@ export function planDeclarationEdit(text: string, model: DeclModel, op: DeclOp):
   }
 
   // setAttr: written as TIA writes it, an entry only for a value other than TIA's default
+  if (!PLAIN_NAME.test(op.key)) return { ok: false, reason: `"${op.key}" is not an attribute name.` };
+  if (!row.hmi && EXPOSURE_KEYS.has(op.key.toUpperCase())) return { ok: false, reason: "Temporaries and constants have no HMI/OPC UA attributes." };
   const def = ATTR_DEFAULT[op.key.toUpperCase()];
   const remove = op.state === "default" || (def !== undefined && (op.state === "on") === def);
   const value = op.state === "on" ? "'True'" : "'False'";

@@ -29,6 +29,7 @@ const SHORT: Record<AttrKey, string> = { accessible: "Accessible", writable: "Wr
 /** the attribute TIA writes for each column */
 const ATTR_KEY: Record<AttrKey, string> = { accessible: "ExternalAccessible", writable: "ExternalWritable", visible: "ExternalVisible", setpoint: "S7_SetPoint" };
 const TYPES_LIST = "rg-types";
+const STALE_TEXT = "The file changed. Review this value again.";
 
 /** a message that asks for a change, as the view writes it (the request number and the file are added) */
 type Request = Extract<ViewToHost, { req: number }> extends infer M ? (M extends unknown ? Omit<M, "v" | "req" | "uri"> : never) : never;
@@ -107,6 +108,13 @@ export class RgDeclarations extends LitElement {
   private receive(m: HostToView) {
     if (!m || m.v !== 1) return;
     if (m.kind === "model") {
+      // another file or block: a draft, a pending paste or a name to open belong to the old one
+      if (this.model && (this.model.uri !== m.model.uri || this.model.block?.name !== m.model.block?.name)) {
+        this.grid()?.cancelEdit();
+        this.paste = undefined;
+        this.editNext = undefined;
+        this.pending.clear();
+      }
       this.model = m.model;
       this.context = m.context;
       this.state = undefined;
@@ -156,8 +164,15 @@ export class RgDeclarations extends LitElement {
     this.send({ kind: "edit", version: this.model!.version, op }, pending);
   }
 
-  private commit(rowId: string, column: string, value: string) {
+  private commit(rowId: string, column: string, value: string, old: string) {
     const pending = { rowId, column, value };
+    // the cell changed while the draft was open (typed in the text, another edit): the draft is not sent over it
+    const now = this.model && findRow(this.model.sections, rowId);
+    if (now && cellText(now.row, column) !== old) {
+      this.notice = STALE_TEXT;
+      void this.updateComplete.then(() => this.grid()?.startEdit(rowId, column, value));
+      return;
+    }
     if (column === "name") return this.send({ kind: "rename", version: this.model!.version, rowId, name: value }, pending);
     if (column === "type") return this.op({ op: "setType", row: rowId, type: value }, pending);
     const v = value.trim() ? value : null;
@@ -303,12 +318,14 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
                 .expanded=${expanded}
                 .cellText=${cellText}
                 .renderCell=${(row: DeclRow, column: string) => this.cell(row, column)}
+                .cellLabel=${this.label}
                 .editable=${model.editable ? this.editable : undefined}
                 .suggestions=${(c: string) => (c === "type" && this.typeNames.length ? TYPES_LIST : undefined)}
                 .copyText=${this.copyText}
                 @rg-select=${(e: CustomEvent<{ rowId: string }>) => (this.selected = e.detail.rowId)}
                 @rg-open=${(e: CustomEvent<{ rowId: string; column: string }>) => this.open(e.detail.rowId, e.detail.column)}
-                @rg-commit=${(e: CustomEvent<{ rowId: string; column: string; value: string }>) => this.commit(e.detail.rowId, e.detail.column, e.detail.value)}
+                @rg-commit=${(e: CustomEvent<{ rowId: string; column: string; value: string; old: string }>) => this.commit(e.detail.rowId, e.detail.column, e.detail.value, e.detail.old)}
+                @rg-edit-lost=${(e: CustomEvent<{ value: string }>) => (this.notice = `The declaration changed elsewhere; what you typed was not saved: ${e.detail.value}`)}
                 @rg-toggle=${(e: CustomEvent<{ rowId: string; column: string }>) => this.toggle(e.detail.rowId, e.detail.column)}
                 @rg-insert=${(e: CustomEvent<{ rowId: string }>) => this.send({ kind: "add", version: model.version, after: e.detail.rowId })}
                 @rg-add=${(e: CustomEvent<{ sectionId: string }>) => this.send({ kind: "add", version: model.version, section: e.detail.sectionId })}
@@ -338,7 +355,21 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
       </div>`;
   }
 
+  /** A cell's own drawing, underlined with its problem when the language server reports one. */
   private cell(row: DeclRow, column: string) {
+    const content = this.cellContent(row, column);
+    const p = row.problems?.find((x) => x.column === column);
+    return p ? html`<span class="rg-problem rg-problem-${p.severity}" title=${p.message}>${content}</span>` : content;
+  }
+
+  /** What a screen reader hears: the cell and its problem. */
+  private readonly label = (row: DeclRow, column: string) => {
+    const p = row.problems?.find((x) => x.column === column);
+    const text = cellText(row, column);
+    return p ? `${text}, ${p.severity}: ${p.message}` : text;
+  };
+
+  private cellContent(row: DeclRow, column: string) {
     if (isAttr(column)) {
       if (!row.hmi) return nothing;
       const a = row.attrs[column];
@@ -391,6 +422,9 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     return html`<aside class="rg-inspector" aria-label="Selected declaration">
       <div class="rg-insp-name">${row.name}</div>
       <div class="rg-insp-path">${path.length > 1 ? path.join(" / ") : section}</div>
+      ${row.problems?.length
+        ? html`<ul class="rg-insp-problems">${row.problems.map((p) => html`<li><span class="codicon ${p.severity === "error" ? "codicon-error" : "codicon-warning"} rg-sev-${p.severity}"></span><span>${p.message}</span></li>`)}</ul>`
+        : nothing}
       <div class="rg-insp-group">
         ${field("Data type", typeValue, true)}
         ${row.kind === "struct" ? nothing : field("Default value", row.start ?? html`<span class="rg-muted">none</span>`, true)}
@@ -420,6 +454,9 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
         ? html`<div class="rg-insp-group"><div class="rg-insp-group-title">Other attributes</div>${row.other.map((o) => field(o.key, o.value, true))}</div>`
         : nothing}
       <div class="rg-actions">
+        ${this.model?.editable && row.children
+          ? html`<button class="rg-link" data-action="add-member" @click=${() => this.send({ kind: "add", version: this.model!.version, into: row.id })}><span class="codicon codicon-add"></span>Add member</button>`
+          : nothing}
         <button class="rg-link" data-action="usages" @click=${() => this.post({ v: 1, kind: "usages", rowId: row.id })}><span class="codicon codicon-references"></span>Where used</button>
         <button class="rg-link" data-action="text" @click=${() => this.post({ v: 1, kind: "open", rowId: row.id, target: "name" })}><span class="codicon codicon-go-to-file"></span>Show in text</button>
       </div>

@@ -21,6 +21,9 @@ describe("declaration protocol", () => {
     expect(ok({ op: "setComment", row: "a", value: "x" })).toBe(true);
     expect(ok({ op: "setAttr", row: "a", key: "ExternalVisible", state: "off" })).toBe(true);
     expect(ok({ op: "setAttr", row: "a", key: "ExternalVisible", state: "maybe" })).toBe(false);
+    // only the four attributes the table shows: a key is never text for the file
+    expect(ok({ op: "setAttr", row: "a", key: "S7_SetPoint", state: "on" })).toBe(true);
+    expect(ok({ op: "setAttr", row: "a", key: "ExternalVisible := 'False'} : Int; x : Int; //", state: "on" })).toBe(false);
     expect(ok({ op: "setType", row: "a", type: "Int" })).toBe(true);
     expect(ok({ op: "insertRows", after: "a", rows: [{ name: "b", type: "Int", start: "1", comment: "c" }] })).toBe(true);
     expect(ok({ op: "insertRows", section: "Static-0", rows: [{ name: "b" }] })).toBe(false);

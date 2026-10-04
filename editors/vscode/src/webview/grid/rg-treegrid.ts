@@ -4,7 +4,7 @@
 // changes no data: it asks (rg-commit, rg-toggle, rg-insert, …) and the owner answers with new rows. Drawn in the page's
 // own DOM so VS Code's theme and codicons apply as they are.
 import { LitElement, html, nothing, type TemplateResult } from "lit";
-import { styleMap } from "lit/directives/style-map.js";
+import { styleProps } from "./style-props";
 import type { GridColumn, GridRow, GridSection } from "./types";
 
 /** how a cell edits: text in an input, a flip of a Boolean, or not at all */
@@ -105,6 +105,12 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   }
 
   protected override willUpdate() {
+    // the row being edited is gone (renamed, deleted elsewhere): its edit ends without a commit, and says what was typed
+    if (this.editing && !this.findRow(this.editing.rowId)) {
+      const lost = this.editing;
+      this.editing = undefined;
+      if (lost.value !== lost.old) this.emit("rg-edit-lost", { rowId: lost.rowId, column: this.columns[lost.col]?.key, value: lost.value });
+    }
     const rows = this.rowLines();
     if (!rows.some((l) => l.row.id === this.activeRow)) this.activeRow = rows[0]?.row.id;
     // fewer columns (another preset): the active cell stays on the grid
@@ -145,6 +151,11 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   }
 
   private selectOnOpen = true;
+
+  /** Closes the open cell without a commit (the rows now belong to another block). */
+  cancelEdit(): void {
+    this.editing = undefined;
+  }
 
   private finishEdit(commit: boolean, refocus = true) {
     const ed = this.editing;
@@ -197,6 +208,12 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   }
 
   private onKey(e: KeyboardEvent) {
+    // the document's undo needs no row (the last one may just have been deleted)
+    if (this.editable && (e.ctrlKey || e.metaKey) && !e.altKey && /^[zy]$/i.test(e.key)) {
+      this.emit(e.key.toLowerCase() === "y" || e.shiftKey ? "rg-redo" : "rg-undo", {});
+      e.preventDefault();
+      return;
+    }
     const rows = this.rowLines();
     const i = rows.findIndex((l) => l.row.id === this.activeRow);
     if (i < 0) return;
@@ -312,7 +329,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
     const index = new Map(lines.flatMap((l, n) => (l.kind === "row" ? [[l.row.id, n] as const] : [])));
     const cellId = (rowId: string, col: number) => `rg-c-${index.get(rowId) ?? "x"}-${col}`;
     const activeId = this.activeRow && index.has(this.activeRow) ? cellId(this.activeRow, this.activeCol) : undefined;
-    // styles through the CSSOM (styleMap): the webview's CSP refuses style attributes
+    // styles through the CSSOM only (styleProps): the webview's CSP refuses style attributes
     return html`<div
       class="rg-grid ${this.focused ? "rg-focused" : ""}"
       role="treegrid"
@@ -320,7 +337,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
       aria-rowcount=${lines.length}
       aria-colcount=${this.columns.length}
       aria-activedescendant=${activeId ?? nothing}
-      style=${styleMap({ "--rg-cols": this.template(), "min-width": `${this.minWidth()}px` })}
+      style=${styleProps({ "--rg-cols": this.template(), "min-width": `${this.minWidth()}px` })}
       @keydown=${(e: KeyboardEvent) => this.onKey(e)}
       @paste=${(e: ClipboardEvent) => this.onPaste(e)}
       @copy=${(e: ClipboardEvent) => this.onCopy(e)}
@@ -382,7 +399,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
           }}
         >
           ${ci === 0
-            ? html`<span class="rg-indent" style=${styleMap({ width: `${(row.depth ?? 0) * 16}px` })}></span><span
+            ? html`<span class="rg-indent" style=${styleProps({ width: `${(row.depth ?? 0) * 16}px` })}></span><span
                   class="rg-twisty codicon ${hasKids ? (open ? "codicon-chevron-down" : "codicon-chevron-right") : ""}"
                   @click=${(e: MouseEvent) => {
                     if (!hasKids) return;
@@ -399,6 +416,10 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
                 list=${this.suggestions?.(c.key) ?? nothing}
                 .value=${this.editing!.value}
                 @keydown=${(e: KeyboardEvent) => this.onInputKey(e)}
+                @input=${(e: Event) => {
+                  // the draft survives a redraw that makes a new input (rows above it came or went)
+                  if (this.editing) this.editing.value = (e.target as HTMLInputElement).value;
+                }}
                 @click=${(e: MouseEvent) => e.stopPropagation()}
                 @dblclick=${(e: MouseEvent) => e.stopPropagation()}
                 @blur=${() => this.finishEdit(true)}

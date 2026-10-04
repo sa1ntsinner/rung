@@ -35,6 +35,11 @@ describe("parsePastedRows", () => {
     ]);
   });
 
+  it("an empty quoted cell is empty; a row whose type is no type is an error", () => {
+    expect(parsePastedRows('a\tInt\t""\tnote').rows).toEqual([{ name: "a", type: "Int", comment: "note" }]);
+    expect(parsePastedRows("b\tInt garbage").errors).toEqual([{ line: 1, message: '"Int garbage" is not a data type.' }]);
+  });
+
   it("strips TIA's quotes around a name and keeps a quoted type", () => {
     expect(parsePastedRows('"30ms"\t"T_Pos"').rows).toEqual([{ name: "30ms", type: '"T_Pos"' }]);
   });

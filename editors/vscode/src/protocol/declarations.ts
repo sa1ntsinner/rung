@@ -29,7 +29,15 @@ export interface DeclRow {
   hmi: boolean;
   other: { key: string; value: string }[];
   ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange };
+  /** the language server's errors and warnings about this declaration's name, type or value */
+  problems?: DeclProblem[];
   children?: DeclRow[];
+}
+
+export interface DeclProblem {
+  column: "name" | "type" | "start";
+  severity: "error" | "warning";
+  message: string;
 }
 
 export interface DeclSection {
@@ -115,6 +123,8 @@ export type ViewToHost =
   | { v: 1; kind: "redo" };
 
 const TARGETS: ReadonlySet<string> = new Set<OpenTarget>(["name", "type", "start", "comment"]);
+/** the attributes the table sets: a key from the view is never text written into the file */
+const ATTR_KEYS: ReadonlySet<string> = new Set(["ExternalAccessible", "ExternalWritable", "ExternalVisible", "S7_SetPoint"]);
 const str = (x: unknown) => typeof x === "string";
 const optStr = (x: unknown) => x === undefined || typeof x === "string";
 const nullStr = (x: unknown) => x === null || typeof x === "string";
@@ -134,7 +144,7 @@ function isOp(x: unknown): x is DeclOp {
     case "setComment":
       return str(o.row) && nullStr(o.value);
     case "setAttr":
-      return str(o.row) && str(o.key) && (o.state === "on" || o.state === "off" || o.state === "default");
+      return str(o.row) && ATTR_KEYS.has(String(o.key)) && (o.state === "on" || o.state === "off" || o.state === "default");
     case "setType":
       return str(o.row) && str(o.type);
     case "insertRows":

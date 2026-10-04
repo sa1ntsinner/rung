@@ -448,6 +448,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "rung.usages.history",
+        "title": "Earlier Usages",
+        "category": "rung",
+        "icon": "$(history)"
+      },
+      {
         "command": "rung.usages.pick",
         "title": "Who Writes This? (Quick Pick)",
         "category": "rung"
@@ -594,6 +600,10 @@
         {
           "command": "rung.usages.refresh",
           "when": "rung.hasUsages"
+        },
+        {
+          "command": "rung.usages.history",
+          "when": "rung.hasUsages"
         }
       ],
       "view/title": [
@@ -683,9 +693,14 @@
           "group": "2_workspace@2"
         },
         {
+          "command": "rung.usages.history",
+          "when": "view == rung.usages && rung.hasUsages",
+          "group": "navigation@1"
+        },
+        {
           "command": "rung.usages.refresh",
           "when": "view == rung.usages && rung.hasUsages",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [

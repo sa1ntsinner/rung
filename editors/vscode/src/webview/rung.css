@@ -404,6 +404,35 @@
 .rg-attr.rg-default {
   opacity: 0.4;
 }
+/* a problem the language server reports: the editor's own squiggle colours */
+.rg-problem {
+  text-decoration: underline wavy;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+}
+.rg-problem-error {
+  text-decoration-color: var(--vscode-editorError-foreground, var(--rg-error));
+}
+.rg-problem-warning {
+  text-decoration-color: var(--vscode-editorWarning-foreground, var(--rg-warn));
+}
+.rg-insp-problems {
+  margin: var(--rg-s2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.rg-insp-problems li {
+  display: flex;
+  gap: var(--rg-s1);
+  align-items: flex-start;
+  padding: 2px 0;
+}
+.rg-sev-error {
+  color: var(--vscode-editorError-foreground, var(--rg-error));
+}
+.rg-sev-warning {
+  color: var(--vscode-editorWarning-foreground, var(--rg-warn));
+}
 .rg-cell.rg-edit-toggle {
   cursor: pointer;
 }

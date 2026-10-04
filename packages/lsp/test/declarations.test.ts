@@ -81,6 +81,21 @@ describe("declarationModel", () => {
     expect(model("")).toMatchObject({ sections: [], editable: false });
   });
 
+  it("problems land on the cell they are about, members' on the member", () => {
+    const src = FB.replace("Start : Bool;", "Start : Bol;");
+    const at = (s: string) => ({ start: src.indexOf(s), end: src.indexOf(s) + s.length });
+    const m = declarationModel("u", 1, src, parse(src), undefined, () => false, [
+      { ...at("Bol"), severity: "error", message: "Unknown type Bol" },
+      { ...at("1500.0"), severity: "warning", message: "Out of range" },
+      { ...at("FUNCTION_BLOCK"), severity: "error", message: "elsewhere" },
+      { ...at("Speed"), severity: "info", message: "a hint" },
+    ]);
+    expect(m.sections[0]!.rows[0]!.problems).toEqual([{ column: "type", severity: "error", message: "Unknown type Bol" }]);
+    const settings = m.sections[1]!.rows[0]!;
+    expect(settings.problems).toBeUndefined();
+    expect(settings.children![0]!.problems).toEqual([{ column: "start", severity: "warning", message: "Out of range" }]);
+  });
+
   it("the language server answers rung/declarations for the open buffer, with its version", async () => {
     const s = await monitorServer();
     try {

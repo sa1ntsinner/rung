@@ -2,7 +2,7 @@
 // The Usages tree: writers first, then readers and hand-overs, each with where it is called from; and a last line
 // saying what static analysis cannot see.
 import { describe, it, expect } from "vitest";
-import { usagesTree, type Site } from "../src/core/usagesTree";
+import { remember, usagesTree, type Site } from "../src/core/usagesTree";
 
 const pos = (line: number) => ({ start: { line, character: 0 }, end: { line, character: 1 } });
 const site = (block: string, line: number, extra: Partial<Site> = {}): Site => ({ uri: `file:///w/${block}.scl`, range: pos(line), kind: "write", block, text: "x := 1;", ...extra });
@@ -34,5 +34,20 @@ describe("usagesTree", () => {
   it("a write reached through a parameter names the call it came through", () => {
     const t = usagesTree({ writes: [site("FC_Count", 5, { through: { block: "FB_Wrap", param: "Cnt", uri: "file:///w/FB_Wrap.scl", range: pos(11), text: "FC_Count(Cnt := #Total);" } })], reads: [] }, rel);
     expect(t[0]!.children![0]!.children![0]).toMatchObject({ label: "as Cnt, from FB_Wrap", description: "FB_Wrap.scl:12" });
+  });
+});
+
+describe("remember", () => {
+  const q = (symbol: string, uri = "file:///w/a.scl") => ({ symbol, uri });
+  it("keeps the latest question first, once, and at most `max`", () => {
+    let h = remember([], q("a"), 3);
+    h = remember(h, q("b"), 3);
+    h = remember(h, q("a"), 3);
+    expect(h.map((x) => x.symbol)).toEqual(["a", "b"]);
+    h = remember(h, q("c"), 3);
+    h = remember(h, q("d"), 3);
+    expect(h.map((x) => x.symbol)).toEqual(["d", "c", "a"]);
+    // the same name in another file is another question
+    expect(remember(h, q("d", "file:///w/b.scl"), 3).map((x) => `${x.symbol}@${x.uri.slice(-5)}`)).toEqual(["d@b.scl", "d@a.scl", "c@a.scl"]);
   });
 });

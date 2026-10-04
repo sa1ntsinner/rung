@@ -44,6 +44,7 @@ export interface SessionHost {
 }
 
 type Result = { ok: boolean; reason?: string; edit?: { rowId: string; column: "name" } };
+const MOVED = "The table shows another file now. Review the value again.";
 
 export class DeclarationsSession implements vscode.Disposable {
   private model: DeclModel | undefined;
@@ -199,12 +200,16 @@ export class DeclarationsSession implements vscode.Disposable {
         // the view may show another file by now: an edit is for the file and the text it was made on
         const doc = this.document();
         let r: Result;
-        if (m.uri !== this.host.uri() || !doc || !this.model || this.model.uri !== m.uri) r = { ok: false, reason: "The table shows another file now. Review the value again." };
+        if (!this.showing(m.uri) || !doc || !this.model) r = { ok: false, reason: MOVED };
         else if (m.version !== this.model.version || m.version !== doc.version) r = { ok: false, reason: STALE };
-        else if (m.kind === "edit") r = await this.applyOp(m.op, m.version);
-        else if (m.kind === "add") r = await this.add(m, m.version);
-        else if (m.kind === "delete") r = await this.delete(m.rowId, m.version);
-        else r = await this.rename(m.rowId, m.name, m.version);
+        else if (m.kind === "edit") {
+          r = await this.applyOp(m.uri, m.op, m.version);
+          // a declaration that became a structure: its first member's name opens for typing
+          if (r.ok && m.op.op === "setType" && /^(Array\s*\[[^\]]*\]\s*of\s+)?Struct$/i.test(m.op.type.trim())) r = { ok: true, edit: { rowId: `${m.op.row}/Tag_1`, column: "name" } };
+        }
+        else if (m.kind === "add") r = await this.add(m.uri, m, m.version);
+        else if (m.kind === "delete") r = await this.delete(m.uri, m.rowId, m.version);
+        else r = await this.rename(m.uri, m.rowId, m.name, m.version);
         this.post({ v: 1, kind: "result", req: m.req, ...r });
         return;
       }
@@ -229,8 +234,14 @@ export class DeclarationsSession implements vscode.Disposable {
     }
   }
 
-  /** Plans `op` in the language server and applies it, unless the document moved on since the view's model. */
-  private async applyOp(op: DeclOp, version?: number): Promise<Result> {
+  /** Whether the view still shows this file (a question or an answer may take a while; the panel follows editors). */
+  private showing(uri: string): boolean {
+    return this.host.uri() === uri && this.model?.uri === uri;
+  }
+
+  /** Plans `op` in the language server and applies it to `uri`, unless the view moved on or the text changed since. */
+  private async applyOp(uri: string, op: DeclOp, version?: number): Promise<Result> {
+    if (!this.showing(uri)) return { ok: false, reason: MOVED };
     const doc = this.document();
     if (!doc || !this.model) return { ok: false, reason: "The file is not open." };
     if (!this.model.editable) return { ok: false, reason: this.model.reason ?? "Read only" };
@@ -238,6 +249,7 @@ export class DeclarationsSession implements vscode.Disposable {
     const plan = await this.deps.lsp
       .request<ServerPlan>("rung/declarationEdit", { textDocument: { uri: doc.uri.toString(), version: version ?? doc.version }, ...(position ? { position } : {}), op })
       .catch(() => undefined);
+    if (!this.showing(uri)) return { ok: false, reason: MOVED };
     const range = (r: Rng) => new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
     const checked = checkPlan({ version: doc.version, getText: (r) => doc.getText(range(r)) }, plan ?? { ok: false, reason: "The language server is not running." });
     if (!checked.ok) return checked;
@@ -248,7 +260,7 @@ export class DeclarationsSession implements vscode.Disposable {
   }
 
   /** A new Bool declaration with a free name, as TIA adds one; the view then edits its name. */
-  private async add(m: { after?: string; into?: string; section?: string }, version: number): Promise<Result> {
+  private async add(uri: string, m: { after?: string; into?: string; section?: string }, version: number): Promise<Result> {
     if (!this.model) return { ok: false, reason: "The file is not open." };
     const taken = new Set<string>();
     const collect = (rows: DeclRow[]) => rows.forEach((r) => (taken.add(r.name.toLowerCase()), r.children && collect(r.children)));
@@ -257,7 +269,7 @@ export class DeclarationsSession implements vscode.Disposable {
     while (taken.has(`tag_${n}`)) n++;
     const name = `Tag_${n}`;
     const where = m.after ? { after: m.after } : m.into ? { into: m.into } : { section: m.section };
-    const r = await this.applyOp({ op: "insertRows", ...where, rows: [{ name, type: "Bool" }] }, version);
+    const r = await this.applyOp(uri, { op: "insertRows", ...where, rows: [{ name, type: "Bool" }] }, version);
     if (!r.ok) return r;
     // the new row's id: beside `after`, inside `into`, or at a section's top level
     const parent = m.after ? m.after.slice(0, Math.max(0, m.after.lastIndexOf("/"))) : (m.into ?? "");
@@ -265,7 +277,7 @@ export class DeclarationsSession implements vscode.Disposable {
   }
 
   /** Deletes a declaration; one the workspace uses (or may use: no answer) only after the user says so. */
-  private async delete(rowId: string, version: number): Promise<Result> {
+  private async delete(uri: string, rowId: string, version: number): Promise<Result> {
     const row = this.model && findRow(this.model, rowId);
     const doc = this.document();
     if (!row || !doc) return { ok: false, reason: "The declaration is gone. Review the table again." };
@@ -284,11 +296,11 @@ export class DeclarationsSession implements vscode.Disposable {
       if (pick !== yes) return { ok: false };
     }
     // the answer took a while: the edit is still for the text the view showed
-    return this.applyOp({ op: "deleteRow", row: rowId }, version);
+    return this.applyOp(uri, { op: "deleteRow", row: rowId }, version);
   }
 
   /** Renames through the language server's rename: the code that uses the name follows. */
-  private async rename(rowId: string, name: string, version: number): Promise<Result> {
+  private async rename(uri: string, rowId: string, name: string, version: number): Promise<Result> {
     const row = this.model && findRow(this.model, rowId);
     const doc = this.document();
     const next = name.trim();
@@ -300,6 +312,7 @@ export class DeclarationsSession implements vscode.Disposable {
     try {
       const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit | undefined>("vscode.executeDocumentRenameProvider", doc.uri, pos, next);
       if (!edit || !edit.size) return { ok: false, reason: `"${row.name}" cannot be renamed here.` };
+      if (!this.showing(uri)) return { ok: false, reason: MOVED };
       if (doc.version !== version) return { ok: false, reason: STALE };
       return (await vscode.workspace.applyEdit(edit)) ? { ok: true } : { ok: false, reason: STALE };
     } catch (e) {

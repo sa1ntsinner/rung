@@ -112,6 +112,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.whoWrites", () => whoWrites(s.usages));
   reg("rung.usages.pick", () => pickUsages(s.lsp));
   reg("rung.usages.refresh", () => s.usages.refresh());
+  reg("rung.usages.history", () => s.usages.pickHistory());
   reg("rung.usages.show", (uri, position, symbol) => {
     if (uri instanceof vscode.Uri && position instanceof vscode.Position) return s.usages.show(uri, position, typeof symbol === "string" ? symbol : "this");
   });

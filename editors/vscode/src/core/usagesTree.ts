@@ -66,3 +66,8 @@ export function usagesTree(r: Usages, rel: (uri: string) => string): UNode[] {
   const groups = [...group("writes", "Writes", r.writes), ...group("reads", "Reads", r.reads), ...group("handed", "Handed on", r.handedOn)];
   return [...(groups.length ? groups : [{ id: "none", label: "No uses in the workspace", icon: "info" }]), { id: "coverage", label: "Workspace code only", tooltip: NOT_SEEN, icon: "info" }];
 }
+
+/** A question asked of the Usages view, newest first: the same name in the same file once, at most `max`. */
+export function remember<Q extends { symbol: string; uri: string }>(history: Q[], q: Q, max = 10): Q[] {
+  return [q, ...history.filter((h) => h.symbol !== q.symbol || h.uri !== q.uri)].slice(0, max);
+}

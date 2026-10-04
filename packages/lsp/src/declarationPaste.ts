@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Rows pasted into a declaration table (rung/declarationPaste): tab-separated text from Excel or TIA Portal's interface
 // table, read into new declarations for a preview. Nothing is written here; insertRows writes what the user confirms.
-import type { NewRow } from "./declarationEdit.js";
+import { typeError, type NewRow } from "./declarationEdit.js";
 
 export interface PasteResult {
   rows: NewRow[];
@@ -57,7 +57,7 @@ function records(text: string): { line: number; fields: string[] }[] {
         field += text[i++];
       }
       // Excel quotes only a field with a tab, a line break or a quote: "T_Pos" is TIA's own quoting, kept as text
-      if (!/[\t\n\r"]/.test(field)) field = `"${field}"`;
+      if (field && !/[\t\n\r"]/.test(field)) field = `"${field}"`;
       // a quote that only opened a field followed by more text keeps its text
       while (i < text.length && text[i] !== "\t" && text[i] !== "\n" && text[i] !== "\r") field += text[i++];
       continue;
@@ -100,6 +100,11 @@ export function parsePastedRows(text: string): PasteResult {
     }
     if (!v.type) {
       result.errors.push({ line: r.line, message: `"${name}" has no data type.` });
+      continue;
+    }
+    const bad = typeError(v.type);
+    if (bad) {
+      result.errors.push({ line: r.line, message: bad });
       continue;
     }
     result.rows.push({ name, type: v.type, ...(v.start ? { start: v.start } : {}), ...(v.comment ? { comment: v.comment } : {}) });

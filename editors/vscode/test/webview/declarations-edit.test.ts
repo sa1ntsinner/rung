@@ -188,6 +188,47 @@ describe("declarations view editing", () => {
     ]);
   });
 
+  it("a structure's inspector adds a member into it", async () => {
+    const v = await mount();
+    cell(v, "Cfg", "name").click();
+    await v.updateComplete;
+    v.querySelector<HTMLButtonElement>('[data-action="add-member"]')!.click();
+    expect(edits()).toEqual([{ v: 1, kind: "add", req: 1, uri: "file:///w/plc/PLC_1/blocks/Fx_Motor.scl", version: 7, into: "Cfg" }]);
+  });
+
+  it("a problem the language server reports marks its cell, is spoken and shown in the inspector", async () => {
+    const v = await mount(model([row("Speed", { type: "Bol", problems: [{ column: "type", severity: "error", message: "Unknown type Bol" }] })]));
+    const mark = cell(v, "Speed", "type").querySelector(".rg-problem-error")!;
+    expect(mark.getAttribute("title")).toBe("Unknown type Bol");
+    expect(cell(v, "Speed", "type").getAttribute("aria-label")).toContain("Unknown type Bol");
+    cell(v, "Speed", "name").click();
+    await v.updateComplete;
+    expect(v.querySelector(".rg-inspector .rg-insp-problems")!.textContent).toContain("Unknown type Bol");
+  });
+
+  it("a draft open when the view moves to another file or block is dropped, never sent there", async () => {
+    const v = await mount();
+    cell(v, "Speed", "start").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await grid(v)!.updateComplete;
+    input(v)!.value = "99";
+    await send(v, { v: 1, kind: "model", model: { ...model(ROWS), uri: "file:///w/plc/PLC_1/blocks/Other.scl" }, context: { file: "f", dirty: false, pinned: false } });
+    expect(input(v)).toBeNull();
+    expect(edits()).toEqual([]);
+  });
+
+  it("a draft for a cell changed meanwhile (in the text) is not sent over the new value", async () => {
+    const v = await mount();
+    cell(v, "Speed", "start").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await grid(v)!.updateComplete;
+    input(v)!.value = "99";
+    input(v)!.dispatchEvent(new Event("input", { bubbles: true }));
+    await send(v, { v: 1, kind: "model", model: { ...model([row("Speed", { type: "Real", start: "2000.0" }), ROWS[1]!]), version: 8 }, context: { file: "f", dirty: true, pinned: false } });
+    await key(v, input(v)!, "Enter");
+    expect(edits()).toEqual([]);
+    expect(v.querySelector(".rg-status")!.textContent).toContain("The file changed. Review this value again.");
+    expect(input(v)?.value).toBe("99");
+  });
+
   it("undo outside an input goes to the document", async () => {
     const v = await mount();
     await key(v, v.querySelector('[role="treegrid"]')!, "z", { ctrlKey: true });

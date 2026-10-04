@@ -272,7 +272,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (!doc?.parsed) return null;
     const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
     const isFb = (name: string) => scopedTo(index, p.textDocument.uri).global(name)?.block?.kind === "FB";
-    return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb);
+    // the errors and warnings the editor shows, on the cells they are about
+    return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb, diagnostics(index, p.textDocument.uri));
   });
   // the data types a declaration table offers: elementary, TIA's instruction FBs, the file's PLC's UDTs and FBs
   connection.onRequest("rung/typeNames", (p: { textDocument: { uri: string } }) => ({
