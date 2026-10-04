@@ -20,4 +20,7 @@ export * from "./declarations.js";
 export * from "./declarationEdit.js";
 export * from "./declarationPaste.js";
 export * from "./testSkeleton.js";
+export * from "./testModel.js";
+export * from "./testEdit.js";
+export * from "./testSymbols.js";
 export { ATTR_DEFAULT, EXPOSURE, attrState, parseAttributes, type AttrEntry, type AttrList } from "./attributes.js";

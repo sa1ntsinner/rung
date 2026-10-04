@@ -35,6 +35,12 @@ import { complete, definition, diagnostics, documentHighlights, hover, outline, 
 import { codeActions } from "./actions.js";
 import { testFilesOf, testKeyEdits } from "./testkeys.js";
 import { testSkeleton } from "./testSkeleton.js";
+import { testModel, type TestModel } from "./testModel.js";
+import { planTestEdit, type TestOp } from "./testEdit.js";
+import { keyProblems, testSymbols } from "./testSymbols.js";
+
+/** a rung test file: kept as text for the test table, never read as SCL */
+const TEST_FILE = /\.test\.ya?ml$/i;
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
@@ -224,11 +230,13 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   });
 
   documents.onDidChangeContent((e) => {
+    if (TEST_FILE.test(e.document.uri)) return;
     monitor?.stop(e.document.uri);
     index.set(e.document.uri, e.document.getText(), e.document.version);
     schedule(e.document.uri);
   });
   documents.onDidClose(async (e) => {
+    if (TEST_FILE.test(e.document.uri)) return;
     monitor?.stop(e.document.uri);
     try {
       index.set(e.document.uri, await readFile(fileURLToPath(e.document.uri), "utf8"), 0);
@@ -284,6 +292,37 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       ...scopedTo(index, p.textDocument.uri).allGlobals().filter((g) => g.kind === "UDT" || g.kind === "FB").map((g) => ({ name: `"${g.name}"`, kind: g.kind })),
     ],
   }));
+  // a test file for the test table: its cases with exact ranges, what the block under test lets it set and expect,
+  // and the keys that name nothing in that block
+  const blockUnderTest = (test: TestModel, uri: string) => {
+    const name = test.block?.value;
+    if (!name) return undefined;
+    // plc: in the file, or the tests/<PLC>/ folder it is kept in
+    const folder = /\/tests\/([^/]+)\/[^/]+$/.exec(uri)?.[1];
+    const plc = test.plc?.value ?? folder;
+    const all = index.allGlobals().filter((g) => (g.kind === "FB" || g.kind === "FC") && g.name.toLowerCase() === name.toLowerCase() && g.block);
+    const g = all.find((x) => plc && deviceOfUri(x.uri)?.toLowerCase() === plc.toLowerCase()) ?? (all.length === 1 ? all[0] : undefined);
+    const doc = g && index.docs.get(g.uri);
+    return g && doc?.parsed ? declarationModel(g.uri, 0, doc.text, doc.parsed, g.block!.start) : undefined;
+  };
+  connection.onRequest("rung/testModel", (p: { textDocument: { uri: string } }) => {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc || !TEST_FILE.test(p.textDocument.uri)) return null;
+    const model = testModel(doc.getText());
+    const block = blockUnderTest(model, p.textDocument.uri);
+    const symbols = block ? testSymbols(block) : [];
+    const temps = block ? block.sections.filter((s) => s.title === "Temp").flatMap((s) => s.rows.map((r) => r.name)) : [];
+    return { uri: p.textDocument.uri, version: doc.version, model, symbols, problems: block ? keyProblems(model, symbols, temps, block.block?.name) : [], ...(block ? {} : { noBlock: model.block ? `No block ${model.block.value} in this workspace` : "The file names no block:" }) };
+  });
+  connection.onRequest("rung/testEdit", (p: { textDocument: { uri: string; version: number }; op: TestOp }) => {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc || !TEST_FILE.test(p.textDocument.uri)) return { ok: false, reason: "The file is not open" };
+    if (p.textDocument.version !== doc.version) return { ok: false, reason: "The file changed. Review this value again." };
+    const text = doc.getText();
+    const plan = planTestEdit(text, testModel(text), p.op);
+    if (!plan.ok) return plan;
+    return { ok: true, version: doc.version, edits: plan.edits.map((e) => ({ range: { start: doc.positionAt(e.start), end: doc.positionAt(e.end) }, old: e.old, newText: e.text })) };
+  });
   // a block's first test (Create test): its text and path, and the test files that already name the block
   connection.onRequest("rung/testSkeleton", async (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {
     const doc = index.docs.get(p.textDocument.uri);
