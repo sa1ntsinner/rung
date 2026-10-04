@@ -7,6 +7,7 @@ import type { CaseRun, KeyProblem, Part, TCase, TStep as TestStep, TestFileModel
 import type { GridColumn, GridRow, GridSection } from "../grid/types";
 import "../grid/rg-treegrid";
 import type { CellEdit, RgTreegrid } from "../grid/rg-treegrid";
+import { guardNativeUndo } from "../nativeUndo";
 
 interface VsCodeApi {
   postMessage(m: TestViewToHost): void;
@@ -109,6 +110,8 @@ export class RgTests extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    // VS Code's Undo here is the page's own: it must not rewind the filter field while the table has the focus
+    guardNativeUndo(document);
     window.addEventListener("message", this.onMessage);
     this.post({ v: 1, kind: "ready" });
   }

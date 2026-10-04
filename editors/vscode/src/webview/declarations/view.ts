@@ -6,6 +6,7 @@ import { LitElement, html, nothing } from "lit";
 import type { DeclModel, DeclOp, DeclRow, HostToView, NewRow, OpenTarget, PasteResult, ViewContext, ViewToHost } from "../../protocol/declarations";
 import type { GridSection } from "../grid/types";
 import "../grid/rg-treegrid";
+import { guardNativeUndo } from "../nativeUndo";
 import type { CellEdit, RgTreegrid } from "../grid/rg-treegrid";
 import { ATTR_LABEL, PRESETS, attrLabel, cellText, countRows, filterSections, findRow, isAttr, type AttrKey, type Preset } from "./columns";
 
@@ -86,6 +87,8 @@ export class RgDeclarations extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    // VS Code's Undo here is the page's own: it must not rewind the filter field while the table has the focus
+    guardNativeUndo(document);
     window.addEventListener("message", this.onMessage);
     this.post({ v: 1, kind: "ready" });
   }
