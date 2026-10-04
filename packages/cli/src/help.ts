@@ -13,7 +13,7 @@ const EXAMPLES: Record<string, string> = {
   bridge: "bridge --tia V20",
 };
 const VALUES: Record<string, string> = {
-  project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", filter: "text", file: "file", plc: "name",
+  project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", filter: "text", case: "file#n", file: "file", plc: "name",
   allow: "answer", agents: "names", skills: "names", editors: "names", platforms: "names", scope: "project|global",
   address: "ip", port: "number", cycle: "ms", block: "name", use: "PG/PC interface", mode: "mode", number: "n", target: "interface",
   instance: "DB", interval: "ms", ip: "address", "from-plc": "ip", host: "user@windows-pc",
@@ -21,7 +21,8 @@ const VALUES: Record<string, string> = {
 };
 const DETAIL: Record<string, string> = {
   preview: "show the next sync without changing files or TIA Portal", json: "complete machine-readable report",
-  filter: "a part of a test file's path or of a case's name (any letter case), or a block name", writes: "turn writes to TIA Portal on (rung writes off stops them)",
+  filter: "a part of a test file's path or of a case's name (any letter case), or a block name",
+  case: "exactly one case: its test file and its place among the file's cases, from 0 (tests/motor.test.yaml#2)", writes: "turn writes to TIA Portal on (rung writes off stops them)",
   ours: "keep your file", theirs: "take TIA Portal's version", merged: "use the file you merged; remove its conflict markers first",
   "pull.force": "replace local edits with TIA Portal's version (each kept in .rung/recovery)",
   "confirm-delete.force": "delete although other blocks use it (they stop compiling)",

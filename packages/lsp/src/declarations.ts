@@ -59,7 +59,8 @@ export interface DeclSection {
 export interface DeclModel {
   uri: string;
   version: number;
-  block?: { name: string; kind: string; range: DRange };
+  /** an FC's return type as written (Void, Int, …) */
+  block?: { name: string; kind: string; range: DRange; returnType?: string };
   sections: DeclSection[];
   editable: boolean;
   reason?: string;
@@ -133,7 +134,7 @@ export function declarationModel(uri: string, version: number, text: string, par
   return {
     uri,
     version,
-    block: { name: block.name, kind: block.kind, range: { start: block.start, end: block.end } },
+    block: { name: block.name, kind: block.kind, range: { start: block.start, end: block.end }, ...(block.returnType ? { returnType: block.returnType } : {}) },
     sections,
     editable: !readOnly,
     ...(readOnly ? { reason: "Read only: graphical or protected block" } : {}),

@@ -33,7 +33,8 @@ import { parsePastedRows } from "./declarationPaste.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
-import { testKeyEdits } from "./testkeys.js";
+import { testFilesOf, testKeyEdits } from "./testkeys.js";
+import { testSkeleton } from "./testSkeleton.js";
 import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
@@ -283,6 +284,18 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       ...scopedTo(index, p.textDocument.uri).allGlobals().filter((g) => g.kind === "UDT" || g.kind === "FB").map((g) => ({ name: `"${g.name}"`, kind: g.kind })),
     ],
   }));
+  // a block's first test (Create test): its text and path, and the test files that already name the block
+  connection.onRequest("rung/testSkeleton", async (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {
+    const doc = index.docs.get(p.textDocument.uri);
+    if (!doc?.parsed) return null;
+    const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
+    const model = declarationModel(p.textDocument.uri, 0, doc.text, doc.parsed, offset);
+    if (!model.block) return null;
+    const device = deviceOfUri(p.textDocument.uri);
+    const plcs = new Set([...index.docs.keys()].map((u) => deviceOfUri(u)).filter(Boolean));
+    const skeleton = testSkeleton(model, { ...(device ? { plc: device } : {}), severalPlcs: plcs.size > 1 });
+    return { ...skeleton, existing: root ? await testFilesOf(root, model.block.name, device) : [] };
+  });
   // rows pasted into a declaration table, read for a preview (nothing is written)
   connection.onRequest("rung/declarationPaste", (p: { text: string }) => parsePastedRows(typeof p?.text === "string" ? p.text : ""));
   // a declaration table's edit: the text edits for one operation, against the version the table showed

@@ -64,7 +64,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
       const l = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", ed.document.uri);
       return l?.length ? l : undefined;
     });
-    assert.deepEqual(lenses.map((l) => l.command?.title), ["Declarations", "Compile", "Test", "Open in TIA Portal"]);
+    assert.deepEqual(lenses.map((l) => l.command?.title), ["Declarations", "Compile", "Create test", "Open in TIA Portal"]);
   });
 
   it("compile this file: TIA Portal's error lands on its line in Problems, without the summary line", async () => {

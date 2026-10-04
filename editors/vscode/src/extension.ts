@@ -86,7 +86,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     vscode.commands.registerCommand("rung.monitor.toggle", (uri?: vscode.Uri) => monitor.toggle(uri instanceof vscode.Uri ? uri : undefined)),
     vscode.commands.registerCommand("rung.monitor.stop", () => monitor.stop()),
   );
-  context.subscriptions.push(project, plc, environment, decorations, statusBar, new BlockCodeLens(ws));
+  const lens = new BlockCodeLens(ws);
+  context.subscriptions.push(project, plc, environment, decorations, statusBar, lens);
   context.subscriptions.push(
     DeclarationsPanel.register(context, { lsp, ws }),
     UdtTableEditor.register(context, { lsp, ws }),
@@ -140,7 +141,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const usages = new UsagesView(lsp);
   context.subscriptions.push(usages);
   registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp, usages });
-  registerTests(context, ws, cli);
+  const tests = registerTests(context, ws, cli);
+  if (tests) lens.useTests(tests);
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
   context.subscriptions.push(

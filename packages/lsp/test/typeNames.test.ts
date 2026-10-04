@@ -5,6 +5,24 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { monitorServer } from "./monitorHarness.js";
 
+describe("rung/testSkeleton", () => {
+  it("drafts the block's first test, and names the test files it already has", async () => {
+    const s = await monitorServer();
+    try {
+      const ask = () => s.client.sendRequest<{ path: string; text: string; existing: string[] }>("rung/testSkeleton", { textDocument: { uri: s.uri }, position: { line: 0, character: 0 } });
+      const first = await ask();
+      expect(first.path).toBe("tests/Motor.test.yaml");
+      expect(first.text).toMatch(/^block: Motor\ncases:\n/);
+      expect(first.existing).toEqual([]);
+      await mkdir(join(s.root, "tests", "drives"), { recursive: true });
+      await writeFile(join(s.root, "tests", "drives", "m.test.yaml"), "block: Motor\ncases: []\n");
+      expect((await ask()).existing).toEqual(["tests/drives/m.test.yaml"]);
+    } finally {
+      await s.dispose();
+    }
+  });
+});
+
 describe("rung/typeNames", () => {
   it("lists the types the file's PLC can use, not another PLC's", async () => {
     const s = await monitorServer(undefined, {

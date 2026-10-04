@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from "vitest";
-import { casesIn, failureText, noTestsHint, parseResults } from "../src/core/testItems";
+import { blockOf, casesIn, failureText, noTestsHint, parseResults } from "../src/core/testItems";
 
 describe("test explorer model", () => {
   it("shows the no-tests hint from the CLI exit code, with both filter match rules", () => {
@@ -42,5 +42,13 @@ describe("test explorer model", () => {
   it("shows a failure like the terminal does, with both values for the diff", () => {
     expect(failureText({ step: 3, name: "Running", expected: false, actual: true })).toEqual({ message: "step 3: Running expected false got true", expected: "false", actual: "true" });
     expect(failureText({ step: 1, name: "Runing", expected: false, actual: "<Runing does not exist>" }).message).toBe("step 1: Runing expected false got <Runing does not exist>");
+  });
+});
+
+describe("blockOf", () => {
+  it("reads the block under test, quoted or not, with a comment after it", () => {
+    expect(blockOf("block: Fx_Motor\ncases: []\n")).toBe("Fx_Motor");
+    expect(blockOf("# tests\nblock: \"Fx Motor\"   # the motor\n")).toBe("Fx Motor");
+    expect(blockOf("cases: []\n")).toBeUndefined();
   });
 });

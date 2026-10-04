@@ -431,6 +431,12 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.test.create",
+        "title": "Create Test",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "rung.udt.openTable",
         "title": "Open as Table",
         "category": "rung",
@@ -461,6 +467,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "rung.test.create",
+          "when": "rung.workspace && editorLangId == scl"
+        },
         {
           "command": "rung.env.fix",
           "when": "false"

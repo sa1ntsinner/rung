@@ -19,6 +19,8 @@ export interface TestFailure {
 
 export interface CaseResult {
   name: string;
+  /** The case's place in its file, from 0 (rung test --case runs one and keeps its place). */
+  index?: number;
   passed: boolean;
   failures: TestFailure[];
   error?: string;
@@ -66,6 +68,12 @@ export function casesIn(text: string): CaseEntry[] {
     out.push({ name: name ? unquote(name) : `case ${out.length + 1}`, line: i });
   }
   return out;
+}
+
+/** The block a test file tests (its top-level block:), if it names one. */
+export function blockOf(text: string): string | undefined {
+  const m = /^block\s*:\s*("[^"]*"|'[^']*'|[^#\r\n]*?)\s*(?:#.*)?$/m.exec(text);
+  return m?.[1] ? unquote(m[1]) : undefined;
 }
 
 const unquote = (s: string) => (/^(["']).*\1$/.test(s) ? s.slice(1, -1) : s);

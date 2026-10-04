@@ -8,12 +8,17 @@
 - UDT files open as a table too (Open as Table, or Open With… → UDT Table).
 - A type set to `Struct` opens a structure with its first member ready to name; *Add member* adds more. Errors and warnings of the language server underline the cell they are about.
 - Usages keeps the earlier questions (the history button in its title).
+- *Create test* above a block that has no test yet: a first test file with the block's inputs set, one cycle and its outputs to expect, opened to change the expected values. A test that exists is opened, never written over.
+- The test explorer runs a picked case and nothing else.
+
+**CLI**
+- `rung test --case tests/x.test.yaml#2` runs exactly one case; `--json` gives each case its `index` in the file.
 - Usages: Who Writes This? fills a sidebar view that stays while you open the places it lists.
 - Get started: a short walkthrough from checking the PC to the first sync.
 
 **Language server**
 - `rung/declarations` and `rung/declarationEdit`: the interface with exact source ranges, and edits that change only their own text, written the way TIA Portal exports them (checked by import, compile and export in TIA Portal V20).
-- Declaration edits also set a type, insert and delete declarations (instruction instances such as `TON` are written as TIA Portal writes them, names SCL reserves are quoted) and refuse what TIA Portal would not accept: a default value on a temporary or a function's parameter, a constant without a value, a value that would end the line. `rung/declarationPaste` reads pasted rows (English or German column names); `rung/typeNames` lists the types a declaration can use.
+- Declaration edits also set a type, insert and delete declarations (instruction instances such as `TON` are written as TIA Portal writes them, names SCL reserves are quoted) and refuse what TIA Portal would not accept: a default value on a temporary or a function's parameter, a constant without a value, a value that would end the line. `rung/declarationPaste` reads pasted rows (English or German column names); `rung/typeNames` lists the types a declaration can use. `rung/testSkeleton` drafts a block's first test and names the test files it already has.
 
 ## 0.1.0 — 2026-10-03 (pre-release)
 

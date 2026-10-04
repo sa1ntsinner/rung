@@ -57,3 +57,18 @@ export async function testKeyEdits(root: string, block: string, name: string, ne
   }
   return out;
 }
+
+/** The test files (relative to `root`, with /) whose block: is `block`, leaving out those of another PLC. */
+export async function testFilesOf(root: string, block: string, device?: string): Promise<string[]> {
+  const files = await readdir(join(root, "tests"), { recursive: true }).catch(() => [] as string[]);
+  const ofBlock = new RegExp(`^block:\\s*["']?${escape(block)}["']?\\s*(#.*)?$`, "im");
+  const out: string[] = [];
+  for (const f of files.map(String).filter((f) => /\.test\.ya?ml$/i.test(f))) {
+    const text = await readFile(join(root, "tests", f), "utf8").catch(() => "");
+    if (!ofBlock.test(text)) continue;
+    const plc = /^plc:\s*["']?([^"'#\n]*?)["']?\s*(#.*)?$/im.exec(text)?.[1]?.trim();
+    if (device && plc && plc.toUpperCase() !== device.toUpperCase()) continue;
+    out.push(`tests/${f.split("\\").join("/")}`);
+  }
+  return out;
+}

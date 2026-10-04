@@ -67,7 +67,7 @@ Usage:
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
-  rung test [dir] [--junit <file>] [--filter <text>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
+  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
@@ -342,7 +342,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   restore: { options: [], positionals: 1 },
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
-  test: { options: ["junit", "filter", "json"], positionals: 1 },
+  test: { options: ["junit", "filter", "case", "json"], positionals: 1 },
   live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
@@ -411,6 +411,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         offline: { type: "boolean" },
         junit: { type: "string" },
         filter: { type: "string" },
+        case: { type: "string" },
         hw: { type: "boolean" },
         "no-hw": { type: "boolean" },
         "no-sw": { type: "boolean" },
@@ -495,7 +496,23 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const ws = await findWorkspace(dir).catch(() => dir);
         const index = new WorkspaceIndex();
         await index.load(ws);
-        const results = await runTests(ws, index, v.filter as string | undefined);
+        // --case tests/x.test.yaml#2: exactly that case (editors run the case under the cursor)
+        const sel = v.case as string | undefined;
+        const m = sel ? /^(.+)#(\d+)$/.exec(sel) : undefined;
+        const refused = sel && v.filter ? "give --case or --filter, not both" : sel && !m ? `--case ${sel}: write it as <test file>#<case number from 0>, e.g. tests/motor.test.yaml#0` : undefined;
+        if (refused) {
+          io.stderr(`rung: ${refused}\n`);
+          return 1;
+        }
+        let results: Awaited<ReturnType<typeof runTests>>;
+        try {
+          results = await runTests(ws, index, v.filter as string | undefined, m ? { file: m[1]!, index: Number(m[2]) } : undefined);
+        } catch (e) {
+          // a case selector that names nothing: said, never "all cases"
+          if (!m) throw e;
+          io.stderr(`rung: ${(e as Error).message}\n`);
+          return 1;
+        }
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         const count = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.length);
         const failedOf = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.filter((c) => !c.passed).length);

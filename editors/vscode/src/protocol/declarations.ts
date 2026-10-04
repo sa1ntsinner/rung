@@ -54,7 +54,8 @@ export interface DeclSection {
 export interface DeclModel {
   uri: string;
   version: number;
-  block?: { name: string; kind: string; range: DRange };
+  /** an FC's return type as written (Void, Int, …) */
+  block?: { name: string; kind: string; range: DRange; returnType?: string };
   sections: DeclSection[];
   editable: boolean;
   reason?: string;

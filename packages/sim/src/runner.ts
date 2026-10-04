@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung test: YAML unit tests for SCL blocks, run on the offline simulator.
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
 import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { SYSTEM_FUNCTIONS, Simulator, SimError, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
@@ -35,6 +35,8 @@ export interface TestFailure {
 
 export interface CaseResult {
   name: string;
+  /** The case's place in its file's cases, from 0 (a selected case keeps its place). */
+  index?: number;
   passed: boolean;
   failures: TestFailure[];
   error?: string;
@@ -449,7 +451,7 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
   return [...missing.values()];
 }
 
-export async function runTestFile(index: WorkspaceIndex, file: string, text: string): Promise<FileResult> {
+export async function runTestFile(index: WorkspaceIndex, file: string, text: string, only?: number): Promise<FileResult> {
   let spec: TestFile;
   try {
     const lines = new LineCounter();
@@ -486,6 +488,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   const cycleMs = spec.cycle !== undefined ? toMs(spec.cycle) : 10;
   const results: CaseResult[] = [];
   for (const [ci, c] of (spec.cases ?? []).entries()) {
+    // one case asked for (rung test --case): the others do not run
+    if (only !== undefined && ci !== only) continue;
     const t0 = Date.now();
     // what the block calls and uses is its own PLC's (another PLC may have objects of the same names)
     const sim = new Simulator(seen);
@@ -650,13 +654,13 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
           }
         }
       }
-      results.push({ name: c.name ?? `case ${ci + 1}`, passed: failures.length === 0, failures, ms: Date.now() - t0 });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0 });
     } catch (err) {
       // an FC input the test misspelt shows when the FC is called
       const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
       const e = input && input[2] === g.block.name ? hinted(err, index, g, input[1]!, "set") : err;
       const where = e instanceof SimError && e.block ? ` (in ${e.block}${e.offset !== undefined && !/\(line \d+\)/.test(e.message) ? `, line ${sim.lineOf(e.block, e.offset) ?? "?"}` : ""})` : "";
-      results.push({ name: c.name ?? `case ${ci + 1}`, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0, ...(current ? { errorStep: current } : {}) });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0, ...(current ? { errorStep: current } : {}) });
     }
     for (const [k, n] of sim.stubCalls) stubCalls.set(k, (stubCalls.get(k) ?? 0) + n);
   }
@@ -701,8 +705,15 @@ export function testPositions(text: string): { line: number; steps: number[] }[]
   });
 }
 
-/** Runs every tests/**\/*.test.yaml in the workspace (or the given files). */
-export async function runTests(root: string, index: WorkspaceIndex, filter?: string): Promise<FileResult[]> {
+/** One case of one file: its path relative to the workspace (with /) and its place among the file's cases, from 0. */
+export interface CaseSelector {
+  file: string;
+  index: number;
+}
+
+/** Runs every tests/**\/*.test.yaml in the workspace (or the given files), or exactly one case. */
+export async function runTests(root: string, index: WorkspaceIndex, filter?: string, only?: CaseSelector): Promise<FileResult[]> {
+  if (only) return [await runOneCase(root, index, only)];
   const files: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -733,6 +744,19 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     if (whole || cases.length || r.error) out.push({ ...r, cases });
   }
   return out;
+}
+
+/** rung test --case: the file is read and checked as a whole, only the case runs; naming nothing is an error. */
+async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelector): Promise<FileResult> {
+  const rel = only.file.replace(/\\/g, "/").replace(/^\.\//, "");
+  const path = resolve(root, rel);
+  if (!/\.test\.ya?ml$/i.test(rel) || relative(resolve(root, "tests"), path).startsWith("..")) throw new Error(`--case ${only.file}: no test file under tests/`);
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (text === undefined) throw new Error(`--case ${only.file}: no test file there`);
+  const r = await runTestFile(index, rel, text, only.index);
+  const count = testPositions(text).length;
+  if (!r.error && (only.index < 0 || only.index >= count)) throw new Error(`--case ${only.file}#${only.index}: the file has ${count} cases (numbered from 0)`);
+  return r;
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");

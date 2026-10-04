@@ -178,11 +178,37 @@ describe("rung extension on a fake-bridge workspace", function () {
         const l = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", ed.document.uri);
         return l?.length ? l : undefined;
       });
-      assert.deepEqual(
-        lenses.map((l) => `${l.range.start.line}:${l.command?.title}`),
-        ["0:Declarations", "0:Compile", "0:Test", "0:Open in TIA Portal"],
-      );
+      // Fx_Pump has no test yet: its lens creates one; Fx_Motor's runs its tests
+      const titles = (l: vscode.CodeLens[]) => l.map((x) => `${x.range.start.line}:${x.command?.title}`);
+      await waitFor("the test files are known", async () => titles((await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", ed.document.uri)) ?? []).includes("0:Create test"));
+      assert.deepEqual(titles(lenses).filter((t) => !/Test|test/.test(t)), ["0:Declarations", "0:Compile", "0:Open in TIA Portal"]);
+      const motor = await openDoc(MOTOR);
+      const motorLenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", motor.document.uri);
+      assert.deepEqual(titles(motorLenses ?? []), ["0:Declarations", "0:Compile", "0:Test", "0:Open in TIA Portal"]);
       assert.ok(!lenses.some((l) => /download/i.test(l.command?.command ?? "")));
+    });
+
+    it("Create test writes a block's first test, runnable as it is, and never overwrites", async () => {
+      const ed = await openDoc(PUMP);
+      const file = vscode.Uri.file(join(api.ws.root!, "tests", "Fx_Pump.test.yaml"));
+      try {
+        const made = await vscode.commands.executeCommand<vscode.Uri>("rung.test.create", ed.document.uri, new vscode.Position(0, 0));
+        assert.equal(made?.fsPath, file.fsPath);
+        const text = Buffer.from(await vscode.workspace.fs.readFile(file)).toString("utf8");
+        assert.match(text, /^block: Fx_Pump\ncases:\n {2}- name: first case\n/);
+        assert.match(text, /- set: \{ start: false, speed: 0 \}/);
+        assert.match(text, /- expect: \{ running: false \}/);
+        // asked again: the same file is opened, not written anew
+        await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(text + "# kept\n"));
+        await waitFor("the tests know Fx_Pump", async () => {
+          const again = await vscode.commands.executeCommand<vscode.Uri>("rung.test.create", ed.document.uri, new vscode.Position(0, 0));
+          return again?.fsPath === file.fsPath;
+        });
+        assert.match(Buffer.from(await vscode.workspace.fs.readFile(file)).toString("utf8"), /# kept\n$/);
+      } finally {
+        await closeAll();
+        await vscode.workspace.fs.delete(file).then(undefined, () => undefined);
+      }
     });
 
     it("compile this file puts TIA Portal's errors into Problems", async () => {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// "Compile · Test · Open in TIA Portal" above each block header. Never offers a download.
+// "Declarations · Compile · Test · Open in TIA Portal" above each block header ("Create test" for a block no test
+// file names yet). Never offers a download.
 import * as vscode from "vscode";
 import { findBlockHeaders } from "./core/headers";
 import { readSettings } from "./settings";
@@ -9,6 +10,7 @@ export class BlockCodeLens implements vscode.CodeLensProvider, vscode.Disposable
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeCodeLenses = this.changed.event;
   private readonly subs: vscode.Disposable[] = [];
+  private tests: { hasTests(block: string): boolean } | undefined;
 
   constructor(private readonly ws: RungWorkspace) {
     this.subs.push(
@@ -18,6 +20,13 @@ export class BlockCodeLens implements vscode.CodeLensProvider, vscode.Disposable
         if (e.affectsConfiguration("rung.codeLens")) this.changed.fire();
       }),
     );
+  }
+
+  /** The workspace's tests: a block without any gets "Create test". */
+  useTests(tests: { hasTests(block: string): boolean; onDidChangeBlocks: vscode.Event<void> }): void {
+    this.tests = tests;
+    this.subs.push(tests.onDidChangeBlocks(() => this.changed.fire()));
+    this.changed.fire();
   }
 
   provideCodeLenses(doc: vscode.TextDocument): vscode.CodeLens[] {
@@ -32,7 +41,11 @@ export class BlockCodeLens implements vscode.CodeLensProvider, vscode.Disposable
       if (!inWorkspace) continue;
       if (mirrored) lenses.push(new vscode.CodeLens(range, { title: "Compile", tooltip: `rung compile --file (${h.name})`, command: "rung.compileFile", arguments: [doc.uri] }));
       if (h.keyword === "FUNCTION_BLOCK" || h.keyword === "FUNCTION")
-        lenses.push(new vscode.CodeLens(range, { title: "Test", tooltip: `rung test --filter ${h.name} (offline simulator)`, command: "rung.testBlock", arguments: [doc.uri, h.name] }));
+        lenses.push(
+          this.tests && !this.tests.hasTests(h.name)
+            ? new vscode.CodeLens(range, { title: "Create test", tooltip: `A first test of ${h.name}: its inputs, one cycle, its outputs`, command: "rung.test.create", arguments: [doc.uri, new vscode.Position(h.line, h.column)] })
+            : new vscode.CodeLens(range, { title: "Test", tooltip: `rung test --filter ${h.name} (offline simulator)`, command: "rung.testBlock", arguments: [doc.uri, h.name] }),
+        );
       if (mirrored) lenses.push(new vscode.CodeLens(range, { title: "Open in TIA Portal", tooltip: `Show ${h.name} in the TIA Portal editor`, command: "rung.openInTia", arguments: [doc.uri] }));
     }
     return lenses;

@@ -34,3 +34,22 @@ describe("examples/conveyor", () => {
     expect(code).not.toBe(0);
   });
 });
+
+describe("rung test --case", () => {
+  const run = async (args: string[]) => {
+    const out: string[] = [];
+    const code = await main(["test", ...args], { cwd: conveyor, stdout: (s) => out.push(s), stderr: (s) => out.push(s), env: {} });
+    return { code, out: out.join("") };
+  };
+  it("runs one case by its file and place, and says it in --json with the case's index", async () => {
+    const { code, out } = await run(["--case", "tests/conveyor.test.yaml#2", "--json"]);
+    expect(code).toBe(0);
+    const r = JSON.parse(out) as { files: { cases: { name: string; index: number }[] }[] };
+    expect(r.files[0]!.cases.map((c) => [c.index, c.name])).toEqual([[2, "a contactor that does not answer within 2 s is a fault until reset"]]);
+  });
+  it("refuses a selector that names no case, and --case with --filter", async () => {
+    expect((await run(["--case", "tests/conveyor.test.yaml#9"])).out).toMatch(/has 5 cases/);
+    expect((await run(["--case", "tests/conveyor.test.yaml"])).code).toBe(1);
+    expect((await run(["--case", "tests/conveyor.test.yaml#1", "--filter", "x"])).out).toMatch(/--case or --filter/);
+  });
+});

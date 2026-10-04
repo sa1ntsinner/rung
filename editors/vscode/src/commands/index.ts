@@ -20,6 +20,7 @@ import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
 import { registerPreview } from "./preview";
 import { pickUsages, whoWrites } from "./usages";
+import { createTest } from "./createTest";
 import type { UsagesView } from "../views/usagesView";
 import { deviceTarget, fileTarget } from "./targets";
 
@@ -113,6 +114,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.usages.pick", () => pickUsages(s.lsp));
   reg("rung.usages.refresh", () => s.usages.refresh());
   reg("rung.usages.history", () => s.usages.pickHistory());
+  reg("rung.test.create", (uri?: unknown, position?: unknown) => createTest(s.lsp, s.ws, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined));
   reg("rung.usages.show", (uri, position, symbol) => {
     if (uri instanceof vscode.Uri && position instanceof vscode.Position) return s.usages.show(uri, position, typeof symbol === "string" ? symbol : "this");
   });
