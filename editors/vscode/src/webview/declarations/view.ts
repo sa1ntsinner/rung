@@ -69,6 +69,8 @@ export class RgDeclarations extends LitElement {
   private readonly pending = new Map<number, Pending>();
   /** a cell to open once the model has its row (a new declaration's name) */
   private editNext: { rowId: string; column: string } | undefined;
+  /** rows made here while a filter is on: they stay in view to be named, until the filter text changes */
+  private readonly pinned = new Set<string>();
   /** the table asked for an undo or redo: its answer (a new model) gives the table the keyboard back */
   private undoing = false;
   private readonly onMessage = (e: MessageEvent) => this.receive(e.data as HostToView);
@@ -195,7 +197,11 @@ export class RgDeclarations extends LitElement {
       void this.updateComplete.then(() => this.grid()?.startEdit(rowId, column, value));
       return;
     }
-    if (column === "name") return this.send({ kind: "rename", version: this.model!.version, rowId, name: value }, pending);
+    if (column === "name") {
+      // a pinned row keeps its place in the filtered table under its new name
+      if (this.pinned.has(rowId)) this.pinned.add(value);
+      return this.send({ kind: "rename", version: this.model!.version, rowId, name: value }, pending);
+    }
     if (column === "type") return this.op({ op: "setType", row: rowId, type: value }, pending);
     const v = value.trim() ? value : null;
     if (column === "start") return this.op({ op: "setStart", row: rowId, value: v }, pending);
@@ -234,7 +240,10 @@ export class RgDeclarations extends LitElement {
     const pending = this.pending.get(m.req);
     this.pending.delete(m.req);
     if (m.ok) {
-      if (m.edit) this.editNext = m.edit;
+      if (m.edit) {
+        this.editNext = m.edit;
+        this.pinned.add(m.edit.rowId);
+      }
       return;
     }
     // cancelled (a question the user said no to): nothing to say
@@ -296,7 +305,7 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
 
   private renderTable() {
     const model = this.model!;
-    const { sections, open } = filterSections(model.sections, this.filter);
+    const { sections, open } = filterSections(model.sections, this.filter, this.pinned);
     const expanded = new Set([...this.expanded, ...open]);
     // RETAIN is worth a note; CONSTANT is already the section's title
     const note = (s: { modifiers: string[] }) => s.modifiers.filter((m) => m !== "CONSTANT").join(" ");
@@ -319,7 +328,10 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
       <div class="rg-toolbar">
         <label class="rg-filter">
           <span class="codicon codicon-filter"></span>
-          <input type="text" placeholder="Filter" aria-label="Filter declarations by name, type or comment" .value=${this.filter} @input=${(e: Event) => (this.filter = (e.target as HTMLInputElement).value)} />
+          <input type="text" placeholder="Filter" aria-label="Filter declarations by name, type or comment" .value=${this.filter} @input=${(e: Event) => {
+            this.pinned.clear();
+            this.filter = (e.target as HTMLInputElement).value;
+          }} />
         </label>
         ${model.editable
           ? html`<div class="rg-tools" role="group" aria-label="Declarations">

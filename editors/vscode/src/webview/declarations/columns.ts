@@ -50,11 +50,12 @@ export function cellText(row: DeclRow, column: string): string {
 }
 
 /** The rows whose name, type or comment contains the text, with the structs around them. */
-export function filterSections(sections: DeclSection[], query: string): { sections: DeclSection[]; open: Set<string> } {
+/** Rows that match the filter, and the structs around them; a pinned row (one just made here) stays whatever it is called. */
+export function filterSections(sections: DeclSection[], query: string, pinned: ReadonlySet<string> = new Set()): { sections: DeclSection[]; open: Set<string> } {
   const q = query.trim().toLowerCase();
   const open = new Set<string>();
   if (!q) return { sections, open };
-  const hit = (r: DeclRow) => [r.name, r.type, r.comment ?? ""].some((s) => s.toLowerCase().includes(q));
+  const hit = (r: DeclRow) => pinned.has(r.id) || [r.name, r.type, r.comment ?? ""].some((s) => s.toLowerCase().includes(q));
   const keep = (rows: DeclRow[]): DeclRow[] =>
     rows.flatMap((r) => {
       const kids = r.children ? keep(r.children) : [];

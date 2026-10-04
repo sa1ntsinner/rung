@@ -135,6 +135,31 @@ describe("declarations view editing", () => {
     expect(input(v)?.value).toBe("Tag_1");
   });
 
+  it("with a filter on, a new row stays in view to be named, and keeps its place once named", async () => {
+    const v = await mount();
+    const filter = v.querySelector<HTMLInputElement>(".rg-filter input")!;
+    filter.value = "speed";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    await v.updateComplete;
+    cell(v, "Speed", "name").click();
+    await key(v, v.querySelector('[role="treegrid"]')!, "Insert");
+    await send(v, { v: 1, kind: "result", req: 1, ok: true, edit: { rowId: "Tag_1", column: "name" } });
+    await send(v, { v: 1, kind: "model", model: { ...model([ROWS[0]!, row("Tag_1"), ROWS[1]!]), version: 8 }, context: { file: "f", dirty: true, pinned: false } });
+    // "Tag_1" does not match "speed", yet it is shown and open for its name
+    expect(cell(v, "Tag_1", "name")).not.toBeNull();
+    expect(input(v)?.value).toBe("Tag_1");
+    input(v)!.value = "Ready";
+    await key(v, input(v)!, "Enter");
+    await send(v, { v: 1, kind: "model", model: { ...model([ROWS[0]!, row("Ready"), ROWS[1]!]), version: 9 }, context: { file: "f", dirty: true, pinned: false } });
+    expect(cell(v, "Ready", "name")).not.toBeNull();
+    // a new filter text: only what matches
+    filter.value = "spee";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
+    await v.updateComplete;
+    await grid(v)!.updateComplete;
+    expect(v.querySelector('[data-row="Ready"]')).toBeNull();
+  });
+
   it("pasted rows are previewed, then inserted after the selected row", async () => {
     const v = await mount();
     cell(v, "Speed", "name").click();
