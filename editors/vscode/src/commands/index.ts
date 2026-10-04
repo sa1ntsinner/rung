@@ -116,6 +116,9 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.usages.refresh", () => s.usages.refresh());
   reg("rung.usages.history", () => s.usages.pickHistory());
   reg("rung.newObject", () => newObjectCommand(s.lsp, s.ws));
+  // Insert in a table adds a row there; the webview also hands the key to VS Code, where it would switch the
+  // text editor's overtype mode
+  reg("rung.tableKey", () => undefined);
   reg("rung.test.create", (uri?: unknown, position?: unknown) => createTest(s.lsp, s.ws, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined));
   reg("rung.usages.show", (uri, position, symbol) => {
     if (uri instanceof vscode.Uri && position instanceof vscode.Position) return s.usages.show(uri, position, typeof symbol === "string" ? symbol : "this");

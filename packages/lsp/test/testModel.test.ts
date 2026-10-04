@@ -57,6 +57,16 @@ describe("testModel", () => {
     expect(SRC.split("\n")[s3!.line]).toContain("advance: 2s");
   });
 
+  it("a value keeps its text as written for the table (750.0, not 750)", () => {
+    const m = testModel("block: X\ncases:\n  - name: a\n    steps:\n      - expect: { Speed: 750.0, Label: 'idle', T: T#2s, F: 1.0e3 }\n");
+    expect(m.cases[0]!.steps[0]!.expect!.entries.map((e) => [e.value, e.text])).toEqual([
+      ["750", "750.0"],
+      ["idle", "idle"],
+      ["T#2s", "T#2s"],
+      ["1000", "1.0e3"],
+    ]);
+  });
+
   it("a comment after a value is not part of its range", () => {
     const e = testModel(SRC).cases[0]!.steps[0]!.set!.entries[1]!;
     expect(SRC.slice(e.valueRange.start, e.valueRange.end)).toBe("1.5");

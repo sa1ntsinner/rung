@@ -28,7 +28,7 @@ export interface StepRow extends GridRow {
 }
 
 const COLUMNS: GridColumn[] = [
-  { key: "label", label: "Step", width: 190 },
+  { key: "label", label: "Step", width: 260 },
   { key: "name", label: "Name", mono: true, width: 220 },
   { key: "value", label: "Value", mono: true, width: 150 },
   { key: "result", label: "Last run", width: 0 },
@@ -62,7 +62,7 @@ export function stepRows(c: TCase): StepRow[] {
     const both = !!s.set && !!s.expect;
     for (const part of ["set", "expect"] as const)
       for (const e of s[part]?.entries ?? [])
-        children.push({ id: `s${s.index}/${part}/${enc(e.key)}`, depth: 1, step: s.index, part, key: e.key, value: e.value, label: both ? PART_LABEL[part] : "" });
+        children.push({ id: `s${s.index}/${part}/${enc(e.key)}`, depth: 1, step: s.index, part, key: e.key, value: e.text ?? e.value, label: both ? PART_LABEL[part] : "" });
     const run = runText(s);
     return { id: `s${s.index}`, depth: 0, step: s.index, label: `${s.index + 1}  ${stepTitle(s)}`, ...(run && !s.set && !s.expect ? { value: run } : {}), ...(children.length ? { children } : {}) };
   });

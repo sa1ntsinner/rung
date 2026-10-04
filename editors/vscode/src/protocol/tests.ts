@@ -15,6 +15,8 @@ export interface TScalar {
 export interface TEntry {
   key: string;
   value: string;
+  /** the value as written (750.0, T#2s; a quoted text without its quotes): what the table shows */
+  text: string;
   keyRange: TRange;
   valueRange: TRange;
   pairRange: TRange;

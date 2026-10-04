@@ -432,6 +432,11 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.tableKey",
+        "title": "Table key (handled by the table)",
+        "category": "rung"
+      },
+      {
         "command": "rung.newObject",
         "title": "New Object…",
         "category": "rung",
@@ -480,6 +485,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "rung.tableKey",
+          "when": "false"
+        },
         {
           "command": "rung.newObject",
           "when": "rung.workspace"
@@ -1074,6 +1083,11 @@
         "key": "alt+q a",
         "command": "rung.declarations.open",
         "when": "editorLangId == scl"
+      },
+      {
+        "key": "insert",
+        "command": "rung.tableKey",
+        "when": "activeWebviewPanelId == 'rung.declarations' || activeCustomEditorId == 'rung.udtTable' || activeCustomEditorId == 'rung.testTable'"
       }
     ],
     "configuration": [

@@ -19,6 +19,8 @@ export interface TScalar {
 export interface TEntry {
   key: string;
   value: string;
+  /** the value as written (750.0, T#2s; a quoted text without its quotes): what the table shows */
+  text: string;
   keyRange: TRange;
   /** the value as written, without a comment after it */
   valueRange: TRange;
@@ -102,6 +104,7 @@ function entries(map: YAMLMap, text: string): TEntry[] {
     return {
       key: keyOf(p),
       value: isScalar(v) ? String(v.value) : text.slice(valueRange.start, valueRange.end),
+      text: isScalar(v) && v.type === "PLAIN" ? text.slice(valueRange.start, valueRange.end) : isScalar(v) ? String(v.value) : text.slice(valueRange.start, valueRange.end),
       keyRange,
       valueRange,
       pairRange: { start: keyRange.start, end: valueRange.end },

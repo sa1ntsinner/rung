@@ -166,6 +166,16 @@ describe("tree-grid editing", () => {
     expect(events.map((e) => e.type)).toEqual(["rg-undo"]);
   });
 
+  it("a click on a cell takes the keyboard (from a filter field, say)", async () => {
+    const { g, grid } = await mount();
+    const outside = document.createElement("input");
+    document.body.append(outside);
+    outside.focus();
+    g.querySelector<HTMLElement>('[data-row="b"] [data-col="type"]')!.click();
+    await g.updateComplete;
+    expect(document.activeElement).toBe(grid);
+  });
+
   it("without editable, Enter still opens the text and nothing edits", async () => {
     const { g, grid, events } = await mount(false);
     await key(g, grid, "Enter");

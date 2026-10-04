@@ -394,6 +394,8 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
           @click=${(e: MouseEvent) => {
             e.stopPropagation();
             if (editing) return;
+            // the keyboard follows the click (out of a filter field, for one)
+            this.querySelector<HTMLElement>('[role="treegrid"]')?.focus();
             this.activate(row.id, ci);
             // a Boolean flips where it is clicked, as a check box does
             if (how === "toggle") this.toggleCell(row, ci);
