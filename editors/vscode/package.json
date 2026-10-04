@@ -39,7 +39,8 @@
     "workspaceContains:**/*.st",
     "onLanguage:scl",
     "onLanguage:s7dcl",
-    "onWebviewPanel:rung.declarations"
+    "onWebviewPanel:rung.declarations",
+    "onCustomEditor:rung.udtTable"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -430,6 +431,12 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.udt.openTable",
+        "title": "Open as Table",
+        "category": "rung",
+        "icon": "$(table)"
+      },
+      {
         "command": "rung.usages.show",
         "title": "Show Usages",
         "category": "rung"
@@ -801,7 +808,12 @@
       "editor/title": [
         {
           "command": "rung.declarations.open",
-          "when": "resourceLangId == scl",
+          "when": "resourceLangId == scl && resourceExtname != .udt",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rung.udt.openTable",
+          "when": "resourceExtname == .udt && activeEditor == workbench.editors.files.textFileEditor",
           "group": "navigation@0"
         },
         {
@@ -880,6 +892,18 @@
         }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "rung.udtTable",
+        "displayName": "UDT Table",
+        "selector": [
+          {
+            "filenamePattern": "*.udt"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "keybindings": [
       {
         "key": "alt+q s",

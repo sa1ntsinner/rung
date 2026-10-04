@@ -30,7 +30,7 @@ const model = (uri: string, name: string): DeclModel => ({ uri, version: 1, bloc
 const deps = (request: any) => ({ lsp: { request }, ws: { rel: (p: string) => p } }) as any;
 let controllers: DeclarationsPanel[] = [];
 const open = (ctx: any, d: any, uri?: any, pos?: any) => { const c = DeclarationsPanel.show(ctx, d, uri, pos); controllers.push(c); return c; };
-const ready = async (c: any) => { await c.handle({ v: 1, kind: "ready" }); };
+const ready = async (c: any) => { await c.receive({ v: 1, kind: "ready" }); };
 
 beforeEach(() => { vi.useFakeTimers(); env.docs = []; env.panels = []; env.saved = undefined; env.active = undefined; });
 afterEach(() => { for (const c of new Set(controllers)) c.dispose(); controllers = []; vi.useRealTimers(); });
@@ -56,10 +56,10 @@ describe("declarations panel: targets, late answers, restore", () => {
     const a = doc("file:///a.scl"), b = doc("file:///b.scl"); env.docs = [a, b]; env.active = { document: a, selection: { active: new vscode.Position(0, 0) } };
     let finishA!: (v: DeclModel) => void;
     const request = vi.fn((_method: string, p: any) => p.textDocument.uri === a.uri.toString() ? new Promise<DeclModel>(r => finishA = r) : Promise.resolve(model(b.uri.toString(), "B")));
-    const c: any = open(context(), deps(request)); c.ready = true; const pending = c.refresh();
+    const c: any = open(context(), deps(request)); c.session.ready = true; const pending = c.refresh();
     c.bind({ pinned: false, uri: b.uri.toString() }, new vscode.Position(0, 0)); await vi.advanceTimersByTimeAsync(1);
     finishA(model(a.uri.toString(), "A")); await pending;
-    expect(c.model.uri).toBe(b.uri.toString()); expect(env.panels[0].title).toBe("B · Declarations");
+    expect(c.shown.uri).toBe(b.uri.toString()); expect(env.panels[0].title).toBe("B · Declarations");
   });
 
   it("first open stores the target so a reload restores the same file", async () => {

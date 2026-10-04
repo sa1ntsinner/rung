@@ -38,6 +38,8 @@ export interface DeclSection {
   modifiers: string[];
   rows: DeclRow[];
   range: DRange;
+  /** after the header .. the start of END_VAR: where new declarations go */
+  body: DRange;
 }
 
 export interface DeclModel {
@@ -94,6 +96,7 @@ export function declarationModel(uri: string, version: number, text: string, par
     modifiers: s.modifiers,
     rows: block.vars.filter((v) => v.start >= s.whole.start && v.end <= s.whole.end).map((v) => row(text, v, "", 0, isFb, s.section !== "Temp" && s.section !== "Constant")),
     range: s.whole,
+    body: s.body,
   }));
   const readOnly = !!block.xml || !!block.stl || /\.protected\.yaml$/i.test(uri);
   const declEnd = block.bodyStart ?? block.end;

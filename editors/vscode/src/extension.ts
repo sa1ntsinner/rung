@@ -4,6 +4,8 @@
 import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { DeclarationsPanel } from "./declarations/panel";
+import { UDT_TABLE, UdtTableEditor } from "./declarations/udtEditor";
+import type { DeclarationsSession } from "./declarations/session";
 import { UsagesView } from "./views/usagesView";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
@@ -43,6 +45,10 @@ export interface RungExtensionApi {
   decorations: ObjectDecorations;
   lsp: Lsp;
   usages: UsagesView;
+  /** the declarations panel, if open: its model and a way in for the view's messages */
+  declarations: () => DeclarationsPanel | undefined;
+  /** the UDT tables open, by document */
+  udtTables: Map<string, DeclarationsSession>;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -83,6 +89,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(project, plc, environment, decorations, statusBar, new BlockCodeLens(ws));
   context.subscriptions.push(
     DeclarationsPanel.register(context, { lsp, ws }),
+    UdtTableEditor.register(context, { lsp, ws }),
+    vscode.commands.registerCommand("rung.udt.openTable", (uri?: vscode.Uri) => {
+      const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+      if (target) return vscode.commands.executeCommand("vscode.openWith", target, UDT_TABLE);
+    }),
     vscode.commands.registerCommand("rung.declarations.open", (uri?: vscode.Uri, position?: vscode.Position) =>
       DeclarationsPanel.show(context, { lsp: lsp!, ws }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
     ),
@@ -158,7 +169,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions };
 }
 
 export async function deactivate(): Promise<void> {

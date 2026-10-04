@@ -1,32 +1,16 @@
 // SPDX-License-Identifier: MIT
-// The declarations panel beside an SCL editor: it asks the language server for the block's interface
-// (rung/declarations), shows it in a webview, follows the active SCL editor unless pinned, and turns the view's
-// messages into editor navigation. It changes no file.
+// The declarations panel beside an SCL editor: one declarations view (DeclarationsSession) that follows the active
+// SCL editor unless pinned, shows the block under the cursor, and comes back bound as it was after a reload.
 import * as vscode from "vscode";
 import { retarget, type Binding } from "../core/binding";
 import { nonce, webviewHtml } from "../host/webviewHtml";
 import type { Lsp } from "../lsp";
-import { isViewToHost, type DeclModel, type DeclRow, type HostToView, type ViewContext, type ViewToHost } from "../protocol/declarations";
+import type { DeclModel, DeclRow, HostToView } from "../protocol/declarations";
 import type { RungWorkspace } from "../workspace";
+import { DeclarationsSession } from "./session";
 
 const VIEW_TYPE = "rung.declarations";
 const BINDING_KEY = "rung.declarations.binding";
-
-function findRow(model: DeclModel, id: string): DeclRow | undefined {
-  const walk = (rows: DeclRow[]): DeclRow | undefined => {
-    for (const r of rows) {
-      if (r.id === id) return r;
-      const c = r.children && walk(r.children);
-      if (c) return c;
-    }
-    return undefined;
-  };
-  for (const s of model.sections) {
-    const r = walk(s.rows);
-    if (r) return r;
-  }
-  return undefined;
-}
 
 /** The deepest row whose declaration holds the offset. */
 function rowAt(model: DeclModel, offset: number): DeclRow | undefined {
@@ -43,16 +27,26 @@ function rowAt(model: DeclModel, offset: number): DeclRow | undefined {
   return found;
 }
 
+/** The view's page: the same for the panel and the UDT table editor. */
+export function declarationsHtml(ctx: vscode.ExtensionContext, web: vscode.Webview): string {
+  const asset = (f: string) => web.asWebviewUri(vscode.Uri.joinPath(ctx.extensionUri, "out", "webview", f)).toString();
+  return webviewHtml({ cspSource: web.cspSource, nonce: nonce(), script: asset("declarations.js"), styles: [asset("codicon.css"), asset("tokens.css"), asset("rung.css")], title: "Declarations" });
+}
+
+export function declarationsOptions(ctx: vscode.ExtensionContext): vscode.WebviewOptions {
+  return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, "out", "webview")] };
+}
+
 export class DeclarationsPanel implements vscode.Disposable {
   private static current: DeclarationsPanel | undefined;
+  /** the open panel (for the integration tests) */
+  static get open(): DeclarationsPanel | undefined {
+    return DeclarationsPanel.current;
+  }
   private binding: Binding;
   private position: vscode.Position | undefined;
-  private model: DeclModel | undefined;
-  private ready = false;
-  /** the latest refresh; an older one's answer is dropped */
-  private seq = 0;
+  private readonly session: DeclarationsSession;
   private readonly subs: vscode.Disposable[] = [];
-  private refreshTimer: NodeJS.Timeout | undefined;
   private revealTimer: NodeJS.Timeout | undefined;
 
   /** Opens the panel beside the editor (or shows it), bound to `uri` or the active SCL editor. */
@@ -82,12 +76,12 @@ export class DeclarationsPanel implements vscode.Disposable {
   }
 
   private static options(ctx: vscode.ExtensionContext): vscode.WebviewPanelOptions & vscode.WebviewOptions {
-    return { enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, "out", "webview")] };
+    return { ...declarationsOptions(ctx), retainContextWhenHidden: false };
   }
 
   private constructor(
     private readonly ctx: vscode.ExtensionContext,
-    private readonly deps: { lsp: Lsp; ws: RungWorkspace },
+    deps: { lsp: Lsp; ws: RungWorkspace },
     private readonly panel: vscode.WebviewPanel,
     binding: Binding,
     position?: vscode.Position,
@@ -96,27 +90,25 @@ export class DeclarationsPanel implements vscode.Disposable {
     this.position = position;
     // remembered from the start, so a reload restores this file even if nothing moves it
     void ctx.workspaceState.update(BINDING_KEY, binding);
-    const web = panel.webview;
-    const asset = (f: string) => web.asWebviewUri(vscode.Uri.joinPath(ctx.extensionUri, "out", "webview", f)).toString();
-    web.html = webviewHtml({ cspSource: web.cspSource, nonce: nonce(), script: asset("declarations.js"), styles: [asset("codicon.css"), asset("tokens.css"), asset("rung.css")], title: "Declarations" });
+    this.session = new DeclarationsSession(panel.webview, deps, {
+      uri: () => this.binding.uri,
+      position: () => this.position,
+      visible: () => this.panel.visible,
+      title: (name) => (this.panel.title = `${name} · Declarations`),
+      pinned: () => this.binding.pinned,
+      pin: (pinned) => this.bind({ ...this.binding, pinned }),
+      focus: () => this.panel.reveal(this.panel.viewColumn, false),
+    });
+    panel.webview.html = declarationsHtml(ctx, panel.webview);
     this.subs.push(
-      web.onDidReceiveMessage((m: unknown) => {
-        if (isViewToHost(m)) void this.handle(m);
-      }),
+      this.session,
       panel.onDidDispose(() => this.dispose()),
-      // hidden, the webview is gone (no retained context); shown again, it loads and says ready
       panel.onDidChangeViewState((e) => {
-        if (!e.webviewPanel.visible) this.ready = false;
+        if (!e.webviewPanel.visible) this.session.hidden();
       }),
       vscode.window.onDidChangeActiveTextEditor((ed) => {
         const next = retarget(this.binding, ed ? { uri: ed.document.uri.toString(), languageId: ed.document.languageId } : undefined);
         if (next.uri !== this.binding.uri) this.bind(next, ed?.selection.active);
-      }),
-      vscode.workspace.onDidChangeTextDocument((e) => {
-        if (e.document.uri.toString() === this.binding.uri) this.scheduleRefresh(150);
-      }),
-      vscode.workspace.onDidSaveTextDocument((d) => {
-        if (d.uri.toString() === this.binding.uri) this.scheduleRefresh(0);
       }),
       vscode.window.onDidChangeTextEditorSelection((e) => {
         if (this.binding.pinned || e.textEditor.document.uri.toString() !== this.binding.uri) return;
@@ -126,135 +118,45 @@ export class DeclarationsPanel implements vscode.Disposable {
     );
   }
 
+  /** The model the view shows. */
+  get shown(): DeclModel | undefined {
+    return this.session.shown;
+  }
+
+  /** A message as if the view sent it; the answer the view would get (for the integration tests). */
+  receive(m: unknown): Promise<HostToView | undefined> {
+    return this.session.receive(m);
+  }
+
   private bind(b: Binding, position?: vscode.Position) {
     const moved = b.uri !== this.binding.uri;
     this.binding = b;
     // a position names the block (a second block's CodeLens in the same file); a new file without one starts at its first
     if (position || moved) this.position = position;
     void this.ctx.workspaceState.update(BINDING_KEY, b);
-    this.scheduleRefresh(0);
-  }
-
-  private post(m: HostToView) {
-    if (this.ready) void this.panel.webview.postMessage(m);
-  }
-
-  private scheduleRefresh(ms: number) {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => void this.refresh(), ms);
+    this.session.scheduleRefresh(0);
   }
 
   private scheduleReveal(doc: vscode.TextDocument) {
     if (this.revealTimer) clearTimeout(this.revealTimer);
     this.revealTimer = setTimeout(() => {
-      if (!this.model || !this.position) return;
+      const model = this.session.shown;
+      if (!model || !this.position) return;
       const offset = doc.offsetAt(this.position);
-      const block = this.model.block?.range;
+      const block = model.block?.range;
       // the cursor went into another block of the file: that block's table
-      if (block && (offset < block.start || offset > block.end)) return void this.refresh();
-      const row = rowAt(this.model, offset);
-      if (row) this.post({ v: 1, kind: "reveal", rowId: row.id });
+      if (block && (offset < block.start || offset > block.end)) return void this.session.refresh();
+      const row = rowAt(model, offset);
+      if (row) this.session.post({ v: 1, kind: "reveal", rowId: row.id });
     }, 300);
   }
 
-  private document(): vscode.TextDocument | undefined {
-    return vscode.workspace.textDocuments.find((d) => d.uri.toString() === this.binding.uri);
-  }
-
-  private context(doc?: vscode.TextDocument): ViewContext {
-    const fsPath = doc?.uri.fsPath ?? (this.binding.uri ? vscode.Uri.parse(this.binding.uri).fsPath : "");
-    const rel = (this.deps.ws.rel(fsPath) ?? vscode.workspace.asRelativePath(fsPath)).replace(/\\/g, "/");
-    const plc = /^plc\/([^/]+)\//.exec(rel)?.[1];
-    return { ...(plc ? { plc } : {}), file: rel, dirty: doc?.isDirty ?? false, pinned: this.binding.pinned };
-  }
-
-  async refresh(): Promise<void> {
-    if (!this.ready || !this.panel.visible) return;
-    if (!this.binding.uri) {
-      this.post({ v: 1, kind: "state", state: "noBlock" });
-      return;
-    }
-    const target = this.binding.uri;
-    const seq = ++this.seq;
-    const uri = vscode.Uri.parse(target);
-    const doc = this.document() ?? (await vscode.workspace.openTextDocument(uri).then((d) => d, () => undefined));
-    const model = await this.deps.lsp.request<DeclModel | null>("rung/declarations", { textDocument: { uri: target }, ...(this.position ? { position: this.position } : {}) }).catch(() => undefined);
-    // a later refresh (another file, another block, a newer text) answers instead
-    if (seq !== this.seq || target !== this.binding.uri) return;
-    if (model === undefined) {
-      this.post({ v: 1, kind: "state", state: "noServer", context: this.context(doc) });
-      // the language server may still be starting: ask again until it answers
-      this.scheduleRefresh(1000);
-      return;
-    }
-    if (!model || !model.block) {
-      this.model = undefined;
-      this.post({ v: 1, kind: "state", state: "noBlock", context: this.context(doc) });
-      return;
-    }
-    this.model = model;
-    this.panel.title = `${model.block.name} · Declarations`;
-    this.post({ v: 1, kind: "model", model, context: this.context(doc) });
-  }
-
-  private async handle(m: ViewToHost) {
-    switch (m.kind) {
-      case "ready":
-        this.ready = true;
-        await this.refresh();
-        return;
-      case "pin":
-        this.bind({ ...this.binding, pinned: m.pinned });
-        return;
-      case "openText":
-        await this.showText();
-        return;
-      case "open": {
-        const row = this.model && findRow(this.model, m.rowId);
-        if (!row) return;
-        const r = (m.target === "name" ? row.ranges.name : row.ranges[m.target]) ?? row.ranges.name;
-        await this.showText(r.start, r.end);
-        return;
-      }
-      case "openType": {
-        const row = this.model && findRow(this.model, m.rowId);
-        const doc = this.document();
-        if (!row || !doc) return;
-        const at = doc.positionAt(row.ranges.type.start);
-        const defs = await vscode.commands.executeCommand<(vscode.Location | vscode.LocationLink)[]>("vscode.executeDefinitionProvider", doc.uri, at);
-        const d = defs?.[0];
-        if (!d) {
-          void vscode.window.setStatusBarMessage(`rung: no definition of ${row.type} in the workspace`, 3000);
-          return;
-        }
-        const loc = "targetUri" in d ? new vscode.Location(d.targetUri, d.targetSelectionRange ?? d.targetRange) : d;
-        await vscode.window.showTextDocument(loc.uri, { selection: loc.range, preview: true });
-        return;
-      }
-      case "usages": {
-        const row = this.model && findRow(this.model, m.rowId);
-        const doc = this.document();
-        if (!row || !doc) return;
-        await vscode.commands.executeCommand("rung.usages.show", doc.uri, doc.positionAt(row.ranges.name.start), row.name);
-        return;
-      }
-    }
-  }
-
-  /** The bound file in its editor (the one already showing it, else the first column), with a range selected. */
-  private async showText(start?: number, end?: number) {
-    if (!this.binding.uri) return;
-    const uri = vscode.Uri.parse(this.binding.uri);
-    const shown = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === this.binding.uri);
-    const doc = await vscode.workspace.openTextDocument(uri);
-    const selection = start !== undefined ? new vscode.Range(doc.positionAt(start), doc.positionAt(end ?? start)) : undefined;
-    const editor = await vscode.window.showTextDocument(doc, { viewColumn: shown?.viewColumn ?? vscode.ViewColumn.One, preserveFocus: false, ...(selection ? { selection } : {}) });
-    if (selection) editor.revealRange(selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  refresh(): Promise<void> {
+    return this.session.refresh();
   }
 
   dispose(): void {
     if (DeclarationsPanel.current === this) DeclarationsPanel.current = undefined;
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
     if (this.revealTimer) clearTimeout(this.revealTimer);
     for (const s of this.subs) s.dispose();
     this.panel.dispose();

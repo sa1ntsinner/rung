@@ -26,8 +26,10 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
+import { ELEMENTARY_TYPES, STANDARD } from "./catalog.js";
 import { declarationModel } from "./declarations.js";
 import { planDeclarationEdit, type DeclOp } from "./declarationEdit.js";
+import { parsePastedRows } from "./declarationPaste.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
@@ -272,6 +274,16 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const isFb = (name: string) => scopedTo(index, p.textDocument.uri).global(name)?.block?.kind === "FB";
     return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb);
   });
+  // the data types a declaration table offers: elementary, TIA's instruction FBs, the file's PLC's UDTs and FBs
+  connection.onRequest("rung/typeNames", (p: { textDocument: { uri: string } }) => ({
+    elementary: ELEMENTARY_TYPES.filter((t) => t !== "Void"),
+    types: [
+      ...STANDARD.filter((s) => s.kind === "functionBlock").map((s) => ({ name: s.name, kind: "SFB" })),
+      ...scopedTo(index, p.textDocument.uri).allGlobals().filter((g) => g.kind === "UDT" || g.kind === "FB").map((g) => ({ name: `"${g.name}"`, kind: g.kind })),
+    ],
+  }));
+  // rows pasted into a declaration table, read for a preview (nothing is written)
+  connection.onRequest("rung/declarationPaste", (p: { text: string }) => parsePastedRows(typeof p?.text === "string" ? p.text : ""));
   // a declaration table's edit: the text edits for one operation, against the version the table showed
   connection.onRequest("rung/declarationEdit", (p: { textDocument: { uri: string; version: number }; position?: { line: number; character: number }; op: DeclOp }) => {
     const doc = index.docs.get(p.textDocument.uri);

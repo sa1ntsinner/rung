@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 // The tree-grid every rung table is drawn with: sections as quiet bands, rows that open into their members, one
-// active cell moved by the keyboard (WAI-ARIA treegrid), and nothing else. Drawn in the page's own DOM so VS Code's
-// theme and codicons apply as they are.
+// active cell moved by the keyboard (WAI-ARIA treegrid), cells edited in place when the owner says they may be. The grid
+// changes no data: it asks (rg-commit, rg-toggle, rg-insert, …) and the owner answers with new rows. Drawn in the page's
+// own DOM so VS Code's theme and codicons apply as they are.
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import type { GridColumn, GridRow, GridSection } from "./types";
+
+/** how a cell edits: text in an input, a flip of a Boolean, or not at all */
+export type CellEdit = "text" | "toggle" | false;
 
 type Line<R> = { kind: "band"; section: GridSection<R & GridRow> } | { kind: "row"; row: R; level: number; parentId?: string };
 
@@ -16,6 +20,7 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
     activeCol: { state: true },
     expanded: { attribute: false },
     focused: { state: true },
+    editing: { state: true },
   };
 
   declare sections: GridSection<R>[];
@@ -25,6 +30,14 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   declare activeRow: string | undefined;
   declare activeCol: number;
   declare focused: boolean;
+  /** the cell open as an input */
+  declare editing: { rowId: string; col: number; value: string; old: string } | undefined;
+  /** how a cell edits; without it the grid only shows */
+  editable?: (row: R, column: string) => CellEdit;
+  /** a row as text for the clipboard (Ctrl+C); without it the grid copies nothing */
+  copyText?: (row: R) => string;
+  /** an input's suggestions: the id of a <datalist> on the page, per column */
+  suggestions?: (column: string) => string | undefined;
   /** plain text of a cell: what is drawn unless renderCell draws more, and what a screen reader hears */
   cellText: (row: R, column: string) => string = () => "";
   /** a richer drawing of a cell (icons, muted parts); falls back to cellText */
@@ -98,11 +111,100 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
     this.activeCol = Math.max(0, Math.min(this.activeCol, this.columns.length - 1));
   }
 
+  private findRow(rowId: string): R | undefined {
+    const walk = (rows: R[]): R | undefined => {
+      for (const r of rows) {
+        if (r.id === rowId) return r;
+        const c = r.children && walk(r.children as R[]);
+        if (c) return c;
+      }
+      return undefined;
+    };
+    for (const s of this.sections) {
+      const r = walk(s.rows);
+      if (r) return r;
+    }
+    return undefined;
+  }
+
+  private emit(type: string, detail: unknown) {
+    this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true }));
+  }
+
+  /** Opens a cell as an input (a new row's name, a refused value to correct): its text, or `value`, all selected. */
+  startEdit(rowId: string, column: string, value?: string): boolean {
+    const row = this.findRow(rowId);
+    const col = this.columns.findIndex((c) => c.key === column);
+    if (!row || col < 0 || this.editable?.(row, column) !== "text") return false;
+    if (rowId !== this.activeRow) this.reveal(rowId);
+    this.activeCol = col;
+    const old = this.cellText(row, column);
+    this.editing = { rowId, col, value: value ?? old, old };
+    this.selectOnOpen = value === undefined;
+    return true;
+  }
+
+  private selectOnOpen = true;
+
+  private finishEdit(commit: boolean, refocus = true) {
+    const ed = this.editing;
+    if (!ed) return;
+    const input = this.querySelector<HTMLInputElement>("input.rg-input");
+    const value = input?.value ?? ed.value;
+    this.editing = undefined;
+    if (commit && value !== ed.old) this.emit("rg-commit", { rowId: ed.rowId, column: this.columns[ed.col]!.key, value, old: ed.old });
+    // the keyboard stays in the table
+    if (refocus) void this.updateComplete.then(() => this.querySelector<HTMLElement>('[role="treegrid"]')?.focus());
+  }
+
+  private onInputKey(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      this.finishEdit(false);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      this.finishEdit(true);
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      const ed = this.editing!;
+      const row = this.findRow(ed.rowId)!;
+      let next: string | undefined;
+      const step = e.shiftKey ? -1 : 1;
+      for (let c = ed.col + step; c >= 0 && c < this.columns.length && !next; c += step) if (this.editable?.(row, this.columns[c]!.key) === "text") next = this.columns[c]!.key;
+      this.finishEdit(true, !next);
+      if (next) this.startEdit(ed.rowId, next);
+    }
+  }
+
+  private toggleCell(row: R, col: number) {
+    this.emit("rg-toggle", { rowId: row.id, column: this.columns[col]!.key });
+  }
+
+  private onCopy(e: ClipboardEvent) {
+    const row = this.activeRow ? this.findRow(this.activeRow) : undefined;
+    if (!this.copyText || !row || this.editing) return;
+    e.clipboardData?.setData("text/plain", this.copyText(row));
+    e.preventDefault();
+  }
+
+  private onPaste(e: ClipboardEvent) {
+    if (!this.editable || this.editing) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!text) return;
+    e.preventDefault();
+    this.emit("rg-paste", { text });
+  }
+
   private onKey(e: KeyboardEvent) {
     const rows = this.rowLines();
     const i = rows.findIndex((l) => l.row.id === this.activeRow);
     if (i < 0) return;
     const cur = rows[i]!;
+    if (this.editable && this.editKey(e, cur.row)) {
+      e.preventDefault();
+      return;
+    }
     const hasKids = !!cur.row.children?.length;
     const open = this.expanded.has(cur.row.id);
     const last = this.columns.length - 1;
@@ -147,6 +249,54 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
     e.preventDefault();
   }
 
+  /** The keys that edit; true when one was handled. */
+  private editKey(e: KeyboardEvent, row: R): boolean {
+    const column = this.columns[this.activeCol]!.key;
+    const how = this.editable!(row, column);
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === "z") this.emit(e.shiftKey ? "rg-redo" : "rg-undo", {});
+      else if (k === "y") this.emit("rg-redo", {});
+      else return false;
+      return true;
+    }
+    switch (e.key) {
+      case "Enter":
+      case "F2":
+        if (how === "toggle") this.toggleCell(row, this.activeCol);
+        else if (how === "text") this.startEdit(row.id, column);
+        // Enter on a cell that does not edit: its text in the editor; F2 does nothing
+        else return e.key === "Enter" ? false : true;
+        return true;
+      case " ":
+        if (how !== "toggle") return false;
+        this.toggleCell(row, this.activeCol);
+        return true;
+      case "Insert":
+        this.emit("rg-insert", { rowId: row.id });
+        return true;
+      case "Delete":
+        this.emit("rg-delete", { rowId: row.id, column });
+        return true;
+    }
+    // a character starts the edit with itself, as in a spreadsheet
+    if (how === "text" && e.key.length === 1 && !e.altKey) {
+      this.startEdit(row.id, column, e.key);
+      return true;
+    }
+    return false;
+  }
+
+  protected override updated() {
+    const input = this.querySelector<HTMLInputElement>("input.rg-input");
+    if (input && document.activeElement !== input) {
+      input.focus();
+      if (this.selectOnOpen) input.select();
+      else input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
+
   private template(): string {
     return this.columns.map((c) => (c.width ? `${c.width}px` : "minmax(160px, 1fr)")).join(" ");
   }
@@ -172,6 +322,8 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
       aria-activedescendant=${activeId ?? nothing}
       style=${styleMap({ "--rg-cols": this.template(), "min-width": `${this.minWidth()}px` })}
       @keydown=${(e: KeyboardEvent) => this.onKey(e)}
+      @paste=${(e: ClipboardEvent) => this.onPaste(e)}
+      @copy=${(e: ClipboardEvent) => this.onCopy(e)}
       @focus=${() => (this.focused = true)}
       @blur=${() => (this.focused = false)}
     >
@@ -181,7 +333,9 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
       ${lines.map((l) =>
         l.kind === "band"
           ? html`<div class="rg-band" role="row"><div role="gridcell" class="rg-band-cell" aria-colspan=${this.columns.length}>
-              <span class="rg-band-title">${l.section.title}</span>${l.section.note ? html`<span class="rg-band-note">${l.section.note}</span>` : nothing}<span class="rg-band-count">${l.section.rows.length}</span>
+              <span class="rg-band-title">${l.section.title}</span>${l.section.note ? html`<span class="rg-band-note">${l.section.note}</span>` : nothing}<span class="rg-band-count">${l.section.rows.length}</span>${this.editable
+                ? html`<button class="rg-band-add rg-icon-btn" tabindex="-1" title=${`Add a declaration to ${l.section.title}`} aria-label=${`Add a declaration to ${l.section.title}`} @click=${() => this.emit("rg-add", { sectionId: l.section.id })}><span class="codicon codicon-add"></span></button>`
+                : nothing}
             </div></div>`
           : this.renderRow(l.row, l.level, cellId),
       )}
@@ -206,18 +360,26 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
         const label = this.cellLabel?.(row, c.key) ?? text;
         const content = this.renderCell?.(row, c.key) ?? text;
         const isActive = selected && ci === this.activeCol;
+        const how = this.editable?.(row, c.key) ?? false;
+        const editing = this.editing && this.editing.rowId === row.id && this.editing.col === ci;
         return html`<div
           id=${cellId(row.id, ci)}
-          class="rg-cell rg-${c.align ?? "start"} ${c.mono ? "rg-mono" : ""} ${isActive ? "rg-active" : ""}"
+          class="rg-cell rg-${c.align ?? "start"} ${c.mono ? "rg-mono" : ""} ${isActive ? "rg-active" : ""} ${editing ? "rg-editing" : ""} ${how ? `rg-edit-${how}` : ""}"
           role="gridcell"
           data-col=${c.key}
           aria-label=${`${c.tooltip ?? c.label}: ${label}`}
           title=${ci === 0 ? nothing : text}
           @click=${(e: MouseEvent) => {
             e.stopPropagation();
+            if (editing) return;
             this.activate(row.id, ci);
+            // a Boolean flips where it is clicked, as a check box does
+            if (how === "toggle") this.toggleCell(row, ci);
           }}
-          @dblclick=${() => this.dispatchEvent(new CustomEvent("rg-open", { detail: { rowId: row.id, column: c.key }, bubbles: true }))}
+          @dblclick=${() => {
+            if (how === "text") this.startEdit(row.id, c.key);
+            else if (how !== "toggle") this.emit("rg-open", { rowId: row.id, column: c.key });
+          }}
         >
           ${ci === 0
             ? html`<span class="rg-indent" style=${styleMap({ width: `${(row.depth ?? 0) * 16}px` })}></span><span
@@ -228,7 +390,20 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
                     this.toggle(row.id);
                   }}
                 ></span>`
-            : nothing}<span class="rg-text">${content}</span>
+            : nothing}${editing
+            ? html`<input
+                class="rg-input ${c.mono ? "rg-mono" : ""}"
+                aria-label=${c.tooltip ?? c.label}
+                spellcheck="false"
+                autocomplete="off"
+                list=${this.suggestions?.(c.key) ?? nothing}
+                .value=${this.editing!.value}
+                @keydown=${(e: KeyboardEvent) => this.onInputKey(e)}
+                @click=${(e: MouseEvent) => e.stopPropagation()}
+                @dblclick=${(e: MouseEvent) => e.stopPropagation()}
+                @blur=${() => this.finishEdit(true)}
+              />`
+            : html`<span class="rg-text">${content}</span>`}
         </div>`;
       })}
     </div>`;

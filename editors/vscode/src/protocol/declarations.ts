@@ -39,6 +39,8 @@ export interface DeclSection {
   modifiers: string[];
   rows: DeclRow[];
   range: DRange;
+  /** after the header .. the start of END_VAR: where new declarations go */
+  body: DRange;
 }
 
 export interface DeclModel {
@@ -51,18 +53,47 @@ export interface DeclModel {
   unavailable: DRange[];
 }
 
+/** A declaration a table adds (mirrors packages/lsp/src/declarationEdit.ts). */
+export interface NewRow {
+  name: string;
+  type: string;
+  start?: string;
+  comment?: string;
+}
+
+/** One edit of the table; the language server plans its text (rung/declarationEdit). */
+export type DeclOp =
+  | { op: "setStart"; row: string; value: string | null }
+  | { op: "setComment"; row: string; value: string | null }
+  | { op: "setAttr"; row: string; key: string; state: "on" | "off" | "default" }
+  | { op: "setType"; row: string; type: string }
+  | { op: "insertRows"; after?: string; into?: string; section?: string; rows: NewRow[] }
+  | { op: "deleteRow"; row: string };
+
+/** Rows read from pasted text (rung/declarationPaste). */
+export interface PasteResult {
+  rows: NewRow[];
+  errors: { line: number; message: string }[];
+}
+
 /** What the view shows around the model: where the block lives and the document's state. */
 export interface ViewContext {
   plc?: string;
   file: string;
   dirty: boolean;
   pinned: boolean;
+  /** the view is the file's own editor (a UDT table): it follows nothing and has no pin */
+  fixed?: boolean;
 }
 
 export type HostToView =
   | { v: 1; kind: "model"; model: DeclModel; context: ViewContext }
   | { v: 1; kind: "state"; state: "loading" | "noServer" | "noBlock"; context?: ViewContext }
-  | { v: 1; kind: "reveal"; rowId: string };
+  | { v: 1; kind: "reveal"; rowId: string }
+  /** the answer to an edit: ok (the document changed) or why not; `edit` names a row to edit next (a new row's name) */
+  | { v: 1; kind: "result"; req: number; ok: boolean; reason?: string; edit?: { rowId: string; column: "name" } }
+  | { v: 1; kind: "pastePreview"; req: number; result: PasteResult }
+  | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] };
 
 export type OpenTarget = "name" | "type" | "start" | "comment";
 
@@ -72,9 +103,48 @@ export type ViewToHost =
   | { v: 1; kind: "usages"; rowId: string }
   | { v: 1; kind: "openType"; rowId: string }
   | { v: 1; kind: "openText" }
-  | { v: 1; kind: "pin"; pinned: boolean };
+  | { v: 1; kind: "pin"; pinned: boolean }
+  /** `uri` and `version` are the model's the view edited: another file or a newer text refuses the edit */
+  | { v: 1; kind: "edit"; req: number; uri: string; version: number; op: DeclOp }
+  | { v: 1; kind: "rename"; req: number; uri: string; version: number; rowId: string; name: string }
+  /** a new declaration (named as TIA names one, Bool) after a row, at the end of a struct or of a section */
+  | { v: 1; kind: "add"; req: number; uri: string; version: number; after?: string; into?: string; section?: string }
+  | { v: 1; kind: "delete"; req: number; uri: string; version: number; rowId: string }
+  | { v: 1; kind: "paste"; req: number; uri: string; text: string }
+  | { v: 1; kind: "undo" }
+  | { v: 1; kind: "redo" };
 
 const TARGETS: ReadonlySet<string> = new Set<OpenTarget>(["name", "type", "start", "comment"]);
+const str = (x: unknown) => typeof x === "string";
+const optStr = (x: unknown) => x === undefined || typeof x === "string";
+const nullStr = (x: unknown) => x === null || typeof x === "string";
+const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+
+function isNewRow(x: unknown): boolean {
+  if (!x || typeof x !== "object") return false;
+  const r = x as Record<string, unknown>;
+  return str(r.name) && str(r.type) && optStr(r.start) && optStr(r.comment);
+}
+
+function isOp(x: unknown): x is DeclOp {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  switch (o.op) {
+    case "setStart":
+    case "setComment":
+      return str(o.row) && nullStr(o.value);
+    case "setAttr":
+      return str(o.row) && str(o.key) && (o.state === "on" || o.state === "off" || o.state === "default");
+    case "setType":
+      return str(o.row) && str(o.type);
+    case "insertRows":
+      return optStr(o.after) && optStr(o.into) && optStr(o.section) && Array.isArray(o.rows) && o.rows.every(isNewRow);
+    case "deleteRow":
+      return str(o.row);
+    default:
+      return false;
+  }
+}
 
 /** A message from the view, checked field by field: anything else is dropped. */
 export function isViewToHost(x: unknown): x is ViewToHost {
@@ -84,7 +154,19 @@ export function isViewToHost(x: unknown): x is ViewToHost {
   switch (m.kind) {
     case "ready":
     case "openText":
+    case "undo":
+    case "redo":
       return true;
+    case "edit":
+      return num(m.req) && str(m.uri) && num(m.version) && isOp(m.op);
+    case "rename":
+      return num(m.req) && str(m.uri) && num(m.version) && str(m.rowId) && str(m.name);
+    case "add":
+      return num(m.req) && str(m.uri) && num(m.version) && optStr(m.after) && optStr(m.into) && optStr(m.section);
+    case "delete":
+      return num(m.req) && str(m.uri) && num(m.version) && str(m.rowId);
+    case "paste":
+      return num(m.req) && str(m.uri) && str(m.text);
     case "pin":
       return typeof m.pinned === "boolean";
     case "usages":

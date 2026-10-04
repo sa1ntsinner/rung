@@ -789,6 +789,68 @@ describe("rung extension on a fake-bridge workspace", function () {
       await closeAll();
     });
 
+    it("edits from the table change the document: a default, add, delete, rename; undo restores; a stale edit is refused", async () => {
+      await closeAll();
+      const editor = await openDoc(PUMP);
+      const doc = editor.document;
+      const original = doc.getText();
+      await vscode.commands.executeCommand("rung.declarations.open");
+      const panel = await waitFor("the panel shows Fx_Pump", () => (api.declarations()?.shown?.block?.name === "Fx_Pump" ? api.declarations() : undefined));
+      const shown = () => panel.shown!;
+      const send = (m: Record<string, unknown>) => panel.receive({ v: 1, req: 1, uri: shown().uri, version: shown().version, ...m });
+      const fresh = (v: number) => waitFor("the table has the new text", () => shown().version > v);
+
+      let v = shown().version;
+      assert.deepEqual(await send({ kind: "edit", op: { op: "setStart", row: "speed", value: "5" } }), { v: 1, kind: "result", req: 1, ok: true });
+      assert.match(doc.getText(), /speed : Int := 5;/);
+      assert.equal(doc.isDirty, true);
+      await fresh(v);
+      // the edit made on the old text is refused, nothing changes
+      const stale = await panel.receive({ v: 1, kind: "edit", req: 2, uri: shown().uri, version: v, op: { op: "setStart", row: "speed", value: "6" } });
+      assert.deepEqual(stale, { v: 1, kind: "result", req: 2, ok: false, reason: "The file changed. Review this value again." });
+      assert.match(doc.getText(), /speed : Int := 5;/);
+
+      v = shown().version;
+      assert.deepEqual(await send({ kind: "add", after: "running" }), { v: 1, kind: "result", req: 1, ok: true, edit: { rowId: "Tag_1", column: "name" } });
+      assert.match(doc.getText(), /running : Bool;\r?\n {6}Tag_1 : Bool;\r?\n/);
+      await fresh(v);
+      v = shown().version;
+      assert.deepEqual(await send({ kind: "delete", rowId: "Tag_1" }), { v: 1, kind: "result", req: 1, ok: true });
+      assert.doesNotMatch(doc.getText(), /Tag_1/);
+      await fresh(v);
+
+      // a rename goes through the language server: the code follows
+      assert.deepEqual(await send({ kind: "rename", rowId: "running", name: "isRunning" }), { v: 1, kind: "result", req: 1, ok: true });
+      assert.match(doc.getText(), /isRunning : Bool;/);
+      assert.match(doc.getText(), /#isRunning := FALSE;/);
+
+      // the view's undo is the document's: back to where it started, one step per edit
+      for (let i = 0; i < 4; i++) await panel.receive({ v: 1, kind: "undo" });
+      assert.equal(doc.getText(), original);
+      await vscode.commands.executeCommand("workbench.action.files.revert", doc.uri);
+      await closeAll();
+    });
+
+    it("a UDT opens as a table; its edits are text edits of the file, undone by VS Code's undo", async () => {
+      await closeAll();
+      const uri = vscode.Uri.file(join(api.ws.root!, "plc/PLC_1/types/Fx_Type.udt"));
+      await vscode.commands.executeCommand("rung.udt.openTable", uri);
+      const session = await waitFor("the UDT table shows Fx_Type", () => {
+        const s = api.udtTables.get(uri.toString());
+        return s?.shown?.block?.name === "Fx_Type" ? s : undefined;
+      });
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())!;
+      const original = doc.getText();
+      const r = await session.receive({ v: 1, kind: "edit", req: 1, uri: uri.toString(), version: session.shown!.version, op: { op: "setStart", row: "a", value: "TRUE" } });
+      assert.deepEqual(r, { v: 1, kind: "result", req: 1, ok: true });
+      assert.match(doc.getText(), /a : Bool := TRUE;/);
+      assert.equal(doc.isDirty, true);
+      await session.receive({ v: 1, kind: "undo" });
+      await waitFor("undo restored the UDT", () => doc.getText() === original);
+      await vscode.commands.executeCommand("workbench.action.files.revert", uri);
+      await closeAll();
+    });
+
     it("who writes a name fills the Usages tree, which stays while you open its places", async () => {
       const editor = await openDoc(MOTOR);
       const at = editor.document.getText().indexOf("#running") + 2;

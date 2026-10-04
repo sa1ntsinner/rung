@@ -64,7 +64,7 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
       const l = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", ed.document.uri);
       return l?.length ? l : undefined;
     });
-    assert.deepEqual(lenses.map((l) => l.command?.title), ["Compile", "Test", "Open in TIA Portal"]);
+    assert.deepEqual(lenses.map((l) => l.command?.title), ["Declarations", "Compile", "Test", "Open in TIA Portal"]);
   });
 
   it("compile this file: TIA Portal's error lands on its line in Problems, without the summary line", async () => {
@@ -159,11 +159,11 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.equal(d.of("inputBox").length, 0);
   });
 
-  it("open in TIA Portal: a headless TIA Portal is explained", async () => {
+  it("open in TIA Portal: no TIA Portal window is explained", async () => {
     await openDoc(MOTOR);
     await vscode.commands.executeCommand("rung.openInTia");
     assert.deepEqual(cli.find("open")?.args, ["open", MOTOR]);
-    assert.match(d.texts.join("\n"), /^warning: TIA Portal runs without a user interface on this PC, so it cannot show Fx_Motor/);
+    assert.match(d.texts.join("\n"), /^warning: No TIA Portal window has this project open, so TIA Portal cannot show Fx_Motor/);
   });
 
   it("status and sync", async () => {
