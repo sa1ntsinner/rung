@@ -40,7 +40,8 @@
     "onLanguage:scl",
     "onLanguage:s7dcl",
     "onWebviewPanel:rung.declarations",
-    "onCustomEditor:rung.udtTable"
+    "onCustomEditor:rung.udtTable",
+    "onCustomEditor:rung.testTable"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -435,6 +436,12 @@
         "title": "Create Test",
         "category": "rung",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "rung.test.openTable",
+        "title": "Open Test as Table",
+        "category": "rung",
+        "icon": "$(table)"
       },
       {
         "command": "rung.udt.openTable",
@@ -842,6 +849,11 @@
           "group": "navigation@0"
         },
         {
+          "command": "rung.test.openTable",
+          "when": "resourceFilename =~ /\\.test\\.ya?ml$/ && activeEditor == workbench.editors.files.textFileEditor",
+          "group": "navigation@0"
+        },
+        {
           "command": "rung.compileFile",
           "when": "rung.workspace && resourceLangId == scl",
           "group": "navigation@1"
@@ -918,6 +930,19 @@
       ]
     },
     "customEditors": [
+      {
+        "viewType": "rung.testTable",
+        "displayName": "Test Table",
+        "selector": [
+          {
+            "filenamePattern": "*.test.yaml"
+          },
+          {
+            "filenamePattern": "*.test.yml"
+          }
+        ],
+        "priority": "option"
+      },
       {
         "viewType": "rung.udtTable",
         "displayName": "UDT Table",

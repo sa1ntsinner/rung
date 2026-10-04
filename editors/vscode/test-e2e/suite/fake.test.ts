@@ -877,6 +877,39 @@ describe("rung extension on a fake-bridge workspace", function () {
       await closeAll();
     });
 
+    it("a test file opens as a table: an edit is a text edit undone by undo; a case runs through the test explorer", async () => {
+      await closeAll();
+      // Fx_Motor is in conflict in this workspace: the table tests Fx_Pump
+      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "pump.test.yaml"));
+      const yaml = ["block: Fx_Pump", "cases:", "  - name: follows start", "    steps:", "      - set: { start: true }", "      - cycle: 1", "      - expect: { running: true }", ""].join("\n");
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
+      await vscode.commands.executeCommand("rung.test.openTable", uri);
+      const table = await waitFor("the test table shows the file", () => {
+        const t = api.testTables.get(uri.toString());
+        return t?.shown?.model.cases.length ? t : undefined;
+      });
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString())!;
+      const original = doc.getText();
+      assert.deepEqual(table.shown!.model.cases.map((c) => c.name?.value), ["follows start"]);
+      assert.deepEqual(table.shown!.symbols.map((s) => s.name), ["start", "speed", "running"]);
+      const r = await table.receive({ v: 1, kind: "edit", req: 1, uri: uri.toString(), version: table.shown!.version, op: { op: "setValue", case: 0, step: 2, part: "expect", key: "running", value: "false" } });
+      assert.deepEqual(r, { v: 1, kind: "result", req: 1, ok: true });
+      assert.match(doc.getText(), /expect: \{ running: false \}/);
+      assert.equal(doc.isDirty, true);
+      await table.receive({ v: 1, kind: "undo" });
+      await waitFor("undo restored the test", () => doc.getText() === original);
+      await vscode.commands.executeCommand("workbench.action.files.revert", uri);
+      await table.receive({ v: 1, kind: "run", case: 0 });
+      const runs = await waitFor("the run's result reached the table", () => {
+        const m = (table as unknown as { last?: { kind: string; runs?: { index: number }[] } }).last;
+        return m?.kind === "runs" && m.runs?.length ? m.runs : undefined;
+      }, 120_000);
+      assert.deepEqual(runs.map((x) => x.index), [0]);
+      assert.deepEqual(cli.find("test")?.args.slice(0, 4), ["test", "--json", "--case", "tests/pump.test.yaml#0"]);
+      await closeAll();
+      await vscode.workspace.fs.delete(uri);
+    });
+
     it("who writes a name fills the Usages tree, which stays while you open its places", async () => {
       const editor = await openDoc(MOTOR);
       const at = editor.document.getText().indexOf("#running") + 2;

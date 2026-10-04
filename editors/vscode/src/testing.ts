@@ -15,7 +15,10 @@ export class RungTests implements vscode.Disposable {
   private readonly blocksChanged = new vscode.EventEmitter<void>();
   /** a test file came, went or names another block */
   readonly onDidChangeBlocks = this.blocksChanged.event;
-  private readonly subs: vscode.Disposable[] = [this.ctrl, this.blocksChanged];
+  private readonly reported = new vscode.EventEmitter<{ file: string; running: number[]; cases?: FileResult["cases"]; error?: string }>();
+  /** a run started (running: the cases' places) or ended with results, per file */
+  readonly onDidReport = this.reported.event;
+  private readonly subs: vscode.Disposable[] = [this.ctrl, this.blocksChanged, this.reported];
 
   constructor(
     private readonly ws: RungWorkspace,
@@ -52,6 +55,14 @@ export class RungTests implements vscode.Disposable {
   /** tests/…/x.test.yaml, relative to the rung workspace, as rung test names the file. */
   private idOf(uri: vscode.Uri): string {
     return relative(this.ws.root ?? "", uri.fsPath).split(sep).join("/");
+  }
+
+  /** Runs one case of a file (or the whole file) through the test explorer, as if picked there. */
+  async runIn(uri: vscode.Uri, caseIndex?: number): Promise<void> {
+    const file = await this.add(uri);
+    const item = caseIndex === undefined ? file : file.children.get(`${file.id}#${caseIndex}`);
+    if (!item) return;
+    await this.run(new vscode.TestRunRequest([item]), new vscode.CancellationTokenSource().token);
   }
 
   discoverNow(): Promise<void> {
@@ -130,9 +141,18 @@ export class RungTests implements vscode.Disposable {
       const mine = (w: { file: vscode.TestItem }) => !one.file || w.file.id === one.file;
       const started = (id: string) => one.args[0] !== "--case" || one.args[1] === id;
       for (const w of wanted.values()) if (mine(w)) w.file.children.forEach((c) => shown(w, c.id) && started(c.id) && run.started(c));
+      for (const w of wanted.values())
+        if (mine(w)) {
+          const running: number[] = [];
+          w.file.children.forEach((c) => {
+            if (shown(w, c.id) && started(c.id)) running.push(Number(c.id.slice(c.id.lastIndexOf("#") + 1)));
+          });
+          this.reported.fire({ file: w.file.id, running });
+        }
       const r = await this.cli.capture(["test", "--json", ...one.args], { quiet: true, token });
       const results = parseResults(r.output);
       if (!results) {
+        for (const w of wanted.values()) if (mine(w)) this.reported.fire({ file: w.file.id, running: [], error: "rung test did not answer" });
         const message = new vscode.TestMessage(`rung test did not answer (exit ${r.code ?? "killed"}); see the rung output`);
         for (const w of wanted.values()) if (mine(w)) run.errored(w.file, message);
         continue;
@@ -147,6 +167,7 @@ export class RungTests implements vscode.Disposable {
 
   private report(run: vscode.TestRun, w: { file: vscode.TestItem; cases?: Set<string> }, f: FileResult, shown: (w: { file: vscode.TestItem; cases?: Set<string> }, id: string) => boolean, allCases: boolean) {
     const uri = w.file.uri!;
+    this.reported.fire({ file: w.file.id, running: [], cases: f.cases, ...(f.error ? { error: f.error } : {}) });
     if (f.error) {
       run.errored(w.file, new vscode.TestMessage(f.error));
       return;

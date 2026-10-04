@@ -271,6 +271,11 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
     const column = this.columns[this.activeCol]!.key;
     const how = this.editable!(row, column);
     const mod = e.ctrlKey || e.metaKey;
+    // Alt+Up/Down: the owner moves the row (a test step) up or down
+    if (e.altKey && !mod && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      this.emit("rg-move", { rowId: row.id, by: e.key === "ArrowUp" ? -1 : 1 });
+      return true;
+    }
     if (mod && !e.altKey) {
       const k = e.key.toLowerCase();
       if (k === "z") this.emit(e.shiftKey ? "rg-redo" : "rg-undo", {});

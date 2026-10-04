@@ -10,6 +10,7 @@
 - Usages keeps the earlier questions (the history button in its title).
 - *Create test* above a block that has no test yet: a first test file with the block's inputs set, one cycle and its outputs to expect, opened to change the expected values. A test that exists is opened, never written over.
 - The test explorer runs a picked case and nothing else.
+- Test files open as a table (Open Test as Table, or Open With… → Test Table): the cases on the left, the selected case's steps on the right (Set, Run, Advance, Expect) with each name and value edited in place. Insert adds a name of the block under test (picked from its inputs, outputs and statics, or typed), Delete removes one, Alt+Up/Down moves a step; cases are added, renamed, duplicated and deleted in the list. A name the block does not have is underlined with the closest one. Run a case or all of them: the result shows on the case and on the expectation that failed. Every change is a small text edit of the file in its own style, comments kept.
 
 **CLI**
 - `rung test --case tests/x.test.yaml#2` runs exactly one case; `--json` gives each case its `index` in the file.
@@ -18,7 +19,7 @@
 
 **Language server**
 - `rung/declarations` and `rung/declarationEdit`: the interface with exact source ranges, and edits that change only their own text, written the way TIA Portal exports them (checked by import, compile and export in TIA Portal V20).
-- Declaration edits also set a type, insert and delete declarations (instruction instances such as `TON` are written as TIA Portal writes them, names SCL reserves are quoted) and refuse what TIA Portal would not accept: a default value on a temporary or a function's parameter, a constant without a value, a value that would end the line. `rung/declarationPaste` reads pasted rows (English or German column names); `rung/typeNames` lists the types a declaration can use. `rung/testSkeleton` drafts a block's first test and names the test files it already has.
+- Declaration edits also set a type, insert and delete declarations (instruction instances such as `TON` are written as TIA Portal writes them, names SCL reserves are quoted) and refuse what TIA Portal would not accept: a default value on a temporary or a function's parameter, a constant without a value, a value that would end the line. `rung/declarationPaste` reads pasted rows (English or German column names); `rung/typeNames` lists the types a declaration can use. `rung/testSkeleton` drafts a block's first test and names the test files it already has. `rung/testModel` and `rung/testEdit` read a test file with exact ranges and plan its edits (flow and block maps, quotes kept, comments kept, CRLF kept).
 
 ## 0.1.0 — 2026-10-03 (pre-release)
 

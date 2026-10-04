@@ -301,7 +301,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const folder = /\/tests\/([^/]+)\/[^/]+$/.exec(uri)?.[1];
     const plc = test.plc?.value ?? folder;
     const all = index.allGlobals().filter((g) => (g.kind === "FB" || g.kind === "FC") && g.name.toLowerCase() === name.toLowerCase() && g.block);
-    const g = all.find((x) => plc && deviceOfUri(x.uri)?.toLowerCase() === plc.toLowerCase()) ?? (all.length === 1 ? all[0] : undefined);
+    // with no PLC named, a name every candidate of which is in one PLC is that PLC's (copies of a block in conflict)
+    const devices = new Set(all.map((x) => deviceOfUri(x.uri)?.toLowerCase()));
+    const g = all.find((x) => plc && deviceOfUri(x.uri)?.toLowerCase() === plc.toLowerCase()) ?? (!plc && devices.size === 1 ? (all.find((x) => /\/plc\//.test(x.uri)) ?? all[0]) : undefined);
     const doc = g && index.docs.get(g.uri);
     return g && doc?.parsed ? declarationModel(g.uri, 0, doc.text, doc.parsed, g.block!.start) : undefined;
   };

@@ -30,6 +30,8 @@ export class Lsp implements vscode.Disposable {
         { scheme: "file", language: "scl" },
         { scheme: "file", language: "s7dcl" },
         { scheme: "file", pattern: "**/*.{TcPOU,TcDUT,TcGVL,TcIO}" },
+        // test files: read and edited for the test table, never as SCL
+        { scheme: "file", pattern: "**/tests/**/*.test.{yaml,yml}" },
       ],
       synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },
       outputChannel: this.out.channel,

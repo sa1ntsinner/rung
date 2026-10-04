@@ -5,6 +5,8 @@ import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { DeclarationsPanel } from "./declarations/panel";
 import { UDT_TABLE, UdtTableEditor } from "./declarations/udtEditor";
+import { TEST_TABLE, TestTableEditor } from "./tests/testEditor";
+import type { RungTests } from "./testing";
 import type { DeclarationsSession } from "./declarations/session";
 import { UsagesView } from "./views/usagesView";
 import { registerCommands } from "./commands";
@@ -29,6 +31,8 @@ import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView"
 import { RungWorkspace } from "./workspace";
 
 let lsp: Lsp | undefined;
+/** the test explorer, once the workspace has one (the test table runs its cases through it) */
+let testsRef: RungTests | undefined;
 
 /** Returned by activate(): the pieces the integration tests (test-e2e) look at. Not a stable API. */
 export interface RungExtensionApi {
@@ -49,6 +53,8 @@ export interface RungExtensionApi {
   declarations: () => DeclarationsPanel | undefined;
   /** the UDT tables open, by document */
   udtTables: Map<string, DeclarationsSession>;
+  /** the test tables open, by document */
+  testTables: typeof TestTableEditor.tables;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -91,6 +97,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(
     DeclarationsPanel.register(context, { lsp, ws }),
     UdtTableEditor.register(context, { lsp, ws }),
+    TestTableEditor.register(context, { lsp, ws, tests: () => testsRef }),
+    vscode.commands.registerCommand("rung.test.openTable", (uri?: vscode.Uri) => {
+      const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+      if (target) return vscode.commands.executeCommand("vscode.openWith", target, TEST_TABLE);
+    }),
     vscode.commands.registerCommand("rung.udt.openTable", (uri?: vscode.Uri) => {
       const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
       if (target) return vscode.commands.executeCommand("vscode.openWith", target, UDT_TABLE);
@@ -142,6 +153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(usages);
   registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp, usages });
   const tests = registerTests(context, ws, cli);
+  testsRef = tests;
   if (tests) lens.useTests(tests);
 
   // Refresh views after every CLI command (state.json changes are also picked up by the file watcher).
@@ -171,7 +183,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables };
 }
 
 export async function deactivate(): Promise<void> {

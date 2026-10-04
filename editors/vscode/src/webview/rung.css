@@ -628,3 +628,140 @@
     border-top: 1px solid var(--rg-line);
   }
 }
+
+/* ---------- test table ---------- */
+.rg-app.rg-tests {
+  grid-template-rows: auto 1fr auto;
+}
+.rg-title-icon {
+  align-self: center;
+  color: var(--rg-muted);
+}
+.rg-tests-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+  border-top: 1px solid var(--rg-line);
+}
+.rg-pane-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rg-muted);
+}
+.rg-cases {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--rg-line);
+  padding: var(--rg-s2) 0;
+}
+.rg-cases > .rg-pane-title {
+  padding: 0 var(--rg-s4) var(--rg-s1);
+}
+.rg-cases ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  outline: none;
+}
+.rg-case {
+  display: flex;
+  align-items: center;
+  gap: var(--rg-s2);
+  height: var(--rg-row);
+  padding: 0 var(--rg-s2) 0 var(--rg-s4);
+  cursor: pointer;
+}
+.rg-case:hover {
+  background: var(--rg-hover);
+}
+.rg-case.rg-selected {
+  background: var(--rg-sel-idle-bg);
+  color: var(--rg-sel-idle-fg);
+}
+.rg-cases ul:focus-within .rg-case.rg-selected,
+.rg-cases ul:focus .rg-case.rg-selected {
+  background: var(--rg-sel-bg);
+  color: var(--rg-sel-fg);
+}
+.rg-case-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rg-case-input {
+  flex: 1;
+  height: 20px;
+}
+.rg-case-actions {
+  display: none;
+  gap: 0;
+}
+.rg-case:hover .rg-case-actions,
+.rg-case.rg-selected .rg-case-actions {
+  display: inline-flex;
+}
+.rg-case-actions .rg-icon-btn {
+  height: 20px;
+  min-width: 20px;
+  color: inherit;
+}
+.rg-add-case {
+  margin: var(--rg-s2) var(--rg-s4);
+}
+.rg-steps {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+.rg-steps-head {
+  display: flex;
+  align-items: center;
+  gap: var(--rg-s2);
+  min-width: 0;
+  padding: var(--rg-s2) var(--rg-s4);
+}
+.rg-add-step {
+  display: inline-flex;
+  gap: 0;
+}
+.rg-step-no {
+  display: inline-block;
+  min-width: 18px;
+  color: var(--rg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.rg-pass {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rg-s1);
+  color: var(--vscode-testing-iconPassed, var(--rg-fg));
+}
+.rg-fail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rg-s1);
+  color: var(--vscode-testing-iconFailed, var(--rg-error));
+}
+.rg-fail > span:not(.codicon) {
+  color: var(--rg-fg);
+}
+
+/* narrow editor groups: the cases go above the steps */
+@media (max-width: 640px) {
+  .rg-tests-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .rg-cases {
+    max-height: 30vh;
+    border-right: none;
+    border-bottom: 1px solid var(--rg-line);
+  }
+}
