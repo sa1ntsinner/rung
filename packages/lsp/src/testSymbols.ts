@@ -28,6 +28,31 @@ export function testSymbols(model: DeclModel): TestSymbol[] {
   return out;
 }
 
+const INT_RANGE: Record<string, [number, number]> = {
+  SINT: [-128, 127], INT: [-32768, 32767], DINT: [-2147483648, 2147483647], USINT: [0, 255], UINT: [0, 65535], UDINT: [0, 4294967295],
+  BYTE: [0, 255], WORD: [0, 65535], DWORD: [0, 4294967295],
+};
+
+/** Why a value written in a test does not fit a variable of this type (as rung test checks it), or undefined. */
+export function valueProblem(type: string, value: string): string | undefined {
+  const t = type.trim().toUpperCase();
+  const v = value.trim().replace(/^'(.*)'$|^"(.*)"$/, "$1$2");
+  if (t === "BOOL") return /^(true|false)$/i.test(v) ? undefined : `${type} takes true or false.`;
+  const range = INT_RANGE[t];
+  if (range) {
+    if (!/^[-+]?\d+$/.test(v)) return `${type} takes a whole number.`;
+    const n = Number(v);
+    return n < range[0] || n > range[1] ? `${v} does not fit an ${type} (${range[0]} to ${range[1]}).` : undefined;
+  }
+  if (/^(LINT|ULINT|LWORD)$/.test(t)) return /^[-+]?\d+$/.test(v) ? undefined : `${type} takes a whole number.`;
+  if (/^L?REAL$/.test(t)) return v !== "" && Number.isFinite(Number(v)) ? undefined : `${type} takes a number.`;
+  if (/^L?TIME$/.test(t)) return /^(L?T#)?-?(\d+(\.\d+)?(ms|s|m|h|d)_?)+$/i.test(v) ? undefined : `${type} takes a time with its unit (500ms, 2s, T#1m).`;
+  const len = /^W?STRING\s*\[\s*(\d+)\s*\]$/.exec(t);
+  if (len && v.length > Number(len[1])) return `${type} holds at most ${len[1]} characters.`;
+  if (/^W?CHAR$/.test(t) && v.length !== 1) return `${type} holds one character.`;
+  return undefined;
+}
+
 function distance(a: string, b: string): number {
   const d = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
@@ -51,27 +76,28 @@ export interface KeyProblem {
 }
 
 /** The set:/expect: keys whose first name the block does not have (a global "…" or an instance's member is not checked). */
-export function keyProblems(test: TestModel, symbols: TestSymbol[], temps: string[] = [], block = test.block?.value ?? "The block"): KeyProblem[] {
+/** Why a key of set:/expect: names nothing in the block (a global "…" or an instance's member is not checked), or undefined. */
+export function keyProblem(key: string, symbols: TestSymbol[], temps: string[] = [], block = "The block"): string | undefined {
+  if (key.startsWith('"')) return undefined;
   const heads = new Set(symbols.map((s) => s.name.split(".")[0]!.toLowerCase()));
-  const full = new Set(symbols.map((s) => s.name.toLowerCase()));
-  const tempSet = new Set(temps.map((t) => t.toLowerCase()));
+  const head = key.split(/[.[]/)[0]!.toLowerCase();
+  if (heads.has(head) || symbols.some((s) => s.name.toLowerCase() === key.toLowerCase())) return undefined;
+  const name = key.split(/[.[]/)[0]!;
+  if (temps.some((t) => t.toLowerCase() === head)) return `${block} has no ${name} (a temporary is not kept between cycles)`;
+  const near = [...heads].map((h) => ({ h, d: distance(head, h) })).sort((a, b) => a.d - b.d)[0];
+  const original = near && near.d <= Math.max(1, Math.ceil(head.length / 3)) ? symbols.find((x) => x.name.split(".")[0]!.toLowerCase() === near.h)?.name.split(".")[0] : undefined;
+  return `${block} has no ${name}${original ? ` (did you mean ${original}?)` : ""}`;
+}
+
+/** The set:/expect: keys whose first name the block does not have. */
+export function keyProblems(test: TestModel, symbols: TestSymbol[], temps: string[] = [], block = test.block?.value ?? "The block"): KeyProblem[] {
   const out: KeyProblem[] = [];
   for (const c of test.cases)
     for (const s of c.steps)
       for (const part of ["set", "expect"] as const)
         for (const e of s[part]?.entries ?? []) {
-          if (e.key.startsWith('"')) continue;
-          const head = e.key.split(/[.[]/)[0]!.toLowerCase();
-          if (heads.has(head) || full.has(e.key.toLowerCase())) continue;
-          const name = e.key.split(/[.[]/)[0]!;
-          let message: string;
-          if (tempSet.has(head)) message = `${block} has no ${name} (a temporary is not kept between cycles)`;
-          else {
-            const near = [...heads].map((h) => ({ h, d: distance(head, h) })).sort((a, b) => a.d - b.d)[0];
-            const original = near && near.d <= Math.max(1, Math.ceil(head.length / 3)) ? symbols.find((x) => x.name.split(".")[0]!.toLowerCase() === near.h)?.name.split(".")[0] : undefined;
-            message = `${block} has no ${name}${original ? ` (did you mean ${original}?)` : ""}`;
-          }
-          out.push({ case: c.index, step: s.index, part, key: e.key, message });
+          const message = keyProblem(e.key, symbols, temps, block);
+          if (message) out.push({ case: c.index, step: s.index, part, key: e.key, message });
         }
   return out;
 }

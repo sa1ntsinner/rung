@@ -46,6 +46,10 @@ describe("runTests with a case selector", () => {
       const r = await runTests(root, index, undefined, { file: "tests/latch.test.yaml", index: 1 });
       expect(r).toHaveLength(1);
       expect(r[0]!.cases.map((c) => [c.name, c.index, c.passed, c.error])).toEqual([["restart", 1, true, undefined]]);
+      // its own lines: the case at line 6, not the first case's
+      expect(r[0]!.cases[0]!.line).toBe(6);
+      const failing = await runTests(root, index, undefined, { file: "tests/latch.test.yaml", index: 2 });
+      expect([failing[0]!.cases[0]!.line, failing[0]!.cases[0]!.failures[0]!.line]).toEqual([11, 14]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

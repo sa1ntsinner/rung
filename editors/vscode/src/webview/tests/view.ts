@@ -90,6 +90,8 @@ export class RgTests extends LitElement {
   /** the case whose name is being typed */
   declare renaming: number | undefined;
   private req = 0;
+  /** a row to make active once the next model arrives (a step that moved) */
+  private follow: string | undefined;
   private readonly onMessage = (e: MessageEvent) => this.receive(e.data as TestHostToView);
 
   constructor() {
@@ -127,6 +129,14 @@ export class RgTests extends LitElement {
       this.context = m.context;
       this.state = undefined;
       if (this.selected >= m.file.model.cases.length) this.selected = Math.max(0, m.file.model.cases.length - 1);
+      const follow = this.follow;
+      this.follow = undefined;
+      if (follow)
+        void this.updateComplete.then(async () => {
+          const g = this.querySelector<RgTreegrid<StepRow>>("rg-treegrid");
+          await g?.updateComplete;
+          g?.reveal(follow);
+        });
     } else if (m.kind === "state") this.state = m.state;
     else if (m.kind === "result") {
       if (!m.ok && m.reason) this.notice = m.reason;
@@ -320,7 +330,23 @@ export class RgTests extends LitElement {
         )}
       </ul>
       <button class="rg-link rg-add-case" data-action="add-case" @click=${() => this.edit({ op: "addCase", name: freeName("new case") })}><span class="codicon codicon-add"></span>Add case</button>
+      ${this.renderStubs()}
     </nav>`;
+  }
+
+  /** What stands in for code the simulator does not run: shown, edited in the text. */
+  private renderStubs() {
+    const stubs = this.file?.model.stubs ?? [];
+    if (!stubs.length) return nothing;
+    return html`<div class="rg-pane-title rg-stubs-title" title="What stands in for code the simulator does not run (docs/testing.md)">Stubs</div>
+      <ul class="rg-stubs">
+        ${stubs.map(
+          (s) => html`<li class="rg-stub" title="Show in the text" @click=${() => this.post({ v: 1, kind: "openText", line: s.line })}>
+            <span class="codicon codicon-debug-disconnect rg-muted"></span><span class="rg-mono">${s.name}</span>
+            <span class="rg-muted rg-stub-outputs">${s.value ? s.value.value : s.entries.map((e) => e.key).join(", ")}</span>
+          </li>`,
+        )}
+      </ul>`;
   }
 
   private casesKey(e: KeyboardEvent, cases: TCase[]) {
@@ -388,7 +414,10 @@ export class RgTests extends LitElement {
           @rg-delete=${(e: CustomEvent<{ rowId: string }>) => this.removeRow(e.detail.rowId)}
           @rg-move=${(e: CustomEvent<{ rowId: string; by: -1 | 1 }>) => {
             const row = this.findStepRow(e.detail.rowId);
-            if (row && !row.part) this.edit({ op: "moveStep", case: c.index, step: row.step, by: e.detail.by });
+            if (!row || row.part) return;
+            this.edit({ op: "moveStep", case: c.index, step: row.step, by: e.detail.by });
+            // the moved step keeps the keyboard: Alt+Up again moves it further
+            this.follow = `s${row.step + e.detail.by}`;
           }}
           @rg-open=${(e: CustomEvent<{ rowId: string }>) => {
             const row = this.findStepRow(e.detail.rowId);

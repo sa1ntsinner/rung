@@ -19,7 +19,8 @@ export function defaultFor(type: string): string {
   if (/^l?real$/i.test(t)) return "0.0";
   if (/^l?time$/i.test(t)) return "T#0ms";
   if (/^(s|u|us|d|ud|l|ul)?int$|^(byte|word|dword|lword)$/i.test(t)) return "0";
-  if (/^w?string/i.test(t)) return "''";
+  // empty text: the table writes it as '' (quoting is the language server's)
+  if (/^w?(string|char)/i.test(t)) return "";
   return "0";
 }
 
@@ -30,7 +31,10 @@ class TestTable implements vscode.Disposable {
   private ready = false;
   private seq = 0;
   private timer: NodeJS.Timeout | undefined;
-  private runs = new Map<number, CaseRun>();
+  /** the last run of each case, by its name (a case's place changes when cases are added or deleted) */
+  private runs = new Map<string, CaseRun>();
+  /** the view's messages, one after another: Run waits for the edit sent before it */
+  private queue: Promise<unknown> = Promise.resolve();
   private running: number[] = [];
   private last: TestHostToView | undefined;
   private readonly subs: vscode.Disposable[] = [];
@@ -43,7 +47,7 @@ class TestTable implements vscode.Disposable {
     const uri = doc.uri.toString();
     this.subs.push(
       panel.webview.onDidReceiveMessage((m: unknown) => {
-        if (isTestViewToHost(m)) void this.handle(m);
+        if (isTestViewToHost(m)) this.queue = this.queue.then(() => this.handle(m)).catch(() => undefined);
       }),
       panel.onDidChangeViewState((e) => {
         if (!e.webviewPanel.visible) this.ready = false;
@@ -65,10 +69,10 @@ class TestTable implements vscode.Disposable {
             // results of the cases that ran replace theirs; the others keep their last run
             for (const [i, c] of r.cases.entries()) {
               const index = c.index ?? i;
-              this.runs.set(index, { index, passed: c.passed, ...(c.error ? { error: c.error } : {}), ...(c.errorStep ? { errorStep: c.errorStep } : {}), failures: c.failures.map((x) => ({ step: x.step, name: x.name, expected: x.expected, actual: x.actual })) });
+              this.runs.set(c.name, { index, passed: c.passed, ...(c.error ? { error: c.error } : {}), ...(c.errorStep ? { errorStep: c.errorStep } : {}), failures: c.failures.map((x) => ({ step: x.step, name: x.name, expected: x.expected, actual: x.actual })) });
             }
           }
-          this.post({ v: 1, kind: "runs", running: this.running, runs: [...this.runs.values()] });
+          this.postRuns();
         }),
       );
   }
@@ -81,8 +85,11 @@ class TestTable implements vscode.Disposable {
   /** A message as if the table sent it; the answer it would get (for the integration tests). */
   async receive(m: unknown): Promise<TestHostToView | undefined> {
     if (!isTestViewToHost(m)) return undefined;
+    await this.queue;
     this.last = undefined;
-    await this.handle(m);
+    const done = this.handle(m);
+    this.queue = done.catch(() => undefined);
+    await done;
     return this.last;
   }
 
@@ -110,7 +117,17 @@ class TestTable implements vscode.Disposable {
     this.file = file;
     const rel = (this.deps.ws.rel(this.doc.uri.fsPath) ?? vscode.workspace.asRelativePath(this.doc.uri)).replace(/\\/g, "/");
     this.post({ v: 1, kind: "model", file, context: { file: rel, dirty: this.doc.isDirty } });
-    if (this.runs.size || this.running.length) this.post({ v: 1, kind: "runs", running: this.running, runs: [...this.runs.values()] });
+    if (this.runs.size || this.running.length) this.postRuns();
+  }
+
+  /** The last runs, placed at the cases' places in the model shown now (a case renamed or deleted has none). */
+  private postRuns() {
+    const cases = this.file?.model.cases ?? [];
+    const runs = cases.flatMap((c) => {
+      const r = c.name && this.runs.get(c.name.value);
+      return r ? [{ ...r, index: c.index }] : [];
+    });
+    this.post({ v: 1, kind: "runs", running: this.running, runs });
   }
 
   private async handle(m: TestViewToHost) {

@@ -693,8 +693,8 @@ describe("rung extension on a fake-bridge workspace", function () {
       );
       assert.equal(cli.runs.find((r) => r.args[0] === "download")?.result.code, 3);
       assert.ok(vscode.window.terminals.some((t) => t.name === "rung download PLC_1"));
-      const downloads = fakeDb().downloads!;
-      assert.equal(downloads.length, 2);
+      // the second download runs in its terminal: it is recorded once it has run
+      const downloads = await waitFor("both downloads reached the fake PLC", () => (fakeDb().downloads?.length === 2 ? fakeDb().downloads! : undefined), 10_000);
       assert.deepEqual(downloads[0]!.allow, []);
       assert.deepEqual(downloads[1]!.allow, ["stop-cpu"]);
       assert.equal(downloads[1]!.target.pcInterface, "Ethernet");

@@ -46,12 +46,19 @@ export interface TCase {
   range: TRange;
   line: number;
   steps: TStep[];
+  /** the steps: list itself, where new steps go */
   stepsRange?: TRange;
+  /** written as { name: …, steps: … } (else one key per line) */
+  flow: boolean;
+  /** its steps written as [ … ] */
+  stepsFlow: boolean;
 }
 
 export interface TStub {
   name: string;
   nameRange: TRange;
+  /** line of its name, from 0 */
+  line: number;
   entries: TEntry[];
   value?: TScalar;
 }
@@ -62,7 +69,10 @@ export interface TestModel {
   cycle?: TScalar;
   stubs: TStub[];
   cases: TCase[];
+  /** the cases: list itself, where new cases go */
   casesRange?: TRange;
+  /** the cases written as [ … ] */
+  casesFlow?: boolean;
   errors: { message: string; line: number; column: number }[];
 }
 

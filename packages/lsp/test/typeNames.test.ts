@@ -23,6 +23,27 @@ describe("rung/testSkeleton", () => {
   });
 });
 
+describe("rung/newObject", () => {
+  it("knows the PLC's names whatever its folder is called on disk, and tag tables in every unit", async () => {
+    const s = await monitorServer(undefined, {
+      setup: async (root) => {
+        await mkdir(join(root, "plc", "PLC%2F1", "blocks", "Old"), { recursive: true });
+        await writeFile(join(root, "plc", "PLC%2F1", "blocks", "Old", "Foo.scl"), 'FUNCTION_BLOCK "Foo"\nBEGIN\nEND_FUNCTION_BLOCK\n');
+        await mkdir(join(root, "plc", "PLC%2F1", "units", "U1", "tags", "Old"), { recursive: true });
+        await writeFile(join(root, "plc", "PLC%2F1", "units", "U1", "tags", "Old", "Motor%2F1.tags.st"), "VAR_GLOBAL\nEND_VAR\n");
+      },
+    });
+    try {
+      const ask = (p: Record<string, unknown>) => s.client.sendRequest<{ reason?: string; path?: string }>("rung/newObject", p);
+      expect(await ask({ kind: "FB", name: "foo", plc: "PLC/1", groups: ["New"] })).toEqual({ reason: "PLC/1 already has a block foo." });
+      expect(await ask({ kind: "TAGS", name: "Motor/1", plc: "PLC/1", groups: ["New"] })).toEqual({ reason: "PLC/1 already has a tag table Motor/1." });
+      expect(await ask({ kind: "FB", name: "Bar", plc: "PLC/1" })).toMatchObject({ path: "plc/PLC%2F1/blocks/Bar.scl" });
+    } finally {
+      await s.dispose();
+    }
+  });
+});
+
 describe("rung/typeNames", () => {
   it("lists the types the file's PLC can use, not another PLC's", async () => {
     const s = await monitorServer(undefined, {

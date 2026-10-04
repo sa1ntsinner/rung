@@ -62,12 +62,16 @@ export async function testKeyEdits(root: string, block: string, name: string, ne
 export async function testFilesOf(root: string, block: string, device?: string): Promise<string[]> {
   const files = await readdir(join(root, "tests"), { recursive: true }).catch(() => [] as string[]);
   const ofBlock = new RegExp(`^block:\\s*["']?${escape(block)}["']?\\s*(#.*)?$`, "im");
+  const plcs = new Set((await readdir(join(root, "plc")).catch(() => [] as string[])).map((p) => String(p).toUpperCase()));
   const out: string[] = [];
   for (const f of files.map(String).filter((f) => /\.test\.ya?ml$/i.test(f))) {
     const text = await readFile(join(root, "tests", f), "utf8").catch(() => "");
     if (!ofBlock.test(text)) continue;
     const plc = /^plc:\s*["']?([^"'#\n]*?)["']?\s*(#.*)?$/im.exec(text)?.[1]?.trim();
     if (device && plc && plc.toUpperCase() !== device.toUpperCase()) continue;
+    // no plc: in the file, kept under tests/<PLC>/: that PLC's, as rung test reads it
+    const folder = f.split(/[\\/]/).length > 1 ? f.split(/[\\/]/)[0]! : undefined;
+    if (device && !plc && folder && plcs.has(folder.toUpperCase()) && folder.toUpperCase() !== device.toUpperCase()) continue;
     out.push(`tests/${f.split("\\").join("/")}`);
   }
   return out;

@@ -137,6 +137,19 @@ describe("test table", () => {
     expect(cell(v, "s2/expect/Runing", "result").textContent).toContain("got false");
   });
 
+  it("the stubs are listed under the cases with their outputs; a click shows one in the text", async () => {
+    const { RgTests } = await import("../../src/webview/tests/view");
+    document.body.innerHTML = "";
+    const v = new RgTests();
+    document.body.append(v);
+    const stubs = [{ name: "RDREC", nameRange: R, line: 3, entries: [entry("VALID", "false"), entry("LEN", "4")] }, { name: '"Rack~Gateway"', nameRange: R, line: 4, entries: [], value: { value: "257", range: R } }];
+    await send(v, { v: 1, kind: "model", file: { ...FILE, model: { ...FILE.model, stubs } }, context: { file: "f", dirty: false } });
+    posted.length = 0;
+    expect([...v.querySelectorAll(".rg-stub")].map((s) => s.textContent!.replace(/\s+/g, " ").trim())).toEqual(["RDREC VALID, LEN", '"Rack~Gateway" 257']);
+    v.querySelector<HTMLElement>(".rg-stub")!.click();
+    expect(posted).toEqual([{ v: 1, kind: "openText", line: 3 }]);
+  });
+
   it("a YAML error is said with its line and a way to the text", async () => {
     const v = await mount();
     await send(v, { v: 1, kind: "model", file: { ...FILE, model: { ...FILE.model, errors: [{ message: "Missing , or }", line: 4, column: 2 }] } }, context: { file: "f", dirty: false } });

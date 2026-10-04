@@ -61,11 +61,17 @@ export interface TCase {
   steps: TStep[];
   /** the steps: list itself, where new steps go */
   stepsRange?: TRange;
+  /** written as { name: …, steps: … } (else one key per line) */
+  flow: boolean;
+  /** its steps written as [ … ] */
+  stepsFlow: boolean;
 }
 
 export interface TStub {
   name: string;
   nameRange: TRange;
+  /** line of its name, from 0 */
+  line: number;
   entries: TEntry[];
   /** a hardware identifier: a number, not a map */
   value?: TScalar;
@@ -79,6 +85,8 @@ export interface TestModel {
   cases: TCase[];
   /** the cases: list itself, where new cases go */
   casesRange?: TRange;
+  /** the cases written as [ … ] */
+  casesFlow?: boolean;
   errors: { message: string; line: number; column: number }[];
 }
 
@@ -128,20 +136,23 @@ export function testModel(text: string): TestModel {
       model.stubs = p.value.items.filter(isPair).map((sp) => ({
         name: keyOf(sp),
         nameRange: r(sp.key as Node),
+        line: lineOf(r(sp.key as Node).start),
         entries: isMap(sp.value) ? entries(sp.value, text) : [],
         ...(isScalar(sp.value) ? { value: scalar(sp.value)! } : {}),
       }));
     } else if (k === "cases" && isSeq(p.value)) {
       model.casesRange = r(p.value);
+      if (p.value.flow) model.casesFlow = true;
       model.cases = p.value.items.map((c, index): TCase => {
         const node = c as Node;
-        const tc: TCase = { index, range: r(node), line: lineOf(r(node).start), steps: [] };
+        const tc: TCase = { index, range: r(node), line: lineOf(r(node).start), steps: [], flow: isMap(c) && !!c.flow, stepsFlow: false };
         if (!isMap(c)) return tc;
         const name = scalar(c.get("name", true));
         if (name) tc.name = name;
         const steps = c.get("steps", true);
         if (isSeq(steps)) {
           tc.stepsRange = r(steps);
+          tc.stepsFlow = !!steps.flow;
           tc.steps = steps.items.map((s, si): TStep => {
             const sn = s as Node;
             const step: TStep = { index: si, flow: isMap(s) && !!s.flow, range: r(sn), line: lineOf(r(sn).start), unknown: [] };

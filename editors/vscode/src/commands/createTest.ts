@@ -5,6 +5,7 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import type { Lsp } from "../lsp";
 import type { RungWorkspace } from "../workspace";
+import { createNew } from "./newObject";
 
 interface Skeleton {
   path: string;
@@ -40,13 +41,11 @@ export async function createTest(lsp: Lsp, ws: RungWorkspace, uri?: vscode.Uri, 
     return pick ? open(pick) : undefined;
   }
   const file = vscode.Uri.file(join(root, s.path));
-  const exists = await vscode.workspace.fs.stat(file).then(() => true, () => false);
-  if (exists) {
-    // a file by that name tests something else: never written over
+  // created in one step that refuses a file already there: a file by that name tests something else
+  if (!(await createNew(file, s.text))) {
     void vscode.window.showWarningMessage(`${s.path} exists and tests another block. Rename it or add a case to it.`);
     return open(s.path);
   }
-  await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(s.text));
   // the cursor on the values to change: the expect line, else the case's name
   const lines = s.text.split("\n");
   const expectLine = lines.findIndex((l) => /^\s*- expect:/.test(l));

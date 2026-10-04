@@ -157,7 +157,8 @@ function planNewSection(text: string, model: DeclModel, title: string, rows: New
   } else {
     // no sections yet: after the block's VERSION line (or its header and attributes)
     const block = model.block!.range;
-    const head = text.slice(block.start, block.end);
+    // comments blanked out (same offsets): a VERSION or BEGIN in a comment is no place for a section
+    const head = text.slice(block.start, block.end).replace(/\(\*[\s\S]*?\*\)|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|'(?:[^']|'')*'/g, (m) => m.replace(/[^\r\n]/g, " "));
     const version = /^[ \t]*VERSION\s*:.*$/m.exec(head);
     const begin = /^[ \t]*BEGIN\b/m.exec(head);
     at = version ? lineEnd(text, block.start + version.index) : begin ? block.start + begin.index : lineEnd(text, block.start);

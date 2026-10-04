@@ -670,12 +670,14 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   for (const name of Object.keys(spec.stubs ?? {})) {
     const calls = stubCalls.get(name.replace(/^"|"$/g, "").toUpperCase()) ?? 0;
     if (calls) stubbed.push({ name, calls, ...(runnable(seen, name.replace(/^"|"$/g, "")) ? { runs: true as const } : {}) });
-    else if (!results.some((c) => c.error)) warnings.push(`stub ${name} was never called: a typo, or code these cases do not reach`);
+    // with one case selected the others did not run: a stub only they call is not unused
+    else if (only === undefined && !results.some((c) => c.error)) warnings.push(`stub ${name} was never called: a typo, or code these cases do not reach`);
   }
   const plc = deviceOfUri(g.uri);
   const at = testPositions(text);
   for (const [ci, r] of results.entries()) {
-    const p = at[ci];
+    // a selected case (--case) keeps its own place in the file
+    const p = at[r.index ?? ci];
     if (!p) continue;
     r.line = p.line;
     for (const f of r.failures) if (p.steps[f.step - 1]) f.line = p.steps[f.step - 1];

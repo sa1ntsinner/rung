@@ -36,9 +36,10 @@ import { codeActions } from "./actions.js";
 import { testFilesOf, testKeyEdits } from "./testkeys.js";
 import { testSkeleton } from "./testSkeleton.js";
 import { newObject, type NewObjectRequest } from "./newObject.js";
+import { escapeSegment, unescapeSegment } from "@rung/core";
 import { testModel, type TestModel } from "./testModel.js";
 import { planTestEdit, type TestOp } from "./testEdit.js";
-import { keyProblems, testSymbols } from "./testSymbols.js";
+import { keyProblem, keyProblems, testSymbols, valueProblem } from "./testSymbols.js";
 
 /** a rung test file: kept as text for the test table, never read as SCL */
 const TEST_FILE = /\.test\.ya?ml$/i;
@@ -322,7 +323,24 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (!doc || !TEST_FILE.test(p.textDocument.uri)) return { ok: false, reason: "The file is not open" };
     if (p.textDocument.version !== doc.version) return { ok: false, reason: "The file changed. Review this value again." };
     const text = doc.getText();
-    const plan = planTestEdit(text, testModel(text), p.op);
+    const model = testModel(text);
+    // what rung test would refuse (a name the block does not have, a value its type cannot hold) is not written
+    const block = blockUnderTest(model, p.textDocument.uri);
+    const symbols = block ? testSymbols(block) : [];
+    const typeOf = (key: string) => symbols.find((s) => s.name.toLowerCase() === key.toLowerCase())?.type;
+    const op = p.op;
+    if (block && (op.op === "setValue" || op.op === "addEntry" || op.op === "setKey")) {
+      const key = op.op === "setKey" ? op.newKey : op.key;
+      const temps = block.sections.filter((s) => s.title === "Temp").flatMap((s) => s.rows.map((r) => r.name));
+      const unknown = keyProblem(key.trim(), symbols, temps, block.block?.name);
+      if (unknown) return { ok: false, reason: unknown };
+      const current = model.cases[op.case]?.steps[op.step]?.[op.part]?.entries.find((e) => e.key === op.key)?.value;
+      const value = op.op === "setKey" ? current : op.value;
+      const type = typeOf(key.trim());
+      const bad = type && value !== undefined ? valueProblem(type, value) : undefined;
+      if (bad) return { ok: false, reason: bad };
+    }
+    const plan = planTestEdit(text, model, op, { isString: (key) => /^W?(STRING|CHAR)\b/i.test(typeOf(key) ?? "") });
     if (!plan.ok) return plan;
     return { ok: true, version: doc.version, edits: plan.edits.map((e) => ({ range: { start: doc.positionAt(e.start), end: doc.positionAt(e.end) }, old: e.old, newText: e.text })) };
   });
@@ -330,12 +348,27 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.onRequest("rung/newObject", async (p: NewObjectRequest) => {
     if (!root) return { reason: "No rung workspace is open." };
     if (!p || typeof p.name !== "string" || typeof p.plc !== "string" || !["FB", "FC", "DB", "UDT", "TAGS"].includes(p.kind)) return { reason: "Not a new object." };
-    const plc = p.plc.toLowerCase();
-    const inPlc = index.allGlobals().filter((g) => deviceOfUri(g.uri)?.toLowerCase() === plc);
+    // the PLC's folder as written on disk (PLC%2F1 for "PLC/1"), as the index knows it
+    let disk: string;
+    try {
+      disk = escapeSegment(p.plc);
+    } catch {
+      return { reason: `"${p.plc}" is not a PLC name.` };
+    }
+    const inPlc = index.allGlobals().filter((g) => deviceOfUri(g.uri)?.toLowerCase() === disk.toLowerCase());
     const names = new Set(inPlc.filter((g) => g.kind === "FB" || g.kind === "FC" || g.kind === "DB" || g.kind === "OB").map((g) => g.name.toLowerCase()));
     const types = new Set(inPlc.filter((g) => g.kind === "UDT").map((g) => g.name.toLowerCase()));
-    const tagsDir = join(root, "plc", p.plc, ...(p.unit ? ["units", p.unit] : []), "tags");
-    const tables = new Set((await readdir(tagsDir, { recursive: true }).catch(() => [] as string[])).map(String).filter((f) => /\.tags\.(st|xml)$/i.test(f)).map((f) => f.replace(/^.*[\\/]/, "").replace(/\.tags\.(st|xml)$/i, "").toLowerCase()));
+    // tag table names are unique in the whole PLC, its software units included
+    const tables = new Set<string>();
+    for (const f of (await readdir(join(root, "plc", disk), { recursive: true }).catch(() => [] as string[])).map(String)) {
+      const m = /(?:^|[\\/])tags[\\/](?:.*[\\/])?([^\\/]+)\.tags\.(st|xml)$/i.exec(f);
+      if (!m) continue;
+      try {
+        tables.add(unescapeSegment(m[1]!).toLowerCase());
+      } catch {
+        tables.add(m[1]!.toLowerCase());
+      }
+    }
     const draft = newObject(p, { names, types, tables, paths: [] });
     if ("reason" in draft) return draft;
     // the files already in its folder (a name that differs only in letter case is the same file on Windows)
@@ -392,6 +425,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   });
   connection.onRenameRequest(async (p) => {
     const uri = p.textDocument.uri;
+    // a test file's keys follow a parameter's rename; renaming from the test file is the YAML editor's
+    if (TEST_FILE.test(uri)) return null;
     const offset = offsetOf(uri, p.position);
     const target = renameTarget(index, uri, offset);
     if (target) {

@@ -60,7 +60,12 @@ export class RungTests implements vscode.Disposable {
   /** Runs one case of a file (or the whole file) through the test explorer, as if picked there. */
   async runIn(uri: vscode.Uri, caseIndex?: number): Promise<void> {
     const file = await this.add(uri);
-    const item = caseIndex === undefined ? file : file.children.get(`${file.id}#${caseIndex}`);
+    let item = caseIndex === undefined ? file : file.children.get(`${file.id}#${caseIndex}`);
+    // a case the explorer's quick reading did not list (cases written as [ … ]): rung test knows it
+    if (!item && caseIndex !== undefined) {
+      item = this.ctrl.createTestItem(`${file.id}#${caseIndex}`, `case ${caseIndex + 1}`, uri);
+      file.children.add(item);
+    }
     if (!item) return;
     await this.run(new vscode.TestRunRequest([item]), new vscode.CancellationTokenSource().token);
   }

@@ -9,11 +9,21 @@ const REAL = /^L?REAL$/i;
 const TIME = /^L?TIME$/i;
 
 /** A YAML value for a type's default or a source start value; undefined for a type a test sets member by member. */
+/** A whole number literal's value: 7, INT#7, 16#FF, DINT#-5, 2#1010 (undefined for anything else). */
+function integer(literal: string): string | undefined {
+  const m = /^(?:[A-Z]+#)?([-+]?)(?:(2|8|16)#)?([0-9A-F_]+)$/i.exec(literal);
+  if (!m) return undefined;
+  const n = parseInt(m[3]!.replace(/_/g, ""), m[2] ? Number(m[2]) : 10);
+  return Number.isFinite(n) ? String(m[1] === "-" ? -n : n) : undefined;
+}
+
 function value(row: DeclRow): string | undefined {
   const t = row.type.trim();
-  const start = row.start?.trim();
+  const start = row.start?.trim().replace(/^BOOL#/i, "");
   if (/^BOOL$/i.test(t)) return start ? String(/^(TRUE|1)$/i.test(start)) : "false";
-  if (INTEGER.test(t)) return start && /^-?\d+$/.test(start) ? start : "0";
+  if (INTEGER.test(t)) return (start && integer(start)) ?? "0";
+  // a string or a character: SCL's '…' with '' inside is also YAML's single-quoted text
+  if (/^W?(STRING|CHAR)\b/i.test(t)) return start && /^'(?:[^']|'')*'$/.test(start) ? start : "''";
   if (REAL.test(t)) return start && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(start) ? start : "0.0";
   if (TIME.test(t)) return start && /^L?T#[\w.]+$/i.test(start) ? start : "T#0ms";
   return undefined;

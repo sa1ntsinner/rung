@@ -34,7 +34,7 @@ describe("testModel", () => {
     expect(m.block?.value).toBe("Fx_Motor");
     expect(slice(SRC, m.block?.range)).toBe("Fx_Motor");
     expect(m.cycle?.value).toBe("10ms");
-    expect(m.stubs.map((s) => [s.name, s.entries.map((e) => [e.key, e.value])])).toEqual([["RDREC", [["VALID", "false"], ["LEN", "4"]]]]);
+    expect(m.stubs.map((s) => [s.name, s.line, s.entries.map((e) => [e.key, e.value])])).toEqual([["RDREC", 4, [["VALID", "false"], ["LEN", "4"]]]]);
     expect(m.cases.map((c) => c.name?.value)).toEqual(["starts and latches", "stops: on demand"]);
     expect(slice(SRC, m.cases[1]!.name!.range)).toBe("'stops: on demand'");
   });

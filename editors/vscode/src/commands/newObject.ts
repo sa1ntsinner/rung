@@ -47,6 +47,13 @@ async function pick<T extends vscode.QuickPickItem>(items: T[], options: vscode.
   return vscode.window.showQuickPick(items, { ...options, title: `New object (${options.step}/${options.steps})`, ignoreFocusOut: true });
 }
 
+/** Creates a file with its text, or refuses when the file exists: never a check and then a write. */
+export async function createNew(file: vscode.Uri, text: string): Promise<boolean> {
+  const edit = new vscode.WorkspaceEdit();
+  edit.createFile(file, { overwrite: false, ignoreIfExists: false, contents: new TextEncoder().encode(text) });
+  return vscode.workspace.applyEdit(edit).then((ok) => ok, () => false);
+}
+
 export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vscode.Uri | undefined> {
   if (!ws.root) {
     void vscode.window.showWarningMessage("New objects are made in a rung workspace (a folder with rung.toml).");
@@ -124,12 +131,11 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
     return undefined;
   }
   const file = vscode.Uri.file(join(ws.root, answer.path));
-  // a file that appeared meanwhile is never written over
-  if (await vscode.workspace.fs.stat(file).then(() => true, () => false)) {
+  // created in one step that refuses a file already there (one that appeared meanwhile is never written over)
+  if (!(await createNew(file, answer.text))) {
     void vscode.window.showWarningMessage(`${answer.path} is already there.`);
     return undefined;
   }
-  await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(answer.text));
   if (k.kind === "UDT") await vscode.commands.executeCommand("vscode.openWith", file, "rung.udtTable");
   else await vscode.window.showTextDocument(file, { preview: false });
   void vscode.window.setStatusBarMessage(`rung: ${answer.path} created; rung sync (or rung watch) brings it into TIA Portal`, 5000);

@@ -774,3 +774,29 @@
 .rg-band-ghost:hover .rg-band-title {
   opacity: 1;
 }
+.rg-stubs-title {
+  margin-top: var(--rg-s4);
+  padding: 0 var(--rg-s4) var(--rg-s1);
+}
+.rg-stubs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rg-stub {
+  display: flex;
+  align-items: center;
+  gap: var(--rg-s2);
+  height: var(--rg-row);
+  padding: 0 var(--rg-s2) 0 var(--rg-s4);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.rg-stub:hover {
+  background: var(--rg-hover);
+}
+.rg-stub-outputs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

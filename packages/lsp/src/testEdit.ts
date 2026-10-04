@@ -45,7 +45,7 @@ const column = (text: string, at: number) => at - lineStart(text, at);
  * A scalar as YAML reads it back unchanged: plain when it can be, else single-quoted. In a flow map ({ … }) commas
  * and brackets need quotes too. Values are kept as typed (true, 1.5, T#500ms, -3); only syntax decides the quotes.
  */
-export function yamlScalar(value: string, flow: boolean): string {
+export function yamlScalar(value: string, flow: boolean, asString = false): string {
   const t = value.trim();
   if (!t) return "''";
   const plain =
@@ -53,16 +53,22 @@ export function yamlScalar(value: string, flow: boolean): string {
     !(/^-/.test(t) && !/^-\d/.test(t)) &&
     !/:(\s|$)|\s#|[\r\n\t]/.test(t) &&
     !(flow && /[,[\]{}]/.test(t));
-  return plain ? t : `'${t.replace(/'/g, "''")}'`;
+  // a text that YAML would read as a number, a Boolean or null stays text where the value is one (a name, a STRING)
+  return plain && !(asString && NOT_TEXT.test(t)) ? t : `'${t.replace(/'/g, "''")}'`;
 }
 
+/** what YAML's core schema reads as something other than a string */
+const NOT_TEXT = /^(true|false|null|~|[-+]?(\d[\d_]*|0x[0-9a-f]+|0o[0-7]+)(\.\d*)?([eE][-+]?\d+)?|[-+]?\.(inf|nan)|[-+]?\.\d+([eE][-+]?\d+)?)$/i;
+
 /** A new value in the quotes the old one was written in ("…" stays "…", '…' stays '…'), else as yamlScalar. */
-function styled(old: string, value: string, flow: boolean): string {
+function styled(old: string, value: string, flow: boolean, asString = false): string {
   const t = value.trim();
   if (old.startsWith('"')) return JSON.stringify(t);
   if (old.startsWith("'")) return `'${t.replace(/'/g, "''")}'`;
-  return yamlScalar(t, flow);
+  return yamlScalar(t, flow, asString);
 }
+
+const FLOW = "These cases or steps are written on one line ([ … ]): change their order or number in the text.";
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -91,7 +97,8 @@ function parts(step: TStep): { name: string; start: number; end: number }[] {
   return out.sort((a, b) => a.start - b.start);
 }
 
-export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPlan {
+/** isString: whether a key names a STRING/CHAR variable (its value is written as text whatever it looks like) */
+export function planTestEdit(text: string, model: TestModel, op: TestOp, opts: { isString?: (key: string) => boolean } = {}): TestPlan {
   const ok = (...edits: TestEdit[]): TestPlan => ({ ok: true, edits });
   const edit = (start: number, end: number, t: string): TestEdit => ({ start, end, old: text.slice(start, end), text: t });
   const fail = (reason: string): TestPlan => ({ ok: false, reason });
@@ -104,16 +111,20 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPl
     if (model.cases.some((c) => c.name && same(c.name.value, name))) return fail(`The file already has a case "${name}".`);
     const ref = model.cases[op.after ?? model.cases.length - 1];
     if (!ref) return fail("The file has no cases: list to add to. Add the first case in the text.");
+    if (model.casesFlow || ref.flow) return fail(FLOW);
     const keyCol = column(text, ref.range.start);
     const dash = " ".repeat(Math.max(0, keyCol - 2));
     const stepDash = ref.steps[0] ? indentAt(text, ref.steps[0].range.start) : " ".repeat(keyCol + 2);
     const at = region(text, ref.range, 0).end;
     const lead = at === text.length && text.length && !text.endsWith("\n") ? eol : "";
-    return ok(edit(at, at, `${lead}${dash}- name: ${yamlScalar(name, false)}${eol}${" ".repeat(keyCol)}steps:${eol}${stepDash}- cycle: 1${eol}`));
+    return ok(edit(at, at, `${lead}${dash}- name: ${yamlScalar(name, false, true)}${eol}${" ".repeat(keyCol)}steps:${eol}${stepDash}- cycle: 1${eol}`));
   }
 
   const c: TCase | undefined = model.cases[op.case];
   if (!c) return fail(`No case ${op.case + 1}.`);
+  // cases or steps written on one line ([ … ], { … }): their values edit, their structure is the text's
+  const structural = op.op === "duplicateCase" || op.op === "removeCase" ? model.casesFlow || c.flow : op.op === "addStep" || op.op === "removeStep" || op.op === "moveStep" ? c.flow || c.stepsFlow || model.casesFlow : false;
+  if (structural) return fail(FLOW);
   const caseFloor = c.range.start;
 
   if (op.op === "renameCase" || op.op === "duplicateCase") {
@@ -121,12 +132,12 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPl
     if (!name) return fail("A case needs a name.");
     if (model.cases.some((x) => x !== c && x.name && same(x.name.value, name)) || (op.op === "duplicateCase" && c.name && same(c.name.value, name))) return fail(`The file already has a case "${name}".`);
     if (!c.name) return fail("This case has no name: line to change. Edit it in the text.");
-    if (op.op === "renameCase") return ok(edit(c.name.range.start, c.name.range.end, yamlScalar(name, false)));
+    if (op.op === "renameCase") return ok(edit(c.name.range.start, c.name.range.end, yamlScalar(name, false, true)));
     // the copy: the case's lines as they are, with the new name
     const from = lineStart(text, c.range.start);
     const to = lineEnd(text, Math.max(c.range.start, c.range.end - 1));
     let copy = text.slice(from, to);
-    copy = copy.slice(0, c.name.range.start - from) + yamlScalar(name, false) + copy.slice(c.name.range.end - from);
+    copy = copy.slice(0, c.name.range.start - from) + yamlScalar(name, false, true) + copy.slice(c.name.range.end - from);
     if (!copy.endsWith("\n")) copy += eol;
     const lead = to === text.length && !text.endsWith("\n") ? eol : "";
     return ok(edit(to, to, lead + copy));
@@ -172,7 +183,8 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPl
     const lastNoEol = !tb.endsWith("\n");
     if (lastNoEol) tb += eol;
     if (lastNoEol) ta = ta.replace(/\r?\n$/, "");
-    return ok(edit(ga.start, gb.end, tb + ta));
+    // what stands between them (a blank line) stays between them
+    return ok(edit(ga.start, gb.end, tb + text.slice(ga.end, gb.start) + ta));
   }
 
   /** Removes a whole part (set:, cycle: …) from the step, in the step's own style. */
@@ -221,16 +233,17 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPl
     const key = op.key.trim();
     if (!key) return fail("A name is needed.");
     if (map?.entries.some((e) => same(e.key, key))) return fail(`This step already ${op.part === "set" ? "sets" : "expects"} ${key}.`);
-    if (!map) return addPart(`${op.part}: { ${yamlScalar(key, true)}: ${yamlScalar(op.value, true)} }`);
+    const str = !!opts.isString?.(key);
+    if (!map) return addPart(`${op.part}: { ${yamlScalar(key, true, true)}: ${yamlScalar(op.value, true, str)} }`);
     const last = map.entries[map.entries.length - 1];
     if (map.flow) {
-      if (!last) return ok(edit(map.range.start, map.range.end, `{ ${yamlScalar(key, true)}: ${yamlScalar(op.value, true)} }`));
-      return ok(edit(last.valueRange.end, last.valueRange.end, `, ${yamlScalar(key, true)}: ${yamlScalar(op.value, true)}`));
+      if (!last) return ok(edit(map.range.start, map.range.end, `{ ${yamlScalar(key, true, true)}: ${yamlScalar(op.value, true, str)} }`));
+      return ok(edit(last.valueRange.end, last.valueRange.end, `, ${yamlScalar(key, true, true)}: ${yamlScalar(op.value, true, str)}`));
     }
     if (!last) return fail("Edit this empty map in the text.");
     const at = lineEnd(text, last.valueRange.end - 1);
     const lead = at === text.length && !text.endsWith("\n") ? eol : "";
-    return ok(edit(at, at, `${lead}${" ".repeat(column(text, last.keyRange.start))}${yamlScalar(key, false)}: ${yamlScalar(op.value, false)}${eol}`));
+    return ok(edit(at, at, `${lead}${" ".repeat(column(text, last.keyRange.start))}${yamlScalar(key, false, true)}: ${yamlScalar(op.value, false, str)}${eol}`));
   }
 
   const e = find(op.key);
@@ -238,13 +251,13 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp): TestPl
 
   if (op.op === "setValue") {
     if (e.complex) return fail("This value is a map or a list. Edit it in the text.");
-    return ok(edit(e.valueRange.start, e.valueRange.end, styled(text.slice(e.valueRange.start, e.valueRange.end), op.value, map.flow)));
+    return ok(edit(e.valueRange.start, e.valueRange.end, styled(text.slice(e.valueRange.start, e.valueRange.end), op.value, map.flow, !!opts.isString?.(e.key))));
   }
   if (op.op === "setKey") {
     const key = op.newKey.trim();
     if (!key) return fail("A name is needed.");
     if (map.entries.some((x) => x !== e && same(x.key, key))) return fail(`This step already ${op.part === "set" ? "sets" : "expects"} ${key}.`);
-    return ok(edit(e.keyRange.start, e.keyRange.end, styled(text.slice(e.keyRange.start, e.keyRange.end), key, map.flow)));
+    return ok(edit(e.keyRange.start, e.keyRange.end, styled(text.slice(e.keyRange.start, e.keyRange.end), key, map.flow, true)));
   }
   // removeEntry
   const i = map.entries.indexOf(e);
