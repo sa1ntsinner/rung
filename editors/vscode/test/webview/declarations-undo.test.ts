@@ -36,4 +36,30 @@ describe("declarations view and the page's own undo", () => {
     document.execCommand("undo");
     expect(native).toHaveBeenCalledWith("undo");
   });
+
+  it("after the table's undo the keyboard is back in the table, so a second Ctrl+Z undoes again", async () => {
+    const { RgDeclarations } = await import("../../src/webview/declarations/view");
+    document.body.innerHTML = "";
+    const v = new RgDeclarations();
+    document.body.append(v);
+    const model2 = (version: number) => ({ v: 1, kind: "model", model: { ...model, version }, context: { plc: "PLC_1", file: "plc/PLC_1/blocks/Fx_Motor.scl", dirty: true, pinned: false } });
+    window.dispatchEvent(new MessageEvent("message", { data: model2(1) }));
+    await v.updateComplete;
+    const grid = () => v.querySelector<HTMLElement>('[role="treegrid"]')!;
+    grid().focus();
+    grid().dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true }));
+    // the extension runs the undo in the text editor: the view loses the keyboard, then gets the new model
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).not.toBe(grid());
+    window.dispatchEvent(new MessageEvent("message", { data: model2(2) }));
+    await v.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(grid());
+    // a model that is not the answer to an undo leaves the focus where it is
+    v.querySelector<HTMLInputElement>(".rg-filter input")!.focus();
+    window.dispatchEvent(new MessageEvent("message", { data: model2(3) }));
+    await v.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(v.querySelector(".rg-filter input"));
+  });
 });

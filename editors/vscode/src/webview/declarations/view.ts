@@ -69,6 +69,8 @@ export class RgDeclarations extends LitElement {
   private readonly pending = new Map<number, Pending>();
   /** a cell to open once the model has its row (a new declaration's name) */
   private editNext: { rowId: string; column: string } | undefined;
+  /** the table asked for an undo or redo: its answer (a new model) gives the table the keyboard back */
+  private undoing = false;
   private readonly onMessage = (e: MessageEvent) => this.receive(e.data as HostToView);
 
   constructor() {
@@ -138,6 +140,15 @@ export class RgDeclarations extends LitElement {
     } else if (m.kind === "types") {
       this.typeNames = [...m.elementary, ...m.types.map((t) => t.name)];
     }
+    // the undo ran in the text editor and took the keyboard: back to the table, so the next Ctrl+Z undoes again
+    if (m.kind === "model" && this.undoing) {
+      this.undoing = false;
+      void this.updateComplete.then(async () => {
+        const g = this.grid();
+        await g?.updateComplete;
+        g?.querySelector<HTMLElement>('[role="treegrid"]')?.focus();
+      });
+    }
     // a new row's name opens once the model has the row
     if (m.kind === "model" && this.editNext && findRow(m.model.sections, this.editNext.rowId)) {
       const next = this.editNext;
@@ -151,6 +162,11 @@ export class RgDeclarations extends LitElement {
   }
 
   // ---------- editing ----------
+
+  private undo(kind: "undo" | "redo") {
+    this.undoing = true;
+    this.post({ v: 1, kind });
+  }
 
   /** How a cell edits: nothing in a read-only block; a struct has no type or value of its own. */
   private readonly editable = (row: DeclRow, column: string): CellEdit => {
@@ -348,8 +364,8 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
                 @rg-add=${(e: CustomEvent<{ sectionId: string }>) => this.send({ kind: "add", version: model.version, section: e.detail.sectionId })}
                 @rg-delete=${(e: CustomEvent<{ rowId: string; column: string }>) => this.clearOrDelete(e.detail.rowId, e.detail.column)}
                 @rg-paste=${(e: CustomEvent<{ text: string }>) => this.send({ kind: "paste", text: e.detail.text })}
-                @rg-undo=${() => this.post({ v: 1, kind: "undo" })}
-                @rg-redo=${() => this.post({ v: 1, kind: "redo" })}
+                @rg-undo=${() => this.undo("undo")}
+                @rg-redo=${() => this.undo("redo")}
                 @keydown=${(e: KeyboardEvent) => this.navKey(e)}
                 @rg-expand=${(e: CustomEvent<{ expanded: string[] }>) => {
                   this.expanded = new Set(e.detail.expanded);
