@@ -10,6 +10,8 @@
 - Usages keeps the earlier questions (the history button in its title).
 - *Create test* above a block that has no test yet: a first test file with the block's inputs set, one cycle and its outputs to expect, opened to change the expected values. A test that exists is opened, never written over.
 - The test explorer runs a picked case and nothing else.
+- *New Object…* (command palette, or + in the Project view): a function block, function, global DB, PLC data type or tag table in a few steps (kind, PLC or software unit, folder, name). The file is written as TIA Portal exports a new object, so the first sync changes nothing back; a name the PLC already has is refused while you type.
+- The declarations table shows the sections a block can have and has not yet (a new FB has none): their + makes the section with its first declaration, where TIA Portal puts it.
 - Test files open as a table (Open Test as Table, or Open With… → Test Table): the cases on the left, the selected case's steps on the right (Set, Run, Advance, Expect) with each name and value edited in place. Insert adds a name of the block under test (picked from its inputs, outputs and statics, or typed), Delete removes one, Alt+Up/Down moves a step; cases are added, renamed, duplicated and deleted in the list. A name the block does not have is underlined with the closest one. Run a case or all of them: the result shows on the case and on the expectation that failed. Every change is a small text edit of the file in its own style, comments kept.
 
 **CLI**

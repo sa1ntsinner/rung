@@ -29,6 +29,9 @@ const SHORT: Record<AttrKey, string> = { accessible: "Accessible", writable: "Wr
 /** the attribute TIA writes for each column */
 const ATTR_KEY: Record<AttrKey, string> = { accessible: "ExternalAccessible", writable: "ExternalWritable", visible: "ExternalVisible", setpoint: "S7_SetPoint" };
 const TYPES_LIST = "rg-types";
+/** TIA's order of interface sections and the ones each kind of block has */
+const SECTION_ORDER = ["Input", "Output", "InOut", "Static", "Temp", "Constant"];
+const SECTIONS_OF: Record<string, string[]> = { FB: SECTION_ORDER, FC: ["Input", "Output", "InOut", "Temp", "Constant"], OB: ["Input", "Temp", "Constant"] };
 const STALE_TEXT = "The file changed. Review this value again.";
 
 /** a message that asks for a change, as the view writes it (the request number and the file are added) */
@@ -279,6 +282,17 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     // RETAIN is worth a note; CONSTANT is already the section's title
     const note = (s: { modifiers: string[] }) => s.modifiers.filter((m) => m !== "CONSTANT").join(" ");
     const grid: GridSection<DeclRow>[] = sections.map((s) => ({ id: s.id, title: s.title, ...(note(s) ? { note: note(s) } : {}), rows: s.rows }));
+    // the sections TIA lets this block have and it has not yet: quiet bands whose + makes one (not while filtering)
+    if (model.editable && !this.filter.trim()) {
+      const present = new Set(model.sections.map((s) => s.title));
+      for (const title of SECTIONS_OF[model.block?.kind ?? ""] ?? []) {
+        if (present.has(title)) continue;
+        const at = grid.findIndex((g) => !g.ghost && SECTION_ORDER.indexOf(g.title) > SECTION_ORDER.indexOf(title));
+        const ghost: GridSection<DeclRow> = { id: `new:${title}`, title, rows: [], ghost: true };
+        if (at < 0) grid.push(ghost);
+        else grid.splice(at, 0, ghost);
+      }
+    }
     const columns = PRESETS[this.preset].columns;
     const total = model.sections.reduce((n, s) => n + countRows(s.rows), 0);
     const picked = this.selected ? findRow(model.sections, this.selected) : undefined;

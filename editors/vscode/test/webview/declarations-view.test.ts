@@ -73,7 +73,7 @@ describe("declarations view", () => {
     expect(v.querySelector(".rg-title-name")!.textContent).toBe("Fx_Motor");
     expect(v.querySelector(".rg-kind")!.textContent).toBe("FB");
     expect(v.querySelector(".rg-crumbs")!.textContent).toContain("PLC_1");
-    expect([...v.querySelectorAll(".rg-band-title")].map((b) => b.textContent)).toEqual(["Input", "Static"]);
+    expect([...v.querySelectorAll(".rg-band:not(.rg-band-ghost) .rg-band-title")].map((b) => b.textContent)).toEqual(["Input", "Static"]);
     expect(v.querySelector(".rg-band-note")!.textContent).toBe("RETAIN");
     expect(v.querySelector(".rg-status")!.textContent).toContain("Edited, not saved");
   });

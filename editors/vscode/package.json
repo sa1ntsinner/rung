@@ -432,6 +432,12 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.newObject",
+        "title": "New Object…",
+        "category": "rung",
+        "icon": "$(add)"
+      },
+      {
         "command": "rung.test.create",
         "title": "Create Test",
         "category": "rung",
@@ -474,6 +480,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "rung.newObject",
+          "when": "rung.workspace"
+        },
         {
           "command": "rung.test.create",
           "when": "rung.workspace && editorLangId == scl"
@@ -633,6 +643,11 @@
           "command": "rung.setup",
           "when": "view == rung.environment",
           "group": "navigation@2"
+        },
+        {
+          "command": "rung.newObject",
+          "when": "view == rung.project",
+          "group": "navigation@0"
         },
         {
           "command": "rung.sync",

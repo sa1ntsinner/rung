@@ -354,8 +354,8 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
       </div>
       ${lines.map((l) =>
         l.kind === "band"
-          ? html`<div class="rg-band" role="row"><div role="gridcell" class="rg-band-cell" aria-colspan=${this.columns.length}>
-              <span class="rg-band-title">${l.section.title}</span>${l.section.note ? html`<span class="rg-band-note">${l.section.note}</span>` : nothing}<span class="rg-band-count">${l.section.rows.length}</span>${this.editable
+          ? html`<div class="rg-band ${l.section.ghost ? "rg-band-ghost" : ""}" role="row"><div role="gridcell" class="rg-band-cell" aria-colspan=${this.columns.length}>
+              <span class="rg-band-title">${l.section.title}</span>${l.section.note ? html`<span class="rg-band-note">${l.section.note}</span>` : nothing}${l.section.ghost ? nothing : html`<span class="rg-band-count">${l.section.rows.length}</span>`}${this.editable
                 ? html`<button class="rg-band-add rg-icon-btn" tabindex="-1" title=${`Add a declaration to ${l.section.title}`} aria-label=${`Add a declaration to ${l.section.title}`} @click=${() => this.emit("rg-add", { sectionId: l.section.id })}><span class="codicon codicon-add"></span></button>`
                 : nothing}
             </div></div>`

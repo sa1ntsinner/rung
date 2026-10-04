@@ -23,4 +23,5 @@ export * from "./testSkeleton.js";
 export * from "./testModel.js";
 export * from "./testEdit.js";
 export * from "./testSymbols.js";
+export * from "./newObject.js";
 export { ATTR_DEFAULT, EXPOSURE, attrState, parseAttributes, type AttrEntry, type AttrList } from "./attributes.js";

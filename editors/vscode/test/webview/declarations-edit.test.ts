@@ -109,7 +109,7 @@ describe("declarations view editing", () => {
     const g = v.querySelector('[role="treegrid"]')!;
     await key(v, g, "Insert");
     await key(v, g, "Delete");
-    v.querySelectorAll<HTMLButtonElement>(".rg-band-add")[1]!.click();
+    v.querySelectorAll<HTMLButtonElement>(".rg-band:not(.rg-band-ghost) .rg-band-add")[1]!.click();
     expect(edits()).toEqual([
       { v: 1, kind: "add", req: 1, uri: "file:///w/plc/PLC_1/blocks/Fx_Motor.scl", version: 7, after: "Speed" },
       { v: 1, kind: "delete", req: 2, uri: "file:///w/plc/PLC_1/blocks/Fx_Motor.scl", version: 7, rowId: "Speed" },
@@ -227,6 +227,14 @@ describe("declarations view editing", () => {
     expect(edits()).toEqual([]);
     expect(v.querySelector(".rg-status")!.textContent).toContain("The file changed. Review this value again.");
     expect(input(v)?.value).toBe("99");
+  });
+
+  it("a section the block does not have yet is a quiet band whose + makes it, with a first declaration", async () => {
+    const v = await mount();
+    // Fx_Motor (FB) has Input and Static: Output, InOut, Temp and Constant can be added, in TIA's order
+    expect([...v.querySelectorAll(".rg-band")].map((b) => `${b.querySelector(".rg-band-title")!.textContent}${b.classList.contains("rg-band-ghost") ? "?" : ""}`)).toEqual(["Input", "Output?", "InOut?", "Static", "Temp?", "Constant?"]);
+    v.querySelector<HTMLButtonElement>(".rg-band-ghost .rg-band-add")!.click();
+    expect(edits()).toEqual([{ v: 1, kind: "add", req: 1, uri: "file:///w/plc/PLC_1/blocks/Fx_Motor.scl", version: 7, section: "new:Output" }]);
   });
 
   it("undo outside an input goes to the document", async () => {

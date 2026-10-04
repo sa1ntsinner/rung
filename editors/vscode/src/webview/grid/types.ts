@@ -24,5 +24,7 @@ export interface GridSection<R extends GridRow = GridRow> {
   title: string;
   /** a short note after the title, e.g. RETAIN */
   note?: string;
+  /** a section the owner can add (the block does not have it yet): drawn quietly, with its + */
+  ghost?: boolean;
   rows: R[];
 }

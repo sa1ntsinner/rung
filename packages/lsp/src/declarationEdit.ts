@@ -133,7 +133,54 @@ const instructionPragma = (instr: string) => `{InstructionName := '${instr}'; Li
 const INSTRUCTION_KEYS = new Set(["INSTRUCTIONNAME", "LIBVERSION"]);
 const EXPOSURE_KEYS = new Set(Object.values(EXPOSURE).map((k) => k.toUpperCase()));
 
+/** TIA's order of interface sections, the keyword each is written with, and which blocks have it. */
+const SECTION_ORDER = ["Input", "Output", "InOut", "Static", "Temp", "Constant"];
+const SECTION_KEYWORD: Record<string, string> = { Input: "VAR_INPUT", Output: "VAR_OUTPUT", InOut: "VAR_IN_OUT", Static: "VAR", Temp: "VAR_TEMP", Constant: "VAR CONSTANT" };
+const SECTIONS_OF: Record<string, string[]> = { FB: SECTION_ORDER, FC: ["Input", "Output", "InOut", "Temp", "Constant"], OB: ["Input", "Temp", "Constant"] };
+
+/** A section the block does not have yet, with its first declarations (TIA drops an empty one), where TIA puts it. */
+function planNewSection(text: string, model: DeclModel, title: string, rows: NewRow[]): EditPlan {
+  const kind = model.block?.kind ?? "";
+  if (!SECTIONS_OF[kind]?.includes(title)) return { ok: false, reason: `${kind || "This block"} has no ${title} section.` };
+  if (model.sections.some((s) => s.title === title)) return { ok: false, reason: `The block has a ${title} section already.` };
+  if (!rows.length) return { ok: false, reason: "A new section comes with a declaration." };
+  const eol = eolOf(text);
+  const order = SECTION_ORDER.indexOf(title);
+  const after = model.sections.find((s) => SECTION_ORDER.indexOf(s.title) > order);
+  const before = [...model.sections].reverse().find((s) => SECTION_ORDER.indexOf(s.title) < order);
+  let at: number;
+  if (after) at = lineStart(text, after.range.start);
+  else if (before) {
+    // TIA leaves a blank line after each section: the new one goes after it
+    at = lineEnd(text, before.range.end - 1);
+    if (/^[ \t]*\r?\n/.test(text.slice(at))) at = lineEnd(text, at);
+  } else {
+    // no sections yet: after the block's VERSION line (or its header and attributes)
+    const block = model.block!.range;
+    const head = text.slice(block.start, block.end);
+    const version = /^[ \t]*VERSION\s*:.*$/m.exec(head);
+    const begin = /^[ \t]*BEGIN\b/m.exec(head);
+    at = version ? lineEnd(text, block.start + version.index) : begin ? block.start + begin.index : lineEnd(text, block.start);
+  }
+  const lines: string[] = [];
+  const taken = new Set(model.sections.flatMap((s) => s.rows).map((r) => r.name.toLowerCase()));
+  for (const r of rows) {
+    const rule = startRule(model, { title } as DeclSection, r.start?.trim());
+    if (rule) return { ok: false, reason: rule };
+    const t = rowText(r, "      ");
+    if (typeof t !== "string") return { ok: false, reason: t.reason };
+    const key = r.name.trim().toLowerCase();
+    if (taken.has(key)) return { ok: false, reason: `The block already has "${r.name.trim()}".` };
+    taken.add(key);
+    lines.push(t);
+  }
+  // as TIA exports it: a blank line after each section
+  const body = [`   ${SECTION_KEYWORD[title]} `, ...lines, "   END_VAR", ""].map((l) => l + eol).join("");
+  return { ok: true, version: model.version, edits: [{ start: at, end: at, old: "", text: body }] };
+}
+
 function planRows(text: string, model: DeclModel, op: Extract<DeclOp, { op: "insertRows" }>): EditPlan {
+  if (op.section?.startsWith("new:")) return planNewSection(text, model, op.section.slice(4), op.rows);
   let at: number;
   let indent: string;
   let siblings: DeclRow[];

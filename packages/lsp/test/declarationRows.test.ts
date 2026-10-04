@@ -162,6 +162,24 @@ describe("values TIA would not accept are refused, never written", () => {
   });
 });
 
+describe("a section the block does not have yet", () => {
+  const NEW_FB = "FUNCTION_BLOCK \"FB_Valve\"\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_FUNCTION_BLOCK\n\n";
+  it("comes with its first declaration, where TIA Portal puts it", () => {
+    const one = apply(NEW_FB, { op: "insertRows", section: "new:Static", rows: [{ name: "Tag_1", type: "Bool" }] });
+    expect(one).toBe("FUNCTION_BLOCK \"FB_Valve\"\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n   VAR \n      Tag_1 : Bool;\n   END_VAR\n\n\nBEGIN\nEND_FUNCTION_BLOCK\n\n");
+    // before a later section, after an earlier one
+    const two = apply(one, { op: "insertRows", section: "new:Input", rows: [{ name: "Start", type: "Bool" }] });
+    expect(two).toContain("VERSION : 0.1\n   VAR_INPUT \n      Start : Bool;\n   END_VAR\n\n   VAR \n");
+    expect(apply(two, { op: "insertRows", section: "new:Temp", rows: [{ name: "t", type: "Int" }] })).toContain("   VAR \n      Tag_1 : Bool;\n   END_VAR\n\n   VAR_TEMP \n      t : Int;\n   END_VAR\n\n\nBEGIN");
+    expect(apply(one, { op: "insertRows", section: "new:Constant", rows: [{ name: "K", type: "Int", start: "3" }] })).toContain("   VAR CONSTANT \n      K : Int := 3;\n   END_VAR\n");
+  });
+  it("an FC has no static section; a section the block has is not made twice", () => {
+    const FC = "FUNCTION \"Calc\" : Void\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_FUNCTION\n\n";
+    expect(plan(FC, { op: "insertRows", section: "new:Static", rows: [{ name: "x", type: "Int" }] })).toMatchObject({ ok: false });
+    expect(plan(SRC, { op: "insertRows", section: "new:Input", rows: [{ name: "x", type: "Int" }] })).toMatchObject({ ok: false });
+  });
+});
+
 describe("deleteRow", () => {
   it("removes the whole lines with the comment", () => {
     expect(apply(SRC, { op: "deleteRow", row: "Enable" })).toBe(SRC.replace("      Enable : Bool;   // run request\n", ""));

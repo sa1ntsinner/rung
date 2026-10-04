@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung lsp: Language Server Protocol adapter over the workspace index and the rung sync diagnostics.
 import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -35,6 +35,7 @@ import { complete, definition, diagnostics, documentHighlights, hover, outline, 
 import { codeActions } from "./actions.js";
 import { testFilesOf, testKeyEdits } from "./testkeys.js";
 import { testSkeleton } from "./testSkeleton.js";
+import { newObject, type NewObjectRequest } from "./newObject.js";
 import { testModel, type TestModel } from "./testModel.js";
 import { planTestEdit, type TestOp } from "./testEdit.js";
 import { keyProblems, testSymbols } from "./testSymbols.js";
@@ -324,6 +325,23 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const plan = planTestEdit(text, testModel(text), p.op);
     if (!plan.ok) return plan;
     return { ok: true, version: doc.version, edits: plan.edits.map((e) => ({ range: { start: doc.positionAt(e.start), end: doc.positionAt(e.end) }, old: e.old, newText: e.text })) };
+  });
+  // a new object's file (the new-object wizard): its path and TIA Portal's text for it, or why it cannot be made
+  connection.onRequest("rung/newObject", async (p: NewObjectRequest) => {
+    if (!root) return { reason: "No rung workspace is open." };
+    if (!p || typeof p.name !== "string" || typeof p.plc !== "string" || !["FB", "FC", "DB", "UDT", "TAGS"].includes(p.kind)) return { reason: "Not a new object." };
+    const plc = p.plc.toLowerCase();
+    const inPlc = index.allGlobals().filter((g) => deviceOfUri(g.uri)?.toLowerCase() === plc);
+    const names = new Set(inPlc.filter((g) => g.kind === "FB" || g.kind === "FC" || g.kind === "DB" || g.kind === "OB").map((g) => g.name.toLowerCase()));
+    const types = new Set(inPlc.filter((g) => g.kind === "UDT").map((g) => g.name.toLowerCase()));
+    const tagsDir = join(root, "plc", p.plc, ...(p.unit ? ["units", p.unit] : []), "tags");
+    const tables = new Set((await readdir(tagsDir, { recursive: true }).catch(() => [] as string[])).map(String).filter((f) => /\.tags\.(st|xml)$/i.test(f)).map((f) => f.replace(/^.*[\\/]/, "").replace(/\.tags\.(st|xml)$/i, "").toLowerCase()));
+    const draft = newObject(p, { names, types, tables, paths: [] });
+    if ("reason" in draft) return draft;
+    // the files already in its folder (a name that differs only in letter case is the same file on Windows)
+    const folder = draft.path.slice(0, draft.path.lastIndexOf("/"));
+    const siblings = (await readdir(join(root, folder)).catch(() => [] as string[])).map((f) => `${folder}/${f}`);
+    return newObject(p, { names, types, tables, paths: siblings });
   });
   // a block's first test (Create test): its text and path, and the test files that already name the block
   connection.onRequest("rung/testSkeleton", async (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {

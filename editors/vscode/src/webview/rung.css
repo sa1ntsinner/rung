@@ -765,3 +765,12 @@
     border-bottom: 1px solid var(--rg-line);
   }
 }
+
+/* a section the block does not have yet: there to be added, nothing more */
+.rg-band-ghost .rg-band-title {
+  font-weight: 400;
+  opacity: 0.6;
+}
+.rg-band-ghost:hover .rg-band-title {
+  opacity: 1;
+}
