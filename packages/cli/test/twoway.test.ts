@@ -8,6 +8,41 @@ import { main } from "../src/main.js";
 import { OwnerClient } from "@rung/sync";
 import { printReport, validateTags } from "../src/twoway.js";
 
+it("session uses the workspace owner and successful release stops watch", async () => {
+  const t = setup();
+  await t.run(["init"]);
+  await t.run(["pull"]);
+  let stop!: () => void;
+  const watching = t.run(["watch"], { stopSignal: new Promise<void>((r) => { stop = r; }) });
+  try {
+    await until(() => existsSync(t.file(".rung", "owner.json")));
+    const owner = (await OwnerClient.connect(t.dir))!;
+    try {
+      for (let i = 0; i < 100; i++) {
+        const s = await owner.request<{ owner: { lastPassAt: number } }>("status");
+        if (s.owner.lastPassAt) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect((await owner.request<{ owner: { lastPassAt: number } }>("status")).owner.lastPassAt).toBeGreaterThan(0);
+    } finally { owner.close(); }
+    const before = JSON.parse(readFileSync(t.objects, "utf8")).starts;
+    const output: string[] = [];
+    expect(await t.run(["session", "--json"], { stdout: (s) => output.push(s) })).toBe(0);
+    expect(JSON.parse(output.join("")).heldBy).toBe("keeper");
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    db.sessionModified = true;
+    writeFileSync(t.objects, JSON.stringify(db));
+    expect(await t.run(["session", "--release"])).not.toBe(0);
+    expect(existsSync(t.file(".rung", "owner.json"))).toBe(true);
+    expect(await t.run(["session", "--release", "--save"])).toBe(0);
+    await until(() => !existsSync(t.file(".rung", "owner.json")));
+    const after = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(after.starts).toBe(before);
+    expect(after.sessionReleased).toBe(true);
+    expect(await watching).toBe(0);
+  } finally { stop(); await watching; }
+});
+
 const fakeScript = fileURLToPath(new URL("./fake-bridge.mjs", import.meta.url));
 const PROJECT = "C:\\fx\\RungFixture\\RungFixture.ap20";
 const MOTOR = "plc:PLC_1/blocks/Fx_Motor";

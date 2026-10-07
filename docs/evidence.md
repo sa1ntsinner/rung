@@ -2,6 +2,26 @@
 
 What has been measured, on which commit, and what it does and does not show.
 
+## TIA Portal without window, measured
+
+Measured on 2026-10-06/07 on a laptop with a copy of RungProve. The first lifecycle spike used Openness V20 directly; the later runs used rung's keeper and window handoff (`8d267b3`, `ba7af41`, `9d69914`, `c67f963`).
+
+| Operation | Measured time |
+|---|---|
+| Cold start without window and project open | about 10–20 s: 10–11 s in the direct spike with warm disk, 16–19 s for rung's cold pull |
+| Attach to a running TIA Portal without window | about 70 ms (70–90 ms in the spike) |
+| Warm `rung pull` | about 1 s |
+| Open in TIA Portal | about 28 s after the keeper fixes; 31 s in the earlier run |
+| Background TIA Portal reopened after closing the window | 15–17 s after the fixes |
+
+Two concurrent cold starts used one keeper. The idle keeper exited cleanly. The direct spike could attach several clients at once. One measuring loop saw 83–86 s for the return to the background in its first round; the trace script did not reproduce it. These times describe this project and PC, not every project or disk.
+
+V20 could not go online at an address outside the project: applying a created address was refused. With PLCSIM Advanced, changing the project's address through `network.yaml` and sync allowed it to go online. V19 uses the same project-address path in rung; the measurement was on V20.
+
+V21 could go online at another address (`8318938`): a real V21 with PLCSIM reached `192.168.250.1` while the project gave `192.168.254.1`. The project stayed unchanged.
+
+The V21 TLS spike refused both the default `NonVerified` and explicit `NonTrusted` selections; `Trusted` connected. rung refuses an untrusted certificate unless consent is given for that connection (`a0a9195`, `a6cc192`). rung's PLCSIM path uses legacy communication and asks for no certificate, so these runs do not verify rung's TLS path on a real PLC. PLC password callbacks did not fire on the protected PLCSIM Advanced instance; password and user management still need a protected real S7-1500 check.
+
 ## Sync under interruption
 
 `tests/e2e/soak.e2e.test.ts` runs against a real TIA Portal V20: two people edit the same six blocks, one in the files and one in TIA Portal (a second Openness client), while `rung sync` runs and is killed at random moments, also in the middle of an import. After every step and at the end it checks:

@@ -29,6 +29,8 @@ export const HINTS: Record<string, string> = {
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
   ONLINE_FAILED:
     "TIA Portal could not go online with the connection it has for this PLC ([plc.<name>] in rung.toml, or the one configured in TIA Portal). Check that the PLC is on and on that network; rung interfaces --scan shows what TIA Portal can reach, rung connect --pick chooses another connection.",
+  PASSWORD_REQUIRED: "The PLC asks for a password to go online: set it in RUNG_PLC_PASSWORD (and the user in RUNG_PLC_USER for a PLC with user management) for this command; rung never keeps it in a file. VS Code asks for it and keeps it in its secret storage.",
+  TLS_UNTRUSTED: "Check the certificate details above. --trust-certificate trusts the certificate TIA Portal shows for this connection, for this run only; or go online in TIA Portal and trust it there.",
   READ_ONLY: "rung writes into TIA Portal only when writes are on (rung writes on); know-how protected, fail-safe, system and GRAPH blocks and instances of library types it never changes.",
 };
 
@@ -87,7 +89,7 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
     args,
     env: bridgeEnv(io.env, {}, extra.includes("--allow-download")),
     firstRequestTimeoutMs: 300_000,
-    onSlowStart: () => io.stderr("rung: waiting for TIA Portal: opening the project without a window can take a minute or two\n"),
+    onSlowStart: () => io.stderr("rung: waiting for TIA Portal: starting it and opening the project can take a minute or two\n"),
   });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
@@ -117,19 +119,23 @@ export function decodeArgs(word: string): string[] {
 /** An ssh destination (user@host, host, ssh://user@host:port); never something ssh would read as an option. */
 const SSH_HOST = /^[^\s"'`\u0000-\u001f-][^\s"'`\u0000-\u001f]*$/;
 
+export function sshCommand(host: string, line: string, env: Io["env"]): { command: string; args: string[] } {
+  if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
+  // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
+  const prefix = env.RUNG_SSH_ARGS ? (JSON.parse(env.RUNG_SSH_ARGS) as string[]) : [];
+  return { command: env.RUNG_SSH ?? "ssh", args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line] };
+}
+
 /**
  * The bridge on the Windows PC that runs TIA Portal, over ssh (Linux, macOS): `rung bridge` there (rung installed on
  * that PC) or the given command. Key-based login only: BatchMode never waits for a password. Files cross the
  * connection (BridgeClient remote).
  */
 export async function remoteBridge(host: string, command: string, args: string[], tia: TiaVersion, io: Io): Promise<BridgeClient> {
-  if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
-  // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
-  const ssh = io.env.RUNG_SSH ?? "ssh";
-  const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
   const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia !== "V20" ? ["--tia", tia] : []), ...args])}`;
+  const ssh = sshCommand(host, line, io.env);
   try {
-    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
+    return await BridgeClient.spawn({ ...ssh, env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
   } catch (e) {
     throw new WorkspaceError(
       "BRIDGE_UNREACHABLE",

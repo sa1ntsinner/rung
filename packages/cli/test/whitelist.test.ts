@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "vitest";
-import { entryStatus } from "../src/setup.js";
+import { entryStatus, whitelistKey } from "../src/setup.js";
 
 const entry = (path: string, hash = "B9R84T8U=") =>
   `HKEY_LOCAL_MACHINE\\SOFTWARE\\Siemens\\Automation\\Openness\\20.0\\Whitelist\\rung-bridge-v20.exe\\Entry\r\n    Path    REG_SZ    ${path}\r\n    DateModified    REG_SZ    2026/10/04 13:10:54.000\r\n    FileHash    REG_SZ    ${hash}\r\n`;
@@ -23,5 +23,13 @@ describe("the Openness whitelist entry, as TIA Portal reads it", () => {
     const exported = `Windows Registry Editor Version 5.00\r\n\r\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Siemens\\Automation\\Openness\\20.0\\Whitelist\\rung-bridge-v20.exe\\Entry]\r\n"Path"="${jorg.split("\\").join("\\\\")}"\r\n"DateModified"="2026/10/04 13:10:54.000"\r\n"FileHash"="B9R84T8U="\r\n`;
     expect(entryStatus(exported, jorg, "B9R84T8U=")).toBe("ok");
     expect(entryStatus(exported, EXT, "B9R84T8U=")).toBe("stale");
+  });
+});
+
+describe("where TIA Portal keeps its Openness allow list", () => {
+  it("per version up to V20, in one AllowList from V21 on (seen on V21: entries in 21.0\\Whitelist are not read)", () => {
+    expect(whitelistKey("20.0", "C:\\b\\rung-bridge-v20.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\20.0\\Whitelist\\rung-bridge-v20.exe\\Entry");
+    expect(whitelistKey("19.0", "C:\\b\\rung-bridge-v19.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\19.0\\Whitelist\\rung-bridge-v19.exe\\Entry");
+    expect(whitelistKey("21.0", "C:\\b\\rung-bridge-v21.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\AllowList\\rung-bridge-v21.exe\\Entry");
   });
 });

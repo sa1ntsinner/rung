@@ -28,6 +28,7 @@ namespace Rung.Bridge.Core.Protocol
         readonly BridgeInfo _info;
         readonly int _maxLineLength;
         ITiaSession _session;
+        bool _released;
 
         public RpcDispatcher(Func<ITiaSession> sessionFactory, BridgeInfo info, int maxLineLength = RpcConstants.DefaultMaxLineLength)
         {
@@ -39,7 +40,12 @@ namespace Rung.Bridge.Core.Protocol
         /// <summary>Written to stderr for unexpected exceptions; never to the protocol stream.</summary>
         public TextWriter Diagnostics { get; set; } = TextWriter.Null;
 
-        ITiaSession Session => _session ?? (_session = _factory());
+        ITiaSession Session => _released ? throw new RpcException(ErrorCodes.PortalDisposed, "The project was released; reconnect to use TIA Portal again.") : _session ?? (_session = _factory());
+
+        /// <summary>Enumerates processes without attaching or starting TIA Portal.</summary>
+        public Func<SessionState> SessionProbe { get; set; }
+        /// <summary>Attaches for release with all opening flags disabled.</summary>
+        public Func<ITiaSession> SessionAttach { get; set; }
 
         public string Handle(string line)
         {
@@ -71,7 +77,7 @@ namespace Rung.Bridge.Core.Protocol
             {
                 return Error(hasId, id, e.Code, TiaText.Clean(e.Message));
             }
-            catch (Exception e) when (e.GetType().Name == "EngineeringObjectDisposedException" && (e.Message.Contains("Siemens.Engineering.Project") || e.Message.Contains("Siemens.Engineering.TiaPortal")))
+            catch (Exception e) when (PortalGone(e))
             {
                 // the bridge keeps no Disposed handler (see OpennessSession.Listen): a closed TIA Portal shows here
                 return Error(hasId, id, ErrorCodes.PortalDisposed, "TIA Portal was closed. " + TiaText.Clean(e.Message));
@@ -83,6 +89,26 @@ namespace Rung.Bridge.Core.Protocol
             }
         }
 
+        /// <summary>
+        /// TIA Portal ended under a request (closed by hand, crashed): a disposed project or portal, or any disposed object
+        /// whose cause is the remoting connection to TIA Portal (V20 writes it into the message). A disposed block alone
+        /// is not it: the engineer deleted that block in a running TIA Portal. Clients drop the bridge and connect again.
+        /// </summary>
+        public static bool PortalGone(Exception e)
+        {
+            for (var x = e; x != null; x = x.InnerException)
+            {
+                var name = x.GetType().Name;
+                if (name == "RemotingException") return true;
+                // the remoting proxy of a TIA Portal that ended (not a block deleted in a running one: that is Engineering's own type)
+                if (x is ObjectDisposedException od && (od.ObjectName ?? "").StartsWith("Siemens.Engineering", StringComparison.Ordinal)) return true;
+                if (name != "EngineeringObjectDisposedException") continue;
+                if (x.Message.Contains("Siemens.Engineering.Project") || x.Message.Contains("Siemens.Engineering.TiaPortal")) return true;
+                if (x.Message.Contains("RemotingException") || x.Message.Contains("no longer running")) return true;
+            }
+            return false;
+        }
+
         object Dispatch(string method, JsonElement p)
         {
             switch (method)
@@ -91,6 +117,15 @@ namespace Rung.Bridge.Core.Protocol
                     return new { protocol = RpcConstants.ProtocolVersion, tiaVersion = _info.TiaVersion, bridgeVersion = _info.BridgeVersion, capabilities = _info.Capabilities };
                 case "project.info":
                     return Session.GetProjectInfo();
+                case "session.state":
+                    return _session != null ? _session.GetSessionState() : SessionProbe != null ? SessionProbe() : throw new RpcException(ErrorCodes.UnsupportedCapability, "Session inspection is unavailable.");
+                case "session.release":
+                    if (_released) throw new RpcException(ErrorCodes.PortalDisposed, "The project was already released.");
+                    if (_session == null) _session = (SessionAttach ?? _factory)();
+                    _session.ReleaseSession(Bool(p, "save"));
+                    _released = true; // requests already queued by other owner clients must never reopen TIA
+                    _session = null;
+                    return new { released = true };
                 case "objects.list":
                     return Session.ListObjects(Str(p, "device"), Obj<Dictionary<string, KnownRevision>>(p, "known"));
                 case "objects.export":
@@ -116,9 +151,9 @@ namespace Rung.Bridge.Core.Protocol
                 case "plc.compile":
                     return Bool(p, "hardware") ? Session.CompileHardware(Str(p, "device")) : Session.Compile(Str(p, "device"), StrArray(p, "addresses"));
                 case "plc.online":
-                    return Session.Online(Str(p, "device"), Str(p, "action"), Obj<ConnectionTarget>(p, "target"));
+                    return Session.Online(Str(p, "device"), Str(p, "action"), Obj<ConnectionTarget>(p, "target"), Obj<OnlineCredentialsInput>(p, "credentials"));
                 case "plc.compare":
-                    return Session.Compare(Str(p, "device"), Obj<ConnectionTarget>(p, "target"));
+                    return Session.Compare(Str(p, "device"), Obj<ConnectionTarget>(p, "target"), Obj<OnlineCredentialsInput>(p, "credentials"));
                 case "plc.connections":
                     return Session.Connections(Str(p, "device"), Bool(p, "scan"));
                 case "plc.download":
@@ -134,7 +169,7 @@ namespace Rung.Bridge.Core.Protocol
                     return Session.UploadStation(req);
                 }
                 case "objects.show":
-                    Session.Show(Str(p, "address"));
+                    Session.Show(Str(p, "address"), Bool(p, "save"));
                     return new { shown = true };
                 case "project.archive":
                     return Session.Archive(OptStr(p, "dir"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("keep", out var keep) && keep.ValueKind == JsonValueKind.Number ? keep.GetInt32() : 10);

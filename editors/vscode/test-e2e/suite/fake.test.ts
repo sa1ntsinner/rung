@@ -15,6 +15,7 @@ interface FakeDb {
   downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean; target: Record<string, unknown> }[];
   reach?: { pc: string; address: string }[];
   scans?: number;
+  shown?: { address: string; save: boolean; window: boolean }[];
 }
 
 const OBJECTS = process.env.RUNG_E2E_OBJECTS!;
@@ -256,12 +257,21 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.match(run!.result.output, /Fx_Motor: follows start/);
     });
 
-    it("open in TIA Portal explains a TIA Portal without user interface", async () => {
+    it("open in TIA Portal shows the block in a TIA Portal window, asking first when unsaved changes would be closed", async () => {
       await openDoc(PUMP);
       await vscode.commands.executeCommand("rung.openInTia");
       assert.deepEqual(cli.find("open")?.args, ["open", PUMP]);
-      assert.equal(d.texts.length, 1, d.texts.join("\n"));
-      assert.match(d.texts[0]!, /^warning: No TIA Portal window has this project open, so TIA Portal cannot show Fx_Pump/);
+      assert.equal(d.texts.length, 0, d.texts.join("\n"));
+      // through rung watch's bridge when watch runs, else through one that may open a TIA Portal window
+      assert.deepEqual({ ...fakeDb().shown?.at(-1), window: undefined }, { address: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", save: false, window: undefined });
+
+      patchFake({ unsavedProject: true });
+      d.reset();
+      d.answer("Save and Open");
+      await vscode.commands.executeCommand("rung.openInTia");
+      assert.match(d.texts[0]!, /^warning: The project has unsaved changes in rung's background TIA Portal/);
+      assert.equal(fakeDb().shown?.at(-1)?.save, true);
+      patchFake({ unsavedProject: false });
     });
   });
 
@@ -561,6 +571,92 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.match(text, /^ {2}Ethernet \[PN\/IE · 1 X1\] \{rung\.connection\} <link>/m);
     });
 
+    it("a PLC that asks for a password: VS Code asks once, keeps it in its secret storage and goes online", async () => {
+      patchFake({ plcPassword: "s3cret" });
+      d.input("s3cret");
+      await vscode.commands.executeCommand("rung.goOnline");
+      assert.deepEqual(d.of("inputBox").map((c) => c.message), ["Password of PLC_1"]);
+      assert.equal(fakeDb().online, "Online");
+      await vscode.commands.executeCommand("rung.goOffline");
+      // the next time it is not asked again
+      d.reset();
+      await vscode.commands.executeCommand("rung.goOnline");
+      assert.equal(d.of("inputBox").length, 0);
+      assert.equal(fakeDb().online, "Online");
+      await vscode.commands.executeCommand("rung.goOffline");
+      // a PLC with user management: the user is asked too, then both are kept
+      patchFake({ plcPassword: "pw2", plcUser: "eng" });
+      d.reset();
+      d.input("eng").input("pw2");
+      await vscode.commands.executeCommand("rung.goOnline");
+      assert.deepEqual(d.of("inputBox").map((c) => c.message), ["User of PLC_1", "Password of PLC_1"]);
+      assert.equal(fakeDb().online, "Online");
+      await vscode.commands.executeCommand("rung.goOffline");
+      patchFake({ plcPassword: undefined, plcUser: undefined });
+    });
+    for (const command of ["rung.goOnline", "rung.compare"]) {
+      it(`${command} retains TLS consent through a rejected named password`, async () => {
+        const verb = command === "rung.goOnline" ? "online" : "compare";
+        const user = `${verb}-retry-eng`;
+        patchFake({ plcCertificate: "SHA256 named-retry", plcPassword: "retry-correct", plcUser: user, compare: [] });
+        try {
+          d.answer("Trust for This Connection").input(user).input("typo").input("retry-correct");
+          await vscode.commands.executeCommand(command);
+          const runs = cli.runs.filter((r) => r.args[0] === verb);
+          assert.equal(runs.at(-1)!.result.code, 0);
+          assert.ok(runs.slice(1).every((r) => r.args.includes("--trust-certificate")));
+          assert.equal(d.of("warning").length, 1);
+          assert.deepEqual(d.of("inputBox").map((c) => c.message), ["User of PLC_1", "Password of PLC_1", "Password of PLC_1"]);
+        } finally {
+          patchFake({ plcCertificate: undefined, plcPassword: undefined, plcUser: undefined, compare: undefined });
+        }
+      });
+      it(`${command} stops password retries without collecting unused credentials`, async () => {
+        const verb = command === "rung.goOnline" ? "online" : "compare";
+        patchFake({ plcPassword: "never-entered", compare: [] });
+        try {
+          d.input("wrong-1").input("wrong-2").input("unused");
+          await vscode.commands.executeCommand(command);
+          const runs = cli.runs.filter((r) => r.args[0] === verb);
+          assert.equal(runs.length, 3);
+          assert.equal(d.of("inputBox").length, 2);
+          assert.ok(d.of("error").length > 0);
+        } finally {
+          patchFake({ plcPassword: undefined, compare: undefined });
+        }
+      });
+      it(`${command} asks about a TLS certificate and trusts it for this connection only`, async () => {
+        const verb = command === "rung.goOnline" ? "online" : "compare";
+        patchFake({ plcCertificate: "PLC_1 certificate: SHA256 AA:BB:CC", online: "Offline", compare: [] });
+        try {
+          d.answer("Trust for This Connection");
+          await vscode.commands.executeCommand(command);
+          const warning = d.of("warning")[0]!;
+          assert.equal(warning.modal, true);
+          assert.match(`${warning.message}\n${warning.detail}`, /SHA256 AA:BB:CC/);
+          assert.ok(warning.items.includes("Trust for This Connection"));
+          const runs = cli.runs.filter((r) => r.args[0] === verb);
+          assert.equal(runs.length, 2);
+          assert.equal(runs[0]!.args.includes("--trust-certificate"), false);
+          assert.equal(runs[1]!.args.includes("--trust-certificate"), true);
+          assert.equal(runs[1]!.result.code, 0);
+          // the decision is never remembered (rung.toml may gain the connection rung found, never a trust)
+          assert.doesNotMatch(readFileSync(join(root(), "rung.toml"), "utf8"), /trust/i);
+          if (verb === "online") await vscode.commands.executeCommand("rung.goOffline");
+          d.reset();
+          cli.clear();
+          // Esc on the next invocation refuses it again, without a retry.
+          await vscode.commands.executeCommand(command);
+          assert.equal(d.of("warning").length, 1);
+          assert.equal(cli.runs.filter((r) => r.args[0] === verb).length, 1);
+          assert.match(cli.find(verb)!.result.output, /TLS_UNTRUSTED/);
+          assert.equal(cli.find(verb)!.args.includes("--trust-certificate"), false);
+        } finally {
+          patchFake({ plcCertificate: undefined, compare: undefined });
+          d.reset();
+        }
+      });
+    }
     it("go offline and online state", async () => {
       await vscode.commands.executeCommand("rung.goOnline");
       await vscode.commands.executeCommand("rung.goOffline");

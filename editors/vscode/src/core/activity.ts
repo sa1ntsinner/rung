@@ -30,6 +30,8 @@ interface Report {
 
 type Now =
   | { kind: "connecting"; since: number }
+  /** the bridge starts TIA Portal (rung's keeper in the background, or a window for "Open in TIA Portal") */
+  | { kind: "starting"; window: boolean; since: number }
   | { kind: "sending"; path: string; since: number }
   | { kind: "compiling"; detail?: string; since: number }
   | { kind: "archiving"; since: number }
@@ -99,6 +101,8 @@ export class Activity {
       // sync.compile = "all" names the PLC; otherwise the detail is a phrase, not shown
       else if (p.phase === "compiling") this.now = { kind: "compiling", ...(p.detail && !/\s/.test(p.detail) ? { detail: p.detail } : {}), since: t };
       else if (p.phase === "archiving") this.now = { kind: "archiving", since: t };
+      else if (p.phase === "starting-tia") this.now = { kind: "starting", window: p.detail === "window", since: t };
+      else if (p.phase === "tia-started") this.now = { kind: "connecting", since: t };
     } else if (event === "error") {
       const message = (params as { message?: string }).message ?? "rung watch lost TIA Portal";
       this.now = { kind: "retrying", message, since: this.now?.kind === "retrying" ? this.now.since : t };
@@ -195,9 +199,11 @@ export function statusPhrase(a: Activity, c: StatusContext, now = Date.now()): {
   // a conflict stands whether watch runs or not
   if (!c.watching) return c.conflicts ? { ...conflict, text: `${conflict.text} · watch off` } : { text: "$(circle-slash) rung · watch off" };
   const n = a.now;
-  const stuck = n && n.kind !== "retrying" && n.kind !== "connecting" && now - n.since > STUCK_MS;
+  // a cold start of TIA Portal takes minutes: that is no dialog
+  const stuck = n && n.kind !== "retrying" && n.kind !== "connecting" && n.kind !== "starting" && now - n.since > STUCK_MS;
   if (stuck) return { text: "$(watch) rung · waiting for TIA Portal (a dialog may be open)", tone: "warning" };
   if (n?.kind === "connecting") return { text: "$(sync~spin) rung · connecting to TIA Portal" };
+  if (n?.kind === "starting") return { text: n.window ? "$(sync~spin) rung · opening a TIA Portal window" : "$(sync~spin) rung · starting TIA Portal" };
   if (n?.kind === "sending") return { text: `$(sync~spin) rung · ${objectName(n.path)} → TIA` };
   if (n?.kind === "compiling") return { text: `$(sync~spin) rung · compiling${n.detail ? ` ${n.detail}` : ""} in TIA` };
   if (n?.kind === "archiving") return { text: "$(sync~spin) rung · archiving the project" };

@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { defaultConfig, formatConfig, parseConfig, preflight, isContained, loadConfig, saveConfig, grantWrites, revokeWrites } from "../src/index.js";
 
 describe("config", () => {
+  it("round trips an online address", () => {
+    const c = defaultConfig("C:/p/Plant.ap21", "V21");
+    c.plc.PLC_1 = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, address: "10.0.0.7" };
+    expect(parseConfig(formatConfig(c))).toEqual(c);
+    expect(() => parseConfig(formatConfig(c).replace('10.0.0.7', '999.0.0.7'))).toThrow(/address/);
+  });
   it("round-trips through TOML", () => {
     const c = defaultConfig("C:\\fx\\RungFixture.ap20", "V20", "C:\\tools\\rung-bridge-v20.exe", ["PLC_1"]);
     expect(parseConfig(formatConfig(c))).toEqual(c);

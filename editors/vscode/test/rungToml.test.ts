@@ -2,6 +2,11 @@
 import { describe, expect, it } from "vitest";
 import { formatPlcSection, lastBackupOf, parseRungToml, upsertPlcSection, writesState } from "../src/core/rungToml";
 
+it("round trips an online address", () => {
+  const connection = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, address: "10.0.0.7" };
+  expect(parseRungToml(formatPlcSection("PLC_1", connection)).plc.PLC_1).toEqual(connection);
+});
+
 const toml = `# rung workspace
 format = 1
 devices = ["PLC_1"]

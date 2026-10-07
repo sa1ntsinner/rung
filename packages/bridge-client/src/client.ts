@@ -10,6 +10,7 @@ import {
   type CompileMessage,
   type ConnectionOptions,
   type ConnectionTarget,
+  type OnlineCredentials,
   type DownloadOutcome,
   type DownloadRequest,
   type OnlineStatus,
@@ -21,6 +22,7 @@ import {
   type KnownRevision,
   type ObjectEntry,
   type ProjectInfo,
+  type SessionState,
   type UploadOutcome,
   type ArchiveOutcome,
   type UploadRequest,
@@ -57,7 +59,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download", "plc.upload"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download", "plc.upload", "session.release"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -166,6 +168,12 @@ export class BridgeClient {
   projectInfo(): Promise<ProjectInfo> {
     return this.request("project.info", {}) as Promise<ProjectInfo>;
   }
+  sessionState(): Promise<SessionState> {
+    return this.request("session.state", {}) as Promise<SessionState>;
+  }
+  releaseSession(save = false): Promise<{ released: boolean }> {
+    return this.request("session.release", { save }) as Promise<{ released: boolean }>;
+  }
   listObjects(device: string, known?: Record<string, KnownRevision>): Promise<ObjectEntry[]> {
     return this.request("objects.list", { device, ...(known && Object.keys(known).length ? { known } : {}) }) as Promise<ObjectEntry[]>;
   }
@@ -246,13 +254,14 @@ export class BridgeClient {
     return this.request("plc.compile", { device, hardware: true }, 600_000) as Promise<CompileMessage[]>;
   }
 
-  online(device: string, action: "state" | "online" | "offline", target?: ConnectionTarget): Promise<OnlineStatus> {
-    return this.request("plc.online", { device, action, ...(target ? { target } : {}) }, 120_000) as Promise<OnlineStatus>;
+  /** credentials: what a person typed for a PLC that asks before going online; sent with this request only. */
+  online(device: string, action: "state" | "online" | "offline", target?: ConnectionTarget, credentials?: OnlineCredentials): Promise<OnlineStatus> {
+    return this.request("plc.online", { device, action, ...(target ? { target } : {}), ...(credentials ? { credentials } : {}) }, 120_000) as Promise<OnlineStatus>;
   }
 
   /** Read-only; comparing a large program with the PLC takes a while. */
-  compare(device: string, target?: ConnectionTarget): Promise<CompareOutcome> {
-    return this.request("plc.compare", { device, ...(target ? { target } : {}) }, 600_000) as Promise<CompareOutcome>;
+  compare(device: string, target?: ConnectionTarget, credentials?: OnlineCredentials): Promise<CompareOutcome> {
+    return this.request("plc.compare", { device, ...(target ? { target } : {}), ...(credentials ? { credentials } : {}) }, 600_000) as Promise<CompareOutcome>;
   }
 
   connections(device: string, scan = false): Promise<ConnectionOptions> {
@@ -269,8 +278,9 @@ export class BridgeClient {
     return this.request("plc.upload", { request }, 1_800_000) as Promise<UploadOutcome>;
   }
 
-  show(address: string): Promise<{ shown: boolean }> {
-    return this.request("objects.show", { address }) as Promise<{ shown: boolean }>;
+  /** save: a project rung holds without window may be saved to move it into a TIA Portal window. */
+  show(address: string, save = false): Promise<{ shown: boolean }> {
+    return this.request("objects.show", save ? { address, save } : { address }) as Promise<{ shown: boolean }>;
   }
 
   /** Values of a running application (CODESYS: its own IEC paths such as PLC_PRG.fbCount.nCount). Read-only. */

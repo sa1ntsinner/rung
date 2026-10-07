@@ -167,12 +167,12 @@
     "viewsWelcome": [
       {
         "view": "rung.project",
-        "contents": "Open the folder that holds (or should hold) the rung workspace.\n[Open Folder](command:vscode.openFolder)",
+        "contents": "Open a TIA Portal project: rung mirrors it into a folder of text files, starts TIA Portal in the background and keeps both in sync.\n[Open TIA Project…](command:rung.init)\n[Open Folder](command:vscode.openFolder)",
         "when": "workbenchState == empty"
       },
       {
         "view": "rung.project",
-        "contents": "This folder has no rung.toml. rung mirrors a TIA Portal project into text files here and keeps both in sync.\n[Initialize from a TIA Portal project](command:rung.init)\n[Read the docs](command:rung.openDocs)",
+        "contents": "This folder has no rung.toml. rung mirrors a TIA Portal project into text files here and keeps both in sync.\n[Open TIA Project…](command:rung.init)\n[Read the docs](command:rung.openDocs)",
         "when": "workbenchState != empty && !rung.workspace"
       },
       {
@@ -219,6 +219,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "rung.session.release",
+        "title": "Release the Project (close rung's background TIA Portal)",
+        "category": "rung",
+        "icon": "$(close)"
+      },
       {
         "command": "rung.assignments",
         "title": "Assignment List (Used I/O and Memory)",
@@ -471,7 +477,7 @@
       },
       {
         "command": "rung.init",
-        "title": "Initialize from a TIA Portal Project…",
+        "title": "Open TIA Project…",
         "category": "rung",
         "icon": "$(add)"
       },
@@ -875,6 +881,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "rung.session.release",
+          "when": "view == rung.plc && rung.workspace",
+          "group": "1_plc@2"
+        },
         {
           "command": "rung.env.refresh",
           "when": "view == rung.environment",
@@ -1507,8 +1518,8 @@
           },
           "rung.watch.autoStart": {
             "type": "boolean",
-            "default": false,
-            "markdownDescription": "Start `rung watch` in a terminal when a folder with `rung.toml` opens. Watch keeps files and TIA Portal in sync and runs the other commands through its TIA Portal session."
+            "default": true,
+            "markdownDescription": "Start `rung watch` when a trusted folder with `rung.toml` opens. Watch keeps files and TIA Portal in sync; TIA Portal starts in the background once and every command, editor and agent of the project reuses it."
           },
           "rung.terminal.reuse": {
             "type": "boolean",

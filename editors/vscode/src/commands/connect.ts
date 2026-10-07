@@ -5,12 +5,12 @@
 // with Retry and a manual choice among all PG/PC interfaces (`rung interfaces`).
 import * as vscode from "vscode";
 import { Args, parseInterfaces, type InterfaceOption } from "../core/args";
-import { automaticChoice, connectUseArgs, parseConnectJson, sameTarget, splitExplanation, type ConnectChoice, type ConnectReport, type ConnectTarget, type NoTarget } from "../core/connect";
+import { automaticChoice, connectAddressArgs, connectUseArgs, parseConnectJson, plcPasswordKey, sameTarget, splitExplanation, type ConnectChoice, type ConnectReport, type ConnectTarget, type NoTarget } from "../core/connect";
 import type { Output } from "../output";
 import { RungCli } from "../runner/cli";
 import type { RungWorkspace } from "../workspace";
 
-type PickItem = vscode.QuickPickItem & { target?: ConnectTarget; manual?: boolean };
+type PickItem = vscode.QuickPickItem & { target?: ConnectTarget; manual?: boolean; change?: ConnectChoice["addressChange"] };
 
 const via = (t: ConnectTarget) => `${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}`;
 
@@ -19,8 +19,47 @@ export class Connector {
     private readonly ws: RungWorkspace,
     private readonly cli: RungCli,
     private readonly out: Output,
+    private readonly secrets?: vscode.SecretStorage,
   ) {}
 
+  /** Per project, bridge host and PLC: a rebound folder never sends one PLC's password to another. */
+  private passwordKey(device: string): string {
+    return plcPasswordKey(this.ws.root, this.ws.config?.projectPath, this.ws.config?.bridgeHost, device);
+  }
+
+  /** The environment that gives `rung online` / `rung compare` the PLC's password (and user), when typed before. */
+  async passwordEnv(device: string): Promise<Record<string, string>> {
+    const kept = await this.secrets?.get(this.passwordKey(device));
+    if (!kept) return {};
+    const user = await this.secrets?.get(`${this.passwordKey(device)}|user`);
+    return { RUNG_PLC_PASSWORD: kept, ...(user ? { RUNG_PLC_USER: user } : {}) };
+  }
+
+  /**
+   * The PLC asked for a password (or refused the kept one): ask for it (and for a user when its user management
+   * wants one), keep both in VS Code's secret storage and return the environment to try again with; undefined
+   * when the person cancels.
+   */
+  async askPassword(device: string, output = ""): Promise<Record<string, string> | undefined> {
+    const key = this.passwordKey(device);
+    await this.secrets?.delete(key);
+    let user = await this.secrets?.get(`${key}|user`);
+    if (/a user and a password/.test(output)) {
+      user = await vscode.window.showInputBox({ title: `User of ${device}`, prompt: `${device} asks for a user of its user management to go online.`, value: (await this.secrets?.get(`${key}|user`)) ?? "", ignoreFocusOut: true });
+      if (!user) return undefined;
+    }
+    const typed = await vscode.window.showInputBox({
+      title: `Password of ${device}`,
+      prompt: `${device} asks for a password to go online${user ? ` (user ${user})` : " (its access protection)"}. Kept in VS Code's secret storage, never in files.`,
+      password: true,
+      ignoreFocusOut: true,
+    });
+    if (!typed) return undefined;
+    await this.secrets?.store(key, typed);
+    if (user) await this.secrets?.store(`${key}|user`, user);
+    else await this.secrets?.delete(`${key}|user`);
+    return { RUNG_PLC_PASSWORD: typed, ...(user ? { RUNG_PLC_USER: user } : {}) };
+  }
   /** `rung connect --json` with a progress notification; undefined (after telling the user) when it fails. */
   async scan(device: string): Promise<ConnectReport | undefined> {
     const r = await this.cli.capture(["connect", "--json", "--plc", device], { progress: `rung: looking for ${device} on the network…`, cancellable: true });
@@ -81,6 +120,7 @@ export class Connector {
       description: c.reason === "address-match" ? "project address" : c.reason === "simulation" ? "S7-PLCSIM" : "other address",
       detail: `${c.target.mode} · ${via(c.target)}${(c.target.pcInterfaceNumber ?? 1) !== 1 ? ` · number ${c.target.pcInterfaceNumber}` : ""}`,
       target: c.target,
+      ...(c.addressChange ? { change: c.addressChange } : {}),
     });
     const seen = new Set<string>();
     const unique = (list: ConnectChoice[]) =>
@@ -108,7 +148,25 @@ export class Connector {
     });
     if (!pick) return undefined;
     if (pick.manual) return this.pickManually(device);
-    return (await this.save(device, pick.target!, pick.label.replace(/^\$\(check\) /, ""))) ? pick.target : undefined;
+    if (!(await this.save(device, pick.target!, pick.label.replace(/^\$\(check\) /, "")))) return undefined;
+    if (pick.change) await this.offerAddress(device, pick.change);
+    return pick.target;
+  }
+
+  /** V21 can use an online address; every version can edit the project address. */
+  private async offerAddress(device: string, change: NonNullable<ConnectChoice["addressChange"]>): Promise<void> {
+    const use = `Use ${change.to} in the Project`;
+    const online = this.ws.config?.tiaVersion === "V21" ? `Go Online at ${change.to}` : undefined;
+    const pick = await vscode.window.showWarningMessage(
+      `${device} answers at ${change.to}, but the project gives it ${change.from} (${change.interface}).${online ? " V21 can go online at that address without changing the project." : " TIA Portal goes online only at the project's address."}`,
+      { modal: true, detail: `${online ? "Go Online saves the address in rung.toml; the project stays unchanged. " : ""}Use in the Project writes ${change.to} into plc/${device}/hardware/network.yaml; sync takes it to TIA Portal like any edit (with writes on).` },
+      ...(online ? [online] : []),
+      use,
+    );
+    if (pick !== use && (!online || pick !== online)) return;
+    const r = await this.cli.capture([...connectAddressArgs(device, change.to), ...(pick === use ? ["--project-address"] : [])]);
+    if (!r.error && r.code === 0) await this.ws.reload();
+    if (!r.error && r.code !== 0) void this.failure(`Could not change the address: ${RungCli.summary(r.output)}`);
   }
 
   private async explainNotFound(device: string, text: string): Promise<"retry" | "manual" | undefined> {

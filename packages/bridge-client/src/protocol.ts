@@ -28,6 +28,11 @@ export const ErrorCodes = {
   NAME_TAKEN: "NAME_TAKEN",
   ONLINE_FAILED: "ONLINE_FAILED",
   NO_TARGET: "NO_TARGET",
+  PROJECT_UNSAVED: "PROJECT_UNSAVED",
+  PROJECT_BUSY: "PROJECT_BUSY",
+  PROJECT_IN_USE: "PROJECT_IN_USE",
+  PASSWORD_REQUIRED: "PASSWORD_REQUIRED",
+  TLS_UNTRUSTED: "TLS_UNTRUSTED",
   // client-side only
   BRIDGE_EXITED: "BRIDGE_EXITED",
   TIMEOUT: "TIMEOUT",
@@ -156,6 +161,7 @@ export interface CompileMessage {
 
 /** Where to connect; names as TIA shows them in "Extended download" (docs/downloads.md). */
 export interface ConnectionTarget {
+  address?: string;
   mode: string;
   pcInterface: string;
   pcInterfaceNumber?: number;
@@ -194,12 +200,20 @@ export interface AccessibleDevice {
   macAddress: string;
 }
 
+/** For a PLC that asks before going online: its access protection password, or a user of its user management. */
+export interface OnlineCredentials {
+  user?: string;
+  password?: string;
+  /** Trust the certificate TIA Portal shows for this connection, for this request only. */
+  trustCertificate?: boolean;
+}
+
 export interface ConnectionOptions {
   device: string;
   configured: boolean;
   /** addresses the project gives the CPU's interfaces, e.g. { interface: "PROFINET interface_1", address: "192.168.0.1" } */
   plcAddresses: { interface: string; address: string; subnet?: string }[];
-  modes: { name: string; pcInterfaces: { name: string; number: number; targetInterfaces: string[]; subnets: string[]; accessible?: AccessibleDevice[] }[] }[];
+  modes: { name: string; pcInterfaces: { name: string; number: number; targetInterfaces: string[]; subnets: string[]; accessible?: AccessibleDevice[]; /** why the scan of this interface failed (cable, driver) */ scanError?: string }[] }[];
 }
 
 export interface DownloadRequest {
@@ -266,4 +280,16 @@ export interface UploadOutcome {
 export interface BridgeEvent {
   event: string;
   params: unknown;
+}
+/** Ownership of the existing TIA Portal; inspection never opens one. */
+export type SessionState = { projectPath: string; open: false; keeperPid?: number } | OpenSessionState;
+
+export interface OpenSessionState {
+  open?: true;
+  projectPath: string;
+  tiaPid: number;
+  mode: "headless" | "ui";
+  heldBy: "keeper" | "self" | "other";
+  keeperPid?: number;
+  attachedSessions: number;
 }

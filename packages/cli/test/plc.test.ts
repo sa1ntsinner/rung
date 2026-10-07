@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,8 +26,93 @@ function setup(answers: string[] = []) {
   const db = () => JSON.parse(readFileSync(objects, "utf8")) as { downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean }[]; online?: string; onlineTarget?: Record<string, unknown> | null; scans?: number };
   const toml = join(dir, "rung.toml");
   const patch = (o: Record<string, unknown>) => writeFileSync(objects, JSON.stringify({ ...JSON.parse(readFileSync(objects, "utf8")), ...o }));
-  return { dir, run, out, err, db, questions, toml, patch, objects };
+  return { dir, run, out, err, db, questions, toml, patch, objects, env: env as Record<string, string> };
 }
+
+describe("rung session", () => {
+  it("prints the custom download destination before asking for confirmation", async () => {
+    const t = setup(["no"]);
+    t.patch({ project: { name: "RungFixture", path: PROJECT.replace("ap20", "ap21"), tiaVersion: "V21", devices: ["PLC_1"], isLocalSession: false } });
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET + 'address = "10.0.0.7"\n');
+    t.out.length = 0;
+    expect(await t.run(["download"])).toBe(1);
+    expect(t.out.join("")).toContain("PLC_1 at 10.0.0.7 via");
+    expect(t.questions).toHaveLength(1);
+  });
+  it("refuses release while another workspace watches the keeper", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.patch({ sessionAttachedSessions: 3 });
+    expect(await t.run(["session", "--release", "--save"])).not.toBe(0);
+    expect(t.err.join("")).toContain("PROJECT_IN_USE");
+    expect(JSON.parse(readFileSync(t.objects, "utf8")).sessionReleased).not.toBe(true);
+  });
+  it.each(["NO_PROJECT", "TIA_NOT_RUNNING"])("reports a closed project for %s", async (code) => {
+    const t = setup();
+    await t.run(["init"]);
+    t.env.FAKE_SESSION_ERROR = code;
+    t.out.length = 0;
+    expect(await t.run(["session", "--json"])).toBe(0);
+    expect(JSON.parse(t.out.join(""))).toEqual({ projectPath: PROJECT, open: false });
+    t.out.length = 0;
+    expect(await t.run(["session"])).toBe(0);
+    expect(t.out.join("")).toMatch(/no TIA Portal has the project open/i);
+    expect(t.out.join("")).toMatch(/no keeper record/i);
+    expect(JSON.parse(readFileSync(t.objects, "utf8")).startArgs.at(-1)).not.toContain("--open-headless");
+  });
+  it("reports a closed project with a keeper record", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.env.FAKE_NO_PROJECT = "1";
+    t.patch({ closedKeeperPid: 7 });
+    t.out.length = 0;
+    expect(await t.run(["session"])).toBe(0);
+    expect(t.out.join("")).toMatch(/no TIA Portal has the project open/i);
+    expect(t.out.join("")).toContain("keeper record exists (7)");
+  });
+  it("documents release and rejects unrelated options before connecting", async () => {
+    const t = setup();
+    expect(await t.run(["session", "--help"])).toBe(0);
+    expect(t.out.join("")).toContain("--release");
+    expect(await t.run(["session", "--plc", "PLC_1"])).not.toBe(0);
+    expect(t.err.join("")).toContain("has no --plc");
+  });
+  it("prints the state without asking its bridge to open TIA", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.out.length = 0;
+    expect(await t.run(["session", t.dir, "--json"])).toBe(0);
+    expect(JSON.parse(t.out.join(""))).toMatchObject({ projectPath: PROJECT, tiaPid: 42, mode: "headless", heldBy: "keeper", keeperPid: 7, attachedSessions: 1 });
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.startArgs.at(-1)).not.toContain("--open-headless");
+    t.out.length = 0;
+    expect(await t.run(["session"])).toBe(0);
+    expect(t.out.join("")).toContain("keeper");
+  });
+
+  it("requires save for unsaved changes and passes it through on release", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.patch({ sessionModified: true });
+    expect(await t.run(["session", "--release"])).not.toBe(0);
+    expect(t.err.join("")).toContain("PROJECT_UNSAVED");
+    expect(await t.run(["session", "--release", "--save"])).toBe(0);
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.sessionReleased).toBe(true);
+    expect(db.sessionSaved).toBe(true);
+    expect(db.startArgs.at(-1)).not.toContain("--open-headless");
+  });
+
+  it("never releases a portal held by another program", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.patch({ sessionHeldBy: "other" });
+    expect(await t.run(["session", "--release", "--save"])).not.toBe(0);
+    expect(t.err.join("")).toContain("PROJECT_BUSY");
+    expect(JSON.parse(readFileSync(t.objects, "utf8")).sessionReleased).not.toBe(true);
+  });
+});
 
 describe("rung compare", () => {
   it("lists what differs from the PLC with the workspace file, and exits 2", async () => {
@@ -267,9 +352,66 @@ describe("PLC commands", () => {
     const j = JSON.parse(t.out.join(""));
     expect(j.candidates).toEqual([]);
     expect(j.reachable[0].label).toContain("10.0.0.7");
+    expect(j.reachable[0].addressChange).toEqual({ interface: "PROFINET interface_1", from: "192.168.0.1", to: "10.0.0.7" });
     expect(j.notFound).toMatch(/Found there instead/);
     expect(await t.run(["online"])).toBe(0);
     expect(t.db().onlineTarget).toMatchObject({ pcInterface: "Wi-Fi" });
+    // TIA Portal goes online at the project's address only: rung says so and how to change it
+    expect(t.out.join("")).toMatch(/The project gives PLC_1 192\.168\.0\.1 \(PROFINET interface_1\), and it answered at 10\.0\.0\.7.*\n.*rung connect --address 10\.0\.0\.7/s);
+  });
+
+  it("connect --address puts the address the PLC answers at into network.yaml, leaving the rest of the file", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    const dir = join(t.dir, "plc", "PLC_1", "hardware");
+    mkdirSync(dir, { recursive: true });
+    const yaml = `"PLC_1 / PROFINET interface_1":\n  ip: 192.168.0.1  # X1\n  subnetMask: 255.255.255.0\n\n"PLC_1 / PROFINET interface_2":\n  ip: 192.168.1.1\n`;
+    writeFileSync(join(dir, "network.yaml"), yaml);
+    expect(await t.run(["connect", "--address", "192.168.0.50"])).toBe(0);
+    expect(readFileSync(join(dir, "network.yaml"), "utf8")).toBe(yaml.replace("ip: 192.168.0.1", "ip: 192.168.0.50"));
+    expect(t.out.join("")).toMatch(/PROFINET interface_1 192\.168\.0\.1 → 192\.168\.0\.50/);
+    expect(await t.run(["connect", "--address", "192.168.1.1"])).toBe(0);
+    expect(t.out.join("")).toMatch(/already has 192\.168\.1\.1/);
+    expect(await t.run(["connect", "--address", "999.168.0.2"])).toBe(1);
+    expect(readFileSync(join(dir, "network.yaml"), "utf8")).toContain("ip: 192.168.0.50");
+  });
+
+  it("saves a V21 online address without changing the project", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    writeFileSync(t.toml, readFileSync(t.toml, "utf8").replace('tiaVersion = "V20"', 'tiaVersion = "V21"') + TARGET);
+    const dir = join(t.dir, "plc", "PLC_1", "hardware");
+    mkdirSync(dir, { recursive: true });
+    const yaml = '"PLC_1 / PROFINET interface_1":\n  ip: 192.168.0.1\n';
+    writeFileSync(join(dir, "network.yaml"), yaml);
+    expect(await t.run(["connect", "--address", "10.0.0.7"])).toBe(0);
+    expect(readFileSync(t.toml, "utf8")).toContain('address = "10.0.0.7"');
+    expect(readFileSync(join(dir, "network.yaml"), "utf8")).toBe(yaml);
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.db().onlineTarget).toMatchObject({ address: "10.0.0.7", pcInterface: "PLCSIM" });
+  });
+
+  it("offers the V21 address in the pick flow", async () => {
+    const t = setup(["1", "y"]);
+    await t.run(["init"]);
+    writeFileSync(t.toml, readFileSync(t.toml, "utf8").replace('tiaVersion = "V20"', 'tiaVersion = "V21"'));
+    t.patch({ reach: [{ pc: "Wi-Fi", address: "10.0.0.7" }] });
+    expect(await t.run(["connect", "--pick"])).toBe(0);
+    expect(t.questions.join("\n")).toMatch(/go online at 10.0.0.7/i);
+    expect(readFileSync(t.toml, "utf8")).toContain('address = "10.0.0.7"');
+    expect(t.out.join("")).toMatch(/project stays unchanged/i);
+  });
+
+  it("can still edit the V21 project address explicitly", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    writeFileSync(t.toml, readFileSync(t.toml, "utf8").replace('tiaVersion = "V20"', 'tiaVersion = "V21"'));
+    const dir = join(t.dir, "plc", "PLC_1", "hardware");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "network.yaml"), '"PLC_1 / PROFINET interface_1":\n  ip: 192.168.0.1\n');
+    expect(await t.run(["connect", "--address", "10.0.0.7", "--project-address"])).toBe(0);
+    expect(readFileSync(join(dir, "network.yaml"), "utf8")).toContain("ip: 10.0.0.7");
+    expect(readFileSync(t.toml, "utf8")).not.toContain('address = "10.0.0.7"');
   });
 
   it("connect --use saves a hand-picked connection TIA Portal offers, in its spelling; one it does not offer is refused", async () => {
@@ -299,6 +441,42 @@ describe("PLC commands", () => {
     expect(await t.run(["status"])).toBe(0); // still a valid rung.toml
   });
 
+  it("online passes the PLC password from RUNG_PLC_PASSWORD and says how when the PLC asks for one", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.patch({ plcPassword: "s3cret" });
+    expect(await t.run(["online"])).toBe(1);
+    expect(t.err.join("")).toMatch(/PASSWORD_REQUIRED: PLC_1 asks for a password to go online[\s\S]*RUNG_PLC_PASSWORD/);
+    t.env.RUNG_PLC_PASSWORD = "s3cret";
+    expect(await t.run(["online"])).toBe(0);
+    expect(t.db().online).toBe("Online");
+  });
+  it.each(["online", "compare"])("%s trusts an unknown certificate only for an explicit run, without a password", async (command) => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.patch({ plcCertificate: "PLC_1 certificate: SHA256 AA:BB:CC", compare: [] });
+    const config = readFileSync(t.toml, "utf8");
+    expect(await t.run([command])).toBe(1);
+    expect(t.err.join("")).toMatch(/TLS_UNTRUSTED:.*SHA256 AA:BB:CC/);
+    expect(t.err.join("")).toMatch(/--trust-certificate/);
+    expect(await t.run([command, "--trust-certificate"])).toBe(0);
+    expect(readFileSync(t.toml, "utf8")).toBe(config);
+    if (command === "online") await t.run(["online", "--off"]);
+    expect(await t.run([command])).toBe(1);
+  });
+  it("trusting a certificate still requires the PLC password", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.patch({ plcCertificate: "PLC_1 certificate: AA:BB", plcPassword: "s3cret", plcUser: "eng" });
+    expect(await t.run(["online", "--trust-certificate"])).toBe(1);
+    expect(t.err.join("")).toContain("PASSWORD_REQUIRED");
+    t.env.RUNG_PLC_PASSWORD = "s3cret";
+    t.env.RUNG_PLC_USER = "eng";
+    expect(await t.run(["online", "--trust-certificate"])).toBe(0);
+  });
   it("online goes online and offline", async () => {
     const t = setup();
     await t.run(["init"]);
@@ -309,16 +487,26 @@ describe("PLC commands", () => {
     expect(t.db().online).toBe("Offline");
   });
 
-  it("compile --hw compiles the hardware; open never starts a TIA Portal without window and says to open the project", async () => {
+  it("compile --hw compiles the hardware; open opens the block in a TIA Portal window, never one without", async () => {
     const t = setup();
     await t.run(["init"]);
     await t.run(["pull"]);
     expect(await t.run(["compile", "--hw"])).toBe(0);
     expect(t.out.join("")).toMatch(/Hardware compiled/);
-    expect(await t.run(["open", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(1);
-    expect(t.err.join("")).toMatch(/NO_TIA_WINDOW: rung open shows plc\/PLC_1\/blocks\/Fx_Motor\.scl in TIA Portal's editor: open .* in TIA Portal \(with its window\) first/);
-    expect(t.err.join("")).not.toMatch(/without user interface/);
+    expect(await t.run(["open", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    expect(t.db().shown).toEqual([{ address: "plc:PLC_1/blocks/Fx_Motor", save: false, window: true }]);
     expect(t.db().startArgs.at(-1)).not.toContain("--open-headless");
+  });
+
+  it("open asks before a project with unsaved changes moves into a TIA Portal window; --save lets it", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    t.patch({ unsavedProject: true });
+    expect(await t.run(["open", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(1);
+    expect(t.err.join("")).toMatch(/PROJECT_UNSAVED: .*rung open plc\/PLC_1\/blocks\/Fx_Motor\.scl --save/);
+    expect(await t.run(["open", "plc/PLC_1/blocks/Fx_Motor.scl", "--save"])).toBe(0);
+    expect(t.db().shown.at(-1)).toMatchObject({ save: true });
   });
 });
 

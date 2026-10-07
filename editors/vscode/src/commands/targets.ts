@@ -3,6 +3,7 @@
 import { basename } from "node:path";
 import * as vscode from "vscode";
 import { findBlockHeaders, headerAt } from "../core/headers";
+import { deviceChoices } from "../core/targets";
 import { ProjectItem } from "../views/projectView";
 import { PlcItem } from "../views/plcView";
 import type { RungWorkspace } from "../workspace";
@@ -53,5 +54,7 @@ export async function deviceTarget(ws: RungWorkspace, arg: unknown, action: stri
   if (arg instanceof ProjectItem && (arg.node.type === "device" || arg.node.type === "unit")) return arg.node.device;
   const devices = ws.devices();
   if (devices.length === 1) return devices[0];
-  return vscode.window.showQuickPick(devices, { title: `${action}: which PLC?`, placeHolder: "PLC (TIA device name)" });
+  const picked = await vscode.window.showQuickPick(deviceChoices(devices, ws.lastDevice), { title: `${action}: which PLC?`, placeHolder: "PLC (TIA device name)" });
+  if (picked) await ws.rememberDevice(picked);
+  return picked;
 }

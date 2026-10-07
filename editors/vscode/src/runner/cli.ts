@@ -23,6 +23,8 @@ export interface CaptureOptions {
   quiet?: boolean;
   /** Stops the process when cancelled (a test run the person stopped). */
   token?: vscode.CancellationToken;
+  /** Added to the environment of this run only (a PLC password the person typed; never shown or logged). */
+  env?: Record<string, string>;
 }
 
 export interface Finished {
@@ -70,7 +72,7 @@ export class RungCli implements vscode.Disposable {
     if (opts.quiet) this.out.debug(`$ ${inv.display}`);
     else this.out.info(`$ ${inv.display}`);
     const exec = async (token?: vscode.CancellationToken) => {
-      const { child, done } = startProcess(inv, this.ws.root);
+      const { child, done } = startProcess(inv, this.ws.root, undefined, opts.env);
       const timer = opts.timeoutMs ? setTimeout(() => killTree(child), opts.timeoutMs) : undefined;
       const sub = token?.onCancellationRequested(() => killTree(child));
       try {
