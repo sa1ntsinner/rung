@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { main } from "../src/main.js";
 
 const conveyor = fileURLToPath(new URL("../../../examples/conveyor", import.meta.url));
-const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
 
 describe("rung test --against", () => {
   it("runs today's scenarios on the code then and now, and names the first value that differs", async () => {

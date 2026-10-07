@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import { bridgeExecutable, installRoot, devPath } from "./paths.js";
 import type { Io } from "./common.js";
@@ -26,7 +26,8 @@ export type WhitelistStatus = "ok" | "missing" | "stale" | "unknown";
 export function whitelistKey(version: string, exe: string): string {
   const major = Number(version.split(".")[0]);
   const root = major >= 21 ? "AllowList" : `${version}\\Whitelist`;
-  return `HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\${root}\\${basename(exe)}\\Entry`;
+  // a Windows path on every OS (rung check runs on Linux through a remote PC too)
+  return `HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\${root}\\${win32.basename(exe)}\\Entry`;
 }
 
 /** `version` is the whitelist's (20.0); by default the one of the bridge's own TIA Portal (rung-bridge-v21.exe: 21.0). */
