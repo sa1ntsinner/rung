@@ -28,6 +28,13 @@ describe("rung test --against", () => {
     expect(text).toContain("a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)");
     expect(text).toMatch(/step \d+: Motor FALSE → TRUE/);
     expect(text).toMatch(/1 case behaves differently, 4 the same/);
+    // the same from the folder's short 8.3 name (a temp folder of a long user name, as on CI runners)
+    if (process.platform === "win32") {
+      const short = spawnSync("cmd", ["/d", "/c", `for %I in ("${dir}") do @echo %~sI`], { encoding: "utf8", windowsVerbatimArguments: true }).stdout.trim();
+      out.length = 0;
+      const again = await main(["test", "--against", "HEAD"], { ...io, cwd: short });
+      expect(again, `${short}\n${out.join("")}`).toBe(2);
+    }
     out.length = 0;
     expect(await main(["test", "--against", "nope-rev"], io)).toBe(1);
     expect(out.join("")).toContain("nope-rev is not a revision of this repository");
