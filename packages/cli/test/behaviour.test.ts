@@ -21,7 +21,8 @@ describe("rung test --against", () => {
     writeFileSync(scl, readFileSync(scl, "utf8").replace("OR #Fault OR", "OR"));
     const out: string[] = [];
     const io = { cwd: dir, stdout: (s: string) => out.push(s), stderr: (s: string) => out.push(s), env: {} };
-    expect(await main(["test", "--against", "HEAD"], io)).toBe(2); // a case that passed then fails now
+    const code = await main(["test", "--against", "HEAD"], io);
+    expect(code, out.join("")).toBe(2); // a case that passed then fails now
     const text = out.join("");
     expect(text).toMatch(/^behaviour against HEAD \(5 cases\):/);
     expect(text).toContain("a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)");
