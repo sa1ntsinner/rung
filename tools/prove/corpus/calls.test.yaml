@@ -1,0 +1,17 @@
+block: FB_ProveCalls
+cases:
+  - name: arrays and structures through calls, dates
+    steps:
+      - set: { n: 3, day: D#2026-10-06, day2: D#2026-10-09, tday: TOD#23:15:00 }
+        cycle: 1
+      - set: { n: 9, day: D#2024-02-28, day2: D#2024-03-01, tday: TOD#08:00:00.5 }
+        cycle: 1
+  - name: a timer in a chain of instances
+    steps:
+      - set: { n: 1, go: true, day: D#2026-01-01, day2: D#2025-12-31, tday: TOD#00:00:00 }
+        advance: 30ms
+      - advance: 40ms
+      - set: { go: false }
+        cycle: 1
+      - set: { go: true }
+        advance: 60ms

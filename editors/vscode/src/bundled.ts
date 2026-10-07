@@ -38,15 +38,22 @@ export function shimText(node: string, version: string, platform: NodeJS.Platfor
   if (platform === "win32") {
     const exe = batchPath(node, env);
     const call = `"${exe}" "%~dp0${dir}\\rung.cjs" %*`;
-    // a path still outside ASCII: read the rest of this file as UTF-8, and give the console its code page back
-    const utf8 = /[^\x20-\x7e]/.test(exe);
+    // the console in UTF-8 while rung runs, then its own code page back: VS Code's executable is a GUI program, so
+    // its output reaches the console as bytes the console decodes with its code page ("→" became "Γå'" in cp437);
+    // a path outside ASCII in this file is read as UTF-8 then too
     return [
       "@echo off",
       "rem rung, installed by the rung VS Code extension: VS Code's own Node.js runs it",
       "setlocal",
       'set "ELECTRON_RUN_AS_NODE=1"',
       `set "RUNG_HOME=%~dp0${dir}"`,
-      ...(utf8 ? ['for /f "tokens=2 delims=:" %%c in (\'chcp\') do set "RUNG_CP=%%c"', "chcp 65001 >nul", call, 'set "RUNG_RC=%ERRORLEVEL%"', "chcp %RUNG_CP% >nul", "exit /b %RUNG_RC%"] : [call]),
+      // "Active code page: 850" (German: "Aktive Codepage: 850."): the number alone
+      'for /f "tokens=2 delims=:." %%c in (\'chcp\') do set "RUNG_CP=%%c"',
+      "chcp 65001 >nul",
+      call,
+      'set "RUNG_RC=%ERRORLEVEL%"',
+      "chcp %RUNG_CP% >nul",
+      "exit /b %RUNG_RC%",
       "",
     ].join("\r\n");
   }

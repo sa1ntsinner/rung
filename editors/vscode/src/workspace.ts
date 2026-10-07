@@ -3,11 +3,13 @@
 // here). Fires onDidChange when any of them changes and keeps the when-clause context keys up to date.
 import { readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
 import { lastBackupOf, parseRungToml, writesState, type RungToml } from "./core/rungToml";
 import { devicesInState, objectsOf, parseState, summarize, type ObjectInfo, type StateDoc } from "./core/state";
 import type { Output } from "./output";
+
+const CHOSEN = "rung.workspaceRoot";
 
 export interface OwnerInfo {
   pid: number;
@@ -32,7 +34,7 @@ export function isFile(p: string): boolean {
 }
 
 export class RungWorkspace implements vscode.Disposable {
-  /** Folder with rung.toml, else the first workspace folder. */
+  /** The folder with rung.toml rung works on (chosen when there are several), else the first workspace folder. */
   root: string | undefined;
   hasConfig = false;
   config: RungToml | undefined;
@@ -56,14 +58,37 @@ export class RungWorkspace implements vscode.Disposable {
     this.subs.push(vscode.workspace.onDidChangeWorkspaceFolders(() => void this.locate()));
   }
 
-  async start(): Promise<void> {
+  async start(memento?: vscode.Memento): Promise<void> {
+    this.memento = memento;
     await this.locate();
   }
 
+  /** Folders of this window that are rung workspaces (have a rung.toml). */
+  candidates(): string[] {
+    return (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file" && isFile(join(f.uri.fsPath, "rung.toml"))).map((f) => f.uri.fsPath);
+  }
+
+  /** Works on this folder from now on (remembered for the window's workspace). */
+  async choose(root: string): Promise<void> {
+    await this.memento?.update(CHOSEN, root);
+    await this.locate();
+  }
+
+  private memento: vscode.Memento | undefined;
+  /** Several rung workspaces in one window: told once which one rung works on, never silently the first. */
+  private told = false;
+
   private async locate(): Promise<void> {
     const folders = vscode.workspace.workspaceFolders ?? [];
-    const withToml = folders.find((f) => f.uri.scheme === "file" && isFile(join(f.uri.fsPath, "rung.toml")));
-    const root = (withToml ?? folders.find((f) => f.uri.scheme === "file"))?.uri.fsPath;
+    const rungs = this.candidates();
+    const chosen = this.memento?.get<string>(CHOSEN);
+    const root = (rungs.includes(chosen ?? "") ? chosen : rungs[0]) ?? folders.find((f) => f.uri.scheme === "file")?.uri.fsPath;
+    if (rungs.length > 1 && !rungs.includes(chosen ?? "") && !this.told) {
+      this.told = true;
+      void vscode.window
+        .showInformationMessage(`This window has ${rungs.length} rung workspaces; rung works on ${basename(root!)}.`, "Choose Another…")
+        .then((pick) => pick && vscode.commands.executeCommand("rung.chooseWorkspace"));
+    }
     if (root !== this.root || !this.watcher) {
       this.root = root;
       this.watcher?.dispose();

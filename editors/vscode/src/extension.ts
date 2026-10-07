@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // VS Code extension for rung: language client, rung sidebar (Project, PLC), status bar, CodeLens and commands.
 // Every action runs the rung CLI (setting rung.command); workspace files are only read here.
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { DeclarationsPanel } from "./declarations/panel";
@@ -24,7 +25,14 @@ import { TerminalPool } from "./runner/terminal";
 import { WatchController } from "./runner/watch";
 import { readSettings } from "./settings";
 import { StatusBar } from "./statusBar";
+import { Activity } from "./core/activity";
+import { OwnerEvents } from "./ownerEvents";
+import { ActivityView } from "./views/activityView";
+import { ChangesView } from "./views/changesView";
 import { registerTests } from "./testing";
+import { registerDebug } from "./debug";
+import { WhyView } from "./views/whyView";
+import { LiveView } from "./views/liveView";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -46,6 +54,8 @@ export interface RungExtensionApi {
   environment: EnvironmentView;
   monitor: Monitor;
   statusBar: StatusBar;
+  activity: Activity;
+  changes: ChangesView;
   decorations: ObjectDecorations;
   lsp: Lsp;
   usages: UsagesView;
@@ -55,6 +65,9 @@ export interface RungExtensionApi {
   udtTables: Map<string, DeclarationsSession>;
   /** the test tables open, by document */
   testTables: typeof TestTableEditor.tables;
+  tests: () => RungTests | undefined;
+  why: import("./views/whyView").WhyView;
+  live: import("./views/liveView").LiveView;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -67,8 +80,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const problems = new CompileProblems(ws);
   lsp = new Lsp(ws, cli, out);
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
+  registerDebug(context, ws, cli);
+  const why = new WhyView(ws, cli);
+  const live = new LiveView(ws, cli, context.workspaceState, lsp);
+  context.subscriptions.push(why, live);
 
-  await ws.start();
+  await ws.start(context.workspaceState);
+  context.subscriptions.push(
+    vscode.commands.registerCommand("rung.chooseWorkspace", async () => {
+      const items = ws.candidates().map((p) => ({ label: basename(p), description: p, picked: p === ws.root }));
+      if (!items.length) return void vscode.window.showInformationMessage("No folder of this window has a rung.toml.");
+      const pick = await vscode.window.showQuickPick(items, { title: "rung works on", placeHolder: "Choose the rung workspace" });
+      if (!pick || pick.description === ws.root) return;
+      // a watch started here keeps syncing the folder it was started in: say so, and offer to move it along
+      if (watch.owned && watch.status !== "stopped") {
+        const move = await vscode.window.showWarningMessage(`rung watch is running for ${basename(ws.root ?? "")}.`, { modal: true, detail: `It keeps syncing that folder until it is stopped. Switch to ${pick.label} and watch there instead?` }, "Switch and Watch There", "Switch Only");
+        if (!move) return;
+        if (move === "Switch and Watch There") {
+          await watch.stop();
+          await ws.choose(pick.description);
+          await watch.start();
+          return;
+        }
+      }
+      await ws.choose(pick.description);
+    }),
+  );
   // the rung that comes with the extension, only when none is installed (rung on PATH, or rung.command set); it
   // lives in the extension's own storage folder
   const command = readSettings().command;
@@ -83,7 +120,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
 
   const project = new ProjectView(ws);
   const plc = new PlcView(ws, online, watch);
-  const statusBar = new StatusBar(ws, watch, online);
+  // rung watch's events: the activity model hears them first, then the status bar and the view redraw
+  const events = new OwnerEvents(ws);
+  const activity = new Activity();
+  context.subscriptions.push(events, events.onEvent(({ event, params, at }) => activity.event(event, params, at)));
+  const statusBar = new StatusBar(ws, watch, online, activity, events);
+  const activityView = new ActivityView(ws, activity, events);
+  const changes = new ChangesView(ws, cli, events);
   const decorations = new ObjectDecorations(ws);
   const environment = new EnvironmentView(cli);
   const monitor = new Monitor(ws, cli, out, context.secrets);
@@ -93,9 +136,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     vscode.commands.registerCommand("rung.monitor.stop", () => monitor.stop()),
   );
   const lens = new BlockCodeLens(ws);
-  context.subscriptions.push(project, plc, environment, decorations, statusBar, lens);
+  context.subscriptions.push(project, plc, environment, decorations, statusBar, activityView, changes, lens);
   context.subscriptions.push(
-    DeclarationsPanel.register(context, { lsp, ws }),
+    DeclarationsPanel.register(context, { lsp, ws, monitor }),
     UdtTableEditor.register(context, { lsp, ws }),
     TestTableEditor.register(context, { lsp, ws, tests: () => testsRef }),
     vscode.commands.registerCommand("rung.test.openTable", (uri?: vscode.Uri) => {
@@ -107,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       if (target) return vscode.commands.executeCommand("vscode.openWith", target, UDT_TABLE);
     }),
     vscode.commands.registerCommand("rung.declarations.open", (uri?: vscode.Uri, position?: vscode.Position) =>
-      DeclarationsPanel.show(context, { lsp: lsp!, ws }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
+      DeclarationsPanel.show(context, { lsp: lsp!, ws, monitor }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
     ),
   );
   context.subscriptions.push(
@@ -151,7 +194,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   );
   const usages = new UsagesView(lsp);
   context.subscriptions.push(usages);
-  registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp, usages });
+  registerCommands(context, { ws, cli, out, watch, online, problems, project, lsp, usages, changes });
   const tests = registerTests(context, ws, cli);
   testsRef = tests;
   if (tests) lens.useTests(tests);
@@ -183,7 +226,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why, live };
 }
 
 export async function deactivate(): Promise<void> {

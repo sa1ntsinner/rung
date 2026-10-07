@@ -229,6 +229,11 @@ export class BridgeClient {
     return this.request("model.describe", { scope, maxNodes }) as Promise<DescribeNode>;
   }
 
+  /** TIA Portal's lasting identity of listed objects (V20 and later; kept through a rename there). */
+  identify(addresses: string[]): Promise<Record<string, string>> {
+    return this.request("objects.identify", { addresses }) as Promise<Record<string, string>>;
+  }
+
   xref(address: string): Promise<XRefEntry[]> {
     return this.request("xref.get", { address }) as Promise<XRefEntry[]>;
   }

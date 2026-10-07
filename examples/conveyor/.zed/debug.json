@@ -1,0 +1,9 @@
+[
+  {
+    "label": "rung: debug the first case of this test file",
+    "adapter": "rung",
+    "test": "$ZED_FILE",
+    "case": 0,
+    "stopOnEntry": true
+  }
+]

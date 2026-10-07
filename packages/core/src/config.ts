@@ -78,8 +78,8 @@ export interface DownloadSettings {
 
 export const CONFIG_FILE = "rung.toml";
 
-export type EngineeringVersion = "V20" | "V21" | "CODESYS";
-export const ENGINEERING_VERSIONS: readonly EngineeringVersion[] = ["V20", "V21", "CODESYS"];
+export type EngineeringVersion = "V19" | "V20" | "V21" | "CODESYS";
+export const ENGINEERING_VERSIONS: readonly EngineeringVersion[] = ["V19", "V20", "V21", "CODESYS"];
 
 export function defaultConfig(projectPath: string, tiaVersion: EngineeringVersion, bridgeCommand = "", devices: string[] = []): RungConfig {
   return {
@@ -109,7 +109,7 @@ export function parseConfig(text: string): RungConfig {
   if (raw.format !== 1) fail(`unsupported format ${String(raw.format)}`);
   const project = raw.project as Record<string, unknown> | undefined;
   if (!project || typeof project.path !== "string" || !project.path) fail("project.path is required");
-  if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V20, V21 or CODESYS");
+  if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V19, V20, V21 or CODESYS");
   const bridge = (raw.bridge ?? {}) as Record<string, unknown>;
   if (bridge.command !== undefined && typeof bridge.command !== "string") fail("bridge.command must be a path");
   if (bridge.host !== undefined && (typeof bridge.host !== "string" || !/^[^\s"']+$/.test(bridge.host))) fail("bridge.host must be an ssh destination such as elmir@tia-pc");

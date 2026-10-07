@@ -48,6 +48,8 @@ export async function fileTarget(ws: RungWorkspace, arg: unknown, nameArg?: unkn
 export async function deviceTarget(ws: RungWorkspace, arg: unknown, action: string): Promise<string | undefined> {
   if (typeof arg === "string" && arg) return arg;
   if (arg instanceof PlcItem && arg.device) return arg.device;
+  // a tree element of another view that names its PLC (the Changes view's comparison)
+  if (arg && typeof arg === "object" && typeof (arg as { device?: unknown }).device === "string") return (arg as { device: string }).device;
   if (arg instanceof ProjectItem && (arg.node.type === "device" || arg.node.type === "unit")) return arg.node.device;
   const devices = ws.devices();
   if (devices.length === 1) return devices[0];

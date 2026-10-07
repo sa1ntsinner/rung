@@ -212,6 +212,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return tools().download(request as never);
     },
     show: async (p) => tools().show(String(p.address)),
+    xref: async (p) => tools().xref(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);

@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Compare with PLC (TIA's online/offline comparison) and Rename in TIA Portal.
 import * as vscode from "vscode";
-import { Args, parseCompare, parseRenamed, type CompareItem } from "../core/args";
+import { Args, parseCompare, parseRenamed } from "../core/args";
 import { parseNoTarget } from "../core/connect";
 import type { Output } from "../output";
 import { RungCli } from "../runner/cli";
 import type { RungWorkspace } from "../workspace";
+import type { ChangesView } from "../views/changesView";
 import type { Connector } from "./connect";
 import { deviceTarget, fileTarget } from "./targets";
 
-const LABEL: Record<string, string> = { Different: "differs", OnlyInProject: "only in the project", OnlyOnPlc: "only on the PLC" };
-const ICON: Record<string, string> = { Different: "$(diff)", OnlyInProject: "$(file-add)", OnlyOnPlc: "$(cloud)" };
 
-export async function compareCommand(ws: RungWorkspace, cli: RungCli, out: Output, connector: Connector, arg: unknown): Promise<void> {
+export async function compareCommand(ws: RungWorkspace, cli: RungCli, out: Output, connector: Connector, changes: ChangesView, arg: unknown): Promise<void> {
   const d = await deviceTarget(ws, arg, "Compare with PLC");
   if (!d) return;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -30,31 +29,17 @@ export async function compareCommand(ws: RungWorkspace, cli: RungCli, out: Outpu
       return;
     }
     await ws.reload();
+    // kept in the Changes view, next to what the next sync does
+    changes.setComparison(d, result.identical, result.items);
     if (!result.items.length) {
       void vscode.window.showInformationMessage(`${d} runs what the project has (${result.identical} objects compared).`);
       return;
     }
-    await showDifferences(ws, d, result.items, result.identical);
+    await vscode.commands.executeCommand("rung.changes.focus");
     return;
   }
 }
 
-async function showDifferences(ws: RungWorkspace, device: string, items: CompareItem[], identical: number): Promise<void> {
-  type Pick = vscode.QuickPickItem & { item: CompareItem };
-  const picks: Pick[] = items.map((item) => ({
-    label: `${ICON[item.state] ?? "$(question)"} ${item.name.replace(/ \[[^\]]*\]$/, "")}`,
-    description: LABEL[item.state] ?? item.state,
-    detail: item.file ?? item.path,
-    item,
-  }));
-  const pick = await vscode.window.showQuickPick(picks, {
-    title: `${device}: ${items.length} object${items.length > 1 ? "s" : ""} not as in the project (${identical} identical)`,
-    placeHolder: "Open a file to see what the project has; download to make the PLC match",
-    matchOnDetail: true,
-  });
-  if (!pick?.item.file || !ws.root) return;
-  await vscode.window.showTextDocument(vscode.Uri.joinPath(vscode.Uri.file(ws.root), pick.item.file));
-}
 
 export async function renameCommand(ws: RungWorkspace, cli: RungCli, out: Output, arg: unknown): Promise<void> {
   const t = await fileTarget(ws, arg, undefined, "a block, PLC data type or tag table file");

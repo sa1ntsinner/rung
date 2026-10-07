@@ -36,12 +36,12 @@
     "onView:rung.environment",
     "workspaceContains:rung.toml",
     "workspaceContains:**/*.TcPOU",
-    "workspaceContains:**/*.st",
     "onLanguage:scl",
     "onLanguage:s7dcl",
     "onWebviewPanel:rung.declarations",
     "onCustomEditor:rung.udtTable",
-    "onCustomEditor:rung.testTable"
+    "onCustomEditor:rung.testTable",
+    "onDebugResolve:rung"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -118,6 +118,30 @@
           "contextualTitle": "rung"
         },
         {
+          "id": "rung.changes",
+          "name": "Changes",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung"
+        },
+        {
+          "id": "rung.activity",
+          "name": "Activity",
+          "icon": "media/rung.svg",
+          "contextualTitle": "rung"
+        },
+        {
+          "id": "rung.live",
+          "name": "Live Values",
+          "when": "rung.workspace",
+          "icon": "$(pulse)"
+        },
+        {
+          "id": "rung.whyLive",
+          "name": "Why?",
+          "when": "rung.workspace && rung.why.shown",
+          "icon": "$(question)"
+        },
+        {
           "id": "rung.environment",
           "name": "Environment",
           "icon": "media/rung.svg",
@@ -129,6 +153,14 @@
           "name": "Usages",
           "icon": "media/rung.svg",
           "contextualTitle": "rung"
+        }
+      ],
+      "debug": [
+        {
+          "id": "rung.why",
+          "name": "Why?",
+          "when": "debugType == rung",
+          "icon": "$(question)"
         }
       ]
     },
@@ -156,6 +188,34 @@
       {
         "view": "rung.usages",
         "contents": "Put the cursor on a name in an SCL file and run Who Writes This? (Alt+Q U).\n[Who Writes This?](command:rung.whoWrites)"
+      },
+      {
+        "view": "rung.changes",
+        "contents": "What the next sync would send to TIA Portal and bring into the files, before anything is written.\n[Show Changes](command:rung.changes.refresh)",
+        "when": "rung.workspace"
+      },
+      {
+        "view": "rung.activity",
+        "contents": "What rung watch sends to TIA Portal and brings back shows up here, newest first.\n[Start Watch](command:rung.watch.start)",
+        "when": "rung.workspace && !rung.watching"
+      },
+      {
+        "view": "rung.activity",
+        "contents": "rung watch is running. Save a block and it shows up here on its way to TIA Portal.",
+        "when": "rung.watching && rung.writesOn"
+      },
+      {
+        "view": "rung.activity",
+        "contents": "rung watch is running with writes off: your saves stay in the files, and what changes in TIA Portal comes in and shows up here.\n[Turn On Writes](command:rung.writes.on)",
+        "when": "rung.watching && !rung.writesOn"
+      },
+      {
+        "view": "rung.why",
+        "contents": "Why is a value what it is? Right-click a variable in Variables → **Why?**, or select a name in the code.\n[Why?…](command:rung.why)"
+      },
+      {
+        "view": "rung.live",
+        "contents": "Pin values from the PLC to watch them change side by side (read-only, through its Web API or rung simulate).\n[Pin a Value…](command:rung.live.add)"
       }
     ],
     "commands": [
@@ -216,7 +276,7 @@
         "command": "rung.watch.start",
         "title": "Start Watch",
         "category": "rung",
-        "icon": "$(eye)"
+        "icon": "$(play-circle)"
       },
       {
         "command": "rung.watch.stop",
@@ -228,7 +288,7 @@
         "command": "rung.watch.toggle",
         "title": "Toggle Watch",
         "category": "rung",
-        "icon": "$(eye)"
+        "icon": "$(play-circle)"
       },
       {
         "command": "rung.watch.show",
@@ -245,7 +305,7 @@
         "command": "rung.preview",
         "title": "Preview Sync",
         "category": "rung",
-        "icon": "$(eye)"
+        "icon": "$(diff)"
       },
       {
         "command": "rung.whoWrites",
@@ -449,6 +509,12 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "rung.test.record",
+        "title": "Record Expectations",
+        "category": "rung",
+        "icon": "$(record)"
+      },
+      {
         "command": "rung.test.openTable",
         "title": "Open Test as Table",
         "category": "rung",
@@ -481,6 +547,124 @@
         "command": "rung.usages.pick",
         "title": "Who Writes This? (Quick Pick)",
         "category": "rung"
+      },
+      {
+        "command": "rung.chooseWorkspace",
+        "title": "Choose Workspace Folder…",
+        "category": "rung",
+        "icon": "$(root-folder)"
+      },
+      {
+        "command": "rung.changes.refresh",
+        "title": "Refresh Changes",
+        "category": "rung",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "rung.changes.sync",
+        "title": "Sync These Changes",
+        "category": "rung",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "rung.changes.open",
+        "title": "Show the Change",
+        "category": "rung",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "rung.resolveMerge",
+        "title": "Merge in Editor…",
+        "category": "rung",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "rung.why",
+        "title": "Why?",
+        "category": "rung",
+        "icon": "$(question)"
+      },
+      {
+        "command": "rung.why.open",
+        "title": "Open Statement",
+        "category": "rung"
+      },
+      {
+        "command": "rung.why.copy",
+        "title": "Copy as Markdown",
+        "category": "rung",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "rung.xref",
+        "title": "Cross-Reference in TIA Portal",
+        "category": "rung",
+        "icon": "$(references)"
+      },
+      {
+        "command": "rung.impact",
+        "title": "Interface Impact (before sync)",
+        "category": "rung",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "rung.live.add",
+        "title": "Pin a Value",
+        "category": "rung",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rung.live.remove",
+        "title": "Unpin",
+        "category": "rung",
+        "icon": "$(close)"
+      },
+      {
+        "command": "rung.live.clear",
+        "title": "Unpin All",
+        "category": "rung",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "rung.live.format",
+        "title": "Display Format…",
+        "category": "rung"
+      },
+      {
+        "command": "rung.live.bookmark",
+        "title": "Bookmark in the Recording",
+        "category": "rung",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "rung.live.export",
+        "title": "Export Recording as CSV",
+        "category": "rung",
+        "icon": "$(export)"
+      },
+      {
+        "command": "rung.live.exportTest",
+        "title": "Export Recording as Test…",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "rung.live.pause",
+        "title": "Pause Live Values",
+        "category": "rung",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "rung.live.resume",
+        "title": "Resume Live Values",
+        "category": "rung",
+        "icon": "$(play)"
+      },
+      {
+        "command": "rung.compareBehaviour",
+        "title": "Compare Behaviour With…",
+        "category": "rung",
+        "icon": "$(git-compare)"
       }
     ],
     "menus": {
@@ -640,12 +824,65 @@
         {
           "command": "rung.usages.history",
           "when": "rung.hasUsages"
+        },
+        {
+          "command": "rung.changes.open",
+          "when": "false"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "rung.workspace && rung.hasConflicts"
+        },
+        {
+          "command": "rung.test.record",
+          "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/"
+        },
+        {
+          "command": "rung.why",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.why.open",
+          "when": "false"
+        },
+        {
+          "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.impact",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.live.remove",
+          "when": "false"
+        },
+        {
+          "command": "rung.live.pause",
+          "when": "false"
+        },
+        {
+          "command": "rung.live.format",
+          "when": "false"
+        },
+        {
+          "command": "rung.live.resume",
+          "when": "false"
+        },
+        {
+          "command": "rung.compareBehaviour",
+          "when": "rung.workspace"
         }
       ],
       "view/title": [
         {
           "command": "rung.env.refresh",
           "when": "view == rung.environment",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.why.copy",
+          "when": "(view == rung.why || view == rung.whyLive) && rung.why.shown",
           "group": "navigation@1"
         },
         {
@@ -742,6 +979,71 @@
           "command": "rung.usages.refresh",
           "when": "view == rung.usages && rung.hasUsages",
           "group": "navigation@2"
+        },
+        {
+          "command": "rung.changes.sync",
+          "when": "view == rung.changes && rung.changes.any && !rung.changes.sendsWithWritesOff",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.writes.on",
+          "when": "view == rung.changes && rung.changes.sendsWithWritesOff",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.changes.refresh",
+          "when": "view == rung.changes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.why",
+          "when": "view == rung.why",
+          "group": "navigation"
+        },
+        {
+          "command": "rung.live.add",
+          "when": "view == rung.live",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.live.pause",
+          "when": "view == rung.live && !rung.live.paused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.live.resume",
+          "when": "view == rung.live && rung.live.paused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.live.clear",
+          "when": "view == rung.live",
+          "group": "navigation@3"
+        },
+        {
+          "command": "rung.live.bookmark",
+          "when": "view == rung.live",
+          "group": "navigation@4"
+        },
+        {
+          "command": "rung.live.export",
+          "when": "view == rung.live",
+          "group": "navigation@5"
+        },
+        {
+          "command": "rung.live.exportTest",
+          "when": "view == rung.live",
+          "group": "navigation@6"
+        },
+        {
+          "command": "rung.compareBehaviour",
+          "when": "view == rung.changes",
+          "group": "2_behaviour"
+        },
+        {
+          "command": "rung.why",
+          "when": "view == rung.whyLive",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -808,7 +1110,7 @@
         {
           "command": "rung.onlineState",
           "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
-          "group": "inline@2"
+          "group": "inline@4"
         },
         {
           "command": "rung.goOnline",
@@ -859,6 +1161,56 @@
           "command": "rung.compare",
           "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
           "group": "1_online@4"
+        },
+        {
+          "command": "rung.compare",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "view == rung.project && viewItem =~ /\\bconflicted\\b/",
+          "group": "0_conflict@0"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "view == rung.changes && viewItem == rung.change.conflict",
+          "group": "inline"
+        },
+        {
+          "command": "rung.compare",
+          "when": "view == rung.changes && viewItem == rung.compared",
+          "group": "inline@1"
+        },
+        {
+          "command": "rung.compare",
+          "when": "view == rung.changes && viewItem == rung.compared",
+          "group": "1_plc@1"
+        },
+        {
+          "command": "rung.download",
+          "when": "view == rung.changes && viewItem == rung.compared",
+          "group": "1_plc@2"
+        },
+        {
+          "command": "rung.xref",
+          "when": "view == rung.project && viewItem =~ /rung\\.object/",
+          "group": "2_inspect@3"
+        },
+        {
+          "command": "rung.impact",
+          "when": "view == rung.project && viewItem =~ /rung\\.object/",
+          "group": "2_inspect@4"
+        },
+        {
+          "command": "rung.live.remove",
+          "when": "view == rung.live && viewItem == rung.liveValue",
+          "group": "inline"
+        },
+        {
+          "command": "rung.live.format",
+          "when": "view == rung.live && viewItem == rung.liveValue",
+          "group": "1_format"
         }
       ],
       "editor/title": [
@@ -901,6 +1253,11 @@
           "command": "rung.monitor.stop",
           "when": "rung.workspace && rung.monitoring",
           "group": "navigation@4"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "rung.workspace && resourceExtname == .conflict",
+          "group": "navigation"
         }
       ],
       "editor/context": [
@@ -923,6 +1280,36 @@
           "command": "rung.whoWrites",
           "when": "editorLangId == scl || editorLangId == s7dcl",
           "group": "navigation@9"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@0"
+        },
+        {
+          "command": "rung.test.record",
+          "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/",
+          "group": "rung@2"
+        },
+        {
+          "command": "rung.why",
+          "when": "rung.workspace && editorLangId == scl",
+          "group": "rung@1"
+        },
+        {
+          "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.impact",
+          "when": "rung.workspace && editorLangId == scl",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.live.add",
+          "when": "rung.workspace && editorLangId == scl && editorHasSelection",
+          "group": "rung@4"
         }
       ],
       "explorer/context": [
@@ -950,6 +1337,18 @@
           "command": "rung.resolveTheirs",
           "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
           "group": "rung@4"
+        },
+        {
+          "command": "rung.resolveMerge",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
+          "group": "rung@2"
+        }
+      ],
+      "debug/variables/context": [
+        {
+          "command": "rung.why",
+          "when": "debugType == rung",
+          "group": "navigation"
         }
       ]
     },
@@ -1342,12 +1741,23 @@
           {
             "id": "test",
             "title": "Run the tests",
-            "description": "Run the YAML tests on the offline simulator.\n[Run all tests](command:rung.testAll)",
+            "description": "Run the YAML tests on the offline simulator, with coverage, and record what to expect.\n[Run all tests](command:rung.testAll)",
             "media": {
               "markdown": "media/walkthrough/test.md"
             },
             "completionEvents": [
               "onCommand:rung.testAll"
+            ]
+          },
+          {
+            "id": "debug",
+            "title": "Step through a test, ask why",
+            "description": "Debug a test case from the Testing view: breakpoints in SCL, stepping back, and Why? on any value.",
+            "media": {
+              "markdown": "media/walkthrough/debug.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.why"
             ]
           },
           {
@@ -1374,7 +1784,74 @@
           }
         ]
       }
-    ]
+    ],
+    "breakpoints": [
+      {
+        "language": "scl"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "rung",
+        "label": "rung: test case (offline simulator)",
+        "languages": [
+          "scl"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "test"
+            ],
+            "properties": {
+              "test": {
+                "type": "string",
+                "description": "The test file whose case runs, e.g. ${workspaceFolder}/tests/motor.test.yaml.",
+                "default": "${file}"
+              },
+              "case": {
+                "type": "number",
+                "description": "The case to debug, numbered from 0.",
+                "default": 0
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop at the first statement.",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "rung",
+            "request": "launch",
+            "name": "Debug a test case",
+            "test": "${file}",
+            "case": 0,
+            "stopOnEntry": true
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "rung: Debug a test case",
+            "description": "Step through one case of a .test.yaml on the offline simulator",
+            "body": {
+              "type": "rung",
+              "request": "launch",
+              "name": "Debug a test case",
+              "test": "^\"\\${file}\"",
+              "case": 0,
+              "stopOnEntry": true
+            }
+          }
+        ]
+      }
+    ],
+    "configurationDefaults": {
+      "[scl]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

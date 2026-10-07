@@ -1,0 +1,10 @@
+TYPE "T_ProvePoint"
+VERSION : 0.1
+   STRUCT
+      x : Int;
+      y : Int;
+      label : String[8];
+   END_STRUCT;
+
+END_TYPE
+

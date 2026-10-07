@@ -83,7 +83,7 @@ Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md
 | CODESYS V3.5 | ✓ | ✓ | ✓ |
 | TwinCAT 3 sources | files already | ✓ | ✓ |
 
-**Editors** VS Code and Zed extensions, a Neovim config · **Agents** Claude Code, Codex, Cursor, Gemini CLI (`rung setup`) · **Runs on** Windows; Linux and macOS through a Windows PC [over ssh](docs/remote.md) · V21 builds, untested.
+**Editors** VS Code and Zed extensions, a Neovim plugin · **Agents** Claude Code, Codex, Cursor, Gemini CLI (`rung setup`) · **Runs on** Windows; Linux and macOS through a Windows PC [over ssh](docs/remote.md) · **TIA Portal** V19, V20 and V21.
 
 ## Careful by default
 

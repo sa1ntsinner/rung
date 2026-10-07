@@ -101,10 +101,28 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
         void vscode.window.showInformationMessage(`Download to ${device} finished.`);
         return;
       }
+      // what is said about the PLC follows what rung knows (the CLI's exit code carries the phase), never a guess
+      const check = async (message: string) => {
+        const pick = await vscode.window.showWarningMessage(message, "Compare with PLC", "Online State");
+        if (pick === "Compare with PLC") await vscode.commands.executeCommand("rung.compare", device);
+        if (pick === "Online State") await vscode.commands.executeCommand("rung.onlineState", device);
+      };
+      if (r.code === 4) {
+        await check(`The download reached ${device}, but TIA Portal asked something afterwards that rung did not answer: ${device} may be in STOP.`);
+        return;
+      }
+      if (r.code === 5) {
+        await check(`rung lost track of the download to ${device} (see the terminal). It may have run in part or in full.`);
+        return;
+      }
+      if (r.code === 2 && /The transfer had started/.test(r.output)) {
+        await check(`Download to ${device} failed after the transfer had started: ${device} may hold part of it.`);
+        return;
+      }
       if (r.code !== 3) {
         const why = RungCli.summary(r.output);
         void vscode.window.showErrorMessage(
-          r.code === 1 ? `Nothing was downloaded to ${device}${why ? `: ${why}` : "."}` : /compile errors/.test(r.output) ? `Nothing was downloaded to ${device}: the program has compile errors (see Problems and the terminal).` : `Download to ${device} failed (exit code ${r.code}). See the terminal.`,
+          r.code === 1 ? `Nothing was downloaded to ${device}${why ? `: ${why}` : "."}` : /compile errors/.test(r.output) ? `Nothing was downloaded to ${device}: the program has compile errors (see Problems and the terminal).` : `Download to ${device} failed before the transfer (exit code ${r.code}). See the terminal.`,
         );
         return;
       }

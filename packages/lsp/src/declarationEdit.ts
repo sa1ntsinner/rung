@@ -4,6 +4,7 @@
 import { ATTR_DEFAULT, EXPOSURE, parseAttributes } from "./attributes.js";
 import type { DeclModel, DeclRow, DeclSection } from "./declarations.js";
 import { ELEMENTARY_TYPES, KEYWORDS } from "./catalog.js";
+import { parseAbsolute } from "./assignments.js";
 
 export type DeclOp =
   | { op: "setStart"; row: string; value: string | null }
@@ -13,13 +14,17 @@ export type DeclOp =
   | { op: "setType"; row: string; type: string }
   /** after the row `after` (at its level), at the end of struct `into`, else at the end of `section` */
   | { op: "insertRows"; after?: string; into?: string; section?: string; rows: NewRow[] }
-  | { op: "deleteRow"; row: string };
+  | { op: "deleteRow"; row: string }
+  /** a PLC tag's address in a tag table */
+  | { op: "setAddress"; row: string; value: string | null };
 
 export interface NewRow {
   name: string;
   type: string;
   start?: string;
   comment?: string;
+  /** a PLC tag's address (a tag table) */
+  address?: string;
 }
 
 export interface PlannedEdit {
@@ -51,7 +56,7 @@ const indentOf = (text: string, at: number) => /^[ \t]*/.exec(text.slice(lineSta
 const eolOf = (text: string) => (text.includes("\r\n") ? "\r\n" : "\n");
 const PLAIN_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** names SCL reserves: TIA refuses them unquoted ("Timer" is the S5 timer type) */
-const RESERVED = new Set(
+export const RESERVED = new Set(
   [...KEYWORDS, ...ELEMENTARY_TYPES, "TIMER", "COUNTER", "S5TIME", "POINTER", "ANY", "BLOCK_DB", "BLOCK_FB", "BLOCK_FC", "BLOCK_SDB", "DT", "TOD", "LTOD", "DATE_AND_TIME", "STRING", "WSTRING", "VOID", "NULL", "REF_TO", "REF", "DB_ANY", "AT", "VERSION", "TITLE"].map((k) =>
     k.toUpperCase(),
   ),
@@ -83,6 +88,11 @@ function sectionOf(model: DeclModel, id: string): DeclSection | undefined {
 /** What TIA allows for a default value in a section, or why not. */
 function startRule(model: DeclModel, section: DeclSection | undefined, start: string | undefined): string | undefined {
   if (!section) return undefined;
+  if (model.block?.kind === "TAGS") {
+    if (start && section.title === "Tags") return "A PLC tag has no start value; a constant has one (VAR_GLOBAL CONSTANT).";
+    if (!start && section.title === "Constants") return "A constant needs a value.";
+    return undefined;
+  }
   if (start && section.title === "Temp") return "Temporary variables have no default value.";
   if (!start && section.title === "Constant") return "A constant needs a value.";
   if (start && model.block?.kind === "FC" && (section.title === "Input" || section.title === "Output" || section.title === "InOut")) return "A function's parameters have no default value.";
@@ -101,8 +111,13 @@ export function typeError(type: string): string | undefined {
   return `"${type.trim()}" is not a data type.`;
 }
 
-/** A row as TIA exports it, or why it cannot be written. */
-function rowText(r: NewRow, indent: string): string | { reason: string } {
+/** Why a text is no address a PLC tag can have, or undefined. */
+function addressError(a: string): string | undefined {
+  return parseAbsolute(a) ? undefined : `"${a}" is not an address: %I0.0, %Q1.7, %MW10, %MD20…`;
+}
+
+/** A row as TIA exports it (a tag with its address), or why it cannot be written. */
+function rowText(r: NewRow, indent: string, address?: string): string | { reason: string } {
   const name = r.name.trim();
   const type = r.type.trim();
   const start = r.start?.trim();
@@ -116,6 +131,11 @@ function rowText(r: NewRow, indent: string): string | { reason: string } {
   if (STRUCT_TYPE.test(type)) return { reason: "Add the declaration first, then set its type to Struct." };
   if (start && /;|\/\/|\(\*|\/\*/.test(start.replace(/'(?:[^']|'')*'/g, "''"))) return { reason: `"${start}" is not a start value.` };
   const quoted = PLAIN_NAME.test(name) && !RESERVED.has(name.toUpperCase()) ? name : `"${name}"`;
+  if (address !== undefined) {
+    const bad = addressError(address);
+    if (bad) return { reason: bad };
+    return `${indent}${quoted} AT ${parseAbsolute(address)!.address} : ${type};${comment ? `   // ${comment}` : ""}`;
+  }
   const instr = instruction(type);
   return `${indent}${quoted}${instr ? ` ${instructionPragma(instr)}` : ""} : ${instr ?? type}${start ? ` := ${start}` : ""};${comment ? `   // ${comment}` : ""}`;
 }
@@ -217,10 +237,15 @@ function planRows(text: string, model: DeclModel, op: Extract<DeclOp, { op: "ins
   const taken = new Set(siblings.map((r) => r.name.toLowerCase()));
   const section = op.after ? sectionOf(model, op.after) : op.into ? sectionOf(model, op.into) : model.sections.find((x) => x.id === op.section);
   const lines: string[] = [];
+  // a new tag gets the next free bit memory; more than one needs its own addresses
+  const tags = model.block?.kind === "TAGS" && section?.title === "Tags";
+  if (tags && op.rows.filter((r) => !r.address).length > 1) return { ok: false, reason: "Paste tags with their addresses, or add them one at a time (each gets the next free bit memory)." };
   for (const r of op.rows) {
     const rule = startRule(model, section, r.start?.trim());
     if (rule) return { ok: false, reason: rule };
-    const t = rowText(r, indent);
+    const address = tags ? (r.address ?? model.nextAddress) : undefined;
+    if (tags && !address) return { ok: false, reason: "No free bit memory is known for a new tag: give it an address." };
+    const t = rowText(r, indent, address);
     if (typeof t !== "string") return { ok: false, reason: t.reason };
     const key = r.name.trim().toLowerCase();
     if (taken.has(key)) return { ok: false, reason: `The block already has "${r.name.trim()}".` };
@@ -280,6 +305,18 @@ export function planDeclarationEdit(text: string, model: DeclModel, op: DeclOp):
     } else if (pragma) put(row.ranges.name.end, row.ranges.name.end, ` ${pragma}`);
     put(row.ranges.type.start, row.ranges.type.end, v);
     return { ok: true, version: model.version, edits };
+  }
+
+  if (op.op === "setAddress") {
+    if (model.block?.kind !== "TAGS" || sectionOf(model, row.id)?.title !== "Tags") return { ok: false, reason: "Only a PLC tag has an address." };
+    const v = op.value?.trim();
+    if (!v) return { ok: false, reason: "A PLC tag needs an address." };
+    const bad = addressError(v);
+    if (bad) return { ok: false, reason: bad };
+    const a = parseAbsolute(v)!.address;
+    if (row.ranges.address) return text.slice(row.ranges.address.start, row.ranges.address.end) === a ? none : edit(row.ranges.address.start, row.ranges.address.end, a);
+    const at = row.ranges.attrs?.end ?? row.ranges.name.end;
+    return edit(at, at, ` AT ${a}`);
   }
 
   if (op.op === "deleteRow") {

@@ -4,6 +4,7 @@
 import type { DeclModel, DeclRow } from "./declarations.js";
 import type { Part } from "./testEdit.js";
 import type { TestModel } from "./testModel.js";
+import { integer } from "./testSkeleton.js";
 
 export interface TestSymbol {
   /** as a test writes it: Start, Cfg.Speed */
@@ -40,11 +41,13 @@ export function valueProblem(type: string, value: string): string | undefined {
   if (t === "BOOL") return /^(true|false)$/i.test(v) ? undefined : `${type} takes true or false.`;
   const range = INT_RANGE[t];
   if (range) {
-    if (!/^[-+]?\d+$/.test(v)) return `${type} takes a whole number.`;
-    const n = Number(v);
+    // 7, 16#00F3, 2#0000_0101, INT#16#7F: as rung test reads them
+    const whole = integer(v);
+    if (whole === undefined) return `${type} takes a whole number.`;
+    const n = Number(whole);
     return n < range[0] || n > range[1] ? `${v} does not fit an ${type} (${range[0]} to ${range[1]}).` : undefined;
   }
-  if (/^(LINT|ULINT|LWORD)$/.test(t)) return /^[-+]?\d+$/.test(v) ? undefined : `${type} takes a whole number.`;
+  if (/^(LINT|ULINT|LWORD)$/.test(t)) return integer(v) !== undefined ? undefined : `${type} takes a whole number.`;
   if (/^L?REAL$/.test(t)) return v !== "" && Number.isFinite(Number(v)) ? undefined : `${type} takes a number.`;
   if (/^L?TIME$/.test(t)) return /^(L?T#)?-?(\d+(\.\d+)?(ms|s|m|h|d)_?)+$/i.test(v) ? undefined : `${type} takes a time with its unit (500ms, 2s, T#1m).`;
   const len = /^W?STRING\s*\[\s*(\d+)\s*\]$/.exec(t);

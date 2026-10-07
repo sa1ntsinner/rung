@@ -457,8 +457,9 @@ namespace Rung.Bridge.V20
         static ConfigurationTargetInterface ResolveTarget(ConnectionConfiguration cfg, ConnectionTarget t, string device)
         {
             // an S7-PLCSIM instance has no PLC certificate, so the secure PG/PC channel TIA V20 uses by default fails
-            // with "Connect to module failed"; TIA Portal's own "Start simulation" talks to it the legacy way
-            if (string.Equals(t.PcInterface, "PLCSIM", StringComparison.OrdinalIgnoreCase) && !cfg.EnableLegacyCommunication)
+            // with "Connect to module failed"; TIA Portal's own "Start simulation" talks to it the legacy way. Both the
+            // softbus ("PLCSIM") and S7-PLCSIM Advanced's "Siemens PLCSIM Virtual Ethernet Adapter" lead to one
+            if ((t.PcInterface ?? "").IndexOf("PLCSIM", StringComparison.OrdinalIgnoreCase) >= 0 && !cfg.EnableLegacyCommunication)
                 cfg.EnableLegacyCommunication = true;
             var mode = cfg.Modes.Find(t.Mode) ?? throw new RpcException(ErrorCodes.NoTarget, "No connection mode \"" + t.Mode + "\" for " + device + "; run rung interfaces");
             var pc = mode.PcInterfaces.Find(t.PcInterface, t.PcInterfaceNumber <= 0 ? 1 : t.PcInterfaceNumber)

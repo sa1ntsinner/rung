@@ -166,6 +166,31 @@ describe("PLC commands", () => {
     expect(t.out.join("")).toMatch(/download: Success/);
   });
 
+  it("what the download says about the PLC follows the phase: before the transfer, after it, or unknown", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    // refused before the transfer: nothing went
+    expect(await t.run(["download", "--yes"])).toBe(3);
+    expect(t.out.join("")).toMatch(/Nothing was downloaded: before the transfer/);
+    // refused after it (start the CPU): the program is there, the CPU may be in STOP
+    t.out.length = 0;
+    t.patch({ downloadOutcome: { state: "Cancelled", decisions: [{ phase: "pre", kind: "StopModules", name: "stop-cpu", choice: "StopAll", allowed: true, blocks: false }, { phase: "post", kind: "StartModules", name: "start-cpu", choice: "NoAction", allowed: false, blocks: true }], needsAllow: ["start-cpu"] } });
+    expect(await t.run(["download", "--yes", "--allow", "stop-cpu"])).toBe(4);
+    expect(t.out.join("")).toMatch(/The download reached PLC_1\. .* may be in STOP/);
+    expect(t.out.join("")).not.toMatch(/Nothing was downloaded/);
+    // an error once the transfer had started
+    t.out.length = 0;
+    t.patch({ downloadOutcome: { state: "Error", errors: 1, decisions: [{ phase: "post", kind: "StartModules", name: "start-cpu", choice: "StartModule", allowed: true, blocks: false }] } });
+    expect(await t.run(["download", "--yes", "--allow", "stop-cpu"])).toBe(2);
+    expect(t.out.join("")).toMatch(/The transfer had started: PLC_1 may hold part of the download/);
+    // lost during the download
+    t.err.length = 0;
+    t.patch({ downloadOutcome: "throw" });
+    expect(await t.run(["download", "--yes", "--allow", "stop-cpu"])).toBe(5);
+    expect(t.err.join("")).toMatch(/cannot tell how far the download to PLC_1 got/);
+  });
+
   it("download settings in rung.toml apply and can switch downloads off", async () => {
     const t = setup();
     await t.run(["init"]);
@@ -294,5 +319,40 @@ describe("PLC commands", () => {
     expect(t.err.join("")).toMatch(/NO_TIA_WINDOW: rung open shows plc\/PLC_1\/blocks\/Fx_Motor\.scl in TIA Portal's editor: open .* in TIA Portal \(with its window\) first/);
     expect(t.err.join("")).not.toMatch(/without user interface/);
     expect(t.db().startArgs.at(-1)).not.toContain("--open-headless");
+  });
+});
+
+describe("rung xref", () => {
+  it("lists TIA Portal's cross-reference by relation, with the workspace file of each object", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    t.patch({
+      xref: {
+        "plc:PLC_1/blocks/Fx_Motor": [
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", target: "plc:PLC_1/blocks/Fx_Motor", targetName: "Main", targetType: "OB", access: "Call", referenceType: "UsedBy", location: "@Main ▶ NW1" },
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", targetName: "Screen_1", targetType: "HMI screen", access: "Read", referenceType: "UsedBy", location: "@Screen_1 ▶ Button" },
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", targetName: "LIMIT [V1.0]", targetType: "Instruction", access: "Call", referenceType: "Uses", location: "@Fx_Motor ▶ Program code" },
+        ],
+      },
+    });
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    const text = t.out.join("");
+    expect(text).toMatch(/used by:\n  Main +Call +OB  @Main ▶ NW1/);
+    expect(text).toMatch(/  Screen_1 +Read +HMI screen/);
+    expect(text).toMatch(/uses:\n  LIMIT \[V1\.0\] +Call/);
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl", "--json"])).toBe(0);
+    const j = JSON.parse(t.out.join("")) as { rows: { relation: string; name: string; path?: string }[] };
+    expect(j.rows.map((r) => [r.relation, r.name])).toEqual([["used by", "Main"], ["used by", "Screen_1"], ["uses", "LIMIT [V1.0]"]]);
+    // kept while nothing mirrored changed: TIA Portal is not asked again, unless --fresh
+    t.patch({ xref: {} });
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    expect(t.out.join("")).toMatch(/used by:\n  Main[\s\S]*\(TIA Portal's answer of .*: nothing mirrored changed since/);
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl", "--fresh"])).toBe(0);
+    expect(t.out.join("")).toBe("TIA Portal knows no cross references of plc:PLC_1/blocks/Fx_Motor\n");
   });
 });

@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": [
+    "test"
+  ],
+  "properties": {
+    "test": {
+      "type": "string",
+      "description": "The test file whose case runs, e.g. tests/motor.test.yaml or $ZED_FILE."
+    },
+    "case": {
+      "type": "integer",
+      "description": "The case to debug, numbered from 0.",
+      "default": 0
+    },
+    "stopOnEntry": {
+      "type": "boolean",
+      "description": "Stop at the first statement.",
+      "default": true
+    }
+  }
+}

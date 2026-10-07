@@ -6,8 +6,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { bridgeExecutable, installRoot, devPath } from "./paths.js";
 import type { Io } from "./common.js";
@@ -16,19 +17,37 @@ const run = promisify(execFile);
 
 export type WhitelistStatus = "ok" | "missing" | "stale" | "unknown";
 
-export async function whitelistStatus(exe: string, version = "20.0"): Promise<WhitelistStatus> {
+/** `version` is the whitelist's (20.0); by default the one of the bridge's own TIA Portal (rung-bridge-v21.exe: 21.0). */
+export async function whitelistStatus(exe: string, version = `${/rung-bridge-v(\d\d)\.exe$/i.exec(basename(exe))?.[1] ?? "20"}.0`): Promise<WhitelistStatus> {
   if (process.platform !== "win32" || !existsSync(exe)) return "unknown";
   const key = `HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\${version}\\Whitelist\\${basename(exe)}\\Entry`;
+  // reg export writes UTF-16: a path outside ASCII (C:\Users\Jörg\…) survives, unlike reg query's console code page
+  const tmp = join(tmpdir(), `rung-whitelist-${process.pid}-${Date.now()}.reg`);
   let out: string;
   try {
-    out = (await run("reg", ["query", key, "/v", "FileHash"], { windowsHide: true })).stdout;
+    await run("reg", ["export", key, tmp, "/y"], { windowsHide: true });
+    out = (await readFile(tmp)).toString("utf16le");
   } catch {
     return "missing";
+  } finally {
+    await rm(tmp, { force: true }).catch(() => undefined);
   }
-  const registered = /FileHash\s+REG_SZ\s+(\S+)/.exec(out)?.[1];
+  return entryStatus(out, exe, createHash("sha256").update(await readFile(exe)).digest("base64"));
+}
+
+/**
+ * What a whitelist entry (reg query output) says about this bridge. TIA Portal checks the path as well as the hash:
+ * the same file at another path (the VS Code extension runs a copy in its storage folder, a new one per version)
+ * still makes it ask, so an entry for another path is stale.
+ */
+export function entryStatus(regOutput: string, exe: string, sha256: string): WhitelistStatus {
+  // reg query: `FileHash    REG_SZ    …`; reg export: `"FileHash"="…"` with doubled backslashes
+  const value = (name: string) => new RegExp(`\\b${name}\\s+REG_SZ\\s+(.+?)\\s*$`, "m").exec(regOutput)?.[1] ?? /^"(.*)"$/.exec(new RegExp(`^"${name}"=(".*")\\s*$`, "m").exec(regOutput)?.[1] ?? "")?.[1]?.replace(/\\\\/g, "\\");
+  const registered = value("FileHash");
   if (!registered) return "missing";
-  const actual = createHash("sha256").update(await readFile(exe)).digest("base64");
-  return registered === actual ? "ok" : "stale";
+  const path = value("Path");
+  const same = (a: string) => a.replace(/[\\/]+$/, "").toLowerCase() === dirname(exe).replace(/[\\/]+$/, "").toLowerCase() || a.toLowerCase() === exe.toLowerCase();
+  return registered === sha256 && (!path || same(path)) ? "ok" : "stale";
 }
 
 function scriptPath(env: Record<string, string | undefined>): string | undefined {
@@ -39,19 +58,35 @@ function scriptPath(env: Record<string, string | undefined>): string | undefined
 export const WHITELIST_HINT =
   "TIA Portal does not know this rung bridge yet, so it will ask \"Openness access\" (and a TIA Portal without window hangs). Run: rung setup openness";
 
+/** The bridges to register: one per TIA Portal installed here whose bridge came with rung (V20 when none is found). */
+function bridgesHere(env: Record<string, string | undefined>): { exe: string; version: string }[] {
+  const programs = env.ProgramFiles ?? "C:\\Program Files";
+  const found = (["V19", "V20", "V21"] as const)
+    .map((tia) => ({ tia, exe: bridgeExecutable(env, tia) }))
+    .filter((b) => existsSync(b.exe) && existsSync(join(programs, "Siemens", "Automation", `Portal ${b.tia}`)));
+  return (found.length ? found : [{ tia: "V20" as const, exe: bridgeExecutable(env) }]).map((b) => ({ exe: b.exe, version: `${b.tia.slice(1)}.0` }));
+}
+
+/** The whitelist state of every bridge for a TIA Portal installed here, as one: the worst of them. */
+export async function whitelistHere(env: Record<string, string | undefined>): Promise<WhitelistStatus> {
+  const all = await Promise.all(bridgesHere(env).map((b) => whitelistStatus(b.exe, b.version)));
+  return (["missing", "stale", "unknown"] as const).find((s) => all.includes(s)) ?? "ok";
+}
+
 export async function cmdSetup(what: string | undefined, v: Record<string, unknown>, io: Io): Promise<number> {
   if (what !== "openness") {
     io.stderr("rung: usage: rung setup openness [--grant]\n");
     return 1;
   }
-  const exe = bridgeExecutable(io.env);
-  const before = await whitelistStatus(exe);
-  if (before === "ok") {
-    io.stdout(`${exe} is already in the Openness whitelist\n`);
+  const bridges = bridgesHere(io.env);
+  const status = async () => Promise.all(bridges.map((b) => whitelistStatus(b.exe, b.version)));
+  const before = await status();
+  if (before.every((s) => s === "ok")) {
+    for (const b of bridges) io.stdout(`${b.exe} is already in the Openness whitelist\n`);
     return 0;
   }
-  if (before === "unknown") {
-    io.stderr(`rung: cannot check the Openness whitelist here (${process.platform === "win32" ? `no bridge at ${exe}` : "not Windows"})\n`);
+  if (before.every((s) => s === "unknown")) {
+    io.stderr(`rung: cannot check the Openness whitelist here (${process.platform === "win32" ? `no bridge at ${bridges[0]!.exe}` : "not Windows"})\n`);
     return 1;
   }
   const script = scriptPath(io.env);
@@ -59,23 +94,26 @@ export async function cmdSetup(what: string | undefined, v: Record<string, unkno
     io.stderr("rung: Register-OpennessWhitelist.ps1 is missing from this installation\n");
     return 1;
   }
-  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Path", exe, "-Quiet"];
+  const pending = bridges.filter((_, i) => before[i] === "missing" || before[i] === "stale");
   // first without elevation: works when the user may already write the whitelist (setup with --grant earlier)
-  await run("powershell.exe", args, { windowsHide: true }).catch(() => undefined);
-  if ((await whitelistStatus(exe)) !== "ok") {
+  for (const b of pending) await run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Path", b.exe, "-Version", b.version, "-Quiet"], { windowsHide: true }).catch(() => undefined);
+  const still = (await status()).map((s, i) => ({ s, b: bridges[i]! })).filter((x) => x.s === "missing" || x.s === "stale").map((x) => x.b);
+  if (still.length) {
     io.stdout("Registering the bridge needs administrator rights once; Windows will ask (UAC).\n");
-    // PowerShell literal strings; paths are wrapped in double quotes because Start-Process joins the list with spaces
+    // one elevated PowerShell for all versions (one UAC prompt); its script goes encoded, so no quoting reaches a shell
     const lit = (x: string) => "'" + x.replace(/'/g, "''") + "'";
     const user = (io.env.USERDOMAIN ? io.env.USERDOMAIN + "\\" : "") + (io.env.USERNAME ?? "");
-    const list = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", `"${script}"`, "-Path", `"${exe}"`, ...(v.grant ? ["-GrantUser", `"${user}"`] : [])];
-    const command = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @(${list.map(lit).join(",")})`;
+    const inner = still.map((b) => `& ${lit(script)} -Path ${lit(b.exe)} -Version ${lit(b.version)}${v.grant ? ` -GrantUser ${lit(user)}` : ""}`).join("; ");
+    const encoded = Buffer.from(inner, "utf16le").toString("base64");
+    const command = `Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}')`;
     await run("powershell.exe", ["-NoProfile", "-Command", command], { windowsHide: true }).catch(() => undefined);
   }
-  const after = await whitelistStatus(exe);
-  if (after !== "ok") {
-    io.stderr("rung: the bridge is still not in the whitelist (UAC declined?). You can also start it once against a TIA Portal with window and answer \"Yes to all\".\n");
+  const after = await status();
+  const missing = bridges.filter((_, i) => after[i] === "missing" || after[i] === "stale");
+  if (missing.length) {
+    io.stderr(`rung: ${missing.map((b) => b.exe).join(", ")} still not in the whitelist (UAC declined?). You can also start it once against a TIA Portal with window and answer "Yes to all".\n`);
     return 1;
   }
-  io.stdout(`registered ${exe} in the Openness whitelist${v.grant ? "; you can now update it without administrator rights" : ""}\n`);
+  for (const b of bridges.filter((_, i) => after[i] === "ok")) io.stdout(`registered ${b.exe} in the Openness whitelist (TIA Portal V${b.version.split(".")[0]})${v.grant ? "; you can now update it without administrator rights" : ""}\n`);
   return 0;
 }

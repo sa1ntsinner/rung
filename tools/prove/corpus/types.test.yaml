@@ -1,0 +1,12 @@
+block: FB_ProveTypes
+cases:
+  - name: unsigned wrap and mixed numbers
+    steps:
+      - set: { us: 255, ui: 40000, ud: 4294967290, i: 3, r: 0.1, b: 16#F8 }
+        cycle: 1
+      - set: { us: 7, ui: 7, ud: 7, i: -4, r: 0.3, b: 16#01 }
+        cycle: 1
+  - name: arrays and a data type
+    steps:
+      - set: { i: 5, r: 2.5 }
+        cycle: 1

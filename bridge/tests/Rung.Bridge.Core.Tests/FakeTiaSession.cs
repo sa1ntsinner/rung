@@ -105,6 +105,9 @@ public sealed class FakeTiaSession : ITiaSession
     public IReadOnlyList<XRefEntry> XRef(string address) =>
         new[] { new XRefEntry { Source = address, SourceName = "Fx_Motor", TargetName = "Start_Button", TargetType = "Tag", TargetAddress = "%I0.0", Access = "Read", ReferenceType = "Uses", Location = "@Fx_Motor NW1" } };
 
+    public IReadOnlyDictionary<string, string> Identify(string[] addresses) =>
+        addresses.Where(a => Objects.Exists(o => o.Address == a)).ToDictionary(a => a, a => "id:" + a);
+
     public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
     {
         var e = Objects.Find(o => o.Address == address) ?? throw new RpcException(ErrorCodes.NotFound, address);

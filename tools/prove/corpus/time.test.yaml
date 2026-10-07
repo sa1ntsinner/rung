@@ -1,0 +1,33 @@
+block: FB_ProveTime
+cycle: 10ms
+cases:
+  - name: on and off delays
+    steps:
+      - set: { run: true, t: 2s }
+        cycle: 1
+      - advance: 100ms
+      - advance: 250ms
+      - set: { run: false }
+        cycle: 1
+      - advance: 100ms
+      - advance: 150ms
+  - name: a pulse, counters and edges
+    steps:
+      - set: { pulse: true, preset: 3, load: true, t: 7ms }
+        cycle: 1
+      - set: { pulse: false, load: false }
+        cycle: 1
+      - set: { pulse: true, down: true }
+        cycle: 1
+      - set: { pulse: false, down: false }
+        advance: 100ms
+      - set: { pulse: true, down: true }
+        cycle: 1
+      - set: { pulse: false, down: false }
+        advance: 200ms
+      - set: { pulse: true, down: true }
+        cycle: 1
+      - set: { pulse: false, reset: true, down: false }
+        cycle: 1
+      - set: { pulse: true, reset: false, down: true }
+        cycle: 1

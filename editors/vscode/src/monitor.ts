@@ -2,6 +2,7 @@
 // Monitoring like TIA Portal's "Monitoring on/off": the values of the open block at the end of each line, read
 // from the PLC's Web API by `rung live watch --json` (read-only, one block at a time).
 import type { ChildProcess } from "node:child_process";
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import type { Output } from "./output";
 import { RungCli } from "./runner/cli";
@@ -58,6 +59,9 @@ export class Monitor implements vscode.Disposable {
   get values(): Record<string, unknown> {
     return this.session?.values ?? {};
   }
+  get errors(): Record<string, string> {
+    return this.session?.errors ?? {};
+  }
   get reads(): number {
     return this.session?.reads ?? 0;
   }
@@ -83,9 +87,15 @@ export class Monitor implements vscode.Disposable {
     // the plan comes from the file on disk: unsaved lines would put values next to the wrong statements. From
     // here to the session no await lets an edit in; after it, an edit stops monitoring.
     const open = vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri.toString());
-    if (open?.isDirty && !(await open.save())) {
-      void vscode.window.showWarningMessage("Save the block first: monitoring shows the values of the saved block.");
-      return;
+    // never saved behind the engineer's back: with watch running, a save is a change sent to TIA Portal
+    if (open?.isDirty) {
+      const save = "Save and Monitor";
+      const pick = await vscode.window.showWarningMessage(
+        `${basename(uri.fsPath)} has unsaved changes. Monitoring shows the values of the saved block.`,
+        { modal: true, ...(this.ws.watching && this.ws.writes === "on" ? { detail: "rung watch is running with writes on: the save also goes to TIA Portal." } : {}) },
+        save,
+      );
+      if (pick !== save || !(await open.save())) return;
     }
     if (open?.isDirty) {
       void vscode.window.showWarningMessage("The block changed while it was saved; start monitoring again.");
@@ -143,7 +153,9 @@ export class Monitor implements vscode.Disposable {
         s.errors = m.errors ?? {};
         s.reads++;
       }
-      if (this.session === s) this.render();
+      if (this.session !== s) return;
+      this.render();
+      this.changed.fire(); // the declarations table shows each read too
     } catch {
       /* a partial or foreign line */
     }

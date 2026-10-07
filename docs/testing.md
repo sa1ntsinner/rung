@@ -45,6 +45,36 @@ cases:
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
 - A case that stops with an error (a misspelt name in a `set`, an instruction the simulator refuses) says in which step: `step 2: Strat does not exist (did you mean Start?)`. `--json` gives that step and its line as `errorStep` and `errorLine`, so editors and GitHub annotations point at the step, not at the case. File-level YAML errors carry `errorLine` and `errorColumn` when the parser can place them.
 
+## From the machine: a recording as a test
+
+In VS Code's Live Values, pin an FB's inputs and outputs through its instance DB (`"Conveyor_DB".Start`, `"Conveyor_DB".Motor`) and let the machine run. *Export Recording as Test…* writes `tests/<FB>.recorded.test.yaml`: a step at each change of the inputs that sets what changed, runs as long as the machine ran until the next change and expects the outputs as they were just before it (settled, not at a cycle the PLC and the simulator count differently). From the start of the recording (the last ten minutes) or a bookmark. What the machine did yesterday is then a test that says when the code stops doing it.
+
+## Over time: within, always, never
+
+A machine's promises are about time: the motor runs no later than 2 s after start, the alarm holds for 5 s, the valve never opens while stopped. A step with `within`, `always` or `never` checks its `expect:` after every cycle for that long:
+
+```yaml
+      - { within: 2s, expect: { Motor: true } }      # true at some cycle within 2 s (then the next step)
+      - { always: 5s, expect: { Alarm: true } }      # true after every cycle for 5 s
+      - { never: 3s, expect: { Valve: true } }       # not once in 3 s
+```
+
+A broken promise says when: `step 4: Fault expected true got false (within 1s: not reached)`, `(always for 3s: broken after 2.01 s)`, `(never for 3s: happened after 2.01 s)`. `within` ends its step as soon as the expectation holds, so the next step starts from that cycle.
+
+## What a change does to behaviour
+
+A text diff shows what changed in the code; `rung test --against <git revision>` shows what changed in what the program does. It runs today's tests on the code as it was at that revision and as it is now, and lists every case where the block's values after a step differ, with the first difference:
+
+```
+rung test --against main
+behaviour against main (5 cases):
+  tests/conveyor.test.yaml: a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)
+     step 8: Motor FALSE → TRUE (first of 2 differences)
+1 case behaves differently, 4 the same
+```
+
+`--json` gives every difference, for a pull request comment or a review page.
+
 ## Stubs
 
 What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. Before running a file, rung lists the missing stubs in its block’s call graph, including calls through other workspace blocks; a stubbed block ends that search. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:
@@ -80,6 +110,19 @@ cases:
   - A stub the cases never called gets a warning: a typo, or code they do not reach. This warning is suppressed when a case stopped with an error.
   - Refused like the rest of the file: a name nothing in the workspace calls or declares (with the closest one), a member a known type does not have, a value its declared type cannot hold, and the block under test itself.
 
+## Debugging a case
+
+A case runs in the debugger like a program: breakpoints in the SCL blocks it calls (with conditions such as `#speed > 100`), step over, into and out of calls, the block's variables and the data blocks, and expressions in the Debug Console. A value changed while stopped stays changed when you step on. A case that fails stops before it ends, with the reason: where the failed expectation's values are (after the cycles before its step), or at the statement that raised an error. A breakpoint on a line without a statement (`ELSE`, `END_IF`) moves to the next statement; one on a declaration is marked as not stopping. Values set while stopped are checked like a test's `set:` (a number out of range, text into a number, a whole structure are refused). In VS Code, *Debug Test* in the test explorer (or the gutter of a case) starts it; `rung debug` is the Debug Adapter Protocol server behind it, for nvim-dap and other editors (launch with `test`, `case` from 0, `stopOnEntry`).
+
+**Why?** While stopped, right-click a variable (or select a name in the code) and pick *Why?*: rung shows the statement that last wrote it, with the time of that cycle, the values its operands had just before it ran (each explained in turn, three levels deep), and the IF or CASE branch that made it run, with that condition's value. A value no statement wrote says so: an input the test set, a start value, or something a call wrote inside. The writes are found by where the value lives, so `"Pump_DB".Running` and `#Running` inside the FB are the same value. In Neovim: `:Rung why`. The copy button on the view puts the answer on the clipboard as Markdown, each statement with its file and line, for a report or a ticket.
+
+Stepping goes backwards too: *Step Back* and *Reverse Continue*. A case is deterministic (its inputs come from the steps, its time from its cycles), so rung runs it again from the start to the statement before. *Step Out* in the block the test calls goes on to its next cycle. While stopped, the values of `#names` show next to the code, and the stopped event shows the virtual time of the cycle. LAD/FBD networks run without stopping inside them.
+## Recording expectations
+
+Writing `expect:` by hand means knowing the values first. *Record Expectations* (right-click in a test file, on a step with `cycle:` or `advance:`) runs the case, lists the block's outputs and statics after that step, and writes the ones you pick into the step's `expect:`. Nothing is written that you did not pick; a value that differs from the one already expected is shown with both. `rung test --case <file#n> --json --observe` gives the same values to scripts and other editors.
+## Coverage
+
+`rung test --coverage lcov.info` also writes which SCL lines the cases ran, as an lcov file for CI tools (Codecov, GitLab, SonarQube), and prints how much of the program ran. Every block the simulator can run counts, tested or not: a block no test calls shows as not run. In VS Code, *Run with Coverage* in the test explorer marks the lines in the editor and fills the Test Coverage view. Lines, not branches: an IF counts as run when its condition was evaluated; the lines inside show whether its branches ran. LAD, FBD and STL blocks and DB start values are not counted.
 ## What the simulator covers
 
 - SCL statements: assignment (also `a := b := 0;`), IF/ELSIF/ELSE, CASE (lists, ranges), FOR/WHILE/REPEAT with EXIT/CONTINUE, RETURN, REGION, GOTO to a label.

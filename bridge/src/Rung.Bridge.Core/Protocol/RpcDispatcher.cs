@@ -109,6 +109,8 @@ namespace Rung.Bridge.Core.Protocol
                     return new { address = Session.Rename(Str(p, "address"), Str(p, "newName"), Str(p, "expectedTiaRevision"), Str(p, "operationId")) };
                 case "model.describe":
                     return Session.Describe(Str(p, "scope"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("maxNodes", out var mn) && mn.ValueKind == JsonValueKind.Number ? mn.GetInt32() : 20000);
+                case "objects.identify":
+                    return Session.Identify(StrArray(p, "addresses"));
                 case "xref.get":
                     return Session.XRef(Str(p, "address"));
                 case "plc.compile":

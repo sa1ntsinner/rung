@@ -331,18 +331,34 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 
   const request = { device, hardware, software, onlyChanges, allow, startAfter, target };
   // confirmed: the PLC the person typed (or passed --yes for); rung watch refuses a download without it
-  const r = await link.call<DownloadOutcome>("download", { request, confirmed: device }, (b) => b.download(request));
+  let r: DownloadOutcome;
+  try {
+    r = await link.call<DownloadOutcome>("download", { request, confirmed: device }, (b) => b.download(request));
+  } catch (e) {
+    // lost while TIA Portal downloads (timeout, the bridge or TIA Portal gone): nobody knows how far it got
+    io.stderr(`rung download: ${(e as { code?: string }).code ?? "ERROR"}: ${(e as Error).message}\nrung cannot tell how far the download to ${device} got. rung online --state and rung compare show what ${device} runs now.\n`);
+    return 5;
+  }
   for (const d of r.decisions) {
     const mark = d.blocks ? "✗" : "✓";
     io.stdout(`  ${mark} ${d.phase.padEnd(4)} ${d.name.padEnd(26)} ${d.choice}${d.message ? `  (${d.message.replace(/\s*\n\s*/g, " ")})` : ""}\n`);
   }
   // on a cancel TIA adds "Download configuration '…' was unhandled"; the decisions above already say what happened
   for (const m of r.messages) if (!(r.state === "Cancelled" && /was unhandled/.test(m))) io.stdout(`  ${m.replace(/\s*\n\s*/g, " ")}\n`);
+  // TIA Portal asks before the transfer ("pre") and after it ("post", e.g. start the CPU): what rung says about the
+  // PLC follows the phase, never just the state
+  const afterTransfer = r.decisions.some((d) => d.phase === "post");
   if (r.state === "Cancelled") {
-    io.stdout(`\nTIA Portal cancelled the download: it asked questions rung may not answer on its own.\nIf that is what you want, run again with --allow ${r.needsAllow.join(",")}\n`);
+    const blockedAfter = r.decisions.some((d) => d.blocks && d.phase === "post");
+    if (blockedAfter) {
+      io.stdout(`\nThe download reached ${device}. Afterwards TIA Portal asked something rung may not answer on its own, so ${device} may be in STOP: check it in TIA Portal or with rung online --state.\nTo answer it next time: --allow ${r.needsAllow.join(",")}\n`);
+      return 4;
+    }
+    io.stdout(`\nNothing was downloaded: before the transfer TIA Portal asked questions rung may not answer on its own.\nIf that is what you want, run again with --allow ${r.needsAllow.join(",")}\n`);
     return 3;
   }
   io.stdout(`\ndownload: ${r.state} (errors ${r.errors}, warnings ${r.warnings})\n`);
+  if (r.state === "Error" && afterTransfer) io.stdout(`The transfer had started: ${device} may hold part of the download. rung compare shows what it runs now.\n`);
   return r.state === "Error" ? 2 : 0;
 }
 

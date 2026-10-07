@@ -1,0 +1,18 @@
+FUNCTION "FC_ProveAdd" : Int
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      a : Int;
+      b : Int;
+   END_VAR
+
+   VAR_IN_OUT
+      total : Int;
+   END_VAR
+
+
+BEGIN
+	#total := #total + #a;
+	#FC_ProveAdd := #a * 2 - #b;
+END_FUNCTION
+

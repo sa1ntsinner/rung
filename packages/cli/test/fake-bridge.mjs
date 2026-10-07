@@ -128,6 +128,9 @@ rl.on("line", (line) => {
       save(db);
       return reply({ device: p.device, state: db.online });
     }
+    case "xref.get":
+      // db.xref[address]: entries as the real bridge answers them; none otherwise
+      return reply((db.xref ?? {})[p.address] ?? []);
     case "plc.read":
       // db.values: expression -> value; one it does not have reads as an error, as CODESYS answers it
       if (db.online !== "Online") return fail("NOT_ONLINE", `${p.device} is not online; rung online first`);
@@ -160,6 +163,9 @@ rl.on("line", (line) => {
       db.downloads = [...(db.downloads ?? []), r];
       save(db);
       const stop = (r.allow ?? []).includes("stop-cpu");
+      // a test's own outcome (decisions after the transfer, an error); "throw" fails the call like a lost bridge
+      if (db.downloadOutcome === "throw") return fail("TIMEOUT", "plc.download timed out after 300000 ms");
+      if (db.downloadOutcome) return reply({ device: r.device, errors: 0, warnings: 0, messages: [], needsAllow: [], ...db.downloadOutcome });
       return reply({ device: r.device, state: stop ? "Success" : "Cancelled", errors: 0, warnings: 0, messages: [], decisions: [{ phase: "pre", kind: "StopModules", name: "stop-cpu", choice: stop ? "StopAll" : "NoAction", allowed: stop, blocks: !stop }], needsAllow: stop ? [] : ["stop-cpu"] });
     }
     case "plc.upload": {

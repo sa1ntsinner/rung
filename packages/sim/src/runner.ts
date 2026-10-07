@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
 import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
-import { SYSTEM_FUNCTIONS, Simulator, SimError, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
+import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
 
 /*
@@ -31,6 +31,8 @@ export interface TestFailure {
   actual: unknown;
   /** Line of the step in the test file (from 1). */
   line?: number;
+  /** A temporal expectation's account: "within 2s: not reached", "always for 5s: broken after 1.2 s". */
+  note?: string;
 }
 
 export interface CaseResult {
@@ -46,6 +48,8 @@ export interface CaseResult {
   /** For an error: the step it stopped in (from 1) and that step's line in the test file. */
   errorStep?: number;
   errorLine?: number;
+  /** With `observe`: the block's outputs and statics after each step that ran cycles (from 1), as a test writes them. */
+  observed?: { step: number; values: Record<string, boolean | number | string>; /** which of them are statics (memory, not results) */ statics?: string[] }[];
 }
 
 export interface FileResult {
@@ -75,7 +79,12 @@ interface TestFile {
 }
 
 /** Keys of a step run in this order when one step has several (`{ set: ..., cycle: 1, expect: ... }`). */
-const STEP_ORDER = ["set", "cycle", "advance", "expect"] as const;
+/** within / always / never: the step's expect checked after every cycle for that time (temporal expectations). */
+const TEMPORAL = ["within", "always", "never"] as const;
+const STEP_ORDER = ["set", "cycle", "advance", ...TEMPORAL, "expect"] as const;
+
+/** A time span as people say it: 350 ms, 1.2 s. */
+const elapsed = (ms: number) => (ms < 1000 ? `${ms} ms` : `${Number((ms / 1000).toFixed(3))} s`);
 /** The cycles one step may run: a typo like advance: 1000d (or .inf) is refused instead of running for hours. */
 const MAX_STEP_CYCLES = 10_000_000;
 
@@ -94,7 +103,29 @@ function nearest(name: string, names: Iterable<string>): string | undefined {
   return nearestSpelling(name, candidates) ?? candidates.find((n) => n.length >= 3 && upper.startsWith(n.toUpperCase()));
 }
 
+const isDate = (t?: string) => /^DATE$/i.test(t?.trim() ?? "");
+const isTod = (t?: string) => /^(TOD|TIME_OF_DAY)$/i.test(t?.trim() ?? "");
+/** A DATE as rung keeps it (days since 1970) from D#2024-02-28; a TIME_OF_DAY (ms of the day) from TOD#23:15:00.5. */
+function dateValue(v: string): number | undefined {
+  const d = /^(?:D|DATE)#(\d{4}-\d{2}-\d{2})$/i.exec(v.trim());
+  if (d) return Date.parse(`${d[1]}T00:00:00Z`) / 86_400_000;
+  const t = /^(?:TOD|TIME_OF_DAY)#(\d+):(\d+)(?::(\d+(?:\.\d+)?))?$/i.exec(v.trim());
+  return t ? Math.round(((Number(t[1]) * 60 + Number(t[2])) * 60 + Number(t[3] ?? 0)) * 1000) : undefined;
+}
+/** How a test writes a DATE or a TIME_OF_DAY back: D#2024-02-29, TOD#00:45:00 (with .fff when it has milliseconds). */
+export function dateText(v: number, type?: string): string {
+  if (isDate(type)) return `D#${new Date(v * 86_400_000).toISOString().slice(0, 10)}`;
+  // hours past 24 stay as they are: a CPU does not wrap a TIME_OF_DAY at midnight
+  const two = (n: number) => String(n).padStart(2, "0");
+  const ms = v % 1000;
+  return `TOD#${two(Math.floor(v / 3_600_000))}:${two(Math.floor(v / 60_000) % 60)}:${two(Math.floor(v / 1000) % 60)}${ms ? `.${String(ms).padStart(3, "0")}` : ""}`;
+}
+
 function normalizeExpected(v: unknown, type?: string): unknown {
+  if (typeof v === "string" && (isDate(type) || isTod(type))) return dateValue(v) ?? v;
+  // a whole number written as TIA Portal does: 16#00F3, 2#0000_0101, WORD#16#FF, INT#16#7F
+  const based = typeof v === "string" ? /^(?:[A-Z]+#)?(2|8|16)#([0-9A-F]+(?:_[0-9A-F]+)*)$/i.exec(v.trim()) : null;
+  if (based) return parseInt(based[2]!.replace(/_/g, ""), Number(based[1]));
   if (typeof v === "string" && ((!type || isTime(type)) && /^(T|TIME|LT|LTIME)#/i.test(v) || isTime(type) && /^\d+(?:\.\d+)?(?:ms|s|m|h)$/i.test(v))) return toMs(v);
   return v;
 }
@@ -125,13 +156,17 @@ function splitName(name: string): { global: boolean; root: string; path: Seg[] }
 const isArrayValue = (v: Value): v is ArrayValue => typeof v === "object" && v !== null && (v as ArrayValue).__array === true;
 
 /** Rejects `set` values whose kind differs from the variable's current value (BOOL vs number vs string). */
-function checkKind(name: string, current: Value, value: Value) {
+export function checkKind(name: string, current: Value, value: Value) {
   if (current === undefined || typeof current === "object") return;
   const kind = (v: Value) => (typeof v === "boolean" ? "a BOOL (true/false)" : typeof v === "number" ? "a number" : "a string");
   if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${shown(value)}`);
 }
 
+/** A simulator value as a test writes it: an array as its elements, a structure as its members. */
+const plainValue = (v: Value): unknown => (isArrayValue(v) ? v.items.map(plainValue) : v && typeof v === "object" && !("__ptr" in v) ? Object.fromEntries(Object.entries("__fb" in v ? (v as Instance).mem : (v as Struct)).map(([k, x]) => [k, plainValue(x)])) : v);
+
 const isTime = (type?: string) => /^(TIME|LTIME|S5TIME)$/i.test(type ?? "");
+const isReal = (type?: string) => /^REAL$/i.test(type ?? "");
 const shown = (v: unknown): string => v === undefined || v === null ? "no value" : JSON.stringify(v);
 
 const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -193,7 +228,7 @@ const INT_RANGE: Record<string, [number, number]> = {
 };
 
 /** Rejects a `set` value the variable's declared type cannot hold (40000 in an Int, 1.5 in a DInt, a number in a Bool). */
-function checkType(name: string, type: string, value: Value) {
+export function checkType(name: string, type: string, value: Value) {
   const t = type.replace(/^"|"$/g, "").toUpperCase();
   if (/^(ARRAY|STRUCT)\b/.test(t)) throw new SimError(`${name} is ${type}: set its ${/^ARRAY\b/.test(t) ? "elements" : "members"} in the test steps`);
   const range = INT_RANGE[t];
@@ -201,6 +236,8 @@ function checkType(name: string, type: string, value: Value) {
     if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${shown(value)}`);
     if (value < range[0] || value > range[1]) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
   } else if (isTime(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a duration, such as T#500ms, got ${shown(value)}`);
+  else if (isDate(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a date, such as D#2024-02-28, got ${shown(value)}`);
+  else if (isTod(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a time of day, such as TOD#08:30:00, got ${shown(value)}`);
   else if (t === "BOOL" && typeof value !== "boolean") throw new SimError(`${name} expects a BOOL (true/false), got ${shown(value)}`);
   else if (/^(W?STRING|W?CHAR)(?:\[\s*\d+\s*\])?$/.test(t)) {
     if (typeof value !== "string") throw new SimError(`${name} is ${type}: expects text, got ${shown(value)}`);
@@ -430,7 +467,9 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
       if (global?.kind === "OBJECT") add(global.name, "is not simulated");
       if (r.access !== "call") continue;
       let type = r.name;
-      let member: Member | undefined = r.kind !== "global" ? g.block.vars.find((v) => v.name.toUpperCase() === r.name.toUpperCase()) ?? global?.gvar?.decl : global?.block?.dbOf ? { name: r.name, type: global.block.dbOf, typeRef: global.block.dbOf, isArray: false } : undefined;
+      // an instruction called by its name (SHL(...)) is the instruction, whatever the block names its variables
+      const instruction = r.kind === "call" && (STANDARD_BY_NAME.has(r.name.toUpperCase()) || SYSTEM_FUNCTIONS.has(r.name.toUpperCase()) || /^\w+_TO_\w+$/i.test(r.name));
+      let member: Member | undefined = instruction ? undefined : r.kind !== "global" ? g.block.vars.find((v) => v.name.toUpperCase() === r.name.toUpperCase()) ?? global?.gvar?.decl : global?.block?.dbOf ? { name: r.name, type: global.block.dbOf, typeRef: global.block.dbOf, isArray: false } : undefined;
       for (const seg of r.members) {
         if (!member) break;
         const hit = seen.membersOf(member).find((m) => m.name.toUpperCase() === seg.name.toUpperCase());
@@ -451,7 +490,16 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
   return [...missing.values()];
 }
 
-export async function runTestFile(index: WorkspaceIndex, file: string, text: string, only?: number): Promise<FileResult> {
+export interface TestHooks {
+  /** Sees each case's simulator before it runs (the debugger, coverage). */
+  simulator?: (sim: Simulator) => void;
+  /** Told when each step of a case starts (from 1). */
+  step?: (index: number) => void;
+  /** Records the block's values after each step that runs cycles (CaseResult.observed): record to test. */
+  observe?: boolean;
+}
+
+export async function runTestFile(index: WorkspaceIndex, file: string, text: string, only?: number, hooks: TestHooks = {}): Promise<FileResult> {
   let spec: TestFile;
   try {
     const lines = new LineCounter();
@@ -495,6 +543,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     const sim = new Simulator(seen);
     sim.stubs = stubs;
     sim.hardwareIds = hardware;
+    hooks.simulator?.(sim);
     const failures: TestFailure[] = [];
     const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     const inOuts = g.block.vars.filter((v) => v.section === "InOut");
@@ -592,14 +641,75 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       if (n > MAX_STEP_CYCLES) throw new SimError(`advance: ${String(v)} is ${n} cycles of ${cycleMs}ms; a step runs at most ${MAX_STEP_CYCLES} (for long times, set a longer cycle: at the top of the file)`);
       return n;
     };
+    /** What an expect: finds now: a failure for every name whose value is not the one expected. */
+    const expectNow = (arg: Record<string, unknown>, si: number): TestFailure[] => {
+      const out: TestFailure[] = [];
+      for (const [k, v] of Object.entries(arg)) {
+        let target: ReturnType<typeof resolve>;
+        try {
+          target = resolve(k, "expect");
+        } catch (e) {
+          throw hinted(e, index, g, k, "expect");
+        }
+        const actual = target.get();
+        if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
+        const expected = normalizeExpected(v, target.decl?.type);
+        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : (isDate(target.decl?.type) || isTod(target.decl?.type)) && typeof expected === "number" ? dateText(expected, target.decl?.type) : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
+      }
+      return out;
+    };
+    const observed: NonNullable<CaseResult["observed"]> = [];
+    const observe = (step: number) => {
+      const values: Record<string, boolean | number | string> = {};
+      const own = g.block!.vars.filter((v) => (isFb ? ["Output", "InOut", "Static"] : ["Output", "InOut"]).includes(v.section));
+      const names = [...own.map((v) => ({ name: v.name, type: v.type })), ...(!isFb && g.block!.returnType && !/^void$/i.test(g.block!.returnType) ? [{ name: g.block!.name, type: g.block!.returnType }] : [])];
+      const statics: string[] = [];
+      // a value as a test writes it; an array's elements and a structure's members by their paths (arr[1], st.a)
+      const put = (key: string, v: Value, decl: Pick<Member, "type" | "members"> | undefined, isStatic: boolean, depth: number, sameArray = false) => {
+        const type = decl?.type;
+        if (typeof v === "number" && isTime(type)) values[key] = `T#${v}ms`;
+        else if (typeof v === "number" && (isDate(type) || isTod(type))) values[key] = dateText(v, type);
+        else if (typeof v === "number" && isReal(type)) values[key] = Number(realText(v));
+        else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[key] = v;
+        else if (depth > 0 && isArrayValue(v) && v.items.length <= 32) {
+          const at = splitArrayType(type ?? "");
+          // a further dimension of the same array: grid[0,1], as TIA Portal and tests write it, not grid[0][1]
+          const inner = at && at.dims.length > 1 ? { type: `Array[${at.dims.slice(1).join(", ")}] of ${at.element}`, ...(decl?.members ? { members: decl.members } : {}) } : undefined;
+          // an array of an inline STRUCT: its members are the array's own declaration's (pts[0].x, not pts[0].X)
+          const element = at?.element ? { type: at.element, ...(decl?.members ? { members: decl.members } : {}) } : undefined;
+          v.items.forEach((x, i) => put(sameArray ? `${key.slice(0, -1)},${v.lo + i}]` : `${key}[${v.lo + i}]`, x, inner ?? element, isStatic, inner ? depth : depth - 1, !!inner));
+        } else if (depth > 0 && v && typeof v === "object" && !("__fb" in v) && !("__ptr" in v)) {
+          // a PLC data type's members by its name without quotes (pt.x, not pt.X)
+          const typeRef = (decl as { typeRef?: string } | undefined)?.typeRef ?? type?.replace(/^"|"$/g, "");
+          const members = decl?.members ?? seen.membersOf({ type: type ?? "", ...(typeRef ? { typeRef } : {}), isArray: false, name: key });
+          for (const [mk, mv] of Object.entries(v as Struct)) {
+            const m = members.find((x) => x.name.toUpperCase() === mk);
+            put(`${key}.${m?.name ?? mk}`, mv, m, isStatic, depth - 1);
+          }
+        }
+        if (isStatic && key in values) statics.push(key);
+      };
+      for (const n of names) {
+        let v: Value;
+        try {
+          v = resolve(n.name, "expect").get();
+        } catch {
+          continue;
+        }
+        const d = own.find((x) => x.name === n.name);
+        put(n.name, v, d ?? { type: n.type }, d?.section === "Static", 2);
+      }
+      observed.push({ step, values, ...(statics.length ? { statics: [...new Set(statics)] } : {}) });
+    };
     try {
       if (g.block.kind === "PRG") inst = sim.read({ root: { kind: "global", name: g.block.name }, path: [], start: 0 }, null) as Instance; // one shared PROGRAM instance
       else if (isFb) inst = sim.newInstance(g.block.name);
       else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs or PROGRAMs`);
       for (const [si, step] of (c.steps ?? []).entries()) {
         current = si + 1;
+        hooks.step?.(current);
         const unknown = Object.keys(step ?? {}).find((k) => !(STEP_ORDER as readonly string[]).includes(k));
-        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect)`);
+        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect, within, always, never)`);
         for (const op of STEP_ORDER) {
           if (!(op in step)) continue;
           const arg = step[op];
@@ -637,24 +747,50 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               for (let n = 0, max = advanceCycles(arg); n < max; n++) runCycle();
               break;
             }
-            case "expect":
-              for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
-                let target: ReturnType<typeof resolve>;
-                try {
-                  target = resolve(k, "expect");
-                } catch (e) {
-                  throw hinted(e, index, g, k, "expect");
-                }
-                const actual = target.get();
-                if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
-                const expected = normalizeExpected(v, target.decl?.type);
-                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : actual });
+            case "within":
+            case "always":
+            case "never": {
+              if (!("expect" in step)) throw new SimError(`${op}: name what to check with expect:, e.g. { ${op}: 2s, expect: { Motor: true } }`);
+              if (TEMPORAL.filter((k) => k in step).length > 1) throw new SimError("a step has one of within, always and never");
+              if (!plain(step.expect)) throw new SimError("expect: write names and values, e.g. { Raw: 1 }");
+              // the time as advance: reads it, its errors in this step's words
+              let n: number;
+              try {
+                n = toMs(arg) === 0 ? 0 : advanceCycles(arg);
+              } catch (e) {
+                throw e instanceof SimError ? new SimError(e.message.replace(/^advance:/, `${op}:`)) : e;
               }
+              const span = String(arg);
+              let last: TestFailure[] = [];
+              let done = false;
+              // checked as it is now, then after every cycle of the span
+              for (let i = 0; i <= n && !done; i++) {
+                if (i > 0) runCycle();
+                const now = expectNow(step.expect as Record<string, unknown>, si);
+                const after = elapsed(i * cycleMs);
+                if (op === "within" && !now.length) done = true;
+                else if (op === "always" && now.length) {
+                  failures.push(...now.map((f) => ({ ...f, note: `always for ${span}: broken after ${after}` })));
+                  done = true;
+                } else if (op === "never" && !now.length) {
+                  // what it should never be, it was
+                  for (const [k, v] of Object.entries(step.expect as Record<string, unknown>)) failures.push({ step: si + 1, name: k, expected: `not ${shown(v)}`, actual: v, note: `never for ${span}: it was, after ${after}` });
+                  done = true;
+                }
+                last = now;
+              }
+              if (op === "within" && !done) failures.push(...last.map((f) => ({ ...f, note: `within ${span}: not reached` })));
+              break;
+            }
+            case "expect":
+              if (TEMPORAL.some((k) => k in step)) break; // checked every cycle above
+              failures.push(...expectNow(arg as Record<string, unknown>, si));
               break;
           }
         }
+        if (hooks.observe && ["cycle", "advance", ...TEMPORAL].some((k) => k in step)) observe(si + 1);
       }
-      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0 });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0, ...(hooks.observe ? { observed } : {}) });
     } catch (err) {
       // an FC input the test misspelt shows when the FC is called
       const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
@@ -714,8 +850,8 @@ export interface CaseSelector {
 }
 
 /** Runs every tests/**\/*.test.yaml in the workspace (or the given files), or exactly one case. */
-export async function runTests(root: string, index: WorkspaceIndex, filter?: string, only?: CaseSelector): Promise<FileResult[]> {
-  if (only) return [await runOneCase(root, index, only)];
+export async function runTests(root: string, index: WorkspaceIndex, filter?: string, only?: CaseSelector, hooks: TestHooks = {}): Promise<FileResult[]> {
+  if (only) return [await runOneCase(root, index, only, hooks)];
   const files: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -740,7 +876,7 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     const whole = !filter || rel.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase()) || new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text);
     // or a part of a case's name (rung test --filter stuck): those cases of the file
     if (!whole && !text.toLowerCase().includes(filter!.toLowerCase())) continue;
-    const r = await runTestFile(index, rel, text);
+    const r = await runTestFile(index, rel, text, undefined, hooks);
     const cases = whole ? r.cases : r.cases.filter((c) => c.name.toLowerCase().includes(filter!.toLowerCase()));
     // a file that cannot run says so, whatever selected it
     if (whole || cases.length || r.error) out.push({ ...r, cases });
@@ -749,13 +885,13 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
 }
 
 /** rung test --case: the file is read and checked as a whole, only the case runs; naming nothing is an error. */
-async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelector): Promise<FileResult> {
+async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelector, hooks: TestHooks): Promise<FileResult> {
   const rel = only.file.replace(/\\/g, "/").replace(/^\.\//, "");
   const path = resolve(root, rel);
   if (!/\.test\.ya?ml$/i.test(rel) || relative(resolve(root, "tests"), path).startsWith("..")) throw new Error(`--case ${only.file}: no test file under tests/`);
   const text = await readFile(path, "utf8").catch(() => undefined);
   if (text === undefined) throw new Error(`--case ${only.file}: no test file there`);
-  const r = await runTestFile(index, rel, text, only.index);
+  const r = await runTestFile(index, rel, text, only.index, hooks);
   const count = testPositions(text).length;
   if (!r.error && (only.index < 0 || only.index >= count)) throw new Error(`--case ${only.file}#${only.index}: the file has ${count} cases (numbered from 0)`);
   return r;

@@ -45,7 +45,7 @@ describe("first run in a folder without rung.toml", function () {
     assert.equal(cli.runs[1]!.result.code, 0, cli.runs[1]!.result.output);
     await waitFor("objects in the Project view", async () => (await outline(api.project)).some((l) => l.startsWith("PLC_1 [7")), 15_000);
     assert.equal(api.ws.hasConfig, true);
-    await waitFor("status bar", () => api.statusBar.visible && api.statusBar.text === "$(circle-slash) rung: idle");
+    await waitFor("status bar", () => api.statusBar.visible && api.statusBar.text === "$(circle-slash) rung · watch off");
     assert.match((await outline(api.plc)).join("\n"), /^PLC_1 \[state not checked\]/m);
   });
 

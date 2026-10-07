@@ -1,0 +1,57 @@
+FUNCTION_BLOCK "FB_ProveCalls"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      n : Int;
+      go : Bool;
+      day : Date;
+      day2 : Date;
+      tday : Time_Of_Day;
+   END_VAR
+
+   VAR_OUTPUT
+      sumOut : DInt;
+      doubled : Array[0..3] of Int;
+      early : Int;
+      p : Struct
+         a : Int;
+         b : Int;
+      END_STRUCT;
+      chainQ : Bool;
+      chainCount : Int;
+      nextDay : Date;
+      laterTod : Time_Of_Day;
+      dayDiff : Time;
+      todMs : DInt;
+   END_VAR
+
+   VAR
+      vals : Array[0..3] of Int;
+      chain : "FB_ProveChain";
+      j : Int;
+   END_VAR
+
+
+BEGIN
+	FOR #j := 0 TO 3 DO
+	    #vals[#j] := #n + #j;
+	END_FOR;
+	// an array by reference (in/out) and its sum as the return value
+	#sumOut := "FC_ProveSum"(arr := #vals);
+	#doubled := #vals;
+	#early := "FC_ProveEarly"(x := #n);
+	// a structure through an FC's in/out
+	#p.a := #n;
+	#p.b := 0;
+	"FC_ProveSwap"(s := #p);
+	// a chain of multi-instances with a timer inside
+	#chain(go := #go);
+	#chainQ := #chain.q;
+	#chainCount := #chain.count;
+	// dates and times of day
+	#nextDay := #day2;
+	#laterTod := #tday + T#1H30M;
+	#dayDiff := #day2 - #day;
+	#todMs := TOD_TO_DINT(#laterTod);
+END_FUNCTION_BLOCK
+

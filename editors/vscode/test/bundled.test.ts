@@ -13,7 +13,9 @@ describe("the rung that comes with the extension", () => {
     expect(win).toContain('set "ELECTRON_RUN_AS_NODE=1"');
     expect(win).toContain('set "RUNG_HOME=%~dp0rung-1.0.0+abc"');
     expect(win).toContain('"%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe" "%~dp0rung-1.0.0+abc\\rung.cjs" %*');
-    expect(win).not.toContain("chcp");
+    // rung's output is UTF-8 bytes (VS Code's executable is a GUI program): the console reads it as UTF-8 while it runs
+    expect(win).toContain("chcp 65001 >nul");
+    expect(win).toContain("chcp %RUNG_CP% >nul");
     expect(/[^\x00-\x7f]/.test(win)).toBe(false);
     expect(win).toContain("\r\n");
     const sh = shimText("/usr/share/code/code", "1.0.0+abc", "linux");
@@ -22,7 +24,7 @@ describe("the rung that comes with the extension", () => {
     expect(shimPath("C:\\x", "win32")).toMatch(/rung\.cmd$/);
   });
 
-  it("a path outside every known folder and outside ASCII switches the console to UTF-8 and back", () => {
+  it("a path outside every known folder and outside ASCII is read in UTF-8, and the code page comes back", () => {
     const win = shimText("D:\\Programmə\\Code\\Code.exe", "1", "win32", env);
     expect(win).toContain("chcp 65001 >nul");
     expect(win).toContain("chcp %RUNG_CP% >nul");

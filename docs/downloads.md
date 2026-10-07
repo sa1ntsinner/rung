@@ -23,6 +23,17 @@ rung download --allow stop-cpu        # accept stopping the CPU for this downloa
 
 Answers can also live in `rung.toml` under `[download] allow = [...]`. A question rung does not know cancels the download. After a download rung starts the CPU again only if this download stopped it and `start_after` is true (the default).
 
+What rung says about the PLC afterwards follows what it knows, read from the phase TIA asked in. The exit code tells a script the same:
+
+| Exit | Meaning |
+|---|---|
+| 0 | Downloaded. |
+| 1 | Nothing was downloaded: not confirmed, no connection, or an error before the transfer. |
+| 2 | Compile errors (nothing downloaded), or TIA reported an error. When the transfer had already started, rung says so: the PLC may hold part of the download. |
+| 3 | Nothing was downloaded: before the transfer TIA asked a question rung did not answer. |
+| 4 | The download reached the PLC; afterwards TIA asked something rung did not answer (starting the CPU, for example). The CPU may be in STOP. |
+| 5 | rung lost track during the download (timeout, the bridge or TIA Portal gone). How far it got is unknown: `rung online --state` and `rung compare` show what the PLC runs. |
+
 A password-protected CPU gets its password from `RUNG_PLC_PASSWORD`; passwords never go into files.
 
 ## Where to connect

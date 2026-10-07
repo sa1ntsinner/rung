@@ -7,6 +7,7 @@ import { nonce, webviewHtml } from "../host/webviewHtml";
 import type { Lsp } from "../lsp";
 import type { DeclModel, DeclRow, HostToView } from "../protocol/declarations";
 import type { RungWorkspace } from "../workspace";
+import type { Monitor } from "../monitor";
 import { DeclarationsSession } from "./session";
 
 const VIEW_TYPE = "rung.declarations";
@@ -50,7 +51,7 @@ export class DeclarationsPanel implements vscode.Disposable {
   private revealTimer: NodeJS.Timeout | undefined;
 
   /** Opens the panel beside the editor (or shows it), bound to `uri` or the active SCL editor. */
-  static show(ctx: vscode.ExtensionContext, deps: { lsp: Lsp; ws: RungWorkspace }, uri?: vscode.Uri, position?: vscode.Position): DeclarationsPanel {
+  static show(ctx: vscode.ExtensionContext, deps: { lsp: Lsp; ws: RungWorkspace; monitor?: Monitor }, uri?: vscode.Uri, position?: vscode.Position): DeclarationsPanel {
     const active = vscode.window.activeTextEditor;
     const target = uri ?? (active?.document.languageId === "scl" ? active.document.uri : undefined);
     const pos = position ?? (active && target && active.document.uri.toString() === target.toString() ? active.selection.active : undefined);
@@ -65,7 +66,7 @@ export class DeclarationsPanel implements vscode.Disposable {
   }
 
   /** Restores the panel VS Code kept across a reload, bound as it was. */
-  static register(ctx: vscode.ExtensionContext, deps: { lsp: Lsp; ws: RungWorkspace }): vscode.Disposable {
+  static register(ctx: vscode.ExtensionContext, deps: { lsp: Lsp; ws: RungWorkspace; monitor?: Monitor }): vscode.Disposable {
     return vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, {
       deserializeWebviewPanel: async (panel) => {
         panel.webview.options = DeclarationsPanel.options(ctx);
@@ -81,7 +82,7 @@ export class DeclarationsPanel implements vscode.Disposable {
 
   private constructor(
     private readonly ctx: vscode.ExtensionContext,
-    deps: { lsp: Lsp; ws: RungWorkspace },
+    deps: { lsp: Lsp; ws: RungWorkspace; monitor?: Monitor },
     private readonly panel: vscode.WebviewPanel,
     binding: Binding,
     position?: vscode.Position,
@@ -121,6 +122,11 @@ export class DeclarationsPanel implements vscode.Disposable {
   /** The model the view shows. */
   get shown(): DeclModel | undefined {
     return this.session.shown;
+  }
+
+  /** The Monitor value column as the view has it, row id → value (for the integration tests). */
+  get monitoredValues(): Record<string, string> | undefined {
+    return this.session.monitoredValues;
   }
 
   /** A message as if the view sent it; the answer the view would get (for the integration tests). */

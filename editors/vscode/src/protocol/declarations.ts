@@ -24,11 +24,13 @@ export interface DeclRow {
   kind: "plain" | "struct" | "array" | "instance";
   start?: string;
   comment?: string;
+  /** a PLC tag's address (a tag table) */
+  address?: string;
   attrs: { accessible: AttrState; visible: AttrState; writable: AttrState; setpoint: AttrState };
   /** whether TIA's HMI/OPC UA attributes apply (not to temporaries and constants) */
   hmi: boolean;
   other: { key: string; value: string }[];
-  ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange };
+  ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange; address?: DRange };
   /** the language server's errors and warnings about this declaration's name, type or value */
   problems?: DeclProblem[];
   children?: DeclRow[];
@@ -60,6 +62,8 @@ export interface DeclModel {
   editable: boolean;
   reason?: string;
   unavailable: DRange[];
+  /** a tag table: the bit memory a new tag gets */
+  nextAddress?: string;
 }
 
 /** A declaration a table adds (mirrors packages/lsp/src/declarationEdit.ts). */
@@ -68,6 +72,7 @@ export interface NewRow {
   type: string;
   start?: string;
   comment?: string;
+  address?: string;
 }
 
 /** One edit of the table; the language server plans its text (rung/declarationEdit). */
@@ -77,7 +82,8 @@ export type DeclOp =
   | { op: "setAttr"; row: string; key: string; state: "on" | "off" | "default" }
   | { op: "setType"; row: string; type: string }
   | { op: "insertRows"; after?: string; into?: string; section?: string; rows: NewRow[] }
-  | { op: "deleteRow"; row: string };
+  | { op: "deleteRow"; row: string }
+  | { op: "setAddress"; row: string; value: string | null };
 
 /** Rows read from pasted text (rung/declarationPaste). */
 export interface PasteResult {
@@ -102,7 +108,9 @@ export type HostToView =
   /** the answer to an edit: ok (the document changed) or why not; `edit` names a row to edit next (a new row's name) */
   | { v: 1; kind: "result"; req: number; ok: boolean; reason?: string; edit?: { rowId: string; column: "name" } }
   | { v: 1; kind: "pastePreview"; req: number; result: PasteResult }
-  | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] };
+  | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] }
+  /** monitoring this block (a DB, an FB through its instance): each row's value as TIA Portal's Monitor value column */
+  | { v: 1; kind: "values"; on: boolean; values: Record<string, string>; instance?: string };
 
 export type OpenTarget = "name" | "type" | "start" | "comment";
 
@@ -121,7 +129,9 @@ export type ViewToHost =
   | { v: 1; kind: "delete"; req: number; uri: string; version: number; rowId: string }
   | { v: 1; kind: "paste"; req: number; uri: string; text: string }
   | { v: 1; kind: "undo" }
-  | { v: 1; kind: "redo" };
+  | { v: 1; kind: "redo" }
+  /** start or stop monitoring the block the table shows */
+  | { v: 1; kind: "monitor" };
 
 const TARGETS: ReadonlySet<string> = new Set<OpenTarget>(["name", "type", "start", "comment"]);
 /** the attributes the table sets: a key from the view is never text written into the file */
@@ -134,7 +144,7 @@ const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
 function isNewRow(x: unknown): boolean {
   if (!x || typeof x !== "object") return false;
   const r = x as Record<string, unknown>;
-  return str(r.name) && str(r.type) && optStr(r.start) && optStr(r.comment);
+  return str(r.name) && str(r.type) && optStr(r.start) && optStr(r.comment) && optStr(r.address);
 }
 
 function isOp(x: unknown): x is DeclOp {
@@ -143,6 +153,7 @@ function isOp(x: unknown): x is DeclOp {
   switch (o.op) {
     case "setStart":
     case "setComment":
+    case "setAddress":
       return str(o.row) && nullStr(o.value);
     case "setAttr":
       return str(o.row) && ATTR_KEYS.has(String(o.key)) && (o.state === "on" || o.state === "off" || o.state === "default");
@@ -167,6 +178,7 @@ export function isViewToHost(x: unknown): x is ViewToHost {
     case "openText":
     case "undo":
     case "redo":
+    case "monitor":
       return true;
     case "edit":
       return num(m.req) && str(m.uri) && num(m.version) && isOp(m.op);

@@ -92,7 +92,7 @@ export class WatchController implements vscode.Disposable {
       shellPath: inv.file,
       // cmd.exe needs its /c line verbatim; a string is passed through unchanged on Windows
       shellArgs: inv.shell ? inv.args.join(" ") : inv.args,
-      iconPath: new vscode.ThemeIcon("eye"),
+      iconPath: new vscode.ThemeIcon("sync"),
       isTransient: true,
     });
     this.terminal.show(true);

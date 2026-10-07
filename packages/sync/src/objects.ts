@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Shared per-object steps of pull and sync: staging exports, comparing with disk and base, building state.
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   BlobStore,
@@ -9,15 +9,17 @@ import {
   bundleHash,
   isContained,
   normalizeText,
+  parseAddress,
   pathKey,
   sha256,
   type ObjectState,
+  type StateStore,
   type PublishTarget,
   type StateFile,
 } from "@rung/core";
 import { BridgeError, type BridgeClient, type ExportResult, type ObjectEntry } from "@rung/bridge-client";
 
-export type BridgeLike = Pick<BridgeClient, "projectInfo" | "listObjects" | "exportObject">;
+export type BridgeLike = Pick<BridgeClient, "projectInfo" | "listObjects" | "exportObject"> & Partial<Pick<BridgeClient, "identify">>;
 
 /** Staged files are named "obj<suffix>"; the suffix is appended to the object's stem in the workspace. */
 export const STAGED_STEM = "obj";
@@ -199,4 +201,104 @@ export async function stageForImport(root: string, form: string, bundle: Record<
 export function isLockError(e: unknown): boolean {
   const code = (e as NodeJS.ErrnoException | undefined)?.code;
   return code === "EBUSY" || code === "EPERM" || code === "EACCES";
+}
+
+/** Quoted uses of a name in SCL/SD (`"Name"`, `"Name".x`) and in SimaticML (`Name="Name"`). */
+export function mentions(text: string, name: string): boolean {
+  return text.includes(`"${name}"`) || text.includes(`Name="${name.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`);
+}
+
+/** Unit tests name blocks too (`block: Fx_Counter`, `"Fx_Counter".member`); they follow the rename. */
+/** The tests that name the old block, unless they name another PLC (`plc: PLC_2`: another block of that name). */
+export async function renameInTests(root: string, oldName: string, newName: string, device: string): Promise<string[]> {
+  const changed: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(join(root, dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) await walk(rel);
+      else if (/\.test\.ya?ml$/i.test(e.name)) {
+        const text = await readFile(join(root, rel), "utf8");
+        const plc = /^plc:\s*["']?([^"'#\n]*?)["']?\s*(#.*)?$/im.exec(text)?.[1]?.trim();
+        if (plc && plc.toUpperCase() !== device.toUpperCase()) continue;
+        const own = new RegExp(`^\\s*block:\\s*"?${escapeRe(oldName)}"?\\s*(?:#.*)?$`, "m").test(text);
+        let next = text
+          .replace(new RegExp(`^(\\s*block:\\s*)"?${escapeRe(oldName)}"?(\\s*(?:#.*)?)$`, "gm"), `$1${newName}$2`)
+          .split(`"${oldName}"`)
+          .join(`"${newName}"`);
+        // an FC's return value is named after the FC: expect: { FC_Scale: 750.0 } in its own tests
+        if (own) next = next.replace(new RegExp(`(?<=[{,]\\s*)${escapeRe(oldName)}(?=\\s*:)`, "g"), newName);
+        if (next !== text) {
+          await writeFile(join(root, rel), next);
+          changed.push(rel);
+        }
+      }
+    }
+  };
+  await walk("tests");
+  return changed;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Objects TIA Portal renamed or moved to another group since the last pass, by its lasting identity (V20 and later):
+ * the new address and the state of the old one: `recognized` all of them, `renamed` those whose files are clean and
+ * move (an edited file is left to the person). Also records the identity of every listed object that has none yet.
+ * Fatal bridge failures pass through; a bridge without identities finds none.
+ */
+export async function renamesInTia(root: string, bridge: BridgeLike, state: StateStore, items: readonly { entry: ObjectEntry; stem?: string | null }[], orphans: Iterable<ObjectState>, fatal: ReadonlySet<string>): Promise<{ ids: Record<string, string>; renamed: Map<string, ObjectState>; recognized: Map<string, ObjectState> }> {
+  const renamed = new Map<string, ObjectState>();
+  const recognized = new Map<string, ObjectState>();
+  const ask = items.filter((i) => i.stem && !state.get(i.entry.address)?.tiaId).map((i) => i.entry.address);
+  if (!bridge.identify || !ask.length) return { ids: {}, renamed, recognized };
+  let ids: Record<string, string>;
+  try {
+    ids = (await bridge.identify(ask)) ?? {};
+  } catch (e) {
+    if (e instanceof BridgeError && fatal.has(e.code)) throw e;
+    return { ids: {}, renamed, recognized }; // an older bridge: no identities
+  }
+  for (const [address, id] of Object.entries(ids)) {
+    const s = state.get(address);
+    if (s && s.tiaId !== id) state.upsert({ ...s, tiaId: id });
+  }
+  const byId = new Map<string, ObjectState>();
+  for (const s of orphans) if (s.tiaId) byId.set(s.tiaId, s);
+  for (const address of ask) {
+    const was = ids[address] ? byId.get(ids[address]!) : undefined;
+    if (!was || state.get(address) || was.status === "importing" || [...recognized.values()].includes(was)) continue;
+    recognized.set(address, was);
+    if ((await localStatus(root, was.files)) === "clean") renamed.set(address, was);
+  }
+  return { ids, renamed, recognized };
+}
+
+/**
+ * The orphan a new address takes over by letter case alone (Fx_A for fx_a.scl, on Windows one file), unless TIA
+ * Portal's identity gives that orphan to another address (it was renamed, and this is a new object).
+ */
+export function caseOrphan(address: string, o: ObjectState | undefined, recognized: ReadonlyMap<string, ObjectState>): ObjectState | undefined {
+  if (!o || [...recognized].some(([a, x]) => x === o && a !== address)) return undefined;
+  return o;
+}
+
+/**
+ * TIA Portal keeps uses symbolic: after a rename there, the files that name the old object come back with the new
+ * name, though TIA reports them unchanged. Marked stale, the pass exports them again.
+ */
+export async function markUsersStale(root: string, state: StateStore, renamed: ReadonlyMap<string, ObjectState>): Promise<void> {
+  const names = [...renamed].filter(([to, o]) => parseAddress(to).name !== parseAddress(o.address).name).map(([, o]) => parseAddress(o.address).name);
+  if (!names.length) return;
+  const moving = new Set([...renamed.values()].map((o) => o.address));
+  for (const s of state.all()) {
+    if (moving.has(s.address) || s.tiaFingerprint.startsWith("stale:")) continue;
+    const texts = await Promise.all(s.files.map((f) => readFile(join(root, f.path), "utf8").catch(() => "")));
+    if (texts.some((t) => names.some((n) => mentions(t, n)))) state.upsert({ ...s, tiaFingerprint: `stale:${s.tiaFingerprint}` });
+  }
 }

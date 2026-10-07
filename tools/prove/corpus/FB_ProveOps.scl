@@ -1,0 +1,100 @@
+FUNCTION_BLOCK "FB_ProveOps"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      a : Int;
+      b : Int;
+      d : DInt;
+      r : Real;
+      w : Word;
+      n : Int;
+   END_VAR
+
+   VAR_OUTPUT 
+      sum : Int;
+      diff : Int;
+      prod : Int;
+      quot : Int;
+      remainder : Int;
+      dsum : DInt;
+      wideProd : DInt;
+      shl : Word;
+      shr : Word;
+      rol : Word;
+      wand : Word;
+      wxor : Word;
+      bit3 : Bool;
+      rToInt : Int;
+      rRound : DInt;
+      rTrunc : DInt;
+      intToReal : Real;
+      rQuot : Real;
+      minAB : Int;
+      maxAB : Int;
+      limited : Int;
+      absA : Int;
+      neg : Int;
+      cmp : Bool;
+      loopSum : DInt;
+      caseOut : Int;
+      wordToInt : Int;
+      intToWord : Word;
+   END_VAR
+
+   VAR 
+      i : Int;
+   END_VAR
+
+
+BEGIN
+	// arithmetic in Int: wraps around as the CPU does
+	#sum := #a + #b;
+	#diff := #a - #b;
+	#prod := #a * #b;
+	IF #b <> 0 THEN
+	    #quot := #a / #b;
+	    #remainder := #a MOD #b;
+	END_IF;
+	#dsum := #d + INT_TO_DINT(#a);
+	#wideProd := INT_TO_DINT(#a) * INT_TO_DINT(#b);
+	// bits and words
+	#shl := SHL(IN := #w, N := 3);
+	#shr := SHR(IN := #w, N := 3);
+	#rol := ROL(IN := #w, N := 4);
+	#wand := #w AND 16#0FF0;
+	#wxor := #w XOR 16#FFFF;
+	#bit3 := #w.%X3;
+	// conversions
+	#rToInt := REAL_TO_INT(#r);
+	#rRound := ROUND(#r);
+	#rTrunc := TRUNC(#r);
+	#intToReal := INT_TO_REAL(#a) / 3.0;
+	IF #r <> 0.0 THEN
+	    #rQuot := 1.0 / #r;
+	END_IF;
+	#wordToInt := WORD_TO_INT(#w);
+	#intToWord := INT_TO_WORD(#a);
+	// functions
+	#minAB := MIN(IN1 := #a, IN2 := #b);
+	#maxAB := MAX(IN1 := #a, IN2 := #b);
+	#limited := LIMIT(MN := -100, IN := #a, MX := 100);
+	#absA := ABS(#a);
+	#neg := - #a;
+	#cmp := #a > #b AND NOT (#r < 0.0) OR #w = 16#FFFF;
+	// control flow
+	#loopSum := 0;
+	FOR #i := 1 TO #n BY 2 DO
+	    #loopSum := #loopSum + #i * #i;
+	END_FOR;
+	CASE #a OF
+	    1..9:
+	        #caseOut := 1;
+	    10, 20, 30:
+	        #caseOut := 2;
+	    -5..-1:
+	        #caseOut := 3;
+	    ELSE
+	        #caseOut := 0;
+	END_CASE;
+END_FUNCTION_BLOCK
+

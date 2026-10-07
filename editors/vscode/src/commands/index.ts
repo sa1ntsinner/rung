@@ -18,11 +18,17 @@ import { Connector } from "./connect";
 import { compareCommand, renameCommand } from "./compare";
 import { downloadCommand } from "./download";
 import { interfacesCommand } from "./interfaces";
-import { registerPreview } from "./preview";
 import { pickUsages, whoWrites } from "./usages";
 import { createTest } from "./createTest";
+import { recordExpectations } from "./record";
+import { crossReference } from "./xref";
+import { interfaceImpact } from "./impact";
+import { compareBehaviour } from "./behaviour";
 import { newObjectCommand } from "./newObject";
 import type { UsagesView } from "../views/usagesView";
+import type { ChangesView } from "../views/changesView";
+import type { PlanEntry } from "../core/preview";
+import { registerMerge } from "./merge";
 import { deviceTarget, fileTarget } from "./targets";
 
 export interface Services {
@@ -35,6 +41,7 @@ export interface Services {
   project: ProjectView;
   lsp: Lsp;
   usages: UsagesView;
+  changes: ChangesView;
 }
 
 const DOCS = "https://github.com/sa1ntsinner/rung/blob/main/docs/editors/README.md";
@@ -110,7 +117,17 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     });
   reg("rung.writes.on", setWrites(true));
   reg("rung.writes.off", setWrites(false));
-  reg("rung.preview", inWs(registerPreview(context, ws, cli)));
+  // what the next sync does: the Changes view, kept on screen while each change is looked at
+  reg(
+    "rung.preview",
+    inWs(async () => {
+      await vscode.commands.executeCommand("rung.changes.focus");
+      await s.changes.refresh();
+    }),
+  );
+  reg("rung.changes.refresh", inWs(() => s.changes.refresh()));
+  reg("rung.changes.sync", inWs(() => s.changes.syncReviewed()));
+  reg("rung.changes.open", (e: unknown) => (e && typeof e === "object" && "path" in e ? s.changes.open(e as PlanEntry) : undefined));
   reg("rung.whoWrites", () => whoWrites(s.usages));
   reg("rung.usages.pick", () => pickUsages(s.lsp));
   reg("rung.usages.refresh", () => s.usages.refresh());
@@ -119,6 +136,10 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   // Insert in a table adds a row there; the webview also hands the key to VS Code, where it would switch the
   // text editor's overtype mode
   reg("rung.tableKey", () => undefined);
+  reg("rung.compareBehaviour", (rev?: unknown) => compareBehaviour(s.ws, s.cli, typeof rev === "string" ? rev : undefined));
+  reg("rung.xref", (arg?: unknown) => crossReference(s.ws, s.cli, arg));
+  reg("rung.impact", (arg?: unknown) => interfaceImpact(s.lsp, arg));
+  reg("rung.test.record", (uri?: unknown, caseIndex?: unknown, stepIndex?: unknown) => recordExpectations(s.ws, s.cli, s.lsp, uri instanceof vscode.Uri ? uri : undefined, typeof caseIndex === "number" ? caseIndex : undefined, typeof stepIndex === "number" ? stepIndex : undefined));
   reg("rung.test.create", (uri?: unknown, position?: unknown) => createTest(s.lsp, s.ws, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined));
   reg("rung.usages.show", (uri, position, symbol) => {
     if (uri instanceof vscode.Uri && position instanceof vscode.Position) return s.usages.show(uri, position, typeof symbol === "string" ? symbol : "this");
@@ -228,7 +249,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   );
   reg("rung.interfaces", inWs((arg) => interfacesCommand(ws, cli, connector, arg)));
   reg("rung.download", inWs((arg) => downloadCommand(ws, cli, online, connector, arg)));
-  reg("rung.compare", inWs((arg) => compareCommand(ws, cli, out, connector, arg)));
+  reg("rung.compare", inWs((arg) => compareCommand(ws, cli, out, connector, s.changes, arg)));
   reg("rung.rename", inWs((arg) => renameCommand(ws, cli, out, arg)));
 
   // --- TIA Portal / conflicts
@@ -243,6 +264,18 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
       if (/NO_TIA_WINDOW|without (a )?user interface/i.test(r.output))
         void vscode.window.showWarningMessage(`No TIA Portal window has this project open, so TIA Portal cannot show ${t.name ?? t.rel}. Open the project in TIA Portal first.`);
       else void showFailure(out, "Could not open it in TIA Portal", r.output);
+    }),
+  );
+  const merge = registerMerge(context, ws, cli);
+  reg(
+    "rung.resolveMerge",
+    inWs(async (arg) => {
+      const t = await fileTarget(ws, arg, undefined, "the conflicted file");
+      if (!t) return;
+      const o = ws.objectAt(t.uri.fsPath);
+      if (o && o.status !== "conflicted") return void vscode.window.showInformationMessage(`${o.path} has no conflict.`);
+      const rel = o?.path ?? t.rel.replace(/\.(conflict|tia)$/, "");
+      await merge(vscode.Uri.joinPath(vscode.Uri.file(ws.root!), ...rel.split("/")), rel);
     }),
   );
   const resolve = (mode: "ours" | "theirs") =>
@@ -337,7 +370,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
   const items: ActionItem[] = [
     sep("sync"),
     a("sync", "Sync now", "rung.sync", "S"),
-    a("eye", "Preview sync", "rung.preview", "Shift+S", "what the next sync would send and bring in, before anything is written"),
+    a("diff", "Preview sync", "rung.preview", "Shift+S", "what the next sync would send and bring in, before anything is written"),
     running ? a("eye-closed", "Stop watch", "rung.watch.stop", "W") : a("eye", "Start watch", "rung.watch.start", "W", "keep files and TIA Portal in sync"),
     a("cloud-download", "Pull from TIA Portal", "rung.pull", "P"),
     a("info", "Status", "rung.status"),

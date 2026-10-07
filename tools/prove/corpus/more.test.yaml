@@ -1,0 +1,12 @@
+block: FB_ProveMore
+cases:
+  - name: strings, chars, slices
+    steps:
+      - set: { s: abcdefg, a: 7, b: 2, d: 100001, dw: 16#A1B2C3F0, lr: 1.0625, c: q }
+        cycle: 1
+      - set: { s: xy, a: -9, b: 4, d: -100001, dw: 16#0000002F, lr: -123456.789, c: Z }
+        cycle: 1
+  - name: division by zero
+    steps:
+      - set: { s: abc, a: 7, b: 0, d: 50, dw: 16#1, lr: 0.0, c: a }
+        cycle: 1

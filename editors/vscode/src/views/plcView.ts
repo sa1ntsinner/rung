@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// "PLC" view: rung watch, then each PLC with its online state and actions.
+// "PLC" view: rung watch, writes, then one row per PLC with its online state; its actions are the row's inline
+// buttons and context menu.
 import * as vscode from "vscode";
 import type { OnlineMonitor } from "../online";
 import type { WatchController } from "../runner/watch";
@@ -9,19 +10,8 @@ type Node =
   | { type: "watch" }
   | { type: "writes" }
   | { type: "plc"; device: string }
-  | { type: "connection"; device: string }
-  | { type: "action"; device: string; label: string; command: string; icon: string; tooltip: string };
+  | { type: "connection"; device: string };
 
-const ACTIONS: readonly Omit<Extract<Node, { type: "action" }>, "type" | "device">[] = [
-  { label: "Go online", command: "rung.goOnline", icon: "plug", tooltip: "rung online: connect TIA Portal to this PLC" },
-  { label: "Go offline", command: "rung.goOffline", icon: "debug-disconnect", tooltip: "rung online --off" },
-  { label: "Compile PLC", command: "rung.compilePlc", icon: "tools", tooltip: "rung compile: compile the software in TIA Portal" },
-  { label: "Compile hardware", command: "rung.compileHardware", icon: "circuit-board", tooltip: "rung compile --hw" },
-  { label: "Connect…", command: "rung.connect", icon: "link", tooltip: "rung connect: find the PLC on the network (or choose among what answers) and save the connection in rung.toml" },
-  { label: "Interfaces…", command: "rung.interfaces", icon: "radio-tower", tooltip: "rung interfaces --scan: PG/PC interfaces and reachable devices; can write [plc.X] into rung.toml" },
-  { label: "Compare with PLC", command: "rung.compare", icon: "diff-multiple", tooltip: "rung compare: what on the PLC differs from the project (read-only)" },
-  { label: "Download…", command: "rung.download", icon: "desktop-download", tooltip: "rung download: asks for confirmation first" },
-];
 
 const STATE_ICON: Readonly<Record<string, [string, string | undefined]>> = {
   Online: ["pass-filled", "testing.iconPassed"],
@@ -72,7 +62,8 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
     if (!e) return [this.watchItem(), this.writesItem(), ...this.ws.devices().map((d) => this.plcItem(d))];
     if (e.node.type === "plc") {
       const d = e.node.device;
-      return [this.connectionItem(d), ...ACTIONS.map((a) => this.actionItem({ type: "action", device: d, ...a }))];
+      // the actions are the row's inline buttons and context menu (and the rung quick pick), not rows of their own
+      return [this.connectionItem(d)];
     }
     return [];
   }
@@ -89,7 +80,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
     const it = new PlcItem({ type: "watch" }, "rung watch", vscode.TreeItemCollapsibleState.None);
     it.id = "watch";
     it.description = text[status];
-    it.iconPath = new vscode.ThemeIcon(status === "running" ? "eye" : status === "stopped" ? "eye-closed" : "sync~spin", status === "running" ? new vscode.ThemeColor("testing.iconPassed") : undefined);
+    it.iconPath = new vscode.ThemeIcon(status === "running" ? "sync" : status === "stopped" ? "circle-slash" : "sync~spin", status === "running" ? new vscode.ThemeColor("testing.iconPassed") : undefined);
     it.contextValue = status === "running" || status === "starting" ? "rung.watch.running" : "rung.watch.stopped";
     it.tooltip =
       status === "running"
@@ -150,16 +141,6 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
       : `No [plc.${device}] in rung.toml yet. Go online (or download) finds ${device} on the network by its project address and saves the connection; click to look now and choose.`;
     it.command = { command: "rung.connect", title: "Connect…", arguments: [device] };
     it.contextValue = c ? "rung.connection" : "rung.connection.none";
-    return it;
-  }
-
-  private actionItem(n: Extract<Node, { type: "action" }>): PlcItem {
-    const it = new PlcItem(n, n.label, vscode.TreeItemCollapsibleState.None);
-    it.id = `act:${n.device}:${n.command}`;
-    it.iconPath = new vscode.ThemeIcon(n.icon);
-    it.tooltip = n.tooltip;
-    it.command = { command: n.command, title: n.label, arguments: [n.device] };
-    it.contextValue = "rung.action";
     return it;
   }
 

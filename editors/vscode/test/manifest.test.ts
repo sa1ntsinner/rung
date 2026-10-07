@@ -12,7 +12,7 @@ const commands = new Set<string>(pkg.contributes.commands.map((c: { command: str
 describe("manifest", () => {
   it("the getting-started walkthrough runs existing commands and has its pages", () => {
     const w = pkg.contributes.walkthroughs.find((x: { id: string }) => x.id === "rung.getStarted");
-    expect(w.steps.map((s: { id: string }) => s.id)).toEqual(["check", "project", "declarations", "usages", "test", "preview", "writes"]);
+    expect(w.steps.map((s: { id: string }) => s.id)).toEqual(["check", "project", "declarations", "usages", "test", "debug", "preview", "writes"]);
     for (const s of w.steps) {
       for (const m of String(s.description).matchAll(/command:([\w.]+)/g)) expect(commands.has(m[1]!)).toBe(true);
       expect(existsSync(join(root, s.media.markdown))).toBe(true);
