@@ -46,6 +46,8 @@ export interface CaseResult {
   /** For an error: the step it stopped in (from 1) and that step's line in the test file. */
   errorStep?: number;
   errorLine?: number;
+  /** With `observe`: the block's outputs and statics after each step that ran cycles (from 1), as a test writes them. */
+  observed?: { step: number; values: Record<string, boolean | number | string> }[];
 }
 
 export interface FileResult {
@@ -451,7 +453,16 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
   return [...missing.values()];
 }
 
-export async function runTestFile(index: WorkspaceIndex, file: string, text: string, only?: number): Promise<FileResult> {
+export interface TestHooks {
+  /** Sees each case's simulator before it runs (the debugger, coverage). */
+  simulator?: (sim: Simulator) => void;
+  /** Told when each step of a case starts (from 1). */
+  step?: (index: number) => void;
+  /** Records the block's values after each step that runs cycles (CaseResult.observed): record to test. */
+  observe?: boolean;
+}
+
+export async function runTestFile(index: WorkspaceIndex, file: string, text: string, only?: number, hooks: TestHooks = {}): Promise<FileResult> {
   let spec: TestFile;
   try {
     const lines = new LineCounter();
@@ -495,6 +506,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     const sim = new Simulator(seen);
     sim.stubs = stubs;
     sim.hardwareIds = hardware;
+    hooks.simulator?.(sim);
     const failures: TestFailure[] = [];
     const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     const inOuts = g.block.vars.filter((v) => v.section === "InOut");
@@ -592,12 +604,30 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       if (n > MAX_STEP_CYCLES) throw new SimError(`advance: ${String(v)} is ${n} cycles of ${cycleMs}ms; a step runs at most ${MAX_STEP_CYCLES} (for long times, set a longer cycle: at the top of the file)`);
       return n;
     };
+    const observed: NonNullable<CaseResult["observed"]> = [];
+    const observe = (step: number) => {
+      const values: Record<string, boolean | number | string> = {};
+      const own = g.block!.vars.filter((v) => (isFb ? ["Output", "InOut", "Static"] : ["Output", "InOut"]).includes(v.section));
+      const names = [...own.map((v) => ({ name: v.name, type: v.type })), ...(!isFb && g.block!.returnType && !/^void$/i.test(g.block!.returnType) ? [{ name: g.block!.name, type: g.block!.returnType }] : [])];
+      for (const n of names) {
+        let v: Value;
+        try {
+          v = resolve(n.name, "expect").get();
+        } catch {
+          continue;
+        }
+        if (typeof v === "number" && isTime(n.type)) values[n.name] = `T#${v}ms`;
+        else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[n.name] = v;
+      }
+      observed.push({ step, values });
+    };
     try {
       if (g.block.kind === "PRG") inst = sim.read({ root: { kind: "global", name: g.block.name }, path: [], start: 0 }, null) as Instance; // one shared PROGRAM instance
       else if (isFb) inst = sim.newInstance(g.block.name);
       else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs or PROGRAMs`);
       for (const [si, step] of (c.steps ?? []).entries()) {
         current = si + 1;
+        hooks.step?.(current);
         const unknown = Object.keys(step ?? {}).find((k) => !(STEP_ORDER as readonly string[]).includes(k));
         if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect)`);
         for (const op of STEP_ORDER) {
@@ -653,8 +683,9 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               break;
           }
         }
+        if (hooks.observe && ("cycle" in step || "advance" in step)) observe(si + 1);
       }
-      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0 });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0, ...(hooks.observe ? { observed } : {}) });
     } catch (err) {
       // an FC input the test misspelt shows when the FC is called
       const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
@@ -714,8 +745,8 @@ export interface CaseSelector {
 }
 
 /** Runs every tests/**\/*.test.yaml in the workspace (or the given files), or exactly one case. */
-export async function runTests(root: string, index: WorkspaceIndex, filter?: string, only?: CaseSelector): Promise<FileResult[]> {
-  if (only) return [await runOneCase(root, index, only)];
+export async function runTests(root: string, index: WorkspaceIndex, filter?: string, only?: CaseSelector, hooks: TestHooks = {}): Promise<FileResult[]> {
+  if (only) return [await runOneCase(root, index, only, hooks)];
   const files: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -740,7 +771,7 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
     const whole = !filter || rel.toLowerCase().includes(filter.replace(/\\/g, "/").toLowerCase()) || new RegExp(`^block:\\s*["']?${filter.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*(#.*)?$`, "mi").test(text);
     // or a part of a case's name (rung test --filter stuck): those cases of the file
     if (!whole && !text.toLowerCase().includes(filter!.toLowerCase())) continue;
-    const r = await runTestFile(index, rel, text);
+    const r = await runTestFile(index, rel, text, undefined, hooks);
     const cases = whole ? r.cases : r.cases.filter((c) => c.name.toLowerCase().includes(filter!.toLowerCase()));
     // a file that cannot run says so, whatever selected it
     if (whole || cases.length || r.error) out.push({ ...r, cases });
@@ -749,13 +780,13 @@ export async function runTests(root: string, index: WorkspaceIndex, filter?: str
 }
 
 /** rung test --case: the file is read and checked as a whole, only the case runs; naming nothing is an error. */
-async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelector): Promise<FileResult> {
+async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelector, hooks: TestHooks): Promise<FileResult> {
   const rel = only.file.replace(/\\/g, "/").replace(/^\.\//, "");
   const path = resolve(root, rel);
   if (!/\.test\.ya?ml$/i.test(rel) || relative(resolve(root, "tests"), path).startsWith("..")) throw new Error(`--case ${only.file}: no test file under tests/`);
   const text = await readFile(path, "utf8").catch(() => undefined);
   if (text === undefined) throw new Error(`--case ${only.file}: no test file there`);
-  const r = await runTestFile(index, rel, text, only.index);
+  const r = await runTestFile(index, rel, text, only.index, hooks);
   const count = testPositions(text).length;
   if (!r.error && (only.index < 0 || only.index >= count)) throw new Error(`--case ${only.file}#${only.index}: the file has ${count} cases (numbered from 0)`);
   return r;

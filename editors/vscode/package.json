@@ -40,7 +40,8 @@
     "onLanguage:s7dcl",
     "onWebviewPanel:rung.declarations",
     "onCustomEditor:rung.udtTable",
-    "onCustomEditor:rung.testTable"
+    "onCustomEditor:rung.testTable",
+    "onDebugResolve:rung"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -480,6 +481,12 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "rung.test.record",
+        "title": "Record Expectations",
+        "category": "rung",
+        "icon": "$(record)"
+      },
+      {
         "command": "rung.test.openTable",
         "title": "Open Test as Table",
         "category": "rung",
@@ -709,6 +716,10 @@
         {
           "command": "rung.resolveMerge",
           "when": "rung.workspace && rung.hasConflicts"
+        },
+        {
+          "command": "rung.test.record",
+          "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/"
         }
       ],
       "view/title": [
@@ -1047,6 +1058,11 @@
           "command": "rung.resolveMerge",
           "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
           "group": "rung@0"
+        },
+        {
+          "command": "rung.test.record",
+          "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/",
+          "group": "rung@2"
         }
       ],
       "explorer/context": [
@@ -1500,6 +1516,68 @@
             "completionEvents": [
               "onContext:rung.writesOn"
             ]
+          }
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "scl"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "rung",
+        "label": "rung: test case (offline simulator)",
+        "languages": [
+          "scl"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "test"
+            ],
+            "properties": {
+              "test": {
+                "type": "string",
+                "description": "The test file whose case runs, e.g. ${workspaceFolder}/tests/motor.test.yaml.",
+                "default": "${file}"
+              },
+              "case": {
+                "type": "number",
+                "description": "The case to debug, numbered from 0.",
+                "default": 0
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Stop at the first statement.",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "rung",
+            "request": "launch",
+            "name": "Debug a test case",
+            "test": "${file}",
+            "case": 0,
+            "stopOnEntry": true
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "rung: Debug a test case",
+            "description": "Step through one case of a .test.yaml on the offline simulator",
+            "body": {
+              "type": "rung",
+              "request": "launch",
+              "name": "Debug a test case",
+              "test": "^\"\\${file}\"",
+              "case": 0,
+              "stopOnEntry": true
+            }
           }
         ]
       }

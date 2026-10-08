@@ -73,7 +73,7 @@ function copyValue(v: Value): Value {
 type Decl = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members" | "init">;
 type Kind = "real" | "int" | "unknown";
 
-interface Frame {
+export interface Frame {
   block: BlockModel;
   /** Instance memory (FB) or call memory (FC). */
   mem: Struct;
@@ -263,6 +263,10 @@ export class Simulator {
   private readonly s5timers = new Map<string, S5Timer>();
   private steps = 0;
   private depth = 0;
+  /** Called before each statement runs (the debugger); it may throw to stop the run. */
+  onStatement?: (s: Stmt, f: Frame) => void;
+  /** The frames running, outermost first. */
+  readonly frames: Frame[] = [];
 
   constructor(
     private readonly index: WorkspaceIndex,
@@ -347,6 +351,44 @@ export class Simulator {
     const abs = Math.abs(x);
     const whole = Math.floor(abs);
     return Math.sign(x) * (whole + (abs - whole >= 0.5 ? 1 : 0));
+  }
+
+  /** Where a statement of a frame is in its file (1-based line and column); none for LAD/FBD, which runs as translated text. */
+  locationOf(f: Frame, offset: number): { uri: string; line: number; column: number } | undefined {
+    if (f.block.lad !== undefined) return undefined;
+    let uri: string;
+    try {
+      uri = this.uriOf(f.block);
+    } catch {
+      return undefined;
+    }
+    const p = this.index.docs.get(uri)?.lines.position(offset);
+    return p ? { uri, line: p.line + 1, column: p.character + 1 } : undefined;
+  }
+
+  /** Every statement of a block's code, nested ones too (coverage); none for code the simulator does not run. */
+  statementsOf(b: BlockModel): Stmt[] {
+    let top: Stmt[];
+    try {
+      top = b.property ? [...(b.property.get ? this.body(b, "get") : []), ...(b.property.set ? this.body(b, "set") : [])] : this.body(b);
+    } catch {
+      return [];
+    }
+    const out: Stmt[] = [];
+    const walk = (list: Stmt[] | undefined) => {
+      for (const s of list ?? []) {
+        out.push(s);
+        if (s.k === "if") {
+          for (const br of s.branches) walk(br.body);
+          walk(s.else);
+        } else if (s.k === "case") {
+          for (const it of s.items) walk(it.body);
+          walk(s.else);
+        } else if (s.k === "for" || s.k === "while" || s.k === "repeat") walk(s.body);
+      }
+    };
+    walk(top);
+    return out;
   }
 
   /** 1-based source line of an offset in a block's file (for error messages). */
@@ -1428,6 +1470,7 @@ export class Simulator {
   /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
   private runBody(b: BlockModel, frame: Frame, accessor?: "get" | "set") {
     if (b.stl) return this.runStlBody(b, frame);
+    this.frames.push(frame);
     try {
       this.exec(this.body(b, accessor), frame);
     } catch (e) {
@@ -1435,6 +1478,8 @@ export class Simulator {
       if (e instanceof Exit || e instanceof Continue) throw new SimError(`${e instanceof Exit ? "EXIT" : "CONTINUE"} outside of a loop in ${b.name}`, b.name);
       if (e instanceof Goto) throw new SimError(`GOTO ${e.label}: ${b.name} has no label ${e.label}: in a statement list around the GOTO`, b.name, e.at);
       throw e;
+    } finally {
+      this.frames.pop();
     }
   }
 
@@ -1854,6 +1899,7 @@ export class Simulator {
   }
 
   private stmt(s: Stmt, f: Frame) {
+    this.onStatement?.(s, f);
     this.tick(f, s.at);
     try {
       switch (s.k) {

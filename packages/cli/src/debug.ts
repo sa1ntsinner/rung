@@ -1,0 +1,212 @@
+// SPDX-License-Identifier: BUSL-1.1
+// rung debug: a Debug Adapter Protocol server on stdin/stdout that debugs one test case on the offline
+// simulator (VS Code, nvim-dap, Zed). The case replays from its start for every stop (DebugSession), so
+// stepping back is as cheap as stepping on.
+import { readFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Readable, Writable } from "node:stream";
+import { WorkspaceIndex } from "@rung/lsp";
+import { DebugSession, type DebugState, type DebugVariable } from "@rung/sim";
+import { findWorkspace, type Io } from "./common.js";
+
+interface Request {
+  seq: number;
+  type: "request";
+  command: string;
+  arguments?: Record<string, unknown>;
+}
+
+export interface LaunchArgs {
+  /** The test file, absolute or from the workspace (tests/motor.test.yaml). */
+  test: string;
+  /** The case, numbered from 0. */
+  case?: number;
+  stopOnEntry?: boolean;
+}
+
+/** Serves one debug session; resolves when the editor disconnects. */
+export function startDebugAdapter(io: Io, input: Readable = process.stdin, output: Writable = process.stdout): Promise<void> {
+  let seq = 1;
+  const send = (m: Record<string, unknown>) => {
+    const body = Buffer.from(JSON.stringify({ seq: seq++, ...m }), "utf8");
+    output.write(`Content-Length: ${body.length}\r\n\r\n`);
+    output.write(body);
+  };
+  const event = (name: string, body?: unknown) => send({ type: "event", event: name, ...(body ? { body } : {}) });
+
+  let session: DebugSession | undefined;
+  let caseName = "";
+  let launched: LaunchArgs | undefined;
+  let configured = false;
+  const breakpoints = new Map<string, { line: number; condition?: string }[]>();
+  // variable handles live until the next run: 1 and 2 are a frame's scopes, the rest children
+  let handles = new Map<number, { frame: number; list: () => DebugVariable[] }>();
+  let nextHandle = 1;
+  const handle = (frame: number, list: () => DebugVariable[]) => {
+    handles.set(nextHandle, { frame, list });
+    return nextHandle++;
+  };
+
+  const report = (s: DebugState) => {
+    handles = new Map();
+    nextHandle = 1;
+    if (s.kind === "stopped") {
+      event("stopped", { reason: s.reason, threadId: 1, allThreadsStopped: true, description: s.text ?? `t = ${s.time} ms`, ...(s.text ? { text: s.text } : {}) });
+      return;
+    }
+    const r = s.result;
+    const lines: string[] = [];
+    if (s.error) lines.push(`${s.error}`);
+    if (r) {
+      lines.push(`${r.passed ? "passed" : "FAILED"}: ${caseName || r.name}${r.error ? ` — ${r.errorStep ? `step ${r.errorStep}: ` : ""}${r.error}` : ""}`);
+      for (const f of r.failures) lines.push(`  step ${f.step}: ${f.name} expected ${JSON.stringify(f.expected)} got ${JSON.stringify(f.actual)}`);
+    }
+    event("output", { category: r?.passed ? "console" : "stderr", output: lines.join("\n") + "\n" });
+    event("terminated");
+  };
+
+  const syncBreakpoints = () => {
+    if (session) session.breakpoints = [...breakpoints].flatMap(([uri, list]) => list.map((b) => ({ uri, ...b })));
+  };
+
+  const begin = async () => {
+    if (!session || !launched || !configured) return;
+    syncBreakpoints();
+    report(await session.start(!!launched.stopOnEntry));
+  };
+
+  const prepare = async (a: LaunchArgs) => {
+    if (!a?.test) throw new Error("launch needs `test`: the test file to debug (tests/motor.test.yaml)");
+    const path = isAbsolute(a.test) ? a.test : resolve(io.cwd, a.test);
+    const ws = await findWorkspace(dirname(path)).catch(() => io.cwd);
+    const text = await readFile(path, "utf8").catch(() => {
+      throw new Error(`no test file at ${path}`);
+    });
+    const index = new WorkspaceIndex();
+    await index.load(ws);
+    const rel = relative(ws, path).split("\\").join("/");
+    const n = a.case ?? 0;
+    caseName = [...text.matchAll(/^\s*-\s*name:\s*(.+?)\s*$/gm)][n]?.[1]?.replace(/^["']|["']$/g, "") ?? `case ${n + 1}`;
+    session = new DebugSession(index, rel, text, n);
+    launched = a;
+  };
+
+  const step = async (run: (d: DebugSession) => Promise<DebugState>) => {
+    if (session) report(await run(session));
+  };
+
+  const handlers: Record<string, (a: Record<string, unknown>) => Promise<unknown> | unknown> = {
+    initialize: () => {
+      queueMicrotask(() => event("initialized"));
+      return {
+        supportsConfigurationDoneRequest: true,
+        supportsConditionalBreakpoints: true,
+        supportsStepBack: true,
+        supportsSetVariable: true,
+        supportsEvaluateForHovers: true,
+        supportsTerminateRequest: true,
+      };
+    },
+    launch: async (a) => {
+      await prepare(a as unknown as LaunchArgs);
+      queueMicrotask(() => void begin());
+    },
+    configurationDone: () => {
+      configured = true;
+      queueMicrotask(() => void begin());
+    },
+    setBreakpoints: (a) => {
+      const source = a.source as { path?: string };
+      const list = ((a.breakpoints as { line: number; condition?: string }[] | undefined) ?? []).map((b) => ({ line: b.line, ...(b.condition ? { condition: b.condition } : {}) }));
+      if (source.path) breakpoints.set(pathToFileURL(source.path).href, list);
+      syncBreakpoints();
+      return { breakpoints: list.map((b) => ({ verified: true, line: b.line })) };
+    },
+    threads: () => ({ threads: [{ id: 1, name: caseName || "test case" }] }),
+    stackTrace: () => {
+      const frames = session?.frames() ?? [];
+      return {
+        stackFrames: frames.map((f, i) => ({ id: i, name: f.name, line: f.line, column: f.column, ...(f.uri ? { source: { name: basename(fileURLToPath(f.uri)), path: fileURLToPath(f.uri) } } : {}) })),
+        totalFrames: frames.length,
+      };
+    },
+    scopes: (a) => {
+      const frame = Number(a.frameId ?? 0);
+      const s = session!;
+      return {
+        scopes: [
+          { name: "Locals", presentationHint: "locals", variablesReference: handle(frame, () => s.locals(frame)), expensive: false },
+          { name: "Data blocks", variablesReference: handle(frame, () => s.globals()), expensive: false },
+        ],
+      };
+    },
+    variables: (a) => {
+      const h = handles.get(Number(a.variablesReference));
+      return {
+        variables: (h?.list() ?? []).map((v) => ({
+          name: v.name,
+          value: v.value,
+          ...(v.type ? { type: v.type } : {}),
+          ...(v.evaluateName ? { evaluateName: v.evaluateName } : {}),
+          variablesReference: v.children ? handle(h!.frame, v.children) : 0,
+        })),
+      };
+    },
+    setVariable: async (a) => {
+      const h = handles.get(Number(a.variablesReference));
+      const v = h?.list().find((x) => x.name === a.name);
+      if (!h || !v?.evaluateName) throw new Error(`${String(a.name)} cannot be set`);
+      const r = await session!.setVariable(v.evaluateName, String(a.value), h.frame);
+      return { value: r.value };
+    },
+    evaluate: (a) => {
+      const v = session!.evaluate(String(a.expression), Number(a.frameId ?? 0));
+      return { result: v.value, ...(v.type ? { type: v.type } : {}), variablesReference: v.children ? handle(Number(a.frameId ?? 0), v.children) : 0 };
+    },
+    continue: () => {
+      queueMicrotask(() => void step((d) => d.continue()));
+      return { allThreadsContinued: true };
+    },
+    next: () => void queueMicrotask(() => void step((d) => d.next())),
+    stepIn: () => void queueMicrotask(() => void step((d) => d.stepIn())),
+    stepOut: () => void queueMicrotask(() => void step((d) => d.stepOut())),
+    stepBack: () => void queueMicrotask(() => void step((d) => d.stepBack())),
+    reverseContinue: () => void queueMicrotask(() => void step((d) => d.reverseContinue())),
+    // a run takes milliseconds: there is nothing running to pause
+    pause: () => undefined,
+    terminate: () => void queueMicrotask(() => event("terminated")),
+    disconnect: () => undefined,
+  };
+
+  return new Promise<void>((done) => {
+    let buf = Buffer.alloc(0);
+    let queue = Promise.resolve();
+    const dispatch = async (req: Request) => {
+      const h = handlers[req.command];
+      const reply = (m: Record<string, unknown>) => send({ type: "response", request_seq: req.seq, command: req.command, ...m });
+      if (!h) return reply({ success: false, message: `rung debug does not support ${req.command}` });
+      try {
+        const body = await h(req.arguments ?? {});
+        reply({ success: true, ...(body ? { body } : {}) });
+      } catch (e) {
+        reply({ success: false, message: (e as Error).message, body: { error: { id: 1, format: (e as Error).message, showUser: req.command === "launch" } } });
+      }
+      if (req.command === "disconnect") done();
+    };
+    input.on("data", (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk]);
+      for (;;) {
+        const end = buf.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const len = Number(/Content-Length:\s*(\d+)/i.exec(buf.subarray(0, end).toString("ascii"))?.[1]);
+        if (!Number.isFinite(len) || buf.length < end + 4 + len) return;
+        const msg = JSON.parse(buf.subarray(end + 4, end + 4 + len).toString("utf8")) as Request;
+        buf = buf.subarray(end + 4 + len);
+        // one request at a time, in order: a step finishes before the stack trace after it is answered
+        queue = queue.then(() => dispatch(msg));
+      }
+    });
+    input.on("end", () => done());
+  });
+}

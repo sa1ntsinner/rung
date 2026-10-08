@@ -5,6 +5,8 @@ namespace Rung.Bridge.V20
     {
 #if TIA_V21
         public const string Name = "V21";
+#elif TIA_V19
+        public const string Name = "V19";
 #else
         public const string Name = "V20";
 #endif

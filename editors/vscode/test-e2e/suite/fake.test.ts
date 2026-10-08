@@ -949,6 +949,94 @@ describe("rung extension on a fake-bridge workspace", function () {
       await vscode.workspace.fs.delete(uri);
     });
 
+    it("Record Expectations writes the values the engineer picks into the step under the cursor", async () => {
+      await closeAll();
+      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "rec.test.yaml"));
+      const yaml = ["block: Fx_Pump", "cases:", "  - name: fast stops", "    steps:", "      - set: { start: true, speed: 200 }", "      - cycle: 1", ""].join("\n");
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
+      try {
+        const ed = await vscode.window.showTextDocument(uri);
+        ed.selection = new vscode.Selection(5, 8, 5, 8); // on "cycle: 1"
+        await waitFor("the language server reads the test file", () => api.lsp.request("rung/testModel", { textDocument: { uri: uri.toString() } }).then((m) => m ?? undefined, () => undefined), 60_000);
+        let offered: string[] = [];
+        d.pick((items) => {
+          offered = items.map((i) => i.label);
+          return items.filter((i) => i.label.startsWith("running"));
+        });
+        assert.equal(await vscode.commands.executeCommand("rung.test.record"), true, JSON.stringify(d.calls.map((c) => c.message)));
+        assert.ok(offered.includes("running = false"), offered.join(", "));
+        assert.match(ed.document.getText(), /- cycle: 1\n {8}expect: \{ running: false \}\n/);
+        // the case passes as recorded
+        const r = await api.cli.capture(["test", "--json", "--case", "tests/rec.test.yaml#0"], { quiet: true });
+        assert.match(r.output, /"passed": true/);
+      } finally {
+        d.reset();
+        await closeAll();
+        await vscode.workspace.fs.delete(uri);
+      }
+    });
+
+    it("Run with Coverage marks the SCL lines the cases ran and the ones they never reached", async () => {
+      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "cov.test.yaml"));
+      const yaml = ["block: Fx_Pump", "cases:", "  - name: slow keeps running", "    steps:", "      - set: { start: true, speed: 50 }", "      - cycle: 1", ""].join("\n");
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
+      try {
+        const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
+        const lines = Buffer.from(await vscode.workspace.fs.readFile(pump)).toString("utf8").split(/\r?\n/);
+        const ifLine = lines.findIndex((l) => l.includes("IF #speed > 100"));
+        const inside = lines.findIndex((l) => l.includes("#running := FALSE"));
+        await api.tests()!.discoverNow();
+        await vscode.commands.executeCommand("testing.coverageAll");
+        const details = await waitFor("coverage of Fx_Pump", () => api.tests()!.coverageOf(pump), 120_000);
+        const count = (line: number) => details.find((d) => (d.location as vscode.Position).line === line)?.executed;
+        assert.equal(count(ifLine), 1);
+        assert.equal(count(inside), 0); // speed 50: the IF's body never ran
+      } finally {
+        await vscode.workspace.fs.delete(uri);
+      }
+    });
+
+    it("debugs a test case: stops at a breakpoint in the block, evaluates, steps back, reports the result", async () => {
+      await closeAll();
+      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "dbg.test.yaml"));
+      const yaml = ["block: Fx_Pump", "cases:", "  - name: too fast stops", "    steps:", "      - set: { start: true, speed: 200 }", "      - cycle: 1", "      - expect: { running: false }", ""].join("\n");
+      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
+      const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
+      const lines = Buffer.from(await vscode.workspace.fs.readFile(pump)).toString("utf8").split(/\r?\n/);
+      const target = lines.findIndex((l) => l.includes("#running := FALSE"));
+      const ifLine = lines.findIndex((l) => l.includes("IF #speed > 100"));
+      const bp = new vscode.SourceBreakpoint(new vscode.Location(pump, new vscode.Position(target, 0)));
+      vscode.debug.addBreakpoints([bp]);
+      const seen: { type: string; event?: string; body?: { output?: string } }[] = [];
+      const tracker = vscode.debug.registerDebugAdapterTrackerFactory("rung", { createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => void seen.push(m) }) });
+      const events = (name: string) => seen.filter((m) => m.type === "event" && m.event === name).length;
+      try {
+        const started = await vscode.debug.startDebugging(undefined, { type: "rung", request: "launch", name: "Debug too fast stops", test: uri.fsPath, case: 0 });
+        assert.equal(started, true, JSON.stringify(seen));
+        await waitFor("stopped at the breakpoint", () => events("stopped") === 1, 60_000);
+        const session = vscode.debug.activeDebugSession!;
+        const top = async () => ((await session.customRequest("stackTrace", { threadId: 1 })) as { stackFrames: { line: number; name: string }[] }).stackFrames[0]!;
+        assert.deepEqual(await top(), { ...(await top()), name: "Fx_Pump", line: target + 1 });
+        assert.equal(((await session.customRequest("evaluate", { expression: "speed", frameId: 0 })) as { result: string }).result, "200");
+        const inline = await vscode.commands.executeCommand<vscode.InlineValue[]>("vscode.executeInlineValueProvider", pump, new vscode.Range(0, 0, target, 0), { frameId: 0, stoppedLocation: new vscode.Range(target, 0, target, 0) });
+        assert.ok(inline.some((v) => (v as vscode.InlineValueVariableLookup).variableName === "speed" && v.range.start.line === ifLine), JSON.stringify(inline));
+        await session.customRequest("stepBack", { threadId: 1 });
+        await waitFor("stopped one statement back", () => events("stopped") === 2);
+        assert.equal((await top()).line, ifLine + 1);
+        await session.customRequest("continue", { threadId: 1 });
+        await waitFor("the breakpoint again", () => events("stopped") === 3);
+        assert.equal((await top()).line, target + 1);
+        await session.customRequest("continue", { threadId: 1 });
+        await waitFor("the case ran to its end", () => events("terminated") > 0);
+        assert.match(seen.filter((m) => m.event === "output").map((m) => m.body?.output).join(""), /passed: too fast stops/);
+      } finally {
+        tracker.dispose();
+        vscode.debug.removeBreakpoints([bp]);
+        await vscode.debug.stopDebugging();
+        await vscode.workspace.fs.delete(uri);
+      }
+    });
+
     it("who writes a name fills the Usages tree, which stays while you open its places", async () => {
       const editor = await openDoc(MOTOR);
       const at = editor.document.getText().indexOf("#running") + 2;

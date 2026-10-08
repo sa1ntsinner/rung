@@ -26,8 +26,8 @@ import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
-import { agentsTemplatePath, bridgeExecutable } from "./paths.js";
-import { runTests, toJUnit } from "@rung/sim";
+import { agentsTemplatePath, bridgeExecutable, tiaOf, tiaOfProject, type TiaVersion } from "./paths.js";
+import { Coverage, runTests, toJUnit } from "@rung/sim";
 import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
@@ -35,6 +35,7 @@ import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdRestore, cmdStat
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
+import { startDebugAdapter } from "./debug.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
@@ -67,7 +68,7 @@ Usage:
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
-  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
+  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
                                        monitor a block like TIA Portal: its values every interval (read-only)
@@ -78,6 +79,7 @@ Usage:
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
+  rung debug [--stdio]                 debug adapter (DAP) for editors: step through a test case, also backwards
   rung doctor [dir] --fixture          round-trip probe; imports over objects (fixture projects only)
 
 PLC:
@@ -119,9 +121,9 @@ async function runBridge(args: string[], io: Io): Promise<number> {
   // over ssh the arguments come as one word (common.ts encodeArgs): no shell on the way splits or expands them
   const at = args.indexOf("--args");
   if (at >= 0) args = [...args.slice(0, at), ...decodeArgs(args[at + 1] ?? ""), ...args.slice(at + 2)];
-  let tia: "V20" | "V21" = "V20";
+  let tia: TiaVersion = "V20";
   while (args[0] === "--tia") {
-    tia = args[1] === "V21" ? "V21" : "V20";
+    tia = tiaOf(args[1]);
     args = args.slice(2);
   }
   const own = defaultBridge(io.env);
@@ -146,14 +148,16 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   }
   // checked before anything starts: --from-plc changes the project, so a bad argument must stop rung before that
   const wanted = v.tia as string | undefined;
-  if (wanted !== undefined && !ENGINEERING_VERSIONS.includes(wanted as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${wanted} (V20, V21 or CODESYS)`);
+  if (wanted !== undefined && !ENGINEERING_VERSIONS.includes(wanted as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${wanted} (V19, V20, V21 or CODESYS)`);
   // a .project file is CODESYS: rung relays to its bridge script inside CODESYS (codesys.ts)
   const codesys = !!v.project && /\.project$/i.test(String(v.project)) && !io.env.RUNG_BRIDGE;
+  // the bridge of the project's own TIA Portal opens it: a .ap19 needs V19's Openness
+  const opener = tiaOf(wanted ?? (v.project ? tiaOfProject(String(v.project)) : undefined));
   const bridge = codesys
     ? codesysBridgeCommand(resolve(io.cwd, String(v.project)))
     : io.env.RUNG_BRIDGE
       ? defaultBridge(io.env)
-      : { command: bridgeExecutable(io.env, wanted === "V21" ? "V21" : "V20"), args: [] };
+      : { command: bridgeExecutable(io.env, opener), args: [] };
   // with an explicit project the bridge may open it in the background when no TIA Portal has it open
   // --from-plc: a new project, and the running PLC uploaded into it as its station
   const fromPlc = v["from-plc"] === undefined ? undefined : uploadRequest(String(v["from-plc"]), v);
@@ -164,12 +168,20 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   const host = v.host as string | undefined;
   if (host && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --host needs --project <path of the project on that PC>");
   const client = host
-    ? await remoteBridge(host, "", args.slice(bridge.args.length), v.tia === "V21" ? "V21" : "V20", io)
-    : await BridgeClient.spawn({ command: bridge.command, args, env: bridgeEnv(io.env, "env" in bridge ? ((bridge.env ?? {}) as Record<string, string>) : {}), ...(codesys ? { closeTimeoutMs: 30_000 } : {}) });
+    ? await remoteBridge(host, "", args.slice(bridge.args.length), opener, io)
+    : await BridgeClient.spawn({
+        command: bridge.command,
+        args,
+        env: bridgeEnv(io.env, "env" in bridge ? ((bridge.env ?? {}) as Record<string, string>) : {}),
+        ...(codesys ? { closeTimeoutMs: 30_000 } : {}),
+        // opening the project in a TIA Portal without window: minutes on a cold start, as for every other command
+        firstRequestTimeoutMs: 300_000,
+        onSlowStart: () => io.stderr("rung: waiting for TIA Portal: opening the project without a window can take a minute or two\n"),
+      });
   try {
     let info = await client.projectInfo();
     const tia = wanted ?? info.tiaVersion;
-    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V20, V21 or CODESYS)`);
+    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V19, V20, V21 or CODESYS)`);
     if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
     const devices = (v.device as string[] | undefined) ?? [];
     const checkDevices = () => {
@@ -212,7 +224,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     if (!(await exists(ga))) await writeFile(ga, "* text=auto eol=lf\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
     const bridgeExe = io.env.RUNG_BRIDGE ?? (config.bridge.command || bridge.command);
-    const wl = /rung-bridge-v2\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe) : "unknown";
+    const wl = /rung-bridge-v\d\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe, `${tiaOf(tia).slice(1)}.0`) : "unknown";
     if (wl === "missing" || wl === "stale") io.stderr(`rung: ${WHITELIST_HINT}\n`);
     io.stdout(`Bound ${dir} to ${info.path} (${tia}, devices: ${(devices.length ? devices : info.devices).join(", ")}).\n`);
     const writing = config.sync.import === "auto" && writesGranted(await readWrites(dir), config);
@@ -316,6 +328,7 @@ async function cmdDoctor(dir: string, v: Record<string, unknown>, io: Io): Promi
 export function serverNote(cmd: string, terminal: boolean): string | undefined {
   if (!terminal) return undefined;
   if (cmd === "lsp") return "rung lsp is the language server your editor starts (rung setup --editors sets that up); it now waits for an editor on stdin, Ctrl+C stops it\n";
+  if (cmd === "debug") return "rung debug is the debug adapter your editor starts for a test case; it now waits for an editor on stdin, Ctrl+C stops it\n";
   if (cmd === "mcp") return "rung mcp is the MCP server an AI agent starts (rung setup --agents sets that up); it now waits for an agent on stdin, Ctrl+C stops it\n";
   return undefined;
 }
@@ -342,12 +355,13 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   restore: { options: [], positionals: 1 },
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
-  test: { options: ["junit", "filter", "case", "json"], positionals: 1 },
+  test: { options: ["junit", "filter", "case", "json", "coverage", "observe"], positionals: 1 },
   live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
   mcp: { options: [], positionals: 1 },
   lsp: { options: ["stdio"], positionals: 0 },
+  debug: { options: ["stdio"], positionals: 0 },
   doctor: { options: ["fixture"], positionals: 1 },
   compile: { options: ["file", "hw", "plc"], positionals: 1 },
   online: { options: ["off", "state", "plc"], positionals: 1 },
@@ -410,6 +424,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         stdio: { type: "boolean" },
         offline: { type: "boolean" },
         junit: { type: "string" },
+        coverage: { type: "string" },
+        observe: { type: "boolean" },
         filter: { type: "string" },
         case: { type: "string" },
         hw: { type: "boolean" },
@@ -484,6 +500,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const note = serverNote(cmd, !!process.stdin.isTTY);
   if (note) io.stderr(note);
+  if (cmd === "debug") {
+    await startDebugAdapter(io);
+    return 0;
+  }
   if (cmd === "lsp") {
     startLsp(io);
     await new Promise<void>(() => {}); // runs until the editor closes the connection
@@ -505,8 +525,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 1;
         }
         let results: Awaited<ReturnType<typeof runTests>>;
+        // --coverage lcov.info: which SCL lines the cases ran (lcov, for CI tools and the editor)
+        const coverage = v.coverage ? new Coverage() : undefined;
+        let covered = "";
         try {
-          results = await runTests(ws, index, v.filter as string | undefined, m ? { file: m[1]!, index: Number(m[2]) } : undefined);
+          results = await runTests(ws, index, v.filter as string | undefined, m ? { file: m[1]!, index: Number(m[2]) } : undefined, { ...(coverage ? { simulator: (sim) => coverage.attach(sim) } : {}), ...(v.observe ? { observe: true } : {}) });
         } catch (e) {
           // a case selector that names nothing: said, never "all cases"
           if (!m) throw e;
@@ -514,6 +537,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 1;
         }
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
+        if (coverage) {
+          const files = coverage.files(index);
+          await writeFileAtomic(resolve(io.cwd, v.coverage as string), Coverage.lcov(files, ws));
+          const { hit, all } = Coverage.total(files);
+          covered = `coverage: ${all ? Math.floor((hit / all) * 100) : 0}% of SCL lines (${hit}/${all} in ${files.length} files) → ${String(v.coverage)}\n`;
+          if (v.json) io.stderr(covered);
+        }
         const count = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.length);
         const failedOf = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.filter((c) => !c.passed).length);
         if (v.json) {
@@ -557,7 +587,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.stdout(`no tests${what}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
           return 3;
         }
-        io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n`);
+        io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n${covered}`);
         return failed ? 2 : total ? 0 : 1;
       }
       case "live":
@@ -601,7 +631,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await serveStdio({
           root: ws ?? dir,
           ...(config ? { bridgeFactory: () => bridgeFor(config, io, importFlags(config)) } : {}),
-          bridgeWhitelisted: () => whitelistStatus(bridgeExecutable(io.env)),
+          bridgeWhitelisted: () => whitelistStatus(bridgeExecutable(io.env, tiaOf(config?.project.tiaVersion))),
         });
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;

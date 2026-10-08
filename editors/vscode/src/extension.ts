@@ -30,6 +30,7 @@ import { OwnerEvents } from "./ownerEvents";
 import { ActivityView } from "./views/activityView";
 import { ChangesView } from "./views/changesView";
 import { registerTests } from "./testing";
+import { registerDebug } from "./debug";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -62,6 +63,7 @@ export interface RungExtensionApi {
   udtTables: Map<string, DeclarationsSession>;
   /** the test tables open, by document */
   testTables: typeof TestTableEditor.tables;
+  tests: () => RungTests | undefined;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -74,6 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const problems = new CompileProblems(ws);
   lsp = new Lsp(ws, cli, out);
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
+  registerDebug(context, ws, cli);
 
   await ws.start(context.workspaceState);
   context.subscriptions.push(
@@ -204,7 +207,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef };
 }
 
 export async function deactivate(): Promise<void> {

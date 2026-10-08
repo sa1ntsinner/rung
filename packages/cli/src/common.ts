@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { bridgeExecutable } from "./paths.js";
+import { bridgeExecutable, tiaOf, type TiaVersion } from "./paths.js";
 import { codesysBridgeCommand } from "./codesys.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
 import { BridgeClient, type BridgeEvent } from "@rung/bridge-client";
@@ -71,13 +71,13 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   }
   const tiaArgs = ["--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   if (config.bridge.host) {
-    const client = await remoteBridge(config.bridge.host, config.bridge.command, [...config.bridge.args, ...tiaArgs], config.project.tiaVersion === "V21" ? "V21" : "V20", io);
+    const client = await remoteBridge(config.bridge.host, config.bridge.command, [...config.bridge.args, ...tiaArgs], tiaOf(config.project.tiaVersion), io);
     client.onEvent((e) => showBridgeEvent(io, e));
     return client;
   }
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
-  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
+  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, tiaOf(config.project.tiaVersion));
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   // the first request may start TIA Portal without window and open the project: minutes on a cold start
   const client = await BridgeClient.spawn({
@@ -120,12 +120,12 @@ const SSH_HOST = /^[^\s"'`\u0000-\u001f-][^\s"'`\u0000-\u001f]*$/;
  * that PC) or the given command. Key-based login only: BatchMode never waits for a password. Files cross the
  * connection (BridgeClient remote).
  */
-export async function remoteBridge(host: string, command: string, args: string[], tia: "V20" | "V21", io: Io): Promise<BridgeClient> {
+export async function remoteBridge(host: string, command: string, args: string[], tia: TiaVersion, io: Io): Promise<BridgeClient> {
   if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
   // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
   const ssh = io.env.RUNG_SSH ?? "ssh";
   const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
-  const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia === "V21" ? ["--tia", "V21"] : []), ...args])}`;
+  const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia !== "V20" ? ["--tia", tia] : []), ...args])}`;
   try {
     return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
   } catch (e) {

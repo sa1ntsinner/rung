@@ -747,6 +747,10 @@ namespace Rung.Bridge.V20
                         return form;
                     case "s7dcl":
                     {
+#if TIA_V19
+                        // SIMATIC SD came with V20: V19 keeps such blocks as SimaticML XML
+                        return ExportInto(r, "xml", dir, warnings);
+#else
                         // blocks with networks in several languages (and other SD gaps) throw instead of
                         // returning a failed result; both cases fall back to SimaticML XML
                         var sdOk = false;
@@ -760,6 +764,7 @@ namespace Rung.Bridge.V20
                         warnings.Add(WarningCodes.SdFallback);
                         foreach (var f in Directory.GetFiles(dir, Stem + ".*")) File.Delete(f);
                         return ExportInto(r, "xml", dir, warnings);
+#endif
                     }
                     case "xml":
                     case "tags.xml":
@@ -1411,7 +1416,11 @@ namespace Rung.Bridge.V20
                         {
                             case PlcBlock b: b.Name = newName; break;
                             case PlcType t: t.Name = newName; break;
+#if TIA_V19
+                            case PlcTagTable _: throw new RpcException(ErrorCodes.UnsupportedObject, "TIA Portal V19 cannot rename a tag table through Openness (V20 can)");
+#else
                             case PlcTagTable tt: tt.Name = newName; break;
+#endif
                             default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot rename " + address);
                         }
                         tx.CommitOnDispose();
@@ -1612,6 +1621,9 @@ namespace Rung.Bridge.V20
                 }
                 case "s7dcl":
                 {
+#if TIA_V19
+                    throw new RpcException(ErrorCodes.UnsupportedObject, "SIMATIC SD (.s7dcl) needs TIA Portal V20 or later; with V19, keep this block as SimaticML XML (.xml)");
+#else
                     var dir = new DirectoryInfo(Path.GetDirectoryName(path));
                     var stem = Path.GetFileNameWithoutExtension(path);
                     if (r.ParentGroup is PlcBlockGroup bg)
@@ -1619,6 +1631,7 @@ namespace Rung.Bridge.V20
                     if (r.ParentGroup is PlcTypeGroup tg)
                         return tg.Types.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcTypes.Select(t => Identity(t.Name, t.Namespace)).ToList();
                     break;
+#endif
                 }
                 case "xml":
                     if (r.ParentGroup is PlcBlockGroup xb) return xb.Blocks.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(b => Identity(b.Name, b.Namespace)).ToList();

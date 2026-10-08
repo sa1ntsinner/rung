@@ -1,25 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- SPDX-License-Identifier: BUSL-1.1 -->
   <!--
-    TIA Portal V21 adapter: the V20 sources compiled against the modular V21 Openness assemblies
-    (PublicAPI\V21\net48). Built and opening projects against an installed V21; writes not verified yet.
-    Not part of Rung.Bridge.sln so machines without V21 keep building.
+    TIA Portal V19 adapter: the V20 sources compiled against the V19 Openness assembly (PublicAPI\V19).
+    Not part of Rung.Bridge.sln so machines without V19 keep building.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net48</TargetFramework>
     <PlatformTarget>x64</PlatformTarget>
-    <AssemblyName>rung-bridge-v21</AssemblyName>
+    <AssemblyName>rung-bridge-v19</AssemblyName>
     <RootNamespace>Rung.Bridge.V20</RootNamespace>
-    <DefineConstants>$(DefineConstants);TIA_V21</DefineConstants>
+    <DefineConstants>$(DefineConstants);TIA_V19</DefineConstants>
     <Version>0.1.0</Version>
-    <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48</RungOpennessDir>
+    <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V19\PublicAPI\V19</RungOpennessDir>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\Rung.Bridge.V20\*.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="$(RungOpennessDir)\Siemens.Engineering*.dll">
+    <Reference Include="Siemens.Engineering">
+      <HintPath>$(RungOpennessDir)\Siemens.Engineering.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
@@ -28,7 +28,7 @@
     <ProjectReference Include="..\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
   </ItemGroup>
   <PropertyGroup>
-    <RungOpennessWhitelistVersion>21.0</RungOpennessWhitelistVersion>
+    <RungOpennessWhitelistVersion>19.0</RungOpennessWhitelistVersion>
   </PropertyGroup>
   <Import Project="../../../tools/openness/Openness.Whitelist.targets" />
 </Project>

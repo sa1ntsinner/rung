@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 // rung tests in VS Code's test explorer: one item per tests/**/*.test.yaml and one per case, run with
 // `rung test --json` on the offline simulator; a failed expectation shows on the line of its step.
-import { readFile } from "node:fs/promises";
-import { relative, sep } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
 import * as vscode from "vscode";
+import { addLcov } from "./core/lcov";
 import { blockOf, casesIn, failureText, parseResults, type FileResult } from "./core/testItems";
+import { debugCase } from "./debug";
 import type { RungCli } from "./runner/cli";
 import type { RungWorkspace } from "./workspace";
 
@@ -19,6 +22,8 @@ export class RungTests implements vscode.Disposable {
   /** a run started (running: the cases' places) or ended with results, per file */
   readonly onDidReport = this.reported.event;
   private readonly subs: vscode.Disposable[] = [this.ctrl, this.blocksChanged, this.reported];
+  /** the lines of the last coverage run, by file */
+  private details = new Map<string, vscode.StatementCoverage[]>();
 
   constructor(
     private readonly ws: RungWorkspace,
@@ -30,6 +35,11 @@ export class RungTests implements vscode.Disposable {
     };
     this.ctrl.refreshHandler = () => this.discover();
     this.ctrl.createRunProfile("Run", vscode.TestRunProfileKind.Run, (request, token) => this.run(request, token), true);
+    // which SCL lines the cases ran (rung test --coverage), shown in the editor and the Test Coverage view
+    const coverage = this.ctrl.createRunProfile("Coverage", vscode.TestRunProfileKind.Coverage, (request, token) => this.run(request, token, true), true);
+    coverage.loadDetailedCoverage = async (_run, file) => this.details.get(file.uri.toString()) ?? [];
+    // one case at a time: the first case picked (a file: its first case), stopped at its first statement
+    this.ctrl.createRunProfile("Debug", vscode.TestRunProfileKind.Debug, (request) => this.debug(request), true);
     const watcher = vscode.workspace.createFileSystemWatcher("**/tests/**/*.test.{yaml,yml}");
     const ours = (uri: vscode.Uri) => this.idOf(uri).startsWith("tests/");
     watcher.onDidCreate((uri) => ours(uri) && void this.add(uri));
@@ -68,6 +78,24 @@ export class RungTests implements vscode.Disposable {
     }
     if (!item) return;
     await this.run(new vscode.TestRunRequest([item]), new vscode.CancellationTokenSource().token);
+  }
+
+  private async debug(request: vscode.TestRunRequest): Promise<void> {
+    let item = request.include?.[0];
+    if (!item?.uri) return;
+    if (!item.parent) {
+      await this.refresh(item);
+      let first: vscode.TestItem | undefined;
+      item.children.forEach((c) => void (first ??= c));
+      if (!first) return void vscode.window.showWarningMessage(`${item.label} has no cases to debug.`);
+      item = first;
+    }
+    await debugCase(this.ws, item.uri!, Number(item.id.slice(item.id.lastIndexOf("#") + 1)), item.label);
+  }
+
+  /** The lines of a file as the last coverage run counted them. */
+  coverageOf(uri: vscode.Uri): readonly vscode.StatementCoverage[] | undefined {
+    return this.details.get(uri.toString());
   }
 
   discoverNow(): Promise<void> {
@@ -114,9 +142,10 @@ export class RungTests implements vscode.Disposable {
     file.children.replace(items);
   }
 
-  private async run(request: vscode.TestRunRequest, token: vscode.CancellationToken): Promise<void> {
+  private async run(request: vscode.TestRunRequest, token: vscode.CancellationToken, coverage = false): Promise<void> {
     if (!this.ws.root) return;
     const run = this.ctrl.createTestRun(request);
+    const lines = new Map<string, Map<number, number>>();
     // which files, and in them which cases (all when the file itself was asked for)
     const wanted = new Map<string, { file: vscode.TestItem; cases?: Set<string> }>();
     const want = (item: vscode.TestItem) => {
@@ -154,7 +183,12 @@ export class RungTests implements vscode.Disposable {
           });
           this.reported.fire({ file: w.file.id, running });
         }
-      const r = await this.cli.capture(["test", "--json", ...one.args], { quiet: true, token });
+      const lcov = coverage ? join(tmpdir(), `rung-coverage-${process.pid}-${Date.now()}.info`) : undefined;
+      const r = await this.cli.capture(["test", "--json", ...one.args, ...(lcov ? ["--coverage", lcov] : [])], { quiet: true, token });
+      if (lcov) {
+        addLcov(await readFile(lcov, "utf8").catch(() => ""), lines);
+        await rm(lcov, { force: true }).catch(() => undefined);
+      }
       const results = parseResults(r.output);
       if (!results) {
         for (const w of wanted.values()) if (mine(w)) this.reported.fire({ file: w.file.id, running: [], error: "rung test did not answer" });
@@ -165,6 +199,15 @@ export class RungTests implements vscode.Disposable {
       for (const f of results) {
         const w = wanted.get(f.file);
         if (w && mine(w)) this.report(run, w, f, shown, one.args[0] !== "--case");
+      }
+    }
+    if (coverage) {
+      this.details = new Map();
+      for (const [path, counts] of lines) {
+        const uri = vscode.Uri.file(join(this.ws.root, path));
+        const details = [...counts].sort((a, b) => a[0] - b[0]).map(([line, n]) => new vscode.StatementCoverage(n, new vscode.Position(line - 1, 0)));
+        this.details.set(uri.toString(), details);
+        run.addCoverage(vscode.FileCoverage.fromDetails(uri, details));
       }
     }
     run.end();

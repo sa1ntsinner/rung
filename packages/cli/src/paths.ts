@@ -33,7 +33,20 @@ export function devPath(rel: string): string | undefined {
   }
 }
 
-export function bridgeExecutable(env: Record<string, string | undefined>, tia: "V20" | "V21" = "V20"): string {
+export type TiaVersion = "V19" | "V20" | "V21";
+
+/** The TIA Portal a version names (a project's tiaVersion, --tia); V20 when it names none. */
+export function tiaOf(v: unknown): TiaVersion {
+  return v === "V19" || v === "V21" ? v : "V20";
+}
+
+/** The TIA Portal a project file belongs to, by its extension (.ap19, .ap20, .ap21). */
+export function tiaOfProject(path: string): TiaVersion | undefined {
+  const m = /\.ap(19|20|21)$/i.exec(path);
+  return m ? (`V${m[1]}` as TiaVersion) : undefined;
+}
+
+export function bridgeExecutable(env: Record<string, string | undefined>, tia: TiaVersion = "V20"): string {
   const name = `rung-bridge-${tia.toLowerCase()}.exe`;
   const root = installRoot(env);
   const candidates = [
