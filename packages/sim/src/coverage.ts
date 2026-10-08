@@ -39,7 +39,8 @@ export class Coverage {
       const lines = new Map<number, number>();
       const hit = this.hits.get(doc.uri);
       for (const b of doc.parsed?.blocks ?? []) {
-        if (b.lad !== undefined) continue; // runs as translated text: no lines of its own
+        // LAD/FBD runs as translated text, without lines of its own; a DB's start values are not code
+        if (b.lad !== undefined || b.kind === "DB") continue;
         for (const s of sim.statementsOf(b)) {
           if (s.k === "label" || s.k === "empty") continue;
           const line = doc.lines.position(s.at).line + 1;

@@ -502,6 +502,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   if (note) io.stderr(note);
   if (cmd === "debug") {
     await startDebugAdapter(io);
+    process.stdin.destroy(); // the editor disconnected: nothing keeps rung debug alive
     return 0;
   }
   if (cmd === "lsp") {
@@ -527,6 +528,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         let results: Awaited<ReturnType<typeof runTests>>;
         // --coverage lcov.info: which SCL lines the cases ran (lcov, for CI tools and the editor)
         const coverage = v.coverage ? new Coverage() : undefined;
+        if (v.observe && !v.json) io.stderr("rung: --observe adds the block's values to --json; without --json it does nothing\n");
         let covered = "";
         try {
           results = await runTests(ws, index, v.filter as string | undefined, m ? { file: m[1]!, index: Number(m[2]) } : undefined, { ...(coverage ? { simulator: (sim) => coverage.attach(sim) } : {}), ...(v.observe ? { observe: true } : {}) });
@@ -537,11 +539,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return 1;
         }
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
-        if (coverage) {
+        // no test ran: no coverage file, rather than one that says nothing ran
+        if (coverage && results.some((f) => f.cases.length)) {
           const files = coverage.files(index);
           await writeFileAtomic(resolve(io.cwd, v.coverage as string), Coverage.lcov(files, ws));
           const { hit, all } = Coverage.total(files);
-          covered = `coverage: ${all ? Math.floor((hit / all) * 100) : 0}% of SCL lines (${hit}/${all} in ${files.length} files) → ${String(v.coverage)}\n`;
+          covered = `coverage: ${all ? Math.floor((hit / all) * 100) : 0}% of SCL lines (${hit}/${all} in ${files.length} ${files.length === 1 ? "file" : "files"}) → ${String(v.coverage)}\n`;
           if (v.json) io.stderr(covered);
         }
         const count = (f: (typeof results)[number]) => (f.error ? 1 : f.cases.length);

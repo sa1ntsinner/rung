@@ -125,9 +125,61 @@ describe("rung debug sessions", () => {
     // the failed expectation stops first, at the last statement before its step, then the case ends
     const failed = await d.continue();
     expect(failed).toMatchObject({ kind: "stopped", reason: "exception", text: "step 3: Running expected true, got false", time: 10 });
+    expect(d.evaluate("#Running").value).toBe("FALSE"); // what the expectation saw: after the cycle
     const end = await d.continue();
     expect(end.kind === "ended" && end.result?.failures[0]).toMatchObject({ name: "Running", expected: true, actual: false });
     await expect(d.start(true).then(() => d.setVariable("#Running", "'text'x", 0))).rejects.toThrow();
+  });
+
+  it("shows values as their types write them, refuses what the type cannot hold, says why a condition failed", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/types/Ud_Cfg.udt", 'TYPE "Ud_Cfg"\n   STRUCT\n      Enabled : Bool;\n      Hold : Time;\n   END_STRUCT;\nEND_TYPE\n', 0);
+    idx.set(
+      "file:///w/plc/P/blocks/Fb_Rich.scl",
+      'FUNCTION_BLOCK "Fb_Rich"\nVAR_INPUT\n  n : Int;\nEND_VAR\nVAR\n  sp : Real;\n  t : Time;\n  cfg : "Ud_Cfg";\n  grid : Array[1..2, 1..2] of Int;\n  inner : "Fb_Leaf";\n  other : "Fb_Leaf";\nEND_VAR\nBEGIN\n  #sp := 0.1;\n  #t := T#2s;\n  #grid[1, 2] := 7;\n  #inner();\n  #other();\nEND_FUNCTION_BLOCK\n',
+      0,
+    );
+    idx.set("file:///w/plc/P/blocks/Fb_Leaf.scl", 'FUNCTION_BLOCK "Fb_Leaf"\nVAR\n  c : Int;\nEND_VAR\nBEGIN\n  #c := #c + 1;\nEND_FUNCTION_BLOCK\n', 0);
+    const yaml = "block: Fb_Rich\ncases:\n  - name: rich\n    steps:\n      - set: { n: 3 }\n      - cycle: 2\n";
+    const d = new DebugSession(idx, "r.yaml", yaml, 0);
+    d.breakpoints = [{ uri: "file:///w/plc/P/blocks/Fb_Rich.scl", line: 18 }];
+    await d.start(false); // at #other(), cycle 1
+    expect(d.evaluate("#sp").value).toBe("0.1");
+    expect(d.evaluate("t").value).toBe("T#2000ms");
+    const locals = d.locals(0);
+    const cfg = locals.find((v) => v.name === "cfg")!;
+    expect(cfg.value).toBe('"Ud_Cfg"');
+    expect(cfg.children!().map((c) => [c.name, c.type, c.value, c.evaluateName])).toEqual([
+      ["Enabled", "Bool", "FALSE", "#cfg.Enabled"],
+      ["Hold", "Time", "T#0ms", "#cfg.Hold"],
+    ]);
+    const grid = locals.find((v) => v.name === "grid")!;
+    expect(grid.value).toBe("Array[1..2, 1..2] of Int");
+    const row = grid.children!()[0]!;
+    expect(row.name).toBe("[1]");
+    expect(row.children!().map((c) => [c.name, c.value, c.evaluateName])).toEqual([["[1]", "0", "#grid[1,1]"], ["[2]", "7", "#grid[1,2]"]]);
+    await expect(d.setVariable("#n", "99999", 0)).rejects.toThrow(/outside -32768\.\.32767/);
+    await expect(d.setVariable("#n", "TRUE", 0)).rejects.toThrow(/whole number/);
+    await expect(d.setVariable("#cfg", "1", 0)).rejects.toThrow(/structure: set its members/);
+    await expect(d.setVariable("#grid", "1", 0)).rejects.toThrow(/array: set its elements/);
+    expect((await d.setVariable("#cfg.Hold", "T#5s", 0)).value).toBe("T#5000ms");
+    // two instances of one FB tell themselves apart
+    expect(at(await d.stepIn())).toMatchObject({ line: 6, depth: 2 });
+    expect(d.frames()[0]!.name).toBe("other : Fb_Leaf");
+    // a condition that cannot be evaluated stops with the reason
+    const c = new DebugSession(idx, "r.yaml", yaml, 0);
+    c.breakpoints = [{ uri: "file:///w/plc/P/blocks/Fb_Rich.scl", line: 14, condition: "#nosuch > 1" }];
+    expect(await c.start(false)).toMatchObject({ kind: "stopped", text: expect.stringMatching(/^breakpoint condition #nosuch > 1: /) });
+  });
+
+  it("reverse continue honours conditions in one pass", async () => {
+    const d = new DebugSession(index(), "t.yaml", MOTOR, 0);
+    d.breakpoints = [{ uri: MOTOR_URI, line: 22 }];
+    await d.start(false);
+    await d.continue();
+    await d.continue(); // line 22, t = 30
+    d.breakpoints = [{ uri: MOTOR_URI, line: 22, condition: "#Start" }];
+    expect(at(await d.reverseContinue())).toMatchObject({ line: 22, time: 10 }); // Start was TRUE only in cycle 1
   });
 
   it("steps into a called function and out again", async () => {

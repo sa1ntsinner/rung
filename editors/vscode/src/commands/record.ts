@@ -13,6 +13,7 @@ import type { RungWorkspace } from "../workspace";
 interface Observed {
   step: number;
   values: Record<string, boolean | number | string>;
+  statics?: string[];
 }
 
 /** The value as a test file writes it (true, 1200, T#2s). */
@@ -43,7 +44,10 @@ export async function recordExpectations(ws: RungWorkspace, cli: RungCli, lsp: L
   // the step at the cursor, or the last one before it that runs cycles: values exist only after cycles
   const at = stepIndex ?? Math.max(0, c.steps.filter((s) => s.range.start <= offset).length - 1);
   const step = [...c.steps.slice(0, at + 1)].reverse().find((s) => s.cycle || s.advance);
-  if (!step) {
+  // a step of only expect: after it is where its values go; otherwise the step that ran the cycles
+  const here = c.steps[at];
+  const into = here && step && here.index > step.index && !here.cycle && !here.advance && !here.set ? here : step;
+  if (!step || !into) {
     void vscode.window.showWarningMessage("Put the cursor on a step that runs cycles (cycle: or advance:): the block has values only after it ran.");
     return false;
   }
@@ -58,32 +62,36 @@ export async function recordExpectations(ws: RungWorkspace, cli: RungCli, lsp: L
   } catch {
     error = RungCli.summary(r.output) || "rung test did not answer";
   }
-  const values = observed?.find((o) => o.step === step.index + 1)?.values;
+  const seen = observed?.find((o) => o.step === step.index + 1);
+  const values = seen?.values;
+  const statics = new Set(seen?.statics ?? []);
   if (!values) {
     void vscode.window.showWarningMessage(`The case did not get to step ${step.index + 1}${error ? `: ${error}` : "."}`);
     return false;
   }
-  const expected = new Map((step.expect?.entries ?? []).map((e) => [e.key.toUpperCase(), e.text]));
+  const expected = new Map((into.expect?.entries ?? []).map((e) => [e.key.toUpperCase(), e.text]));
   type Item = vscode.QuickPickItem & { key: string; value: string };
   const items: Item[] = Object.entries(values).map(([key, v]) => {
     const now = expected.get(key.toUpperCase());
-    return { key, value: shown(v), label: `${key} = ${shown(v)}`, ...(now !== undefined ? { description: now === shown(v) ? "expected already" : `expected now: ${now}` } : {}), picked: now === undefined || now !== shown(v) };
+    // statics are the block's memory, not its results: offered, not picked
+    const note = now !== undefined ? (now === shown(v) ? "expected already" : `expected now: ${now}`) : statics.has(key) ? "static" : undefined;
+    return { key, value: shown(v), label: `${key} = ${shown(v)}`, ...(note ? { description: note } : {}), picked: now !== undefined ? now !== shown(v) : !statics.has(key) };
   });
   if (!items.length) {
     void vscode.window.showInformationMessage("The block has no outputs or statics with plain values to expect.");
     return false;
   }
   const picked = await vscode.window.showQuickPick(items, {
-    title: `Expect after step ${step.index + 1} of "${c.name?.value ?? `case ${c.index + 1}`}"`,
+    title: `Expect after step ${step.index + 1} of "${c.name?.value ?? `case ${c.index + 1}`}"${into !== step ? `, written into step ${into.index + 1}` : ""}`,
     placeHolder: "The values the block has after this step. Pick the ones the test should expect.",
     canPickMany: true,
     ignoreFocusOut: true,
   });
   if (!picked?.length) return false;
   for (const p of picked) {
-    const has = step.expect?.entries.find((e) => e.key.toUpperCase() === p.key.toUpperCase());
+    const has = into.expect?.entries.find((e) => e.key.toUpperCase() === p.key.toUpperCase());
     if (has && has.text === p.value) continue;
-    const op = has ? { op: "setValue" as const, case: c.index, step: step.index, part: "expect" as const, key: has.key, value: p.value } : { op: "addEntry" as const, case: c.index, step: step.index, part: "expect" as const, key: p.key, value: p.value };
+    const op = has ? { op: "setValue" as const, case: c.index, step: into.index, part: "expect" as const, key: has.key, value: p.value } : { op: "addEntry" as const, case: c.index, step: into.index, part: "expect" as const, key: p.key, value: p.value };
     const done = await applyTestOp(lsp, doc, op);
     if (!done.ok) {
       void vscode.window.showWarningMessage(`${p.key} was not written: ${done.reason ?? "the file changed"}`);

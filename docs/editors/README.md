@@ -105,6 +105,8 @@ Suggested keys (`keymap.json`): `alt-q` and then a letter.
 
 ## Neovim (0.11+)
 
+**rung.nvim** ([editors/neovim](../../editors/neovim/README.md)) sets all of this up and adds `:Rung` commands, tests with their failures on the YAML lines, coverage signs, recorded expectations and the debugger through nvim-dap. Without it, by hand:
+
 ```lua
 vim.filetype.add({ extension = { scl = "scl", db = "scl", udt = "scl" } })
 

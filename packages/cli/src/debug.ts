@@ -7,7 +7,7 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { WorkspaceIndex } from "@rung/lsp";
-import { DebugSession, type DebugState, type DebugVariable } from "@rung/sim";
+import { breakpointLine, DebugSession, testPositions, type DebugState, type DebugVariable } from "@rung/sim";
 import { findWorkspace, type Io } from "./common.js";
 
 interface Request {
@@ -39,7 +39,17 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
   let caseName = "";
   let launched: LaunchArgs | undefined;
   let configured = false;
-  const breakpoints = new Map<string, { line: number; condition?: string }[]>();
+  // by file: as the editor set them (id, line asked for) and where they stop (line), when the workspace is loaded
+  const breakpoints = new Map<string, { id: number; asked: number; line: number; verified: boolean; condition?: string }[]>();
+  let nextBreakpoint = 1;
+  let index: WorkspaceIndex | undefined;
+  /** A breakpoint moved to the statement it stops at, or unverified where nothing runs. */
+  const place = (uri: string, b: { id: number; asked: number; condition?: string }) => {
+    if (!index) return { ...b, line: b.asked, verified: true };
+    const line = breakpointLine(index, uri, b.asked);
+    return { ...b, line: line ?? b.asked, verified: line !== undefined };
+  };
+  const shownBreakpoint = (b: { id: number; line: number; verified: boolean }) => ({ id: b.id, verified: b.verified, line: b.line, ...(b.verified ? {} : { message: "No SCL statement the simulator runs here (a declaration, END_IF, a DB, LAD/FBD)" }) });
   // variable handles live until the next run: 1 and 2 are a frame's scopes, the rest children
   let handles = new Map<number, { frame: number; list: () => DebugVariable[] }>();
   let nextHandle = 1;
@@ -47,6 +57,10 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
     handles.set(nextHandle, { frame, list });
     return nextHandle++;
   };
+
+  // what follows an answer (the initialized event, a run and its stopped event) goes out after it, in order
+  const pending: (() => unknown)[] = [];
+  const later = (fn: () => unknown) => void pending.push(fn);
 
   const report = (s: DebugState) => {
     handles = new Map();
@@ -62,12 +76,14 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
       lines.push(`${r.passed ? "passed" : "FAILED"}: ${caseName || r.name}${r.error ? ` — ${r.errorStep ? `step ${r.errorStep}: ` : ""}${r.error}` : ""}`);
       for (const f of r.failures) lines.push(`  step ${f.step}: ${f.name} expected ${JSON.stringify(f.expected)} got ${JSON.stringify(f.actual)}`);
     }
+    if (s.note) lines.push(s.note);
+    if (!lines.length) lines.push("The case did not run.");
     event("output", { category: r?.passed ? "console" : "stderr", output: lines.join("\n") + "\n" });
     event("terminated");
   };
 
   const syncBreakpoints = () => {
-    if (session) session.breakpoints = [...breakpoints].flatMap(([uri, list]) => list.map((b) => ({ uri, ...b })));
+    if (session) session.breakpoints = [...breakpoints].flatMap(([uri, list]) => list.filter((b) => b.verified).map((b) => ({ uri, line: b.line, ...(b.condition ? { condition: b.condition } : {}) })));
   };
 
   const begin = async () => {
@@ -83,12 +99,21 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
     const text = await readFile(path, "utf8").catch(() => {
       throw new Error(`no test file at ${path}`);
     });
-    const index = new WorkspaceIndex();
-    await index.load(ws);
+    const loaded = new WorkspaceIndex();
+    await loaded.load(ws);
     const rel = relative(ws, path).split("\\").join("/");
     const n = a.case ?? 0;
+    const count = testPositions(text).length;
+    if (!Number.isInteger(n) || n < 0 || n >= count) throw new Error(`${rel} has ${count} case${count === 1 ? "" : "s"}, numbered from 0: there is no case ${n}`);
+    index = loaded;
+    // breakpoints set before the launch move to their statements now
+    for (const [uri, list] of breakpoints) {
+      const placed = list.map((b) => place(uri, b));
+      breakpoints.set(uri, placed);
+      for (const b of placed) later(() => event("breakpoint", { reason: "changed", breakpoint: shownBreakpoint(b) }));
+    }
     caseName = [...text.matchAll(/^\s*-\s*name:\s*(.+?)\s*$/gm)][n]?.[1]?.replace(/^["']|["']$/g, "") ?? `case ${n + 1}`;
-    session = new DebugSession(index, rel, text, n);
+    session = new DebugSession(loaded, rel, text, n);
     launched = a;
   };
 
@@ -98,7 +123,7 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
 
   const handlers: Record<string, (a: Record<string, unknown>) => Promise<unknown> | unknown> = {
     initialize: () => {
-      queueMicrotask(() => event("initialized"));
+      later(() => event("initialized"));
       return {
         supportsConfigurationDoneRequest: true,
         supportsConditionalBreakpoints: true,
@@ -110,18 +135,19 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
     },
     launch: async (a) => {
       await prepare(a as unknown as LaunchArgs);
-      queueMicrotask(() => void begin());
+      later(() => begin());
     },
     configurationDone: () => {
       configured = true;
-      queueMicrotask(() => void begin());
+      later(() => begin());
     },
     setBreakpoints: (a) => {
       const source = a.source as { path?: string };
-      const list = ((a.breakpoints as { line: number; condition?: string }[] | undefined) ?? []).map((b) => ({ line: b.line, ...(b.condition ? { condition: b.condition } : {}) }));
-      if (source.path) breakpoints.set(pathToFileURL(source.path).href, list);
+      const uri = source.path ? pathToFileURL(source.path).href : "";
+      const list = ((a.breakpoints as { line: number; condition?: string }[] | undefined) ?? []).map((b) => place(uri, { id: nextBreakpoint++, asked: b.line, ...(b.condition ? { condition: b.condition } : {}) }));
+      if (uri) breakpoints.set(uri, list);
       syncBreakpoints();
-      return { breakpoints: list.map((b) => ({ verified: true, line: b.line })) };
+      return { breakpoints: list.map(shownBreakpoint) };
     },
     threads: () => ({ threads: [{ id: 1, name: caseName || "test case" }] }),
     stackTrace: () => {
@@ -165,17 +191,17 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
       return { result: v.value, ...(v.type ? { type: v.type } : {}), variablesReference: v.children ? handle(Number(a.frameId ?? 0), v.children) : 0 };
     },
     continue: () => {
-      queueMicrotask(() => void step((d) => d.continue()));
+      later(() => step((d) => d.continue()));
       return { allThreadsContinued: true };
     },
-    next: () => void queueMicrotask(() => void step((d) => d.next())),
-    stepIn: () => void queueMicrotask(() => void step((d) => d.stepIn())),
-    stepOut: () => void queueMicrotask(() => void step((d) => d.stepOut())),
-    stepBack: () => void queueMicrotask(() => void step((d) => d.stepBack())),
-    reverseContinue: () => void queueMicrotask(() => void step((d) => d.reverseContinue())),
+    next: () => void later(() => step((d) => d.next())),
+    stepIn: () => void later(() => step((d) => d.stepIn())),
+    stepOut: () => void later(() => step((d) => d.stepOut())),
+    stepBack: () => void later(() => step((d) => d.stepBack())),
+    reverseContinue: () => void later(() => step((d) => d.reverseContinue())),
     // a run takes milliseconds: there is nothing running to pause
     pause: () => undefined,
-    terminate: () => void queueMicrotask(() => event("terminated")),
+    terminate: () => void later(() => event("terminated")),
     disconnect: () => undefined,
   };
 
@@ -190,7 +216,15 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
         const body = await h(req.arguments ?? {});
         reply({ success: true, ...(body ? { body } : {}) });
       } catch (e) {
+        pending.length = 0;
         reply({ success: false, message: (e as Error).message, body: { error: { id: 1, format: (e as Error).message, showUser: req.command === "launch" } } });
+      }
+      for (const fn of pending.splice(0)) {
+        try {
+          await fn();
+        } catch (e) {
+          event("output", { category: "stderr", output: `rung debug: ${(e as Error).message}\n` });
+        }
       }
       if (req.command === "disconnect") done();
     };

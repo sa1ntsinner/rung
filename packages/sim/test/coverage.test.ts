@@ -38,9 +38,13 @@ describe("observing a case (record to test)", () => {
     const yaml = "block: Fx_Motor\ncases:\n  - name: runs\n    steps:\n      - set: { Start: true, SpeedSetpoint: 1200 }\n      - cycle: 1\n      - set: { Stop: true }\n      - { cycle: 1, expect: { Running: false } }\n";
     const r = await runTestFile(idx, "t.yaml", yaml, undefined, { observe: true });
     expect(r.cases[0]?.observed).toEqual([
-      { step: 2, values: { Running: true, SpeedOut: 1200, Latch: true } },
-      { step: 4, values: { Running: false, SpeedOut: 0, Latch: false } },
+      { step: 2, values: { Running: true, SpeedOut: 1200, Latch: true }, statics: ["Latch"] },
+      { step: 4, values: { Running: false, SpeedOut: 0, Latch: false }, statics: ["Latch"] },
     ]);
     expect((await runTestFile(idx, "t.yaml", yaml)).cases[0]?.observed).toBeUndefined();
+    // arrays and structures by their paths; REAL without float32 noise
+    idx.set(pathToFileURL(join(resolve("/w"), "plc", "P", "blocks", "Fc_Arr.scl")).href, 'FUNCTION_BLOCK "Fb_Arr"\nVAR_OUTPUT\n  a : Array[0..1] of Int;\n  r : Real;\n  s : Struct\n    x : Bool;\n  END_STRUCT;\nEND_VAR\nBEGIN\n  #a[1] := 5;\n  #r := 0.1;\n  #s.x := TRUE;\nEND_FUNCTION_BLOCK\n', 0);
+    const arr = await runTestFile(idx, "a.yaml", "block: Fb_Arr\ncases:\n  - name: a\n    steps:\n      - cycle: 1\n", undefined, { observe: true });
+    expect(arr.cases[0]?.observed?.[0]?.values).toEqual({ "a[0]": 0, "a[1]": 5, r: 0.1, "s.x": true });
   });
 });

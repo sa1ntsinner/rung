@@ -1581,7 +1581,12 @@
           }
         ]
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[scl]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

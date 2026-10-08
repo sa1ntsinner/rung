@@ -28,6 +28,8 @@ import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
 import { WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
 import { ELEMENTARY_TYPES, STANDARD } from "./catalog.js";
 import { declarationModel } from "./declarations.js";
+import { semanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semantic.js";
+import { incomingCalls, outgoingCalls, prepareCallHierarchy, type HierarchyItem } from "./callHierarchy.js";
 import { planDeclarationEdit, type DeclOp } from "./declarationEdit.js";
 import { parsePastedRows } from "./declarationPaste.js";
 import { isSimaticMl } from "./simaticml.js";
@@ -188,6 +190,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         documentSymbolProvider: true,
         workspaceSymbolProvider: true,
         foldingRangeProvider: true,
+      callHierarchyProvider: true,
+      semanticTokensProvider: { legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [...TOKEN_MODIFIERS] }, full: true },
         inlayHintProvider: !!monitor,
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
         executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
@@ -496,6 +500,48 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.onWorkspaceSymbol((p) =>
     workspaceSymbols(index, p.query).map((s) => ({ name: s.name, kind: globalKind(s), location: { uri: s.uri, range: range(s.uri, s.start, s.end) }, ...(s.container ? { containerName: s.container } : {}) })),
   );
+  connection.languages.semanticTokens.on((p) => {
+    const doc = index.docs.get(p.textDocument.uri);
+    const data: number[] = [];
+    if (!doc) return { data };
+    let line = 0;
+    let char = 0;
+    for (const tk of semanticTokens(index, p.textDocument.uri)) {
+      const a = doc.lines.position(tk.start);
+      const b = doc.lines.position(tk.end);
+      if (a.line !== b.line) continue; // a token is on one line
+      data.push(a.line - line, a.line === line ? a.character - char : a.character, b.character - a.character, TOKEN_TYPES.indexOf(tk.type), tk.modifiers.reduce((m, x) => m | (1 << TOKEN_MODIFIERS.indexOf(x)), 0));
+      line = a.line;
+      char = a.character;
+    }
+    return { data };
+  });
+  // call hierarchy: items carry the block in data; ranges become positions in their own files
+  const lspRange = (uri: string, start: number, end: number) => {
+    const d = index.docs.get(uri);
+    return d ? { start: d.lines.position(start), end: d.lines.position(end) } : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
+  };
+  const toItem = (it: HierarchyItem) => ({
+    name: it.name,
+    kind: it.kind === "FB" ? SymbolKind.Class : SymbolKind.Function,
+    detail: it.kind,
+    uri: it.uri,
+    range: lspRange(it.uri, it.start, it.end),
+    selectionRange: lspRange(it.uri, it.nameStart, it.nameEnd),
+    data: it,
+  });
+  connection.languages.callHierarchy.onPrepare((p) => {
+    const d = index.docs.get(p.textDocument.uri);
+    const it = d ? prepareCallHierarchy(index, p.textDocument.uri, d.lines.offset(p.position.line, p.position.character)) : undefined;
+    return it ? [toItem(it)] : null;
+  });
+  connection.languages.callHierarchy.onIncomingCalls((p) =>
+    incomingCalls(index, p.item.data as HierarchyItem).map((c) => ({ from: toItem(c.from), fromRanges: c.ranges.map((r) => lspRange(c.from.uri, r.start, r.end)) })),
+  );
+  connection.languages.callHierarchy.onOutgoingCalls((p) => {
+    const it = p.item.data as HierarchyItem;
+    return outgoingCalls(index, it).map((c) => ({ to: toItem(c.to), fromRanges: c.ranges.map((r) => lspRange(it.uri, r.start, r.end)) }));
+  });
   connection.onFoldingRanges((p) => {
     const doc = index.docs.get(p.textDocument.uri);
     return doc ? foldingRanges(doc) : [];

@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
 import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
-import { SYSTEM_FUNCTIONS, Simulator, SimError, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
+import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
 
 /*
@@ -47,7 +47,7 @@ export interface CaseResult {
   errorStep?: number;
   errorLine?: number;
   /** With `observe`: the block's outputs and statics after each step that ran cycles (from 1), as a test writes them. */
-  observed?: { step: number; values: Record<string, boolean | number | string> }[];
+  observed?: { step: number; values: Record<string, boolean | number | string>; /** which of them are statics (memory, not results) */ statics?: string[] }[];
 }
 
 export interface FileResult {
@@ -127,13 +127,14 @@ function splitName(name: string): { global: boolean; root: string; path: Seg[] }
 const isArrayValue = (v: Value): v is ArrayValue => typeof v === "object" && v !== null && (v as ArrayValue).__array === true;
 
 /** Rejects `set` values whose kind differs from the variable's current value (BOOL vs number vs string). */
-function checkKind(name: string, current: Value, value: Value) {
+export function checkKind(name: string, current: Value, value: Value) {
   if (current === undefined || typeof current === "object") return;
   const kind = (v: Value) => (typeof v === "boolean" ? "a BOOL (true/false)" : typeof v === "number" ? "a number" : "a string");
   if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${shown(value)}`);
 }
 
 const isTime = (type?: string) => /^(TIME|LTIME|S5TIME)$/i.test(type ?? "");
+const isReal = (type?: string) => /^REAL$/i.test(type ?? "");
 const shown = (v: unknown): string => v === undefined || v === null ? "no value" : JSON.stringify(v);
 
 const plain = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -195,7 +196,7 @@ const INT_RANGE: Record<string, [number, number]> = {
 };
 
 /** Rejects a `set` value the variable's declared type cannot hold (40000 in an Int, 1.5 in a DInt, a number in a Bool). */
-function checkType(name: string, type: string, value: Value) {
+export function checkType(name: string, type: string, value: Value) {
   const t = type.replace(/^"|"$/g, "").toUpperCase();
   if (/^(ARRAY|STRUCT)\b/.test(t)) throw new SimError(`${name} is ${type}: set its ${/^ARRAY\b/.test(t) ? "elements" : "members"} in the test steps`);
   const range = INT_RANGE[t];
@@ -609,6 +610,25 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       const values: Record<string, boolean | number | string> = {};
       const own = g.block!.vars.filter((v) => (isFb ? ["Output", "InOut", "Static"] : ["Output", "InOut"]).includes(v.section));
       const names = [...own.map((v) => ({ name: v.name, type: v.type })), ...(!isFb && g.block!.returnType && !/^void$/i.test(g.block!.returnType) ? [{ name: g.block!.name, type: g.block!.returnType }] : [])];
+      const statics: string[] = [];
+      // a value as a test writes it; an array's elements and a structure's members by their paths (arr[1], st.a)
+      const put = (key: string, v: Value, decl: Pick<Member, "type" | "members"> | undefined, isStatic: boolean, depth: number) => {
+        const type = decl?.type;
+        if (typeof v === "number" && isTime(type)) values[key] = `T#${v}ms`;
+        else if (typeof v === "number" && isReal(type)) values[key] = Number(realText(v));
+        else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[key] = v;
+        else if (depth > 0 && isArrayValue(v) && v.items.length <= 32) {
+          const element = splitArrayType(type ?? "")?.element;
+          v.items.forEach((x, i) => put(`${key}[${v.lo + i}]`, x, element ? { type: element } : undefined, isStatic, depth - 1));
+        } else if (depth > 0 && v && typeof v === "object" && !("__fb" in v) && !("__ptr" in v)) {
+          const members = decl?.members ?? seen.membersOf({ type: type ?? "", isArray: false, name: key });
+          for (const [mk, mv] of Object.entries(v as Struct)) {
+            const m = members.find((x) => x.name.toUpperCase() === mk);
+            put(`${key}.${m?.name ?? mk}`, mv, m, isStatic, depth - 1);
+          }
+        }
+        if (isStatic && key in values) statics.push(key);
+      };
       for (const n of names) {
         let v: Value;
         try {
@@ -616,10 +636,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         } catch {
           continue;
         }
-        if (typeof v === "number" && isTime(n.type)) values[n.name] = `T#${v}ms`;
-        else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[n.name] = v;
+        const d = own.find((x) => x.name === n.name);
+        put(n.name, v, d ?? { type: n.type }, d?.section === "Static", 2);
       }
-      observed.push({ step, values });
+      observed.push({ step, values, ...(statics.length ? { statics: [...new Set(statics)] } : {}) });
     };
     try {
       if (g.block.kind === "PRG") inst = sim.read({ root: { kind: "global", name: g.block.name }, path: [], start: 0 }, null) as Instance; // one shared PROGRAM instance
@@ -678,7 +698,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
                 const actual = target.get();
                 if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
                 const expected = normalizeExpected(v, target.decl?.type);
-                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : actual });
+                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : actual });
               }
               break;
           }

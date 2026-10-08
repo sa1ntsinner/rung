@@ -949,6 +949,18 @@ describe("rung extension on a fake-bridge workspace", function () {
       await vscode.workspace.fs.delete(uri);
     });
 
+    it("colours SCL names by what they are (semantic tokens)", async () => {
+      const ed = await openDoc(PUMP);
+      const tokens = await waitFor("semantic tokens", async () => {
+        const t = await vscode.commands.executeCommand<vscode.SemanticTokens>("vscode.provideDocumentSemanticTokens", ed.document.uri);
+        return t?.data.length ? t : undefined;
+      }, 60_000);
+      const legend = await vscode.commands.executeCommand<vscode.SemanticTokensLegend>("vscode.provideDocumentSemanticTokensLegend", ed.document.uri);
+      assert.ok(legend.tokenTypes.includes("parameter") && legend.tokenModifiers.includes("readonly"), JSON.stringify(legend));
+      assert.equal(tokens.data.length % 5, 0);
+      assert.equal(vscode.workspace.getConfiguration("editor", { languageId: "scl" }).get("semanticHighlighting.enabled"), true);
+    });
+
     it("Record Expectations writes the values the engineer picks into the step under the cursor", async () => {
       await closeAll();
       const uri = vscode.Uri.file(join(api.ws.root!, "tests", "rec.test.yaml"));

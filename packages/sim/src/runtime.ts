@@ -95,6 +95,16 @@ class Goto {
   ) {}
 }
 
+/** The shortest text of a REAL (32-bit) value: 0.1, not 0.10000000149011612. */
+export function realText(x: number): string {
+  if (!Number.isFinite(x) || Math.fround(x) !== x) return String(x);
+  for (let p = 1; p <= 9; p++) {
+    const s = Number(x.toPrecision(p));
+    if (Math.fround(s) === x) return String(s);
+  }
+  return String(x);
+}
+
 /** Rounds to the nearest integer; exact halves go to the even neighbour (IEEE 754 round-to-nearest-even, as the S7 FPU and TIA's ROUND do). */
 export function roundHalfEven(x: number): number {
   if (!Number.isFinite(x)) return x;

@@ -60,7 +60,7 @@ describe("rung test --coverage", () => {
     const lcov = join(mkdtempSync(join(tmpdir(), "rung-cov-")), "lcov.info");
     const code = await main(["test", "--coverage", lcov], { cwd: conveyor, stdout: (s) => out.push(s), stderr: (s) => out.push(s), env: {} });
     expect(code).toBe(0);
-    expect(out.join("")).toMatch(/coverage: \d+% of SCL lines \(\d+\/\d+ in \d+ files\)/);
+    expect(out.join("")).toMatch(/coverage: \d+% of SCL lines \(\d+\/\d+ in \d+ files?\)/);
     const text = readFileSync(lcov, "utf8");
     expect(text).toMatch(/^SF:blocks\/FB_Conveyor\.scl\nDA:\d+,[1-9]/m);
     expect(text.trimEnd().endsWith("end_of_record")).toBe(true);

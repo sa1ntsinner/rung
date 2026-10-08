@@ -63,8 +63,9 @@ describe("rung debug (DAP)", () => {
     expect(init.body).toMatchObject({ supportsStepBack: true, supportsConditionalBreakpoints: true, supportsSetVariable: true });
     await c.eventOf("initialized");
     expect((await c.request("launch", { test: "tests/motor.test.yaml", case: 0 })).success).toBe(true);
-    const bp = await c.request("setBreakpoints", { source: { path: block }, breakpoints: [{ line: 27 }] });
-    expect(bp.body.breakpoints).toEqual([{ verified: true, line: 27 }]);
+    // ELSE (26) has no statement: the breakpoint moves to the next one; a declaration (5) has none at all
+    const bp = await c.request("setBreakpoints", { source: { path: block }, breakpoints: [{ line: 26 }, { line: 5 }] });
+    expect(bp.body.breakpoints).toMatchObject([{ verified: true, line: 27 }, { verified: false, line: 5, message: expect.stringMatching(/No SCL statement/) }]);
     await c.request("configurationDone");
     const stopped = await c.eventOf("stopped");
     expect(stopped.body).toMatchObject({ reason: "breakpoint", threadId: 1, description: "t = 20 ms" });
@@ -103,6 +104,9 @@ describe("rung debug (DAP)", () => {
     const r = await c.request("launch", { test: "tests/none.test.yaml" });
     expect(r).toMatchObject({ success: false });
     expect(r.message).toMatch(/no test file at/);
+    mkdirSync(join(dir, "tests"));
+    writeFileSync(join(dir, "tests", "m.test.yaml"), TEST);
+    expect((await c.request("launch", { test: "tests/m.test.yaml", case: 9 })).message).toBe("tests/m.test.yaml has 1 case, numbered from 0: there is no case 9");
     c.input.end();
     await c.done;
   });
