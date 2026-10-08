@@ -142,6 +142,14 @@
           "icon": "media/rung.svg",
           "contextualTitle": "rung"
         }
+      ],
+      "debug": [
+        {
+          "id": "rung.why",
+          "name": "Why?",
+          "when": "debugType == rung",
+          "icon": "$(question)"
+        }
       ]
     },
     "viewsWelcome": [
@@ -188,6 +196,10 @@
         "view": "rung.activity",
         "contents": "rung watch is running with writes off: your saves stay in the files, and what changes in TIA Portal comes in and shows up here.\n[Turn On Writes](command:rung.writes.on)",
         "when": "rung.watching && !rung.writesOn"
+      },
+      {
+        "view": "rung.why",
+        "contents": "Why is a value what it is? Right-click a variable in Variables → **Why?**, or select a name in the code.\n[Why?…](command:rung.why)"
       }
     ],
     "commands": [
@@ -549,6 +561,17 @@
         "title": "Merge in Editor…",
         "category": "rung",
         "icon": "$(git-merge)"
+      },
+      {
+        "command": "rung.why",
+        "title": "Why?",
+        "category": "rung",
+        "icon": "$(question)"
+      },
+      {
+        "command": "rung.why.open",
+        "title": "Open Statement",
+        "category": "rung"
       }
     ],
     "menus": {
@@ -720,6 +743,14 @@
         {
           "command": "rung.test.record",
           "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/"
+        },
+        {
+          "command": "rung.why",
+          "when": "inDebugMode && debugType == rung"
+        },
+        {
+          "command": "rung.why.open",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -837,6 +868,11 @@
           "command": "rung.changes.refresh",
           "when": "view == rung.changes",
           "group": "navigation@2"
+        },
+        {
+          "command": "rung.why",
+          "when": "view == rung.why",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -1063,6 +1099,11 @@
           "command": "rung.test.record",
           "when": "rung.workspace && resourceFilename =~ /\\.test\\.ya?ml$/",
           "group": "rung@2"
+        },
+        {
+          "command": "rung.why",
+          "when": "inDebugMode && debugType == rung && editorLangId == scl",
+          "group": "rung@1"
         }
       ],
       "explorer/context": [
@@ -1095,6 +1136,13 @@
           "command": "rung.resolveMerge",
           "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",
           "group": "rung@2"
+        }
+      ],
+      "debug/variables/context": [
+        {
+          "command": "rung.why",
+          "when": "debugType == rung",
+          "group": "navigation"
         }
       ]
     },

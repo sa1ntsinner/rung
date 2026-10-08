@@ -15,6 +15,8 @@ export interface TestFailure {
   actual: unknown;
   /** Line of the step, from 1 (as rung prints it). */
   line?: number;
+  /** within / always / never: when or how it broke. */
+  note?: string;
 }
 
 export interface CaseResult {
@@ -95,5 +97,5 @@ export function parseResults(output: string): FileResult[] | undefined {
 /** A failure as the explorer shows it: which step and name, and the two values to compare. */
 export function failureText(f: TestFailure): { message: string; expected: string; actual: string } {
   const show = (v: unknown) => (typeof v === "string" && /^<.*>$/.test(v) ? v : JSON.stringify(v));
-  return { message: `step ${f.step}: ${f.name} expected ${JSON.stringify(f.expected)} got ${show(f.actual)}`, expected: show(f.expected), actual: show(f.actual) };
+  return { message: `step ${f.step}: ${f.name} expected ${JSON.stringify(f.expected)} got ${show(f.actual)}${f.note ? ` (${f.note})` : ""}`, expected: show(f.expected), actual: show(f.actual) };
 }

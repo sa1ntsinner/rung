@@ -66,7 +66,7 @@ local function show(buf, results)
       end
       if c.error then add(c.errorLine or c.line, (c.errorStep and ("step " .. c.errorStep .. ": ") or "") .. c.error) end
       for _, x in ipairs(c.failures or {}) do
-        add(x.line or c.line, ("step %d: %s expected %s, got %s"):format(x.step, x.name, vim.json.encode(x.expected), vim.json.encode(x.actual)))
+        add(x.line or c.line, ("step %d: %s expected %s, got %s%s"):format(x.step, x.name, vim.json.encode(x.expected), vim.json.encode(x.actual), x.note and (" (" .. x.note .. ")") or ""))
       end
     end
   end
@@ -84,6 +84,7 @@ function M.run(what, buf, cb)
     return
   end
   if vim.bo[buf].modified then vim.api.nvim_buf_call(buf, function() vim.cmd("silent write") end) end
+  if not cli.available() then return end
   local args = { "test", "--json" }
   if what == "case" then
     local i = M.case_at_cursor(buf)

@@ -67,6 +67,12 @@ function bridgesHere(env: Record<string, string | undefined>): { exe: string; ve
   return (found.length ? found : [{ tia: "V20" as const, exe: bridgeExecutable(env) }]).map((b) => ({ exe: b.exe, version: `${b.tia.slice(1)}.0` }));
 }
 
+/** The whitelist state of every bridge for a TIA Portal installed here, as one: the worst of them. */
+export async function whitelistHere(env: Record<string, string | undefined>): Promise<WhitelistStatus> {
+  const all = await Promise.all(bridgesHere(env).map((b) => whitelistStatus(b.exe, b.version)));
+  return (["missing", "stale", "unknown"] as const).find((s) => all.includes(s)) ?? "ok";
+}
+
 export async function cmdSetup(what: string | undefined, v: Record<string, unknown>, io: Io): Promise<number> {
   if (what !== "openness") {
     io.stderr("rung: usage: rung setup openness [--grant]\n");

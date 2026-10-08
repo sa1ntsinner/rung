@@ -70,6 +70,8 @@ export class Activity {
   private passStart: number | undefined;
   /** refusals already in the history (they stand in every report until fixed) */
   private readonly seenRefusals = new Set<string>();
+  /** the PLCs paths have named: with more than one, a label says which PLC an object is on */
+  private readonly plcs = new Set<string>();
 
   constructor(private readonly clock: () => number = Date.now) {}
 
@@ -82,8 +84,9 @@ export class Activity {
     this.seenRefusals.clear();
   }
 
-  event(event: string, params: unknown): void {
-    const t = this.clock();
+  /** `at`: when it happened, for a pass replayed to an editor that came later. */
+  event(event: string, params: unknown, at?: number): void {
+    const t = at ?? this.clock();
     if (event === "connected") return this.reset();
     if (event === "disconnected") {
       this.now = undefined;
@@ -115,7 +118,15 @@ export class Activity {
     }
   }
 
+  /** An object's name, with its PLC once the workspace has shown more than one (`PLC_2 · FB_Motor`). */
+  private name(path: string): string {
+    const plc = /(?:^|[\\/])plc[\\/:]([^\\/]+)[\\/]/.exec(path)?.[1] ?? /^plc:([^/]+)\//.exec(path)?.[1];
+    if (plc) this.plcs.add(plc);
+    return this.plcs.size > 1 && plc ? `${decodeURIComponent(plc)} · ${objectName(path)}` : objectName(path);
+  }
+
   private report(r: Report, t: number): void {
+    for (const c of r.changes ?? []) this.name(c.path); // every PLC of the pass is known before the first label
     const start = this.passStart;
     this.passStart = undefined;
     this.now = undefined;
@@ -129,7 +140,7 @@ export class Activity {
       for (const c of changes) {
         const toTia = c.action === "import" || c.action === "create";
         const mine = compileErrors.filter((d) => d.path === c.path);
-        let label = `${objectName(c.path)} ${WHAT[c.action]}`;
+        let label = `${this.name(c.path)} ${WHAT[c.action]}`;
         if (toTia && mine.length) label += `, compile: ${mine.length} error${mine.length > 1 ? "s" : ""}`;
         else if (toTia && r.compiled?.some((a) => a.endsWith("/" + objectName(c.path)))) label += ", compiled clean";
         pass.push({
@@ -152,7 +163,7 @@ export class Activity {
       const key = `${d.path ?? d.address}\0${d.code}\0${d.message}`;
       now.add(key);
       if (this.seenRefusals.has(key)) continue;
-      const name = objectName(d.path ?? d.address ?? "");
+      const name = this.name(d.path ?? d.address ?? "");
       pass.push({ at: t, kind: "refused", label: `${name} not sent: ${firstSentence(d.message ?? d.code ?? "")}`, ...(d.path ? { path: d.path } : {}), ...(d.line ? { line: d.line } : {}) });
     }
     this.seenRefusals.clear();

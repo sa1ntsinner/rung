@@ -36,6 +36,7 @@ import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInte
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { startDebugAdapter } from "./debug.js";
+import { cmdFormat } from "./format.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
@@ -52,6 +53,7 @@ Usage:
              [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
+  rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
@@ -344,6 +346,7 @@ function initHint(code: string, project: boolean): string | undefined {
 export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
+  format: { options: ["check"], positionals: 1 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
@@ -414,6 +417,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         tia: { type: "string" },
         device: { type: "string", multiple: true },
         rebind: { type: "boolean" },
+        check: { type: "boolean" },
         force: { type: "boolean" },
         verbose: { type: "boolean" },
         fixture: { type: "boolean" },
@@ -569,7 +573,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
               const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));
               // <...> is what went wrong reading the name (it does not exist), not a value
               const got = typeof x.actual === "string" && /^<.*>$/.test(x.actual) ? x.actual : JSON.stringify(x.actual);
-              io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${got}${quoted ? ` (in quotes "${x.expected}" is text: write ${x.expected} without them)` : ""}\n`);
+              io.stdout(`       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${got}${x.note ? ` (${x.note})` : ""}${quoted ? ` (in quotes "${x.expected}" is text: write ${x.expected} without them)` : ""}\n`);
             }
             if (!c.passed) failed++;
           }
@@ -639,6 +643,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "format":
+        return await cmdFormat(dir, !!v.check, io);
       case "check":
         return await cmdCheck(v, io);
       case "simulate":

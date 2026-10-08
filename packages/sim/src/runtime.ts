@@ -376,6 +376,40 @@ export class Simulator {
     return p ? { uri, line: p.line + 1, column: p.character + 1 } : undefined;
   }
 
+  /** Where a reference's value lives in a frame (the debugger compares writes by place, not by name). */
+  where(ref: LRef, frame: Frame | null): { obj: Struct | Value[]; key: string | number } | undefined {
+    try {
+      return this.locate(ref, frame);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The statement each statement of a block stands in (an IF's branch, a loop), with the branch's number (-1: ELSE). */
+  parentsOf(b: BlockModel): Map<Stmt, { parent: Stmt; branch: number }> {
+    const out = new Map<Stmt, { parent: Stmt; branch: number }>();
+    let top: Stmt[];
+    try {
+      top = this.body(b);
+    } catch {
+      return out;
+    }
+    const walk = (list: Stmt[] | undefined, parent: Stmt | undefined, branch: number) => {
+      for (const s of list ?? []) {
+        if (parent) out.set(s, { parent, branch });
+        if (s.k === "if") {
+          s.branches.forEach((br, i) => walk(br.body, s, i));
+          walk(s.else, s, -1);
+        } else if (s.k === "case") {
+          s.items.forEach((it, i) => walk(it.body, s, i));
+          walk(s.else, s, -1);
+        } else if (s.k === "for" || s.k === "while" || s.k === "repeat") walk(s.body, s, 0);
+      }
+    };
+    walk(top, undefined, 0);
+    return out;
+  }
+
   /** Every statement of a block's code, nested ones too (coverage); none for code the simulator does not run. */
   statementsOf(b: BlockModel): Stmt[] {
     let top: Stmt[];

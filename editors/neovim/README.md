@@ -33,6 +33,7 @@ tree-sitter grammar in `grammars/tree-sitter-scl` ([editors](../../docs/editors/
 | `:Rung record` | runs the case, lists the block's values after the step at the cursor; `<Space>` picks, `<CR>` writes them into the step's `expect:` (one undo) |
 | `:Rung coverage` | runs all tests with coverage and marks each executable SCL line in the sign column (green ran, red never ran); again clears it |
 | `:Rung debug` | debugs the case under the cursor with nvim-dap: breakpoints in SCL, stepping, `dap.step_back()`, `dap.reverse_continue()`, variables, the REPL |
+| `:Rung why [name]` | while debugging: why the value under the cursor is what it is: the statement that wrote it, its operands then, the branch that ran; `<CR>` opens a statement |
 | `:Rung status` `pull` `sync` `preview` `watch` `compile` `compare` `online` `check` `test-all` | the CLI in a terminal split |
 | `:Rung download` | `rung download` in a terminal split: it asks for the PLC's name there, and shows TIA Portal's questions |
 

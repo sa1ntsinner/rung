@@ -78,6 +78,8 @@ describe("rung debug (DAP)", () => {
     expect(locals.body.variables.find((v: { name: string }) => v.name === "Stop")).toMatchObject({ value: "TRUE", type: "Bool", evaluateName: "#Stop" });
     expect((await c.request("evaluate", { expression: "Latch", frameId: 0 })).body.result).toBe("FALSE");
     expect((await c.request("evaluate", { expression: "#Nope", frameId: 0 })).success).toBe(false);
+    const why = await c.request("rungWhy", { expression: "Latch", frameId: 0 });
+    expect(why.body).toMatchObject({ kind: "value", text: "#Latch", value: "FALSE", children: [{ kind: "write", text: "#Latch := (#Start OR #Latch) AND NOT #Stop;" }] });
 
     await c.request("stepBack", { threadId: 1 });
     await c.eventOf("stopped");

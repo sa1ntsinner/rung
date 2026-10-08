@@ -31,6 +31,7 @@ import { ActivityView } from "./views/activityView";
 import { ChangesView } from "./views/changesView";
 import { registerTests } from "./testing";
 import { registerDebug } from "./debug";
+import { WhyView } from "./views/whyView";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -64,6 +65,7 @@ export interface RungExtensionApi {
   /** the test tables open, by document */
   testTables: typeof TestTableEditor.tables;
   tests: () => RungTests | undefined;
+  why: import("./views/whyView").WhyView;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -77,6 +79,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   lsp = new Lsp(ws, cli, out);
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
   registerDebug(context, ws, cli);
+  const why = new WhyView();
+  context.subscriptions.push(why);
 
   await ws.start(context.workspaceState);
   context.subscriptions.push(
@@ -84,7 +88,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       const items = ws.candidates().map((p) => ({ label: basename(p), description: p, picked: p === ws.root }));
       if (!items.length) return void vscode.window.showInformationMessage("No folder of this window has a rung.toml.");
       const pick = await vscode.window.showQuickPick(items, { title: "rung works on", placeHolder: "Choose the rung workspace" });
-      if (pick) await ws.choose(pick.description);
+      if (!pick || pick.description === ws.root) return;
+      // a watch started here keeps syncing the folder it was started in: say so, and offer to move it along
+      if (watch.owned && watch.status !== "stopped") {
+        const move = await vscode.window.showWarningMessage(`rung watch is running for ${basename(ws.root ?? "")}.`, { modal: true, detail: `It keeps syncing that folder until it is stopped. Switch to ${pick.label} and watch there instead?` }, "Switch and Watch There", "Switch Only");
+        if (!move) return;
+        if (move === "Switch and Watch There") {
+          await watch.stop();
+          await ws.choose(pick.description);
+          await watch.start();
+          return;
+        }
+      }
+      await ws.choose(pick.description);
     }),
   );
   // the rung that comes with the extension, only when none is installed (rung on PATH, or rung.command set); it
@@ -104,7 +120,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   // rung watch's events: the activity model hears them first, then the status bar and the view redraw
   const events = new OwnerEvents(ws);
   const activity = new Activity();
-  context.subscriptions.push(events, events.onEvent(({ event, params }) => activity.event(event, params)));
+  context.subscriptions.push(events, events.onEvent(({ event, params, at }) => activity.event(event, params, at)));
   const statusBar = new StatusBar(ws, watch, online, activity, events);
   const activityView = new ActivityView(ws, activity, events);
   const changes = new ChangesView(ws, cli, events);
@@ -207,7 +223,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why };
 }
 
 export async function deactivate(): Promise<void> {

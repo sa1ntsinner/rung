@@ -949,6 +949,25 @@ describe("rung extension on a fake-bridge workspace", function () {
       await vscode.workspace.fs.delete(uri);
     });
 
+    it("Format Document writes SCL code as TIA Portal does", async () => {
+      const ed = await openDoc(PUMP);
+      const original = ed.document.getText();
+      try {
+        const at = original.indexOf("BEGIN") + "BEGIN".length;
+        await ed.edit((e) => e.insert(ed.document.positionAt(original.indexOf("\n", at) + 1), "\tif #speed>100 then #running:=false; end_if;\n"));
+        const edits = await waitFor("formatting edits", async () => {
+          const r = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", ed.document.uri, { tabSize: 4, insertSpaces: true });
+          return r?.length ? r : undefined;
+        }, 60_000);
+        const w = new vscode.WorkspaceEdit();
+        w.set(ed.document.uri, edits);
+        await vscode.workspace.applyEdit(w);
+        assert.match(ed.document.getText(), /\n\tIF #speed > 100 THEN\n\t {4}#running := FALSE;\n\tEND_IF;\n/);
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.files.revert", ed.document.uri);
+      }
+    });
+
     it("colours SCL names by what they are (semantic tokens)", async () => {
       const ed = await openDoc(PUMP);
       const tokens = await waitFor("semantic tokens", async () => {
@@ -1032,6 +1051,11 @@ describe("rung extension on a fake-bridge workspace", function () {
         assert.equal(((await session.customRequest("evaluate", { expression: "speed", frameId: 0 })) as { result: string }).result, "200");
         const inline = await vscode.commands.executeCommand<vscode.InlineValue[]>("vscode.executeInlineValueProvider", pump, new vscode.Range(0, 0, target, 0), { frameId: 0, stoppedLocation: new vscode.Range(target, 0, target, 0) });
         assert.ok(inline.some((v) => (v as vscode.InlineValueVariableLookup).variableName === "speed" && v.range.start.line === ifLine), JSON.stringify(inline));
+        // why is running TRUE here? the statement that wrote it, with its operand as it was
+        const why = await api.why.ask("#running");
+        assert.equal(why?.value, "TRUE", JSON.stringify(why));
+        assert.match(why!.children[0]!.text, /#running := #start/);
+        assert.equal(why!.children[0]!.children[0]!.text, "#start");
         await session.customRequest("stepBack", { threadId: 1 });
         await waitFor("stopped one statement back", () => events("stopped") === 2);
         assert.equal((await top()).line, ifLine + 1);
@@ -1044,7 +1068,7 @@ describe("rung extension on a fake-bridge workspace", function () {
       } finally {
         tracker.dispose();
         vscode.debug.removeBreakpoints([bp]);
-        await vscode.debug.stopDebugging();
+        await Promise.resolve(vscode.debug.stopDebugging()).catch(() => undefined);
         await vscode.workspace.fs.delete(uri);
       }
     });

@@ -20,10 +20,24 @@ function M.argv(args)
   return vim.list_extend(argv, args)
 end
 
---- Runs rung and calls back with { code, stdout, stderr } on the main loop; `sync` waits instead.
+M.missing = "rung does not run here: put it on PATH (the release folder, npm install -g @rung-plc/cli, or VS Code's \"rung: Put rung on PATH\") or set cmd in require(\"rung\").setup()"
+
+--- Whether rung can be started at all; says how to fix it when not.
+function M.available()
+  if vim.fn.executable(config().cmd[1]) == 1 then return true end
+  vim.notify("rung: " .. M.missing, vim.log.levels.ERROR)
+  return false
+end
+
+--- Runs rung and calls back with { code, stdout, stderr } on the main loop; without `cb` it waits instead.
 function M.capture(args, opts, cb)
   opts = opts or {}
-  local run = vim.system(M.argv(args), { cwd = opts.cwd or M.root(), text = true }, cb and vim.schedule_wrap(cb) or nil)
+  local ok, run = pcall(vim.system, M.argv(args), { cwd = opts.cwd or M.root(), text = true }, cb and vim.schedule_wrap(cb) or nil)
+  if not ok then
+    local failed = { code = -1, stdout = "", stderr = M.missing }
+    if cb then vim.schedule(function() cb(failed) end) end
+    return not cb and failed or nil
+  end
   if not cb then return run:wait() end
   return run
 end
@@ -39,6 +53,7 @@ end
 --- Runs rung in a terminal split at the bottom, where its questions can be answered.
 function M.terminal(args, opts)
   opts = opts or {}
+  if not M.available() then return end
   vim.cmd("botright " .. (opts.height or 12) .. "split")
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(0, buf)

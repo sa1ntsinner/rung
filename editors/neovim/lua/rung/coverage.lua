@@ -60,7 +60,7 @@ function M.toggle(cb)
   end
   local root = cli.root()
   if not root then
-    vim.notify("rung: no rung.toml here", vim.log.levels.WARN)
+    vim.notify("rung: no rung workspace here (a folder with rung.toml or tests/)", vim.log.levels.WARN)
     return
   end
   local lcov = vim.fn.tempname() .. ".info"

@@ -50,6 +50,12 @@ local got
 dap.session():evaluate("Stop", function(err, resp) got = err and tostring(err) or resp.result end)
 vim.wait(5000, function() return got ~= nil end, 50)
 check("evaluate", got == "TRUE", got)
+local tree
+require("rung.why").ask("Motor", function(t) tree = t or false end)
+vim.wait(10000, function() return tree ~= nil end, 50)
+check("why", tree and tree.kind == "value" and tree.text == "#Motor", tree)
+local lines = require("rung.why").render(tree or { kind = "note", text = "", children = {} })
+check("why renders", #lines >= 1, lines)
 dap.continue()
 check("ran to the end", vim.wait(30000, function() return ended end, 50))
 

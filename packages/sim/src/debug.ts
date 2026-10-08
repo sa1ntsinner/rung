@@ -5,7 +5,7 @@
 // ponytail: each stop replays the case from the start (about 60 ms per 1000 cycles); add checkpoints when cases
 // run for minutes.
 import { STANDARD_BY_NAME, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
-import { parseBody, SclSyntaxError, type Stmt } from "./ast.js";
+import { parseBody, SclSyntaxError, type Expr, type LRef, type Stmt } from "./ast.js";
 import { checkKind, checkType, runTestFile, type CaseResult } from "./runner.js";
 import { realText, SimError, Simulator, splitArrayType, type ArrayValue, type Frame, type Instance, type Pointer, type Struct, type Value } from "./runtime.js";
 
@@ -30,6 +30,15 @@ export interface DebugVariable {
   /** What `evaluate` and `setVariable` take for it. */
   evaluateName?: string;
   children?: () => DebugVariable[];
+}
+
+/** One step of an explanation: a value, the statement that wrote it, the branch that made that run, or a note. */
+export interface WhyNode {
+  kind: "value" | "write" | "condition" | "note";
+  text: string;
+  value?: string;
+  at?: { uri: string; line: number; time: number };
+  children: WhyNode[];
 }
 
 export type StopReason = "entry" | "step" | "breakpoint" | "exception";
@@ -159,6 +168,28 @@ export class DebugSession {
     return this.variable(expr, v, this.declOf(text, f), expr);
   }
 
+  /**
+   * Why a value is what it is here: the statement that last wrote it (found by where the value lives, not by its
+   * name), the values its operands had then and why, and the IF/CASE branch that made it run. `depth` levels.
+   * The debugger's own position does not change.
+   */
+  async why(target: string, frame = 0, depth = 3): Promise<WhyNode> {
+    const f = this.frame(frame);
+    let text = target.trim();
+    let ref = this.refOf(text);
+    if (!ref || this.sim!.where(ref, f) === undefined) {
+      const local = /^[A-Za-z_]/.test(text) ? this.refOf(`#${text}`) : undefined;
+      if (local && this.sim!.where(local, f)) {
+        ref = local;
+        text = `#${text}`;
+      }
+    }
+    if (!ref) throw new Error(`${target} is not a variable`);
+    if (ref.root.kind === "ident" && f.block.vars.some((v) => v.name.toUpperCase() === ref!.root.name.toUpperCase())) text = `#${text}`;
+    const value = this.evaluate(text, frame).value;
+    return this.explain(ref, text, value, this.stack.length - 1 - frame, this.at, depth);
+  }
+
   /** The frames stopped in, innermost first, as `frames` of the stopped state. */
   frames(): DebugFrame[] {
     const out: DebugFrame[] = [];
@@ -203,6 +234,135 @@ export class DebugSession {
   }
 
   // ------------------------------------------------------------------ internals
+
+  private refOf(text: string): LRef | undefined {
+    try {
+      const [s] = parseBody(`${text} := 0;`);
+      return s?.k === "assign" ? s.target : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Runs the case to statement `pos` (not running it) without moving the debugger, calling `seen` for every
+   * statement before it; answers the simulator and its frames there.
+   */
+  private async replay(pos: number, seen?: (n: number, s: Stmt, f: Frame, sim: Simulator) => void): Promise<{ sim: Simulator; frames: Frame[] } | undefined> {
+    let n = 0;
+    let at: { sim: Simulator; frames: Frame[] } | undefined;
+    await runTestFile(this.index, this.file, this.text, this.caseIndex, {
+      simulator: (sim) => {
+        sim.onStatement = (s, f) => {
+          if (at) throw new Pause();
+          n++;
+          for (const x of this.sets) if (x.at === n) this.applySet(sim, x);
+          if (n === pos) {
+            at = { sim, frames: [...sim.frames] };
+            throw new Pause();
+          }
+          seen?.(n, s, f, sim);
+        };
+      },
+    });
+    return at;
+  }
+
+  private async explain(ref: LRef, text: string, value: string, frameAt: number, pos: number, depth: number): Promise<WhyNode> {
+    const node: WhyNode = { kind: "value", text, value, children: [] };
+    // every write before here, by where it went; the place of the value asked about is found in the same run
+    const writes: { n: number; place: { obj: unknown; key: string | number }; s: Stmt; f: Frame; frame: number; loc?: { uri: string; line: number }; time: number }[] = [];
+    const runs = new Map<number, number[]>(); // when each statement ran, by where it starts (each run parses anew)
+    // the value's own place, then each structure that holds it (a copy of the whole structure writes it too)
+    let places: { obj: unknown; key: string | number; whole?: string }[] = [];
+    const r = await this.replay(pos, (n, s, f, sim) => {
+      let list = runs.get(s.at);
+      if (!list) runs.set(s.at, (list = []));
+      list.push(n);
+      const targets: LRef[] = s.k === "assign" ? [s.target] : s.k === "for" ? [s.v] : s.k === "call" ? s.call.args.filter((a) => a.out && a.value.k === "ref").map((a) => (a.value as Extract<Expr, { k: "ref" }>).ref) : [];
+      for (const t of targets) {
+        const p = sim.where(t, f);
+        if (p) writes.push({ n, place: p, s, f, frame: sim.frames.indexOf(f), time: sim.time, ...(sim.locationOf(f, s.at) ? { loc: sim.locationOf(f, s.at)! } : {}) });
+      }
+    });
+    if (r) {
+      for (let k = ref.path.length; k >= 0; k--) {
+        const prefix: LRef = { ...ref, path: ref.path.slice(0, k) };
+        if (k < ref.path.length && "slice" in (ref.path[k] ?? {})) continue;
+        const p = r.sim.where(prefix, r.frames[frameAt] ?? null);
+        if (p) places.push({ ...p, ...(k < ref.path.length ? { whole: refText(prefix) } : {}) });
+      }
+    }
+    let whole: string | undefined;
+    const w = [...writes].reverse().find((x) => {
+      const hit = places.find((p) => x.place.obj === p.obj && x.place.key === p.key);
+      if (hit) whole = hit.whole;
+      return !!hit;
+    });
+    if (!w) {
+      node.children.push({ kind: "note", text: "not written by the code before this point: an input the test sets, its start value, or written inside a call (a timer's Q, an FB's output)", children: [] });
+      return node;
+    }
+    const write: WhyNode = { kind: "write", text: (this.lineText(w.loc) ?? text) + (whole ? `   (all of ${whole})` : ""), ...(w.loc ? { at: { ...w.loc, time: w.time } } : {}), children: [] };
+    node.children.push(write);
+    // the operands as they were just before that statement ran, and why
+    const before = await this.replay(w.n);
+    const f = before?.frames[w.frame];
+    if (before && f) {
+      const exprs: Expr[] = w.s.k === "assign" ? [w.s.value] : w.s.k === "for" ? [w.s.from, w.s.to, ...(w.s.by ? [w.s.by] : [])] : w.s.k === "call" ? w.s.call.args.filter((a) => !a.out).map((a) => a.value) : [];
+      const operands = new Map<string, LRef>();
+      for (const e of exprs) for (const o of refsOf(e)) operands.set(refText(o), o);
+      for (const [label, o] of operands) {
+        const v = this.shownValue(before.sim, o, f, label);
+        write.children.push(depth > 1 && v !== undefined ? await this.explain(o, label, v, w.frame, w.n, depth - 1) : { kind: "value", text: label, value: v ?? "—", children: [] });
+      }
+      // the branch that made it run: each enclosing IF/CASE, evaluated where it ran last
+      const parents = new Map([...before.sim.parentsOf(f.block)].map(([s, p]) => [s.at, p]));
+      for (let p = parents.get(w.s.at); p; p = parents.get(p.parent.at)) {
+        const ran = runs.get(p.parent.at)?.filter((x) => x < w.n).pop(); // the run that led to the write
+        const cond = p.parent.k === "if" && p.branch >= 0 ? p.parent.branches[p.branch]!.cond : p.parent.k === "case" || p.parent.k === "while" ? (p.parent.k === "case" ? p.parent.sel : p.parent.cond) : undefined;
+        const loc = before.sim.locationOf(f, p.parent.at);
+        const why: WhyNode = { kind: "condition", text: this.lineText(loc) ?? p.parent.k.toUpperCase(), children: [] };
+        if (p.parent.k === "if" && p.branch < 0) why.value = "ELSE: every condition before was FALSE";
+        if (cond && ran !== undefined) {
+          const at = await this.replay(ran);
+          const fr = at?.frames[w.frame];
+          if (at && fr) {
+            try {
+              why.value = this.format(at.sim.eval(cond, fr));
+            } catch {
+              /* not evaluable there */
+            }
+            for (const o of new Map([...refsOf(cond)].map((x) => [refText(x), x]))) {
+              const v = this.shownValue(at.sim, o[1], fr, o[0]);
+              why.children.push({ kind: "value", text: o[0], value: v ?? "—", children: [] });
+            }
+          }
+        }
+        write.children.push(why);
+      }
+    }
+    return node;
+  }
+
+  private shownValue(sim: Simulator, ref: LRef, f: Frame, label: string): string | undefined {
+    try {
+      return this.variable(label, sim.read(ref, f), this.declOf(label, f), undefined).value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private format(v: Value): string {
+    return this.variable("", v, undefined, undefined).value;
+  }
+
+  /** The source line a statement starts on, trimmed. */
+  private lineText(loc: { uri: string; line: number } | undefined): string | undefined {
+    if (!loc) return undefined;
+    const doc = [...this.index.docs.values()].find((d) => sameUri(d.uri, loc.uri));
+    return doc?.text.split(/\r?\n/)[loc.line - 1]?.trim();
+  }
 
   private depth(): number {
     return this.trace[this.at]?.depth ?? 1;
@@ -398,7 +558,7 @@ export class DebugSession {
     if (failure && beforeStep === undefined) {
       // a failed expectation stops once, on the way there, where its values are
       const s = await this.run(() => false, "exception", failure.step);
-      if (s.kind === "stopped") return { ...s, text: `step ${failure.step}: ${failure.name} expected ${shown(failure.expected)}, got ${shown(failure.actual)}` };
+      if (s.kind === "stopped") return { ...s, text: `step ${failure.step}: ${failure.name} expected ${shown(failure.expected)}, got ${shown(failure.actual)}${failure.note ? ` (${failure.note})` : ""}` };
       return s;
     }
     if (!failure && result?.error && result.errorStep !== undefined) {
@@ -479,6 +639,22 @@ export class DebugSession {
         }),
     };
   }
+}
+
+/** The variables an expression reads (call arguments too), as written. */
+function* refsOf(e: Expr): Generator<LRef> {
+  if (e.k === "ref") yield e.ref;
+  else if (e.k === "un") yield* refsOf(e.e);
+  else if (e.k === "bin") {
+    yield* refsOf(e.l);
+    yield* refsOf(e.r);
+  } else if (e.k === "call") for (const a of e.args) yield* refsOf(a.value);
+}
+
+/** A reference as SCL writes it: #a.b[1], "DB".x. */
+function refText(r: LRef): string {
+  const root = r.root.kind === "local" ? `#${r.root.name}` : r.root.kind === "global" ? `"${r.root.name}"` : r.root.name;
+  return root + r.path.map((p) => ("member" in p ? `.${p.member}` : "index" in p ? `[${p.index.map((x) => (x.k === "lit" ? String(x.value) : x.k === "ref" ? refText(x.ref) : "…")).join(",")}]` : "slice" in p ? `.%${p.slice}${p.n}` : "^")).join("");
 }
 
 const shown = (v: unknown) => (typeof v === "number" && !Number.isInteger(v) ? realText(v) : JSON.stringify(v));

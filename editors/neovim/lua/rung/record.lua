@@ -80,7 +80,7 @@ local function pick(title, items, done)
   end
   render()
   local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor", style = "minimal", border = "rounded", title = " " .. title .. " ", footer = " <Space> pick · <CR> write · q cancel ",
+    relative = "editor", style = "minimal", border = "rounded", title = " " .. title .. " ", footer = " <Space> pick · a all · <CR> write · q cancel ",
     width = math.min(width, vim.o.columns - 4), height = math.min(#items, vim.o.lines - 6),
     row = math.floor((vim.o.lines - #items) / 3), col = math.floor((vim.o.columns - width) / 2),
   })
@@ -94,6 +94,12 @@ local function pick(title, items, done)
     render()
   end
   for _, k in ipairs({ "<Space>", "x" }) do vim.keymap.set("n", k, toggle, { buffer = buf, nowait = true }) end
+  -- a: all picked, or none when all are
+  vim.keymap.set("n", "a", function()
+    local all = vim.iter(items):all(function(i) return i.on end)
+    for _, i in ipairs(items) do i.on = not all end
+    render()
+  end, { buffer = buf, nowait = true })
   vim.keymap.set("n", "<CR>", function() close(vim.tbl_filter(function(i) return i.on end, items)) end, { buffer = buf, nowait = true })
   for _, k in ipairs({ "q", "<Esc>" }) do vim.keymap.set("n", k, function() close(nil) end, { buffer = buf, nowait = true }) end
   return buf, win
@@ -107,7 +113,10 @@ function M.record(buf, choose, cb)
     vim.notify("rung: open a test file under tests/ (….test.yaml)", vim.log.levels.WARN)
     return
   end
-  if vim.bo[buf].modified then vim.api.nvim_buf_call(buf, function() vim.cmd("silent write") end) end
+  if vim.bo[buf].modified then
+    vim.api.nvim_buf_call(buf, function() vim.cmd("silent write") end)
+    vim.notify("rung: saved " .. vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":t") .. ": the case runs from the file")
+  end
   local file, why = lsp.request(buf, "rung/testModel", { textDocument = { uri = vim.uri_from_bufnr(buf) } })
   if not file then
     vim.notify("rung: " .. tostring(why), vim.log.levels.WARN)

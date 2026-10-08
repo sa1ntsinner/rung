@@ -35,7 +35,7 @@ const DETAIL: Record<string, string> = {
   state: "only say whether the PLC is online", hw: "download the hardware configuration too", "no-hw": "software only",
   "no-sw": "hardware only", "all-blocks": "download every block, not only the changed ones", allow: "a TIA question download may answer yes (e.g. stop-cpu, reset-module)",
   "no-start": "leave the CPU stopped afterwards", yes: "skip the typed confirmation (scripts; never for agents)",
-  junit: "write a JUnit report (CI)", coverage: "write which SCL lines ran, as lcov (CI, editors)", observe: "with --json: the block's values after each step that runs cycles (record to test)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
+  junit: "write a JUnit report (CI)", check: "only list what would change; exit 1 when something would", coverage: "write which SCL lines ran, as lcov (CI, editors)", observe: "with --json: the block's values after each step that runs cycles (record to test)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
   agents: "claude, codex, cursor, gemini, opencode, copilot, zed", editors: "vscode, zed, neovim", skills: "which PLC engineering skills to copy",
   platforms: "tia, twincat, codesys", offline: "from the files only, no TIA Portal", fixture: "against the generated test fixture project",
   grant: "let your user update the whitelist later without administrator rights", stdio: "speak LSP on stdin/stdout",

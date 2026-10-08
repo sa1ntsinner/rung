@@ -199,6 +199,8 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
     stepOut: () => void later(() => step((d) => d.stepOut())),
     stepBack: () => void later(() => step((d) => d.stepBack())),
     reverseContinue: () => void later(() => step((d) => d.reverseContinue())),
+    // why a value is what it is: the write, its operands then and why, the branch that ran (rung's own request)
+    rungWhy: (a) => session!.why(String(a.expression), Number(a.frameId ?? 0), Math.min(6, Math.max(1, Number(a.depth ?? 3)))),
     // a run takes milliseconds: there is nothing running to pause
     pause: () => undefined,
     terminate: () => void later(() => event("terminated")),

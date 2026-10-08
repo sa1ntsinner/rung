@@ -172,6 +172,54 @@ describe("rung debug sessions", () => {
     expect(await c.start(false)).toMatchObject({ kind: "stopped", text: expect.stringMatching(/^breakpoint condition #nosuch > 1: /) });
   });
 
+  it("explains why a value is what it is: the write, its operands then, the branch that ran", async () => {
+    const d = new DebugSession(index(), "t.yaml", MOTOR, 0);
+    d.breakpoints = [{ uri: MOTOR_URI, line: 27 }];
+    await d.start(false); // cycle 3: Stop pressed, before the ELSE branch's statement runs
+    const tree = await d.why("Running");
+    const show = (n: import("../src/index.js").WhyNode, pad = ""): string[] => [`${pad}${n.kind}: ${n.text}${n.value !== undefined ? ` = ${n.value}` : ""}${n.at ? ` @${n.at.line} t=${n.at.time}` : ""}`, ...n.children.flatMap((c) => show(c, pad + "  "))];
+    expect(show(tree)).toEqual([
+      "value: #Running = FALSE",
+      "  write: #Running := #Latch; @23 t=30",
+      "    value: #Latch = FALSE",
+      "      write: #Latch := (#Start OR #Latch) AND NOT #Stop; @22 t=30",
+      "        value: #Start = FALSE",
+      "          note: not written by the code before this point: an input the test sets, its start value, or written inside a call (a timer's Q, an FB's output)",
+      "        value: #Latch = TRUE",
+      "          write: #Latch := (#Start OR #Latch) AND NOT #Stop; @22 t=20",
+      "            value: #Start = FALSE",
+      "            value: #Latch = TRUE",
+      "            value: #Stop = FALSE",
+      "        value: #Stop = TRUE",
+      "          note: not written by the code before this point: an input the test sets, its start value, or written inside a call (a timer's Q, an FB's output)",
+    ]);
+    const out = await d.why("#SpeedOut", 0, 1);
+    expect(show(out)).toEqual([
+      "value: #SpeedOut = 1500",
+      "  write: #SpeedOut := LIMIT(MN := 0.0, IN := #SpeedSetpoint, MX := 3000.0); @25 t=20",
+      "    value: #SpeedSetpoint = 1500",
+      "    condition: IF #Running THEN = TRUE",
+      "      value: #Running = TRUE",
+    ]);
+    expect(d.frames()[0]!.line).toBe(27); // the debugger did not move
+  });
+
+  it("explains a member written by a copy of its whole structure, and a FOR counter", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set(
+      "file:///w/plc/P/blocks/Fb_Copy.scl",
+      'FUNCTION_BLOCK "Fb_Copy"\nVAR_INPUT\n  a : Int;\nEND_VAR\nVAR\n  st : Struct\n    m : Int;\n  END_STRUCT;\n  st2 : Struct\n    m : Int;\n  END_STRUCT;\n  i : Int;\n  sum : Int;\nEND_VAR\nBEGIN\n  #st.m := #a;\n  #st2 := #st;\n  FOR #i := 1 TO 3 DO\n    #sum := #sum + #i;\n  END_FOR;\n  ;\nEND_FUNCTION_BLOCK\n',
+      0,
+    );
+    const d = new DebugSession(idx, "c.yaml", "block: Fb_Copy\ncases:\n  - name: c\n    steps:\n      - set: { a: 3 }\n      - cycle: 1\n", 0);
+    d.breakpoints = [{ uri: "file:///w/plc/P/blocks/Fb_Copy.scl", line: 21 }];
+    await d.start(false);
+    const st = await d.why("#st2.m", 0, 2);
+    expect(st.children[0]).toMatchObject({ kind: "write", text: "#st2 := #st;   (all of #st2)" });
+    const i = await d.why("#i", 0, 1);
+    expect(i.children[0]).toMatchObject({ kind: "write", text: "FOR #i := 1 TO 3 DO" });
+  });
+
   it("reverse continue honours conditions in one pass", async () => {
     const d = new DebugSession(index(), "t.yaml", MOTOR, 0);
     d.breakpoints = [{ uri: MOTOR_URI, line: 22 }];

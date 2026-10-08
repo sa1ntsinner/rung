@@ -31,6 +31,8 @@ export interface TestFailure {
   actual: unknown;
   /** Line of the step in the test file (from 1). */
   line?: number;
+  /** A temporal expectation's account: "within 2s: not reached", "always for 5s: broken after 1.2 s". */
+  note?: string;
 }
 
 export interface CaseResult {
@@ -77,7 +79,12 @@ interface TestFile {
 }
 
 /** Keys of a step run in this order when one step has several (`{ set: ..., cycle: 1, expect: ... }`). */
-const STEP_ORDER = ["set", "cycle", "advance", "expect"] as const;
+/** within / always / never: the step's expect checked after every cycle for that time (temporal expectations). */
+const TEMPORAL = ["within", "always", "never"] as const;
+const STEP_ORDER = ["set", "cycle", "advance", ...TEMPORAL, "expect"] as const;
+
+/** A time span as people say it: 350 ms, 1.2 s. */
+const elapsed = (ms: number) => (ms < 1000 ? `${ms} ms` : `${Number((ms / 1000).toFixed(3))} s`);
 /** The cycles one step may run: a typo like advance: 1000d (or .inf) is refused instead of running for hours. */
 const MAX_STEP_CYCLES = 10_000_000;
 
@@ -605,6 +612,23 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       if (n > MAX_STEP_CYCLES) throw new SimError(`advance: ${String(v)} is ${n} cycles of ${cycleMs}ms; a step runs at most ${MAX_STEP_CYCLES} (for long times, set a longer cycle: at the top of the file)`);
       return n;
     };
+    /** What an expect: finds now: a failure for every name whose value is not the one expected. */
+    const expectNow = (arg: Record<string, unknown>, si: number): TestFailure[] => {
+      const out: TestFailure[] = [];
+      for (const [k, v] of Object.entries(arg)) {
+        let target: ReturnType<typeof resolve>;
+        try {
+          target = resolve(k, "expect");
+        } catch (e) {
+          throw hinted(e, index, g, k, "expect");
+        }
+        const actual = target.get();
+        if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
+        const expected = normalizeExpected(v, target.decl?.type);
+        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : actual });
+      }
+      return out;
+    };
     const observed: NonNullable<CaseResult["observed"]> = [];
     const observe = (step: number) => {
       const values: Record<string, boolean | number | string> = {};
@@ -649,7 +673,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         current = si + 1;
         hooks.step?.(current);
         const unknown = Object.keys(step ?? {}).find((k) => !(STEP_ORDER as readonly string[]).includes(k));
-        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect)`);
+        if (unknown !== undefined || !step || !Object.keys(step).length) throw new SimError(`unknown step "${unknown ?? ""}" (use set, cycle, advance, expect, within, always, never)`);
         for (const op of STEP_ORDER) {
           if (!(op in step)) continue;
           const arg = step[op];
@@ -687,23 +711,41 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               for (let n = 0, max = advanceCycles(arg); n < max; n++) runCycle();
               break;
             }
-            case "expect":
-              for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
-                let target: ReturnType<typeof resolve>;
-                try {
-                  target = resolve(k, "expect");
-                } catch (e) {
-                  throw hinted(e, index, g, k, "expect");
+            case "within":
+            case "always":
+            case "never": {
+              if (!("expect" in step)) throw new SimError(`${op}: name what to check with expect:, e.g. { ${op}: 2s, expect: { Motor: true } }`);
+              if (TEMPORAL.filter((k) => k in step).length > 1) throw new SimError("a step has one of within, always and never");
+              if (!plain(step.expect)) throw new SimError("expect: write names and values, e.g. { Raw: 1 }");
+              const n = advanceCycles(arg);
+              const span = String(arg);
+              let last: TestFailure[] = [];
+              let done = false;
+              for (let i = 1; i <= n && !done; i++) {
+                runCycle();
+                const now = expectNow(step.expect as Record<string, unknown>, si);
+                const after = elapsed(i * cycleMs);
+                if (op === "within" && !now.length) done = true;
+                else if (op === "always" && now.length) {
+                  failures.push(...now.map((f) => ({ ...f, note: `always for ${span}: broken after ${after}` })));
+                  done = true;
+                } else if (op === "never" && !now.length) {
+                  // what it should never be, it was
+                  for (const [k, v] of Object.entries(step.expect as Record<string, unknown>)) failures.push({ step: si + 1, name: k, expected: `never ${shown(v)}`, actual: v, note: `never for ${span}: happened after ${after}` });
+                  done = true;
                 }
-                const actual = target.get();
-                if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
-                const expected = normalizeExpected(v, target.decl?.type);
-                if (!approx(actual, expected)) failures.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : actual });
+                last = now;
               }
+              if (op === "within" && !done) failures.push(...last.map((f) => ({ ...f, note: `within ${span}: not reached` })));
+              break;
+            }
+            case "expect":
+              if (TEMPORAL.some((k) => k in step)) break; // checked every cycle above
+              failures.push(...expectNow(arg as Record<string, unknown>, si));
               break;
           }
         }
-        if (hooks.observe && ("cycle" in step || "advance" in step)) observe(si + 1);
+        if (hooks.observe && ["cycle", "advance", ...TEMPORAL].some((k) => k in step)) observe(si + 1);
       }
       results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0, ...(hooks.observe ? { observed } : {}) });
     } catch (err) {

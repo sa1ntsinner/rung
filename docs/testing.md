@@ -45,6 +45,18 @@ cases:
 - For an FC, the return value is expected under the block's own name; IN_OUT parameters keep the value the FC wrote, like the caller's variable would.
 - A case that stops with an error (a misspelt name in a `set`, an instruction the simulator refuses) says in which step: `step 2: Strat does not exist (did you mean Start?)`. `--json` gives that step and its line as `errorStep` and `errorLine`, so editors and GitHub annotations point at the step, not at the case. File-level YAML errors carry `errorLine` and `errorColumn` when the parser can place them.
 
+## Over time: within, always, never
+
+A machine's promises are about time: the motor runs no later than 2 s after start, the alarm holds for 5 s, the valve never opens while stopped. A step with `within`, `always` or `never` checks its `expect:` after every cycle for that long:
+
+```yaml
+      - { within: 2s, expect: { Motor: true } }      # true at some cycle within 2 s (then the next step)
+      - { always: 5s, expect: { Alarm: true } }      # true after every cycle for 5 s
+      - { never: 3s, expect: { Valve: true } }       # not once in 3 s
+```
+
+A broken promise says when: `step 4: Fault expected true got false (within 1s: not reached)`, `(always for 3s: broken after 2.01 s)`, `(never for 3s: happened after 2.01 s)`. `within` ends its step as soon as the expectation holds, so the next step starts from that cycle.
+
 ## Stubs
 
 What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. Before running a file, rung lists the missing stubs in its block’s call graph, including calls through other workspace blocks; a stubbed block ends that search. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:
@@ -83,6 +95,8 @@ cases:
 ## Debugging a case
 
 A case runs in the debugger like a program: breakpoints in the SCL blocks it calls (with conditions such as `#speed > 100`), step over, into and out of calls, the block's variables and the data blocks, and expressions in the Debug Console. A value changed while stopped stays changed when you step on. A case that fails stops before it ends, with the reason: where the failed expectation's values are (after the cycles before its step), or at the statement that raised an error. A breakpoint on a line without a statement (`ELSE`, `END_IF`) moves to the next statement; one on a declaration is marked as not stopping. Values set while stopped are checked like a test's `set:` (a number out of range, text into a number, a whole structure are refused). In VS Code, *Debug Test* in the test explorer (or the gutter of a case) starts it; `rung debug` is the Debug Adapter Protocol server behind it, for nvim-dap and other editors (launch with `test`, `case` from 0, `stopOnEntry`).
+
+**Why?** While stopped, right-click a variable (or select a name in the code) and pick *Why?*: rung shows the statement that last wrote it, with the time of that cycle, the values its operands had just before it ran (each explained in turn, three levels deep), and the IF or CASE branch that made it run, with that condition's value. A value no statement wrote says so: an input the test set, a start value, or something a call wrote inside. The writes are found by where the value lives, so `"Pump_DB".Running` and `#Running` inside the FB are the same value. In Neovim: `:Rung why`.
 
 Stepping goes backwards too: *Step Back* and *Reverse Continue*. A case is deterministic (its inputs come from the steps, its time from its cycles), so rung runs it again from the start to the statement before. *Step Out* in the block the test calls goes on to its next cycle. While stopped, the values of `#names` show next to the code, and the stopped event shows the virtual time of the cycle. LAD/FBD networks run without stopping inside them.
 ## Recording expectations

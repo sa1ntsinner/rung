@@ -42,6 +42,26 @@ describe("owner IPC", () => {
     expect(existsSync(join(root, ".rung", "owner.json"))).toBe(false);
   });
 
+  it("replays the last passes' reports, with their times, to a subscriber that asks", async () => {
+    const root = ws();
+    const server = await OwnerServer.start(root, {});
+    server.emit("phase", { phase: "sending" }); // a moment, not history
+    server.emit("report", { imported: 1 });
+    const info = JSON.parse(readFileSync(join(root, ".rung", "owner.json"), "utf8")) as { pipe: string; token: string };
+    const { connect } = await import("node:net");
+    const sock = connect(info.pipe);
+    let got = "";
+    sock.on("data", (d) => (got += d.toString()));
+    sock.write(JSON.stringify({ id: 1, token: info.token, method: "subscribe", params: { replay: true } }) + "\n");
+    await until(() => got.split("\n").filter(Boolean).length >= 2);
+    const [reply, replayed] = got.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    expect(reply).toMatchObject({ id: 1, result: { subscribed: true } });
+    expect(replayed).toMatchObject({ event: "report", params: { imported: 1 }, replay: true });
+    expect(typeof replayed.at).toBe("number");
+    sock.destroy();
+    await server.close();
+  });
+
   it("rejects a wrong token", async () => {
     const root = ws();
     const server = await OwnerServer.start(root, { status: async () => ({}) });

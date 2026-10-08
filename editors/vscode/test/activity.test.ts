@@ -9,6 +9,14 @@ const on = { watching: true, writes: "on" as const, conflicts: 0 };
 const err = (path: string, code: string, message = "x", line?: number) => ({ address: `PLC_1/${objectName(path)}`, path, severity: "error", code, message, ...(line ? { line } : {}) });
 
 describe("the save loop as the editor shows it", () => {
+  it("names the PLC once the workspace has shown more than one", () => {
+    const a = new Activity(() => 0);
+    a.event("report", report({ imported: 1, changes: [{ path: "plc/PLC_1/blocks/FB_A.scl", action: "import" }] }));
+    expect(a.entries[0]!.label).toBe("FB_A sent to TIA Portal");
+    a.event("report", report({ imported: 2, changes: [{ path: "plc/PLC_1/blocks/FB_A.scl", action: "import" }, { path: "plc/Line%2F2/blocks/FB_A.scl", action: "import" }] }));
+    expect(a.entries.slice(0, 2).map((e) => e.label)).toEqual(["PLC_1 · FB_A sent to TIA Portal", "Line/2 · FB_A sent to TIA Portal"]);
+  });
+
   it("a save goes out, compiles and lands: one phrase per moment, and one line of history", () => {
     let now = 1000;
     const a = new Activity(() => now);

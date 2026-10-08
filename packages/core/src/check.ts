@@ -223,7 +223,7 @@ const INVENTORY_PS = `
 $ErrorActionPreference = 'SilentlyContinue'
 $keys = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
 $apps = Get-ItemProperty $keys | Where-Object { $_.DisplayName -match 'Totally Integrated Automation|PLCSIM|TwinCAT|Beckhoff|CODESYS' } | ForEach-Object { @{ name = [string]$_.DisplayName; version = [string]$_.DisplayVersion } }
-$api = @(Get-ChildItem 'C:\\Program Files\\Siemens\\Automation\\Portal V*\\PublicAPI\\V*\\Siemens.Engineering.dll' | ForEach-Object { $_.Directory.Name } | Sort-Object -Unique)
+$api = @(@(Get-ChildItem 'C:\\Program Files\\Siemens\\Automation\\Portal V*\\PublicAPI\\V*\\Siemens.Engineering.dll' | ForEach-Object { $_.Directory.Name }) + @(Get-ChildItem 'C:\\Program Files\\Siemens\\Automation\\Portal V*\\PublicAPI\\V*\\net48\\Siemens.Engineering.Base.dll' | ForEach-Object { $_.Directory.Parent.Name }) | Sort-Object -Unique)
 $groups = & "$env:SystemRoot\\System32\\whoami.exe" /groups 2>$null | Out-String
 $tc = $null; foreach ($d in 'C:\\TwinCAT\\3.1','C:\\Program Files (x86)\\Beckhoff\\TwinCAT\\3.1') { if (Test-Path $d) { $tc = $d; break } }
 $cs = @(Get-ChildItem 'C:\\Program Files\\CODESYS*\\CODESYS\\Common\\CODESYS.exe','C:\\Program Files (x86)\\CODESYS*\\CODESYS\\Common\\CODESYS.exe' | ForEach-Object { $_.Directory.Parent.Parent.Name })

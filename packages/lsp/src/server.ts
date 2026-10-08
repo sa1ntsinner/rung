@@ -8,6 +8,7 @@ import {
   CodeActionKind,
   createConnection,
   DiagnosticSeverity,
+  DiagnosticTag,
   DocumentSymbol,
   MarkupKind,
   MessageType,
@@ -29,6 +30,7 @@ import { WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
 import { ELEMENTARY_TYPES, STANDARD } from "./catalog.js";
 import { declarationModel } from "./declarations.js";
 import { semanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semantic.js";
+import { formatScl } from "./format.js";
 import { incomingCalls, outgoingCalls, prepareCallHierarchy, type HierarchyItem } from "./callHierarchy.js";
 import { planDeclarationEdit, type DeclOp } from "./declarationEdit.js";
 import { parsePastedRows } from "./declarationPaste.js";
@@ -49,7 +51,7 @@ import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
 
-const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
+const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information, hint: DiagnosticSeverity.Hint } as const;
 const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
   variable: CompletionItemKind.Variable,
   field: CompletionItemKind.Field,
@@ -113,7 +115,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   async function publish(uri: string) {
     const doc = index.docs.get(uri);
     if (!doc) return;
-    const items: LspDiagnostic[] = diagnostics(index, uri).map((d) => ({ range: range(uri, d.start, d.end), severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung" }));
+    const items: LspDiagnostic[] = diagnostics(index, uri).map((d) => ({ range: range(uri, d.start, d.end), severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung", ...(d.unnecessary ? { tags: [DiagnosticTag.Unnecessary] } : {}) }));
     // Compile/conflict diagnostics describe the file as synced; hide them while the buffer differs from disk.
     let onDisk = doc.text;
     try {
@@ -191,6 +193,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         workspaceSymbolProvider: true,
         foldingRangeProvider: true,
       callHierarchyProvider: true,
+      documentFormattingProvider: true,
       semanticTokensProvider: { legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [...TOKEN_MODIFIERS] }, full: true },
         inlayHintProvider: !!monitor,
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
@@ -541,6 +544,15 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.languages.callHierarchy.onOutgoingCalls((p) => {
     const it = p.item.data as HierarchyItem;
     return outgoingCalls(index, it).map((c) => ({ to: toItem(c.to), fromRanges: c.ranges.map((r) => lspRange(it.uri, r.start, r.end)) }));
+  });
+  // Format Document: SCL as TIA Portal writes it (format.ts); TwinCAT/IEC files and text with errors are left alone
+  connection.onDocumentFormatting((p) => {
+    const doc = documents.get(p.textDocument.uri);
+    if (!doc || !/\.scl$/i.test(p.textDocument.uri)) return [];
+    const text = doc.getText();
+    const formatted = formatScl(text);
+    if (formatted === undefined || formatted === text) return [];
+    return [{ range: { start: { line: 0, character: 0 }, end: doc.positionAt(text.length) }, newText: formatted }];
   });
   connection.onFoldingRanges((p) => {
     const doc = index.docs.get(p.textDocument.uri);

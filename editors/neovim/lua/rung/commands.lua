@@ -23,6 +23,7 @@ M.commands = {
   record = function() require("rung.record").record() end,
   coverage = function() require("rung.coverage").toggle() end,
   debug = function() require("rung.dap").debug_case() end,
+  why = function(rest) require("rung.why").ask(rest[1]) end,
 }
 
 function M.setup(cfg)
