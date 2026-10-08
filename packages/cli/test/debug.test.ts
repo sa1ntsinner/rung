@@ -89,6 +89,7 @@ describe("rung debug (DAP)", () => {
     await c.request("continue", { threadId: 1 });
     // the failed expectation stops first, where it shows
     expect((await c.eventOf("stopped")).body).toMatchObject({ reason: "exception", text: "step 6: Running expected true, got false" });
+    expect((await c.request("exceptionInfo", { threadId: 1 })).body).toMatchObject({ exceptionId: "expectation failed", description: "step 6: Running expected true, got false", breakMode: "always" });
     await c.request("continue", { threadId: 1 });
     const out = await c.eventOf("output");
     expect(out.body).toMatchObject({ category: "stderr" });

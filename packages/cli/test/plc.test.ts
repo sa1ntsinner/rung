@@ -321,3 +321,30 @@ describe("PLC commands", () => {
     expect(t.db().startArgs.at(-1)).not.toContain("--open-headless");
   });
 });
+
+describe("rung xref", () => {
+  it("lists TIA Portal's cross-reference by relation, with the workspace file of each object", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    t.patch({
+      xref: {
+        "plc:PLC_1/blocks/Fx_Motor": [
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", target: "plc:PLC_1/blocks/Fx_Motor", targetName: "Main", targetType: "OB", access: "Call", referenceType: "UsedBy", location: "@Main ▶ NW1" },
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", targetName: "Screen_1", targetType: "HMI screen", access: "Read", referenceType: "UsedBy", location: "@Screen_1 ▶ Button" },
+          { source: "plc:PLC_1/blocks/Fx_Motor", sourceName: "Fx_Motor", targetName: "LIMIT [V1.0]", targetType: "Instruction", access: "Call", referenceType: "Uses", location: "@Fx_Motor ▶ Program code" },
+        ],
+      },
+    });
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    const text = t.out.join("");
+    expect(text).toMatch(/used by:\n  Main +Call +OB  @Main ▶ NW1/);
+    expect(text).toMatch(/  Screen_1 +Read +HMI screen/);
+    expect(text).toMatch(/uses:\n  LIMIT \[V1\.0\] +Call/);
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl", "--json"])).toBe(0);
+    const j = JSON.parse(t.out.join("")) as { rows: { relation: string; name: string; path?: string }[] };
+    expect(j.rows.map((r) => [r.relation, r.name])).toEqual([["used by", "Main"], ["used by", "Screen_1"], ["uses", "LIMIT [V1.0]"]]);
+  });
+});

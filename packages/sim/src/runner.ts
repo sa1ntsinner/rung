@@ -140,6 +140,9 @@ export function checkKind(name: string, current: Value, value: Value) {
   if (typeof current !== typeof value) throw new SimError(`${name} expects ${kind(current)}, got ${shown(value)}`);
 }
 
+/** A simulator value as a test writes it: an array as its elements, a structure as its members. */
+const plainValue = (v: Value): unknown => (isArrayValue(v) ? v.items.map(plainValue) : v && typeof v === "object" && !("__ptr" in v) ? Object.fromEntries(Object.entries("__fb" in v ? (v as Instance).mem : (v as Struct)).map(([k, x]) => [k, plainValue(x)])) : v);
+
 const isTime = (type?: string) => /^(TIME|LTIME|S5TIME)$/i.test(type ?? "");
 const isReal = (type?: string) => /^REAL$/i.test(type ?? "");
 const shown = (v: unknown): string => v === undefined || v === null ? "no value" : JSON.stringify(v);
@@ -625,7 +628,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         const actual = target.get();
         if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
         const expected = normalizeExpected(v, target.decl?.type);
-        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : actual });
+        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
       }
       return out;
     };
@@ -717,12 +720,19 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               if (!("expect" in step)) throw new SimError(`${op}: name what to check with expect:, e.g. { ${op}: 2s, expect: { Motor: true } }`);
               if (TEMPORAL.filter((k) => k in step).length > 1) throw new SimError("a step has one of within, always and never");
               if (!plain(step.expect)) throw new SimError("expect: write names and values, e.g. { Raw: 1 }");
-              const n = advanceCycles(arg);
+              // the time as advance: reads it, its errors in this step's words
+              let n: number;
+              try {
+                n = toMs(arg) === 0 ? 0 : advanceCycles(arg);
+              } catch (e) {
+                throw e instanceof SimError ? new SimError(e.message.replace(/^advance:/, `${op}:`)) : e;
+              }
               const span = String(arg);
               let last: TestFailure[] = [];
               let done = false;
-              for (let i = 1; i <= n && !done; i++) {
-                runCycle();
+              // checked as it is now, then after every cycle of the span
+              for (let i = 0; i <= n && !done; i++) {
+                if (i > 0) runCycle();
                 const now = expectNow(step.expect as Record<string, unknown>, si);
                 const after = elapsed(i * cycleMs);
                 if (op === "within" && !now.length) done = true;
@@ -731,7 +741,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
                   done = true;
                 } else if (op === "never" && !now.length) {
                   // what it should never be, it was
-                  for (const [k, v] of Object.entries(step.expect as Record<string, unknown>)) failures.push({ step: si + 1, name: k, expected: `never ${shown(v)}`, actual: v, note: `never for ${span}: happened after ${after}` });
+                  for (const [k, v] of Object.entries(step.expect as Record<string, unknown>)) failures.push({ step: si + 1, name: k, expected: `not ${shown(v)}`, actual: v, note: `never for ${span}: it was, after ${after}` });
                   done = true;
                 }
                 last = now;

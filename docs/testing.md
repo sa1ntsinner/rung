@@ -57,6 +57,20 @@ A machine's promises are about time: the motor runs no later than 2 s after star
 
 A broken promise says when: `step 4: Fault expected true got false (within 1s: not reached)`, `(always for 3s: broken after 2.01 s)`, `(never for 3s: happened after 2.01 s)`. `within` ends its step as soon as the expectation holds, so the next step starts from that cycle.
 
+## What a change does to behaviour
+
+A text diff shows what changed in the code; `rung test --against <git revision>` shows what changed in what the program does. It runs today's tests on the code as it was at that revision and as it is now, and lists every case where the block's values after a step differ, with the first difference:
+
+```
+rung test --against main
+behaviour against main (5 cases):
+  tests/conveyor.test.yaml: a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)
+     step 8: Motor FALSE → TRUE (first of 2 differences)
+1 case behaves differently, 4 the same
+```
+
+`--json` gives every difference, for a pull request comment or a review page.
+
 ## Stubs
 
 What the simulator does not model (communication, diagnostics, data logging, motion, technology objects, a block the workspace does not have) stops a test with its name. Before running a file, rung lists the missing stubs in its block’s call graph, including calls through other workspace blocks; a stubbed block ends that search. A test can stand in for it with `stubs:`, a map from the name to the values its outputs start with:

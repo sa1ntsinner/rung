@@ -62,10 +62,13 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
   const pending: (() => unknown)[] = [];
   const later = (fn: () => unknown) => void pending.push(fn);
 
+  // why the last stop happened, for the editor's exception widget (a failed expectation, an error)
+  let lastStop: { reason: string; text?: string } | undefined;
   const report = (s: DebugState) => {
     handles = new Map();
     nextHandle = 1;
     if (s.kind === "stopped") {
+      lastStop = { reason: s.reason, ...(s.text ? { text: s.text } : {}) };
       event("stopped", { reason: s.reason, threadId: 1, allThreadsStopped: true, description: s.text ?? `t = ${s.time} ms`, ...(s.text ? { text: s.text } : {}) });
       return;
     }
@@ -131,6 +134,7 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
         supportsSetVariable: true,
         supportsEvaluateForHovers: true,
         supportsTerminateRequest: true,
+        supportsExceptionInfoRequest: true,
       };
     },
     launch: async (a) => {
@@ -201,6 +205,11 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
     reverseContinue: () => void later(() => step((d) => d.reverseContinue())),
     // why a value is what it is: the write, its operands then and why, the branch that ran (rung's own request)
     rungWhy: (a) => session!.why(String(a.expression), Number(a.frameId ?? 0), Math.min(6, Math.max(1, Number(a.depth ?? 3)))),
+    exceptionInfo: () => {
+      const failed = lastStop?.reason === "exception";
+      // a failed expectation reads "step N: Name expected …, got …"; anything else that stopped there is an error
+      return { exceptionId: failed ? (/^step \d+: \S+ expected .*, got /.test(lastStop?.text ?? "") ? "expectation failed" : "error") : "stopped", description: lastStop?.text ?? "", breakMode: "always" };
+    },
     // a run takes milliseconds: there is nothing running to pause
     pause: () => undefined,
     terminate: () => void later(() => event("terminated")),
@@ -243,6 +252,9 @@ export function startDebugAdapter(io: Io, input: Readable = process.stdin, outpu
         queue = queue.then(() => dispatch(msg));
       }
     });
+    // the editor went away: its pipe ends or closes (killed, crashed); either way this session is over
     input.on("end", () => done());
+    input.on("close", () => done());
+    input.on("error", () => done());
   });
 }

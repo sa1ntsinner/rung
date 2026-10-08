@@ -128,6 +128,9 @@ rl.on("line", (line) => {
       save(db);
       return reply({ device: p.device, state: db.online });
     }
+    case "xref.get":
+      // db.xref[address]: entries as the real bridge answers them; none otherwise
+      return reply((db.xref ?? {})[p.address] ?? []);
     case "plc.read":
       // db.values: expression -> value; one it does not have reads as an error, as CODESYS answers it
       if (db.online !== "Online") return fail("NOT_ONLINE", `${p.device} is not online; rung online first`);

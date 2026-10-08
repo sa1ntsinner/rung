@@ -45,12 +45,13 @@ args = ["mcp"]
 | `rung_compile` | compile objects (addresses or file paths) in TIA Portal |
 | `rung_explain` | an object's file, interface, status and users |
 | `rung_find_usages`, `rung_graph` | usages, callers/callees, impact, dependency paths |
+| `rung_xref` | TIA Portal's own cross-reference of an object: who uses it, HMI screens and alarms included (read-only) |
 | `rung_assignments` | the assignment list: inputs, outputs, bit memory, timers and counters in use, overlaps |
 | `rung_diff` | file vs. last synced TIA version |
 | `rung_list` | objects by status or folder |
 | `rung_rename` | rename in TIA Portal; the files that use it follow |
 | `rung_resolve`, `rung_confirm_delete` | conflict resolution, confirmed deletes |
-| `rung_test` | the unit tests on the offline simulator |
+| `rung_test` | the unit tests on the offline simulator; `observe` adds the block's values after each step, to write expectations from |
 | `rung_compare`, `rung_live_read` | the project against the PLC, live values (both read-only) |
 | `rung_check` | what is installed on the PC |
 | `rung_rules`, `rung_download_request` | safety rules; a download request for the person (the MCP server never downloads) |

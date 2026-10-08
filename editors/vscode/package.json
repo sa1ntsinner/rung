@@ -130,6 +130,12 @@
           "contextualTitle": "rung"
         },
         {
+          "id": "rung.live",
+          "name": "Live Values",
+          "when": "rung.workspace",
+          "icon": "$(pulse)"
+        },
+        {
           "id": "rung.environment",
           "name": "Environment",
           "icon": "media/rung.svg",
@@ -200,6 +206,10 @@
       {
         "view": "rung.why",
         "contents": "Why is a value what it is? Right-click a variable in Variables → **Why?**, or select a name in the code.\n[Why?…](command:rung.why)"
+      },
+      {
+        "view": "rung.live",
+        "contents": "Pin values from the PLC to watch them change side by side (read-only, through its Web API or rung simulate).\n[Pin a Value…](command:rung.live.add)"
       }
     ],
     "commands": [
@@ -572,6 +582,42 @@
         "command": "rung.why.open",
         "title": "Open Statement",
         "category": "rung"
+      },
+      {
+        "command": "rung.xref",
+        "title": "Cross-Reference in TIA Portal",
+        "category": "rung",
+        "icon": "$(references)"
+      },
+      {
+        "command": "rung.live.add",
+        "title": "Pin a Value",
+        "category": "rung",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rung.live.remove",
+        "title": "Unpin",
+        "category": "rung",
+        "icon": "$(close)"
+      },
+      {
+        "command": "rung.live.clear",
+        "title": "Unpin All",
+        "category": "rung",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "rung.live.pause",
+        "title": "Pause Live Values",
+        "category": "rung",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "rung.live.resume",
+        "title": "Resume Live Values",
+        "category": "rung",
+        "icon": "$(play)"
       }
     ],
     "menus": {
@@ -751,6 +797,22 @@
         {
           "command": "rung.why.open",
           "when": "false"
+        },
+        {
+          "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.live.remove",
+          "when": "false"
+        },
+        {
+          "command": "rung.live.pause",
+          "when": "false"
+        },
+        {
+          "command": "rung.live.resume",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -873,6 +935,26 @@
           "command": "rung.why",
           "when": "view == rung.why",
           "group": "navigation"
+        },
+        {
+          "command": "rung.live.add",
+          "when": "view == rung.live",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.live.pause",
+          "when": "view == rung.live && !rung.live.paused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.live.resume",
+          "when": "view == rung.live && rung.live.paused",
+          "group": "navigation@2"
+        },
+        {
+          "command": "rung.live.clear",
+          "when": "view == rung.live",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -1020,6 +1102,16 @@
           "command": "rung.download",
           "when": "view == rung.changes && viewItem == rung.compared",
           "group": "1_plc@2"
+        },
+        {
+          "command": "rung.xref",
+          "when": "view == rung.project && viewItem =~ /rung\\.object/",
+          "group": "2_inspect@3"
+        },
+        {
+          "command": "rung.live.remove",
+          "when": "view == rung.live && viewItem == rung.liveValue",
+          "group": "inline"
         }
       ],
       "editor/title": [
@@ -1104,6 +1196,16 @@
           "command": "rung.why",
           "when": "inDebugMode && debugType == rung && editorLangId == scl",
           "group": "rung@1"
+        },
+        {
+          "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.live.add",
+          "when": "rung.workspace && editorLangId == scl && editorHasSelection",
+          "group": "rung@4"
         }
       ],
       "explorer/context": [
@@ -1535,12 +1637,23 @@
           {
             "id": "test",
             "title": "Run the tests",
-            "description": "Run the YAML tests on the offline simulator.\n[Run all tests](command:rung.testAll)",
+            "description": "Run the YAML tests on the offline simulator, with coverage, and record what to expect.\n[Run all tests](command:rung.testAll)",
             "media": {
               "markdown": "media/walkthrough/test.md"
             },
             "completionEvents": [
               "onCommand:rung.testAll"
+            ]
+          },
+          {
+            "id": "debug",
+            "title": "Step through a test, ask why",
+            "description": "Debug a test case from the Testing view: breakpoints in SCL, stepping back, and Why? on any value.",
+            "media": {
+              "markdown": "media/walkthrough/debug.md"
+            },
+            "completionEvents": [
+              "onCommand:rung.why"
             ]
           },
           {

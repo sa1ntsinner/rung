@@ -11,8 +11,12 @@ SCL editing and TIA Portal sync for [rung](https://github.com/sa1ntsinner/rung).
 - **Status bar**: watching / idle / conflicts, and online PLCs. Click it for all rung actions.
 - **CodeLens** above each block header: Compile · Test · Open in TIA Portal. Editor title buttons do the same.
 - **Testing view**: the YAML tests (`tests/**/*.test.yaml`) and their cases, run on rung's offline simulator. A failed expectation shows on its step's line, expected and actual side by side.
+- **Live Values** in the rung sidebar: the values you pin (PLC tags, DB members), read twice a second while the view is open, each with its age and a short history line, read-only.
 - **Monitor Values** (the eye in the editor title): the values of the open block at the end of each line, read twice a second from the PLC's Web API or from `rung simulate`, read-only.
 - **Problems** from `rung compile`, with file and line.
+- **Debug Test** in the Testing view: breakpoints in SCL, step back, the block's variables, and **Why?** on any value (the statement that wrote it, its operands then, the branch that ran). **Run with Coverage**, **Record Expectations**.
+- **Changes** and **Activity** views: what a sync would do before it runs, and what the watch did (sends, compiles, refusals), with conflicts in VS Code's merge editor.
+- **Format Document** as TIA Portal writes SCL, TIA Portal's type rules while typing, semantic highlighting and the call hierarchy.
 
 ## Going online
 

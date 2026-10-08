@@ -21,6 +21,7 @@ import { interfacesCommand } from "./interfaces";
 import { pickUsages, whoWrites } from "./usages";
 import { createTest } from "./createTest";
 import { recordExpectations } from "./record";
+import { crossReference } from "./xref";
 import { newObjectCommand } from "./newObject";
 import type { UsagesView } from "../views/usagesView";
 import type { ChangesView } from "../views/changesView";
@@ -133,6 +134,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   // Insert in a table adds a row there; the webview also hands the key to VS Code, where it would switch the
   // text editor's overtype mode
   reg("rung.tableKey", () => undefined);
+  reg("rung.xref", (arg?: unknown) => crossReference(s.ws, s.cli, arg));
   reg("rung.test.record", (uri?: unknown, caseIndex?: unknown, stepIndex?: unknown) => recordExpectations(s.ws, s.cli, s.lsp, uri instanceof vscode.Uri ? uri : undefined, typeof caseIndex === "number" ? caseIndex : undefined, typeof stepIndex === "number" ? stepIndex : undefined));
   reg("rung.test.create", (uri?: unknown, position?: unknown) => createTest(s.lsp, s.ws, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined));
   reg("rung.usages.show", (uri, position, symbol) => {

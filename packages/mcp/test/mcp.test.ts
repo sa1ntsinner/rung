@@ -47,7 +47,7 @@ beforeAll(async () => {
 describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_rename", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test"]);
+    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_rename", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test", "rung_xref"]);
     expect(client.getInstructions()).toMatch(/Never download to a PLC/);
   });
 
@@ -100,6 +100,24 @@ describe("rung mcp", () => {
     expect(data.identical).toBe(2);
     expect(data.items[0]).toMatchObject({ state: "Different", file: "plc/PLC_1/blocks/Fx_Motor.scl" });
     expect(asked).toMatchObject({ device: "PLC_1" });
+  });
+
+  it("gives TIA Portal's cross-reference by relation for a file, a bare name or an absolute path", async () => {
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const xref = async (address: string) => [
+      { source: address, sourceName: "Fx_Motor", target: "plc:PLC_1/blocks/Fx_Motor", targetName: "Main", targetType: "OB", access: "Call", referenceType: "UsedBy", location: "@Main" },
+      { source: address, sourceName: "Fx_Motor", targetName: "Screen_1", targetType: "HMI screen", access: "Read", referenceType: "UsedBy" },
+    ];
+    await createMcpServer({ root, bridgeFactory: async () => ({ xref, close: async () => {} }) as never }).connect(a);
+    const c = new Client({ name: "test", version: "1" });
+    await c.connect(b);
+    for (const object of ["plc/PLC_1/blocks/Fx_Motor.scl", "Fx_Motor", join(root, "plc", "PLC_1", "blocks", "Fx_Motor.scl")]) {
+      const r = (await c.callTool({ name: "rung_xref", arguments: { object } })) as { content: { text: string }[]; isError?: boolean };
+      expect(r.isError, r.content[0]!.text).toBeFalsy();
+      const data = JSON.parse(r.content[0]!.text) as { address: string; rows: { relation: string; name: string; file?: string }[] };
+      expect(data.address).toBe("plc:PLC_1/blocks/Fx_Motor");
+      expect(data.rows.map((x) => [x.relation, x.name])).toEqual([["used by", "Main"], ["used by", "Screen_1"]]);
+    }
   });
 
   it("refuses to sync or compile without an owner or bridge, and never downloads", async () => {

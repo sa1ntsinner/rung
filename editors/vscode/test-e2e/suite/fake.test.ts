@@ -968,6 +968,59 @@ describe("rung extension on a fake-bridge workspace", function () {
       }
     });
 
+    it("Live Values reads pinned values from a virtual PLC while the view is open", async () => {
+      const db = file("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Pump_DB.db");
+      writeFileSync(db.fsPath, 'DATA_BLOCK "Fx_Pump_DB"\nVERSION : 0.1\nNON_RETAIN\n"Fx_Pump"\n\nBEGIN\n\nEND_DATA_BLOCK\n');
+      const tomlPath = join(root(), "rung.toml");
+      const toml = readFileSync(tomlPath, "utf8");
+      const inv = api.cli.invocation(["simulate", "--address", "127.0.0.1", "--port", "0", "--cycle", "20"]);
+      const sim = spawn(inv.file, inv.args, { cwd: root(), windowsHide: true, windowsVerbatimArguments: inv.shell });
+      let simOut = "";
+      sim.stdout.on("data", (d: Buffer) => (simOut += d.toString()));
+      sim.stderr.on("data", (d: Buffer) => (simOut += d.toString()));
+      const name = '"Fx_Pump_DB".running';
+      try {
+        const url = await waitFor("rung simulate to listen", () => /virtual PLC at (http:\/\/\S+)/.exec(simOut)?.[1], 30_000);
+        writeFileSync(tomlPath, `${toml}\n[live.webapi]\nurl = "${url}"\nuser = "any"\n`);
+        process.env.RUNG_WEBAPI_PASSWORD = "x";
+        await vscode.commands.executeCommand("rung.live.focus");
+        await api.live.add(name);
+        assert.deepEqual(api.live.pinned, [name]);
+        await waitFor("a value read", () => api.live.seen.get(name)?.value === true || undefined, 30_000, 200); // Main calls "Fx_Pump_DB"(start := TRUE)
+      } finally {
+        await vscode.commands.executeCommand("rung.live.clear");
+        delete process.env.RUNG_WEBAPI_PASSWORD;
+        writeFileSync(tomlPath, toml);
+        if (process.platform === "win32" && sim.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(sim.pid)], { windowsHide: true });
+        else sim.kill();
+        await vscode.workspace.fs.delete(db).then(undefined, () => {});
+      }
+    });
+
+    it("Cross-Reference in TIA Portal lists who uses a block and what it uses", async () => {
+      const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
+      patchFake({
+        xref: {
+          "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump": [
+            { source: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", sourceName: "Fx_Pump", target: "plc:PLC_1/blocks/Main", targetName: "Main", targetType: "OB", access: "Call", referenceType: "UsedBy", location: "@Main ▶ Program code" },
+            { source: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", sourceName: "Fx_Pump", targetName: "Screen_1", targetType: "HMI screen", access: "Read", referenceType: "UsedBy" },
+          ],
+        },
+      });
+      let shown: string[] = [];
+      d.pick((items) => {
+        shown = items.map((i) => (i.kind === vscode.QuickPickItemKind.Separator ? `-- ${i.label}` : `${i.label} | ${i.description}`));
+        return undefined;
+      });
+      try {
+        const rows = await vscode.commands.executeCommand<{ name: string }[]>("rung.xref", pump);
+        assert.deepEqual(rows?.map((r) => r.name), ["Main", "Screen_1"]);
+        assert.deepEqual(shown, ["-- Used by", "Main | Call · OB", "Screen_1 | Read · HMI screen"]);
+      } finally {
+        d.reset();
+      }
+    });
+
     it("colours SCL names by what they are (semantic tokens)", async () => {
       const ed = await openDoc(PUMP);
       const tokens = await waitFor("semantic tokens", async () => {

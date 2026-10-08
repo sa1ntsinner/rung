@@ -24,6 +24,8 @@ M.commands = {
   coverage = function() require("rung.coverage").toggle() end,
   debug = function() require("rung.dap").debug_case() end,
   why = function(rest) require("rung.why").ask(rest[1]) end,
+  xref = function() require("rung.xref").show() end,
+  live = function(rest) require("rung.live").command(rest) end,
 }
 
 function M.setup(cfg)

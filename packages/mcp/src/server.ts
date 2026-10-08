@@ -14,7 +14,7 @@ import { WorkspaceIndex, assignmentList, nearest, diagnostics as parseDiagnostic
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient, plainHttpRefusal } from "@rung/live";
 import { runTests } from "@rung/sim";
-import type { CompareOutcome, ConnectionTarget } from "@rung/bridge-client";
+import type { CompareOutcome, ConnectionTarget, XRefEntry } from "@rung/bridge-client";
 import { handover } from "./handover.js";
 
 export interface McpContext {
@@ -23,7 +23,7 @@ export interface McpContext {
   env?: Record<string, string | undefined>;
   /** Starts a bridge for one-off operations when no `rung watch` owner is running. */
   bridgeFactory?: () => Promise<
-    SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown>; compare?(device: string, target?: ConnectionTarget): Promise<CompareOutcome> }
+    SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown>; compare?(device: string, target?: ConnectionTarget): Promise<CompareOutcome>; xref?(address: string): Promise<XRefEntry[]> }
   >;
   /** Whether the bridge is in the Openness whitelist (the CLI knows where the bridge is). */
   bridgeWhitelisted?: () => Promise<"ok" | "missing" | "stale" | "unknown">;
@@ -526,16 +526,48 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_test",
-    { description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed.", inputSchema: { filter: z.string().optional() } },
-    async ({ filter }) => {
+    { description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs; { within: 2s, expect: … }, always, never for timing) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed. observe: true adds the block's outputs and statics after every step that runs cycles (to write expectations from; check them with the person before they become a test).", inputSchema: { filter: z.string().optional(), observe: z.boolean().optional() } },
+    async ({ filter, observe }) => {
       const { index } = await model();
-      const results = await runTests(ctx.root, index, filter);
+      const results = await runTests(ctx.root, index, filter, undefined, observe ? { observe: true } : {});
       if (!results.length && filter) {
         const all = (await runTests(ctx.root, index)).length;
         if (all) return text(`No tests match "${filter}" (by file path, block name or case name); tests/**/*.test.yaml has ${all} file${all === 1 ? "" : "s"}.`);
       }
       if (!results.length) return text("No tests found. Add tests/<name>.test.yaml (see rung docs: block, cases, steps set/cycle/advance/expect).");
       return json(results);
+    },
+  );
+
+  server.registerTool(
+    "rung_xref",
+    { description: "TIA Portal's own cross-reference of an object (read-only): who uses it and what it uses, including what the files cannot show (HMI screens, alarms, technology objects, address overlaps). Give a workspace file (plc/PLC_1/blocks/FB_Motor.scl) or an address (plc:PLC_1/blocks/FB_Motor). Needs TIA Portal: through the running rung watch, else a bridge.", inputSchema: { object: z.string() } },
+    async ({ object }) => {
+      const none = noWorkspace();
+      if (none) return none;
+      const states = await stateSnapshot(ctx.root);
+      const root = ctx.root.replace(/\\/g, "/").replace(/\/$/, "");
+      let rel = object.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (rel.toLowerCase().startsWith(root.toLowerCase() + "/")) rel = rel.slice(root.length + 1); // an absolute path of the workspace
+      const bare = rel.replace(/^"|"$/g, "").toLowerCase();
+      const address = /^[a-z]+:/i.test(rel) && !/^[a-z]:\//i.test(rel) ? rel : (states.find((s) => s.path === rel) ?? states.find((s) => s.address.toLowerCase().endsWith("/" + bare)))?.address;
+      if (!address) return fail(`${object} is not a mirrored object (give its file under plc/ or its address, as rung_list shows them)`);
+      const relation: Record<string, string> = { UsedBy: "used by", TypeInstance: "used by", Defines: "used by", GroupMember: "used by", Uses: "uses", InstanceType: "uses", DefinedBy: "uses", MemberGroup: "uses", Assigns: "uses", OverlapsWith: "overlaps" };
+      const owner = await OwnerClient.connect(ctx.root);
+      let b: Awaited<ReturnType<NonNullable<typeof ctx.bridgeFactory>>> | undefined;
+      try {
+        if (!owner) b = await ctx.bridgeFactory?.().catch(() => undefined);
+        if (!owner && !b) return fail("No rung watch is running and no bridge could start (TIA Portal and its Openness are needed for the cross-reference).");
+        if (!owner && !b!.xref) return fail("This bridge has no cross-reference.");
+        const entries: XRefEntry[] = owner ? await owner.request<XRefEntry[]>("xref", { address }) : await b!.xref!(address);
+        return json({
+          address,
+          rows: entries.map((e) => ({ relation: relation[e.referenceType] ?? "related", name: e.targetName, type: e.targetType, access: e.access, ...(e.location ? { location: e.location } : {}), ...(e.target ? { file: states.find((s) => s.address === e.target)?.path } : {}) })),
+        });
+      } finally {
+        owner?.close();
+        await b?.close();
+      }
     },
   );
 

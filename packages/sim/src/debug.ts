@@ -512,12 +512,14 @@ export class DebugSession {
     let step = 0;
     let top: Frame | undefined;
     let lastTop = 0;
+    let reached = false;
     const from = this.at;
     const trace: Entry[] = [];
     this.note = undefined;
     const r = await runTestFile(this.index, this.file, this.text, this.caseIndex, {
       step: (i) => {
         step = i;
+        if (i === beforeStep) reached = true;
         // the values the failed expectation saw: after the last statement of the tested block before its step
         if (beforeStep !== undefined && i === beforeStep && top && lastTop > from) {
           paused = true;
@@ -549,6 +551,12 @@ export class DebugSession {
       },
     });
     this.trace = trace;
+    // the case ended before the step to stop at (a temporal step that broke in the last step): stop at its end
+    if (!paused && beforeStep !== undefined && !reached && top && lastTop > from) {
+      paused = true;
+      this.at = lastTop;
+      this.stack = [top];
+    }
     if (paused) {
       const text = this.note;
       return { kind: "stopped", reason, frames: this.frames(), time: this.sim!.time, ...(text ? { text } : {}) };
@@ -557,7 +565,9 @@ export class DebugSession {
     const failure = result?.failures[0];
     if (failure && beforeStep === undefined) {
       // a failed expectation stops once, on the way there, where its values are
-      const s = await this.run(() => false, "exception", failure.step);
+      // a temporal expectation (within, always, never) broke at a cycle inside its step: the step ends there, so
+      // the values it saw are those before the next step
+      const s = await this.run(() => false, "exception", failure.note ? failure.step + 1 : failure.step);
       if (s.kind === "stopped") return { ...s, text: `step ${failure.step}: ${failure.name} expected ${shown(failure.expected)}, got ${shown(failure.actual)}${failure.note ? ` (${failure.note})` : ""}` };
       return s;
     }

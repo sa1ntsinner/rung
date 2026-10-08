@@ -5,6 +5,7 @@
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import type { RungCli } from "./runner/cli";
+import { killTree } from "./runner/terminal";
 import type { RungWorkspace } from "./workspace";
 
 class RungDebugAdapter implements vscode.DebugAdapter {
@@ -46,7 +47,7 @@ class RungDebugAdapter implements vscode.DebugAdapter {
   }
 
   dispose(): void {
-    this.child.kill();
+    killTree(this.child); // through the rung.cmd shim rung debug is a child of cmd.exe
     this.sent.dispose();
   }
 }

@@ -32,6 +32,7 @@ import { ChangesView } from "./views/changesView";
 import { registerTests } from "./testing";
 import { registerDebug } from "./debug";
 import { WhyView } from "./views/whyView";
+import { LiveView } from "./views/liveView";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -66,6 +67,7 @@ export interface RungExtensionApi {
   testTables: typeof TestTableEditor.tables;
   tests: () => RungTests | undefined;
   why: import("./views/whyView").WhyView;
+  live: import("./views/liveView").LiveView;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<RungExtensionApi> {
@@ -80,7 +82,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
   registerDebug(context, ws, cli);
   const why = new WhyView();
-  context.subscriptions.push(why);
+  const live = new LiveView(ws, cli, context.workspaceState);
+  context.subscriptions.push(why, live);
 
   await ws.start(context.workspaceState);
   context.subscriptions.push(
@@ -223,7 +226,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   if (readSettings().autoStartWatch && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why, live };
 }
 
 export async function deactivate(): Promise<void> {

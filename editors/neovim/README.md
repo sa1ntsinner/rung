@@ -34,6 +34,8 @@ tree-sitter grammar in `grammars/tree-sitter-scl` ([editors](../../docs/editors/
 | `:Rung coverage` | runs all tests with coverage and marks each executable SCL line in the sign column (green ran, red never ran); again clears it |
 | `:Rung debug` | debugs the case under the cursor with nvim-dap: breakpoints in SCL, stepping, `dap.step_back()`, `dap.reverse_continue()`, variables, the REPL |
 | `:Rung why [name]` | while debugging: why the value under the cursor is what it is: the statement that wrote it, its operands then, the branch that ran; `<CR>` opens a statement |
+| `:Rung live` / `:Rung live add <name>` | values pinned from the PLC (Web API or `rung simulate`) in a split, read twice a second while it is open, with their age and a short history; `dd` unpins, `q` closes |
+| `:Rung xref` | TIA Portal's cross-reference of the open block (who uses it, what it uses, HMI and alarms too) in the quickfix list |
 | `:Rung status` `pull` `sync` `preview` `watch` `compile` `compare` `online` `check` `test-all` | the CLI in a terminal split |
 | `:Rung download` | `rung download` in a terminal split: it asks for the PLC's name there, and shows TIA Portal's questions |
 
@@ -48,4 +50,5 @@ From this folder, with the CLI built (`npx tsc -b` at the repository root):
 ```
 nvim --headless --clean -l tests/smoke.lua
 NVIM_DAP=<clone of nvim-dap> nvim --headless --clean -l tests/dap.lua
+RUNG_LIVE_WS=<a workspace with a DB "Fx_Global"> nvim --headless --clean -l tests/live.lua
 ```

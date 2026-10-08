@@ -37,6 +37,8 @@ import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { startDebugAdapter } from "./debug.js";
 import { cmdFormat } from "./format.js";
+import { behaviourAgainst } from "./behaviour.js";
+import { cmdXref } from "./xref.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
@@ -54,6 +56,7 @@ Usage:
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
+  rung xref <file|address> [--json]    TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
@@ -70,9 +73,10 @@ Usage:
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
-  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
+  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
+  rung live watch <var>... [--interval 500] [--json]  these values every interval (read-only)
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
@@ -347,6 +351,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
   format: { options: ["check"], positionals: 1 },
+  xref: { options: ["json"], positionals: 1 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
@@ -358,7 +363,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   restore: { options: [], positionals: 1 },
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
-  test: { options: ["junit", "filter", "case", "json", "coverage", "observe"], positionals: 1 },
+  test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
   live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
@@ -429,6 +434,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         offline: { type: "boolean" },
         junit: { type: "string" },
         coverage: { type: "string" },
+        against: { type: "string" },
         observe: { type: "boolean" },
         filter: { type: "string" },
         case: { type: "string" },
@@ -507,6 +513,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   if (cmd === "debug") {
     await startDebugAdapter(io);
     process.stdin.destroy(); // the editor disconnected: nothing keeps rung debug alive
+    setTimeout(() => process.exit(0), 200).unref(); // and should anything still hold the process, it ends anyway
     return 0;
   }
   if (cmd === "lsp") {
@@ -524,6 +531,17 @@ export async function main(argv: string[], io: Io): Promise<number> {
         // --case tests/x.test.yaml#2: exactly that case (editors run the case under the cursor)
         const sel = v.case as string | undefined;
         const m = sel ? /^(.+)#(\d+)$/.exec(sel) : undefined;
+        // --against HEAD~1: the same scenarios on the code then and now; what behaves differently
+        if (v.against) {
+          try {
+            const b = await behaviourAgainst(ws, index, String(v.against), v.filter as string | undefined);
+            io.stdout(v.json ? JSON.stringify({ against: String(v.against), cases: b.cases, divergences: b.divergences }, null, 2) + "\n" : b.text);
+            return b.worse ? 2 : 0;
+          } catch (e) {
+            io.stderr(`rung: ${(e as Error).message}\n`);
+            return 1;
+          }
+        }
         const refused = sel && v.filter ? "give --case or --filter, not both" : sel && !m ? `--case ${sel}: write it as <test file>#<case number from 0>, e.g. tests/motor.test.yaml#0` : undefined;
         if (refused) {
           io.stderr(`rung: ${refused}\n`);
@@ -643,6 +661,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "xref":
+        return await cmdXref(target, !!v.json, io);
       case "format":
         return await cmdFormat(dir, !!v.check, io);
       case "check":
