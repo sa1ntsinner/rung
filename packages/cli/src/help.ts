@@ -3,7 +3,6 @@
 const EXAMPLES: Record<string, string> = {
   setup: "setup --dry-run", check: "check --json", init: "init --project Line.ap20",
   writes: "writes off", backup: "backup", pull: "pull", sync: "sync --preview", watch: "watch", status: "status",
-  session: "session --release --save",
   resolve: "resolve plc/PLC_1/blocks/Line/FB_Motor.scl --merged", restore: "restore plc/PLC_1/blocks/Line/FB_Motor.scl", "confirm-delete": "confirm-delete plc/PLC_1/blocks/FC_Old.scl",
   rename: "rename plc/PLC_1/blocks/Line/FB_Motor.scl FB_Drive", test: "test --filter Motor", live: "live read Start_PB",
   views: "views --offline", agents: "agents", mcp: "mcp", lsp: "lsp --stdio", doctor: "doctor --fixture",
@@ -14,14 +13,13 @@ const EXAMPLES: Record<string, string> = {
   bridge: "bridge --tia V20",
 };
 const VALUES: Record<string, string> = {
-  project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", coverage: "lcov file", filter: "text", case: "file#n", file: "file", plc: "name",
+  project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", filter: "text", case: "file#n", file: "file", plc: "name",
   allow: "answer", agents: "names", skills: "names", editors: "names", platforms: "names", scope: "project|global",
   address: "ip", port: "number", cycle: "ms", block: "name", use: "PG/PC interface", mode: "mode", number: "n", target: "interface",
   instance: "DB", interval: "ms", ip: "address", "from-plc": "ip", host: "user@windows-pc",
   args: "encoded arguments",
 };
 const DETAIL: Record<string, string> = {
-  release: "close the project only in rung's background keeper; stop watch on success", "session.save": "save unsaved changes before releasing the project",
   preview: "show the next sync without changing files or TIA Portal", json: "complete machine-readable report",
   filter: "a part of a test file's path or of a case's name (any letter case), or a block name",
   case: "exactly one case: its test file and its place among the file's cases, from 0 (tests/motor.test.yaml#2)", writes: "turn writes to TIA Portal on (rung writes off stops them)",
@@ -31,14 +29,13 @@ const DETAIL: Record<string, string> = {
   "compile.hw": "compile the hardware configuration instead of the program",
   "setup.yes": "skip the questions", args: "the bridge's own arguments, encoded (editors and agents pass them)",
   dir: "the workspace (default: the current folder)", file: "a workspace file", project: "the TIA Portal project (.ap20)",
-  tia: "TIA Portal version (V19, V20, V21; default: the project file's)", device: "mirror only this PLC (repeat for more)", rebind: "bind the folder to another project",
+  tia: "TIA Portal version (V20, V21)", device: "mirror only this PLC (repeat for more)", rebind: "bind the folder to another project",
   plc: "the PLC (when the project has several)", pick: "choose among the connections that answer", use: "the PG/PC interface (rung interfaces lists them)",
   mode: "PN/IE, PROFIBUS, …", number: "the interface number", target: "the PLC's interface, e.g. 1 X1", scan: "also look for reachable devices",
   state: "only say whether the PLC is online", hw: "download the hardware configuration too", "no-hw": "software only",
-  "trust-certificate": "trust the certificate TIA Portal shows for this connection, for this run only",
   "no-sw": "hardware only", "all-blocks": "download every block, not only the changed ones", allow: "a TIA question download may answer yes (e.g. stop-cpu, reset-module)",
   "no-start": "leave the CPU stopped afterwards", yes: "skip the typed confirmation (scripts; never for agents)",
-  junit: "write a JUnit report (CI)", check: "only list what would change; exit 1 when something would", against: "run the same tests on the code at this git revision too, and show what behaves differently", coverage: "write which SCL lines ran, as lcov (CI, editors)", observe: "with --json: the block's values after each step that runs cycles (record to test)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
+  junit: "write a JUnit report (CI)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
   agents: "claude, codex, cursor, gemini, opencode, copilot, zed", editors: "vscode, zed, neovim", skills: "which PLC engineering skills to copy",
   platforms: "tia, twincat, codesys", offline: "from the files only, no TIA Portal", fixture: "against the generated test fixture project",
   grant: "let your user update the whitelist later without administrator rights", stdio: "speak LSP on stdin/stdout",

@@ -195,26 +195,20 @@ class TestTable implements vscode.Disposable {
   private async apply(uri: string, version: number, op: TestOp): Promise<{ ok: boolean; reason?: string }> {
     if (uri !== this.doc.uri.toString()) return { ok: false, reason: STALE };
     if (version !== this.doc.version) return { ok: false, reason: STALE };
-    return applyTestOp(this.deps.lsp, this.doc, op);
+    const plan = await this.deps.lsp.request<ServerPlan>("rung/testEdit", { textDocument: { uri, version }, op }).catch(() => undefined);
+    const range = (r: Rng) => new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
+    const checked = checkPlan({ version: this.doc.version, getText: (r) => this.doc.getText(range(r)) }, plan ?? { ok: false, reason: "The language server is not running." });
+    if (!checked.ok) return checked;
+    if (!checked.edits.length) return { ok: true };
+    const edit = new vscode.WorkspaceEdit();
+    for (const e of checked.edits) edit.replace(this.doc.uri, range(e.range), e.newText);
+    return (await vscode.workspace.applyEdit(edit)) ? { ok: true } : { ok: false, reason: STALE };
   }
 
   dispose(): void {
     if (this.timer) clearTimeout(this.timer);
     for (const s of this.subs) s.dispose();
   }
-}
-
-/** One edit of a test file, planned by the language server (rung/testEdit) for the document as it is now. */
-export async function applyTestOp(lsp: Lsp, doc: vscode.TextDocument, op: TestOp): Promise<{ ok: boolean; reason?: string }> {
-  const version = doc.version;
-  const plan = await lsp.request<ServerPlan>("rung/testEdit", { textDocument: { uri: doc.uri.toString(), version }, op }).catch(() => undefined);
-  const range = (r: Rng) => new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
-  const checked = checkPlan({ version: doc.version, getText: (r) => doc.getText(range(r)) }, plan ?? { ok: false, reason: "The language server is not running." });
-  if (!checked.ok) return checked;
-  if (!checked.edits.length) return { ok: true };
-  const edit = new vscode.WorkspaceEdit();
-  for (const e of checked.edits) edit.replace(doc.uri, range(e.range), e.newText);
-  return (await vscode.workspace.applyEdit(edit)) ? { ok: true } : { ok: false, reason: STALE };
 }
 
 export class TestTableEditor implements vscode.CustomTextEditorProvider {

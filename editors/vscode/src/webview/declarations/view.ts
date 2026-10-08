@@ -4,11 +4,11 @@
 // to the extension as a checked message (protocol/declarations.ts) and comes back as a new model.
 import { LitElement, html, nothing } from "lit";
 import type { DeclModel, DeclOp, DeclRow, HostToView, NewRow, OpenTarget, PasteResult, ViewContext, ViewToHost } from "../../protocol/declarations";
-import type { GridColumn, GridSection } from "../grid/types";
+import type { GridSection } from "../grid/types";
 import "../grid/rg-treegrid";
 import { guardNativeUndo } from "../nativeUndo";
 import type { CellEdit, RgTreegrid } from "../grid/rg-treegrid";
-import { ATTR_LABEL, PRESETS, attrLabel, cellText, countRows, filterSections, findRow, isAttr, presetsFor, type AttrKey, type Preset } from "./columns";
+import { ATTR_LABEL, PRESETS, attrLabel, cellText, countRows, filterSections, findRow, isAttr, type AttrKey, type Preset } from "./columns";
 
 interface VsCodeApi {
   postMessage(m: ViewToHost): void;
@@ -40,9 +40,6 @@ type Request = Extract<ViewToHost, { req: number }> extends infer M ? (M extends
 /** what a request was about: a refused cell edit opens again with its draft */
 type Pending = { rowId: string; column: string; value: string } | undefined;
 
-/** TIA Portal's Monitor value column: read-only, shown while monitoring */
-const MONITOR: GridColumn = { key: "monitor", label: "Monitor value", mono: true, align: "end", width: 140 };
-
 export class RgDeclarations extends LitElement {
   static override properties = {
     model: { state: true },
@@ -54,7 +51,6 @@ export class RgDeclarations extends LitElement {
     notice: { state: true },
     paste: { state: true },
     typeNames: { state: true },
-    monitor: { state: true },
   };
 
   declare model: DeclModel | undefined;
@@ -68,8 +64,6 @@ export class RgDeclarations extends LitElement {
   /** pasted rows waiting for the user's yes */
   declare paste: { result: PasteResult; after?: string; section?: string } | undefined;
   declare typeNames: string[];
-  /** monitoring: each row's value from the PLC (TIA Portal's Monitor value column) */
-  declare monitor: { values: Record<string, string>; instance?: string } | undefined;
   private expanded: Set<string>;
   private req = 0;
   private readonly pending = new Map<number, Pending>();
@@ -123,16 +117,11 @@ export class RgDeclarations extends LitElement {
 
   private receive(m: HostToView) {
     if (!m || m.v !== 1) return;
-    if (m.kind === "values") {
-      this.monitor = m.on ? { values: m.values, ...(m.instance ? { instance: m.instance } : {}) } : undefined;
-      return;
-    }
     if (m.kind === "model") {
       // another file or block: a draft, a pending paste or a name to open belong to the old one
       if (this.model && (this.model.uri !== m.model.uri || this.model.block?.name !== m.model.block?.name)) {
         this.grid()?.cancelEdit();
         this.paste = undefined;
-        this.monitor = undefined; // the old block's values
         this.editNext = undefined;
         this.pending.clear();
       }
@@ -185,7 +174,6 @@ export class RgDeclarations extends LitElement {
   private readonly editable = (row: DeclRow, column: string): CellEdit => {
     if (isAttr(column)) return row.hmi ? "toggle" : false;
     if ((column === "type" || column === "start") && row.kind === "struct") return false;
-    if (column === "address") return this.model?.block?.kind === "TAGS" && !!this.model.sections.find((s) => s.title === "Tags" && s.rows.includes(row)) ? "text" : false;
     return column === "name" || column === "type" || column === "start" || column === "comment" ? "text" : false;
   };
 
@@ -218,7 +206,6 @@ export class RgDeclarations extends LitElement {
     const v = value.trim() ? value : null;
     if (column === "start") return this.op({ op: "setStart", row: rowId, value: v }, pending);
     if (column === "comment") return this.op({ op: "setComment", row: rowId, value: v }, pending);
-    if (column === "address") return this.op({ op: "setAddress", row: rowId, value: v }, pending);
   }
 
   private toggle(rowId: string, column: string) {
@@ -334,16 +321,7 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
         else grid.splice(at, 0, ghost);
       }
     }
-    const monitored = this.monitor;
-    // the Monitor value column follows the default value (or the type), in every preset
-    // a tag table has its own columns; a block the code, HMI or commissioning ones
-    const offered = presetsFor(model.block?.kind);
-    const shownPreset = offered.includes(this.preset) ? this.preset : offered[0]!;
-    const preset = PRESETS[shownPreset].columns;
-    const after = preset.some((c) => c.key === "start") ? "start" : "type";
-    const columns = monitored ? preset.flatMap((c) => (c.key === after ? [c, MONITOR] : [c])) : preset;
-    const monitorable = model.block?.kind === "DB" || model.block?.kind === "FB";
-    const watching = monitored ? `Stop monitoring${monitored.instance ? ` (through ${monitored.instance})` : ""}` : "Monitor the values on the PLC (read-only)";
+    const columns = PRESETS[this.preset].columns;
     const total = model.sections.reduce((n, s) => n + countRows(s.rows), 0);
     const picked = this.selected ? findRow(model.sections, this.selected) : undefined;
     return html`
@@ -364,12 +342,9 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
               <button class="rg-icon-btn" data-action="delete" title="Delete the declaration" aria-label="Delete the declaration" ?disabled=${!picked} @click=${() => picked && this.send({ kind: "delete", version: model.version, rowId: picked.row.id })}><span class="codicon codicon-trash"></span></button>
             </div>`
           : nothing}
-        ${monitorable
-          ? html`<button class="rg-icon-btn" data-action="monitor" aria-pressed=${monitored ? "true" : "false"} title=${watching} aria-label=${watching} @click=${() => this.post({ v: 1, kind: "monitor" })}><span class="codicon codicon-eye"></span></button>`
-          : nothing}
         <div class="rg-presets" role="group" aria-label="Columns">
-          ${offered.map(
-            (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === shownPreset ? "true" : "false"} @click=${() => {
+          ${(Object.keys(PRESETS) as Preset[]).map(
+            (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === this.preset ? "true" : "false"} @click=${() => {
               this.preset = p;
               this.save();
             }}>${PRESETS[p].label}</button>`,
@@ -386,7 +361,7 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
                 .sections=${grid}
                 .columns=${columns}
                 .expanded=${expanded}
-                .cellText=${this.text}
+                .cellText=${cellText}
                 .renderCell=${(row: DeclRow, column: string) => this.cell(row, column)}
                 .cellLabel=${this.label}
                 .editable=${model.editable ? this.editable : undefined}
@@ -432,13 +407,10 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     return p ? html`<span class="rg-problem rg-problem-${p.severity}" title=${p.message}>${content}</span>` : content;
   }
 
-  /** A cell's text; the Monitor value column's comes from the PLC. */
-  private readonly text = (row: DeclRow, column: string) => (column === "monitor" ? (this.monitor?.values[row.id] ?? "") : cellText(row, column));
-
   /** What a screen reader hears: the cell and its problem. */
   private readonly label = (row: DeclRow, column: string) => {
     const p = row.problems?.find((x) => x.column === column);
-    const text = this.text(row, column);
+    const text = cellText(row, column);
     return p ? `${text}, ${p.severity}: ${p.message}` : text;
   };
 
@@ -451,7 +423,6 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     }
     if (column === "type" && row.kind === "struct") return html`<span class="rg-muted">Struct · ${row.children?.length ?? 0}</span>`;
     if (column === "comment") return html`<span class="rg-muted">${row.comment ?? ""}</span>`;
-    if (column === "monitor") return this.text(row, column);
     return cellText(row, column);
   }
 

@@ -53,16 +53,3 @@ describe("rung test --case", () => {
     expect((await run(["--case", "tests/conveyor.test.yaml#1", "--filter", "x"])).out).toMatch(/--case or --filter/);
   });
 });
-
-describe("rung test --coverage", () => {
-  it("writes which SCL lines the cases ran as lcov and says how much ran", async () => {
-    const out: string[] = [];
-    const lcov = join(mkdtempSync(join(tmpdir(), "rung-cov-")), "lcov.info");
-    const code = await main(["test", "--coverage", lcov], { cwd: conveyor, stdout: (s) => out.push(s), stderr: (s) => out.push(s), env: {} });
-    expect(code).toBe(0);
-    expect(out.join("")).toMatch(/coverage: \d+% of SCL lines \(\d+\/\d+ in \d+ files?\)/);
-    const text = readFileSync(lcov, "utf8");
-    expect(text).toMatch(/^SF:blocks\/FB_Conveyor\.scl\nDA:\d+,[1-9]/m);
-    expect(text.trimEnd().endsWith("end_of_record")).toBe(true);
-  });
-});

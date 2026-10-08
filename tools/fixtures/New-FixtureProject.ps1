@@ -31,9 +31,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $target = Join-Path $FixtureDir $Name
 $marker = Join-Path $target '.rung-fixture'
 
-# V21 splits Openness into several assemblies (PublicAPI\V21\net48); earlier versions have one
-$assemblies = if (Test-Path (Join-Path $OpennessDir 'Siemens.Engineering.dll')) { @(Join-Path $OpennessDir 'Siemens.Engineering.dll') } else { @(Get-ChildItem $OpennessDir -Filter 'Siemens.Engineering*.dll' | Sort-Object { $_.Name -ne 'Siemens.Engineering.Base.dll' } | ForEach-Object FullName) }
-foreach ($a in $assemblies) { try { Add-Type -Path $a } catch [System.Reflection.ReflectionTypeLoadException] { } catch { } }
+try { Add-Type -Path (Join-Path $OpennessDir 'Siemens.Engineering.dll') } catch [System.Reflection.ReflectionTypeLoadException] { }
 
 function Get-Service2([object]$provider, [type]$serviceType) {
     $m = [Siemens.Engineering.IEngineeringServiceProvider].GetMethod('GetService').MakeGenericMethod($serviceType)
@@ -80,8 +78,7 @@ try {
     $project = $tia.Projects.Create((New-Object IO.DirectoryInfo($FixtureDir)), $Name)
     Set-Content -Path $marker -Value 'rung-fixture-v1' -Encoding ASCII -NoNewline
     # S7-PLCSIM only accepts programs compiled with simulation support
-    # V21 no longer has this project attribute (PLCSIM takes the program as it is)
-    if ($project.PSObject.Properties['IsSimulationDuringBlockCompilationEnabled']) { $project.IsSimulationDuringBlockCompilationEnabled = $true }
+    $project.IsSimulationDuringBlockCompilationEnabled = $true
     $manifest.runnable = [bool]$Runnable
 
     # --- CPU: pick the newest firmware of the order number in the installed catalog

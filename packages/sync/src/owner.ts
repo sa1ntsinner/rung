@@ -65,8 +65,6 @@ function lines(sock: Socket, onLine: (l: string) => void, maxBytes = 16 * 1024 *
 export class OwnerServer {
   private server!: Server;
   private readonly subscribers = new Set<Socket>();
-  /** the last passes' reports, with when they happened, for an editor that subscribes later */
-  private readonly recent: string[] = [];
   private constructor(
     readonly root: string,
     readonly info: OwnerInfo,
@@ -110,8 +108,6 @@ export class OwnerServer {
       if (req.method === "subscribe") {
         this.subscribers.add(sock);
         reply({ result: { subscribed: true } });
-        // { replay: true }: the passes before it subscribed, oldest first, each with its time (`at`)
-        if (req.params?.replay) for (const l of this.recent) if (sock.writable) sock.write(l);
         return;
       }
       const h = req.method ? this.handlers[req.method] : undefined;
@@ -129,10 +125,6 @@ export class OwnerServer {
   emit(event: string, params: unknown) {
     const line = JSON.stringify({ event, params }) + "\n";
     for (const s of this.subscribers) if (s.writable) s.write(line);
-    if (event === "report") {
-      this.recent.push(JSON.stringify({ event, params, at: Date.now(), replay: true }) + "\n");
-      if (this.recent.length > 20) this.recent.shift();
-    }
   }
 
   async close(): Promise<void> {

@@ -59,12 +59,11 @@ namespace Rung.Bridge.V20
         static readonly FormCapabilities Caps = new FormCapabilities { SdLad = true, SdFbd = false, SourceStl = true };
         const string Stem = "obj";
 
-        // these three change once: when "Open in TIA Portal" moves the project from the keeper into a TIA Portal window
-        TiaPortal _portal;
-        Project _project;
+        readonly TiaPortal _portal;
+        readonly Project _project;
         readonly BridgeArgs _args;
         readonly Action<string, object> _emit;
-        int _tiaPid;
+        readonly int _tiaPid;
         readonly Dictionary<string, ObjectRef> _index = new Dictionary<string, ObjectRef>(StringComparer.Ordinal);
         volatile bool _disposed;
         volatile bool _inImport;
@@ -73,39 +72,6 @@ namespace Rung.Bridge.V20
         OpennessSession(TiaPortal portal, Project project, BridgeArgs args, Action<string, object> emit, int tiaPid)
         {
             _portal = portal; _project = project; _args = args; _emit = emit; _tiaPid = tiaPid;
-            WatchTia();
-        }
-
-        /// <summary>
-        /// A call into a TIA Portal that has ended hangs for tens of seconds before Openness gives up, and the client then
-        /// waits for the bridge to close (measured, V20: watch took 80 s to come back after the engineer closed the TIA
-        /// Portal window). The process ending is known at once from Windows, without an Openness handler (see Listen).
-        /// With TIA Portal gone this bridge has nothing left to finish or protect, so it ends: the client sees the bridge
-        /// exit, reconnects at once (to the keeper, or to the TIA Portal window the project moved to) and treats a write
-        /// that was under way as of unknown outcome (receipts).
-        /// </summary>
-        void WatchTia()
-        {
-            if (_tiaPid <= 0) return;
-            try
-            {
-                var pid = _tiaPid;
-                var p = System.Diagnostics.Process.GetProcessById(pid);
-                p.EnableRaisingEvents = true;
-                p.Exited += (s, e) => Gone(pid);
-                if (p.HasExited) Gone(pid);
-            }
-            catch (ArgumentException) { _disposed = true; } // already gone
-            catch (InvalidOperationException) { }
-            catch (System.ComponentModel.Win32Exception) { } // no right to watch it: Openness reports it later
-        }
-
-        void Gone(int pid)
-        {
-            if (_tiaPid != pid) return; // the keeper's TIA Portal ending after "Open in TIA Portal" moved the project
-            _disposed = true;
-            Console.Error.WriteLine("rung bridge: TIA Portal (pid " + pid + ") ended; the bridge ends too");
-            Environment.Exit(75);
         }
 
         /// <summary>
@@ -149,36 +115,14 @@ namespace Rung.Bridge.V20
 
         public static OpennessSession Attach(BridgeArgs args, Action<string, object> emit)
         {
-            // Attach and release share startup arbitration: a peer cannot arrive after release counted its sessions.
-            var path = args.ProjectPath ?? PortalSelector.Choose(TiaPortal.GetProcesses()
-                .Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), null).ProjectPath;
-            using (Keeper.StartLock(Path.GetFullPath(path)))
-                return AttachLocked(args, emit, path);
-        }
-
-        static OpennessSession AttachLocked(BridgeArgs args, Action<string, object> emit, string path)
-        {
             try
             {
                 var procs = TiaPortal.GetProcesses();
                 PortalCandidate chosen;
-                try { chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), path); }
-                catch (RpcException e) when (args.OpenWindow && args.ProjectPath != null && (e.Code == ErrorCodes.TiaNotRunning || e.Code == ErrorCodes.NoProject))
-                {
-                    return OpenWindow(args, emit);
-                }
+                try { chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath); }
                 catch (RpcException e) when (args.OpenHeadless && args.ProjectPath != null && (e.Code == ErrorCodes.TiaNotRunning || e.Code == ErrorCodes.NoProject))
                 {
-                    ValidateHeadless(args);
-                    try { Keeper.Ensure(args, emit); }
-                    catch (Exception k) when (!(k is RpcException))
-                    {
-                        // no keeper possible here (WMI unavailable): this bridge holds TIA Portal itself, as before keepers
-                        emit("tia-keeper-unavailable", new { reason = k.Message });
-                        return OpenHeadless(args, emit);
-                    }
-                    procs = TiaPortal.GetProcesses();
-                    chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath);
+                    return OpenHeadless(args, emit);
                 }
                 var proc = procs.First(p => p.Id == chosen.Pid);
                 var portal = proc.Attach();
@@ -803,10 +747,6 @@ namespace Rung.Bridge.V20
                         return form;
                     case "s7dcl":
                     {
-#if TIA_V19
-                        // SIMATIC SD came with V20: V19 keeps such blocks as SimaticML XML
-                        return ExportInto(r, "xml", dir, warnings);
-#else
                         // blocks with networks in several languages (and other SD gaps) throw instead of
                         // returning a failed result; both cases fall back to SimaticML XML
                         var sdOk = false;
@@ -820,7 +760,6 @@ namespace Rung.Bridge.V20
                         warnings.Add(WarningCodes.SdFallback);
                         foreach (var f in Directory.GetFiles(dir, Stem + ".*")) File.Delete(f);
                         return ExportInto(r, "xml", dir, warnings);
-#endif
                     }
                     case "xml":
                     case "tags.xml":
@@ -1433,29 +1372,6 @@ namespace Rung.Bridge.V20
             return list;
         }
 
-        // ---------------------------------------------------------------- identity
-
-        /// <summary>
-        /// The ObjectIdentifierProvider's id of each object the last listing found: the same after a rename in TIA
-        /// Portal, so the client moves the file instead of deleting one and creating another. V19 has no such service.
-        /// </summary>
-        public IReadOnlyDictionary<string, string> Identify(string[] addresses)
-        {
-            Alive();
-            var ids = new Dictionary<string, string>(StringComparer.Ordinal);
-#if !TIA_V19
-            var provider = _project.GetService<ObjectIdentifierProvider>();
-            if (provider == null) return ids;
-            foreach (var a in addresses ?? new string[0])
-            {
-                if (!_index.TryGetValue(a, out var r) || !(r.Obj is IEngineeringObject o)) continue;
-                try { ids[a] = provider.GetIdentifier(o); }
-                catch (EngineeringException) { }
-            }
-#endif
-            return ids;
-        }
-
         // ---------------------------------------------------------------- delete
 
         /// <summary>
@@ -1495,11 +1411,7 @@ namespace Rung.Bridge.V20
                         {
                             case PlcBlock b: b.Name = newName; break;
                             case PlcType t: t.Name = newName; break;
-#if TIA_V19
-                            case PlcTagTable _: throw new RpcException(ErrorCodes.UnsupportedObject, "TIA Portal V19 cannot rename a tag table through Openness (V20 can)");
-#else
                             case PlcTagTable tt: tt.Name = newName; break;
-#endif
                             default: throw new RpcException(ErrorCodes.UnsupportedObject, "Cannot rename " + address);
                         }
                         tx.CommitOnDispose();
@@ -1700,9 +1612,6 @@ namespace Rung.Bridge.V20
                 }
                 case "s7dcl":
                 {
-#if TIA_V19
-                    throw new RpcException(ErrorCodes.UnsupportedObject, "SIMATIC SD (.s7dcl) needs TIA Portal V20 or later; with V19, keep this block as SimaticML XML (.xml)");
-#else
                     var dir = new DirectoryInfo(Path.GetDirectoryName(path));
                     var stem = Path.GetFileNameWithoutExtension(path);
                     if (r.ParentGroup is PlcBlockGroup bg)
@@ -1710,7 +1619,6 @@ namespace Rung.Bridge.V20
                     if (r.ParentGroup is PlcTypeGroup tg)
                         return tg.Types.ImportFromDocuments(dir, stem, ImportDocumentOptions.Override).ImportedPlcTypes.Select(t => Identity(t.Name, t.Namespace)).ToList();
                     break;
-#endif
                 }
                 case "xml":
                     if (r.ParentGroup is PlcBlockGroup xb) return xb.Blocks.Import(new FileInfo(path), ImportOptions.Override, SWImportOptions.None).Select(b => Identity(b.Name, b.Namespace)).ToList();
@@ -1746,8 +1654,7 @@ namespace Rung.Bridge.V20
         /// Opens the bound project in a TIA Portal without user interface that lives as long as this bridge, so an
         /// engineer never has to start TIA Portal for rung. Nothing is shown on screen.
         /// </summary>
-        /// <summary>Refuses a missing project, or a new one in the wrong place, before any TIA Portal starts.</summary>
-        static void ValidateHeadless(BridgeArgs args)
+        static OpennessSession OpenHeadless(BridgeArgs args, Action<string, object> emit)
         {
             var file = new FileInfo(Path.GetFullPath(args.ProjectPath));
             var create = !file.Exists && args.CreateProject;
@@ -1758,13 +1665,6 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.BadRequest, "A new project goes in a folder of its own name, like " + Path.Combine(file.DirectoryName ?? "", name, name + file.Extension));
             if (create && file.Directory.Exists && file.Directory.EnumerateFileSystemInfos().Any())
                 throw new RpcException(ErrorCodes.BadRequest, file.Directory.FullName + " is not empty; a new project needs a new folder");
-        }
-
-        static OpennessSession OpenHeadless(BridgeArgs args, Action<string, object> emit)
-        {
-            var file = new FileInfo(Path.GetFullPath(args.ProjectPath));
-            var create = !file.Exists && args.CreateProject;
-            var name = Path.GetFileNameWithoutExtension(file.Name);
             emit("tia-starting", new { project = file.FullName, headless = true });
             var portal = new TiaPortal(TiaPortalMode.WithoutUserInterface);
             try
@@ -1792,12 +1692,6 @@ namespace Rung.Bridge.V20
             {
                 try { if (_args.SaveAfterImport) _project.Save(); } catch (Exception) { }
                 try { _project.Close(); } catch (Exception) { }
-            }
-            else if (_args.SaveAfterImport)
-            {
-                // the keeper never saves (a workspace's sync.save can change while it runs): a bridge that may, saves what
-                // it leaves changed in the keeper's project (a compile), so the keeper can end when nobody uses it
-                try { if (Keeper.Holds(_project.Path.FullName, _tiaPid) && _project.IsModified) _project.Save(); } catch (Exception) { }
             }
             try { if (_listening) { _portal.Notification -= OnNotification; _portal.Confirmation -= OnConfirmation; } _portal.Dispose(); } catch (Exception) { }
         }

@@ -77,9 +77,9 @@ function literal(t: Token): Extract<Expr, { k: "lit" }> {
     if (/^(T|TIME|LT|LTIME|S5T|S5TIME)$/.test(prefix)) return { k: "lit", value: parseTime(text), type: "time" };
     if (/^(TOD|TIME_OF_DAY|LTOD|LTIME_OF_DAY)$/.test(prefix)) {
       const [h = 0, m = 0, sec = 0] = val.split(":").map(Number);
-      return { k: "lit", value: Math.round(((h * 60 + m) * 60 + sec) * 1000), type: "time", typeName: "TOD" };
+      return { k: "lit", value: Math.round(((h * 60 + m) * 60 + sec) * 1000), type: "time" };
     }
-    if (/^(D|DATE)$/.test(prefix)) return { k: "lit", value: Date.parse(`${val}T00:00:00Z`) / 86_400_000, type: "int", typeName: "DATE" };
+    if (/^(D|DATE)$/.test(prefix)) return { k: "lit", value: Date.parse(`${val}T00:00:00Z`) / 86_400_000, type: "int" };
     if (/^(DT|DATE_AND_TIME|LDT)$/.test(prefix)) {
       const m = /^(\d+-\d+-\d+)-(.*)$/.exec(val);
       return { k: "lit", value: m ? Date.parse(`${m[1]}T${m[2]}Z`) : NaN, type: "time" };

@@ -3,9 +3,8 @@
 // There is no PLC: the fixture's addresses (192.168.254.1, 192.168.253.1) are nobody's, so going online has to
 // end with rung's "not found" explanation. Nothing here downloads, and rung.toml is left as it was.
 import * as assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import * as vscode from "vscode";
 import type { RungExtensionApi } from "../../src/extension";
 import { CliLog, Dialogs, closeAll, file, findItem, openDoc, outline, positionOf, root, rungApi, waitFor } from "./helpers";
@@ -160,23 +159,11 @@ describe("rung extension on TIA Portal V20 (headless, no PLC)", function () {
     assert.equal(d.of("inputBox").length, 0);
   });
 
-  it("open in TIA Portal moves the project into a TIA Portal window; closing it, rung goes back to the background", async function () {
-    this.timeout(300_000);
+  it("open in TIA Portal: no TIA Portal window is explained", async () => {
     await openDoc(MOTOR);
     await vscode.commands.executeCommand("rung.openInTia");
     assert.deepEqual(cli.find("open")?.args, ["open", MOTOR]);
-    assert.equal(cli.find("open")?.result.code, 0, cli.find("open")?.result.output);
-    assert.deepEqual(d.texts, []);
-    // the window is the engineer's; the test closes it as they would
-    const ps = (script: string) => spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8" }).stdout.trim();
-    const title = basename(dirname(process.env.RUNG_PROJECT ?? "RungFixture"));
-    const pid = ps(`(Get-Process Siemens.Automation.Portal | Where-Object MainWindowTitle -like '*${title}*' | Select-Object -First 1).Id`);
-    assert.ok(pid, "a TIA Portal window with the project");
-    ps(`(Get-Process -Id ${pid}).CloseMainWindow() | Out-Null; Wait-Process -Id ${pid} -Timeout 60`);
-    // the next command needs TIA Portal again: rung opens the project in the background once more
-    d.reset();
-    await vscode.commands.executeCommand("rung.onlineState");
-    assert.match(d.texts.join("\n"), /Online state: PLC_1: (Offline|NotReachable)/, cli.runs.filter((r) => r.args[0] === "online").map((r) => `${r.args.join(" ")} -> ${r.result.code}: ${r.result.output}`).join("\n"));
+    assert.match(d.texts.join("\n"), /^warning: No TIA Portal window has this project open, so TIA Portal cannot show Fx_Motor/);
   });
 
   it("status and sync", async () => {

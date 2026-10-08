@@ -39,11 +39,7 @@ import {
   isLockError,
   isReadOnlyEntry,
   localStatus,
-  markUsersStale,
-  caseOrphan,
   readOnlyReason,
-  renameInTests,
-  renamesInTia,
   mapStaged,
   planPublication,
   readBundle,
@@ -577,26 +573,13 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
   if (!quick) for (const s of state.all()) if (!items.has(s.address) && bound(s.address) && !inv.skipped.has(s.address) && !inv.blocked.has(s.address)) orphans.set(nameKey(stemOf(s)), s);
   const adopted = new Set<string>();
   const adoptedFrom = new Set<string>();
-  // renamed or moved in TIA Portal (V20 and later): the same object by its lasting identity, its file follows and
-  // the files that name it come back from TIA with the new name
-  const none = new Map<string, ObjectState>();
-  const { ids, renamed, recognized } = quick ? { ids: {} as Record<string, string>, renamed: none, recognized: none } : await renamesInTia(root, bridge, state, inv.items, orphans.values(), FATAL_BRIDGE_CODES);
-  await markUsersStale(root, state, recognized);
   for (const i of inv.items) {
-    const o = i.stem && !state.get(i.entry.address) ? (renamed.get(i.entry.address) ?? caseOrphan(i.entry.address, orphans.get(nameKey(i.stem)), recognized)) : undefined;
+    const o = i.stem && !state.get(i.entry.address) ? orphans.get(nameKey(i.stem)) : undefined;
     if (!o || adoptedFrom.has(o.address) || o.status === "importing") continue;
     state.remove(o.address);
-    state.upsert({ ...o, address: i.entry.address, ...(ids[i.entry.address] ? { tiaId: ids[i.entry.address] } : {}) });
+    state.upsert({ ...o, address: i.entry.address });
     adopted.add(i.entry.address);
     adoptedFrom.add(o.address);
-    if (renamed.get(i.entry.address) !== o || plan) continue;
-    const from = parseAddress(o.address);
-    const to = parseAddress(i.entry.address);
-    const tests = from.name === to.name ? [] : await renameInTests(root, from.name, to.name, to.device);
-    // the old file coming back with git (another branch) is this object under its old name, not a new block
-    const tomb = tombstoneOf(o, { to: i.entry.address });
-    if (tomb) await recordTombstone(root, tomb).catch(() => undefined);
-    warn(i.entry.address, "RENAMED_IN_TIA", `${from.name === to.name ? "moved" : `renamed from ${from.name}`} in TIA Portal; its file moved here from ${o.path}${tests.length ? `, and the tests that named it: ${tests.join(", ")}` : ""}`);
   }
   /** A mirrored object TIA Portal takes this file for, its name differing only in letter case (Fx_A for fx_a.scl). */
   const caseTwin = (address: string, file: LocalFile): { name: string; path: string } | undefined => {
@@ -622,8 +605,6 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     const pub = await planPublication(root, prevFiles, staged.files);
     if (pub.localEdit && !force) throw new WorkspaceError("LOCAL_CHANGES", `${staged.primary.path} changed locally; not overwritten`);
     const next = await buildState(root, address, staged, readOnly, now());
-    const tiaId = ids[address] ?? state.get(address)?.tiaId;
-    if (tiaId) next.tiaId = tiaId;
     if (pub.targets.length || pub.removes.length) {
       const opId = randomUUID();
       await publishBundle(root, { opId, address, targets: pub.targets, removes: pub.removes, nextState: next }, { keepJournal: true, force });
@@ -765,11 +746,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
         const status = await localStatus(root, st.files);
         let staged: StagedExport | undefined;
         let tiaChanged = false;
-        // an adopted state is written under the new name even when the object did not change, and so is one whose
-        // file is not where its address puts it yet (a move whose export failed on an earlier pass)
+        // an adopted state is written under the new name even when the object did not change
         // a quick pass does not look: the import tells whether TIA Portal still has the revision it names
-        const moving = adopted.has(address) || stemOf(st) !== stem;
-        if (moving || (!quick && !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs, opts.unversionedMs))) {
+        if (adopted.has(address) || (!quick && !isFresh(item.entry.fingerprint, st, now(), cfg.sync.weakVerifyMs, opts.unversionedMs))) {
           staged = await stageExport(root, bridge, address, stem);
           tiaChanged = bundleHash(staged.files) !== st.fileHash;
           if (!tiaChanged) state.upsert({ ...st, tiaFingerprint: staged.result.fingerprint, verifiedAt: now() });
@@ -783,9 +762,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
 
         // a file back where it was before a send TIA Portal took without answering (an undo) is the newer edit:
         // handled like an edited file, which asks which send TIA Portal holds before merging
-        const undone = status === "clean" && tiaChanged && !moving && sendsOf(cur).length > 0 && !readOnly && cfg.sync.import === "auto";
+        const undone = status === "clean" && tiaChanged && !adopted.has(address) && sendsOf(cur).length > 0 && !readOnly && cfg.sync.import === "auto";
         if (status === "clean" && !undone) {
-          if (tiaChanged || moving) {
+          if (tiaChanged || adopted.has(address)) {
             await publish(address, cur.files, staged!, readOnly);
             report.exported++;
           } else {

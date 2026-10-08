@@ -10,10 +10,9 @@ const TIME = /^L?TIME$/i;
 
 /** A YAML value for a type's default or a source start value; undefined for a type a test sets member by member. */
 /** A whole number literal's value: 7, INT#7, 16#FF, DINT#-5, 2#1010 (undefined for anything else). */
-export function integer(literal: string): string | undefined {
+function integer(literal: string): string | undefined {
   const m = /^(?:[A-Z]+#)?([-+]?)(?:(2|8|16)#)?([0-9A-F_]+)$/i.exec(literal);
-  // decimal digits only without a base: 12A is no number
-  if (!m || (!m[2] && !/^[\d_]+$/.test(m[3]!))) return undefined;
+  if (!m) return undefined;
   const n = parseInt(m[3]!.replace(/_/g, ""), m[2] ? Number(m[2]) : 10);
   return Number.isFinite(n) ? String(m[1] === "-" ? -n : n) : undefined;
 }

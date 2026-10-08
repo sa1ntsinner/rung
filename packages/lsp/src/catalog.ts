@@ -38,9 +38,6 @@ export const STANDARD: CatalogEntry[] = [
   timer("TON_LTIME", "LTime", "On-delay timer (LTIME)."),
   timer("TOF_LTIME", "LTime", "Off-delay timer (LTIME)."),
   timer("TP_LTIME", "LTime", "Pulse timer (LTIME)."),
-  ...["TONR", "TONR_TIME", "TONR_LTIME"].map((n) =>
-    fb(n, [p("IN", "Bool", "in", "start input"), p("R", "Bool", "in", "reset ET to 0"), p("PT", n.endsWith("LTIME") ? "LTime" : "Time", "in", "preset time"), p("Q", "Bool", "out", "ET >= PT"), p("ET", n.endsWith("LTIME") ? "LTime" : "Time", "out", "time accumulated")], "Retentive on-delay timer: ET adds up the time IN is TRUE and keeps it while IN is FALSE; R resets it."),
-  ),
   fb("CTU", [p("CU", "Bool", "in", "count up on a rising edge"), p("R", "Bool", "in", "reset CV to 0"), p("PV", "Int", "in", "preset value"), p("Q", "Bool", "out", "CV >= PV"), p("CV", "Int", "out", "current count")], "Up counter: CV counts rising edges of CU; Q = CV >= PV."),
   fb("CTD", [p("CD", "Bool", "in", "count down on a rising edge"), p("LD", "Bool", "in", "load PV into CV"), p("PV", "Int", "in", "preset value"), p("Q", "Bool", "out", "CV <= 0"), p("CV", "Int", "out", "current count")], "Down counter: LD loads PV; Q = CV <= 0."),
   fb("CTUD", [p("CU", "Bool"), p("CD", "Bool"), p("R", "Bool"), p("LD", "Bool"), p("PV", "Int"), p("QU", "Bool", "out"), p("QD", "Bool", "out"), p("CV", "Int", "out")], "Up/down counter."),
@@ -67,7 +64,6 @@ export const STANDARD: CatalogEntry[] = [
   fn("SEL", [p("G", "Bool"), p("IN0", "ANY"), p("IN1", "ANY")], "ANY", "Selects IN0 when G is FALSE, IN1 when TRUE."),
   fn("MUX", [p("K", "ANY_INT"), p("IN0", "ANY"), p("IN1", "ANY"), p("INELSE", "ANY", "in", "the value when K has no input")], "ANY", "Selects input number K."),
   fn("TRUNC", [p("IN", "ANY_REAL")], "ANY_INT", "Truncates toward zero."),
-  fn("FRAC", [p("IN", "ANY_REAL")], "ANY_REAL", "The fractional part: IN without its whole part (FRAC(2.25) = 0.25)."),
   fn("ROUND", [p("IN", "ANY_REAL")], "ANY_NUM", "Rounds to the nearest integer."),
   fn("CEIL", [p("IN", "ANY_REAL")], "ANY_NUM", "Rounds up."),
   fn("FLOOR", [p("IN", "ANY_REAL")], "ANY_NUM", "Rounds down."),

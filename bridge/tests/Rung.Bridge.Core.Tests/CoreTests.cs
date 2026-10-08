@@ -341,52 +341,14 @@ public class CompileRouteTests
 
 public class PlcActionRouteTests
 {
-    [Theory]
-    [InlineData(true, "10.0.0.7", true)]
-    [InlineData(true, null, false)]
-    [InlineData(false, null, true)]
-    [InlineData(false, "10.0.0.7", true)]
-    public void ExplicitAddressRequiresReconnection(bool online, string address, bool expected)
-    {
-        Assert.Equal(expected, Rung.Bridge.Core.ConnectionTarget.NeedsConnection(online, new Rung.Bridge.Core.ConnectionTarget { Address = address }));
-    }
-    [Theory]
-    [InlineData("plc.online")]
-    [InlineData("plc.compare")]
-    public void OnlineAddressPassesThrough(string method)
-    {
-        var r = Call("{\"id\":1,\"method\":\"" + method + "\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"Ethernet\",\"address\":\"10.0.0.7\"}}}");
-        Assert.True(r.TryGetProperty("result", out _));
-        Assert.Equal("10.0.0.7", JsonSerializer.SerializeToElement(_s.LastOnlineTarget, RpcDispatcher.Json).GetProperty("address").GetString());
-    }
     readonly FakeTiaSession _s = new FakeTiaSession();
     JsonElement Call(string line) => JsonDocument.Parse(new RpcDispatcher(() => _s, new BridgeInfo("V20", "t")).Handle(line)).RootElement;
-
-    [Theory]
-    [InlineData("plc.online")]
-    [InlineData("plc.compare")]
-    public void CertificateTrustPassesThroughForOneRequest(string method)
-    {
-        var trusted = Call("{\"id\":1,\"method\":\"" + method + "\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"credentials\":{\"trustCertificate\":true}}}");
-        Assert.True(trusted.TryGetProperty("result", out _));
-        Assert.True(JsonSerializer.SerializeToElement(_s.LastCredentials, RpcDispatcher.Json).GetProperty("trustCertificate").GetBoolean());
-        Call("{\"id\":2,\"method\":\"" + method + "\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"credentials\":{}}}");
-        Assert.False(JsonSerializer.SerializeToElement(_s.LastCredentials, RpcDispatcher.Json).GetProperty("trustCertificate").GetBoolean());
-        Call("{\"id\":3,\"method\":\"" + method + "\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\"}}");
-        Assert.Null(_s.LastCredentials);
-    }
 
     [Fact] public void OnlineStateAndActions()
     {
         Assert.Equal("Offline", Call("{\"id\":1,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"state\"}}").GetProperty("result").GetProperty("state").GetString());
         Assert.Equal("Online", Call("{\"id\":2,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"target\":{\"mode\":\"PN/IE\",\"pcInterface\":\"PLCSIM\"}}}").GetProperty("result").GetProperty("state").GetString());
         Assert.Equal("BAD_REQUEST", Call("{\"id\":3,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"reboot\"}}").GetProperty("error").GetProperty("code").GetString());
-        // the password a person typed travels with the request (a long-lived bridge has no environment for it)
-        Call("{\"id\":4,\"method\":\"plc.online\",\"params\":{\"device\":\"PLC_1\",\"action\":\"online\",\"credentials\":{\"user\":\"eng\",\"password\":\"s3cret\"}}}");
-        Assert.Equal("eng", _s.LastCredentials.User);
-        Assert.Equal("s3cret", _s.LastCredentials.Password);
-        Call("{\"id\":5,\"method\":\"plc.compare\",\"params\":{\"device\":\"PLC_1\",\"credentials\":{\"password\":\"p\"}}}");
-        Assert.Equal("p", _s.LastCredentials.Password);
     }
 
     [Fact] public void RenameReturnsTheNewAddress()
@@ -476,9 +438,6 @@ public class PlcActionRouteTests
         var c = Call("{\"id\":1,\"method\":\"plc.connections\",\"params\":{\"device\":\"PLC_1\",\"scan\":true}}").GetProperty("result");
         Assert.Equal("PN/IE", c.GetProperty("modes")[0].GetProperty("name").GetString());
         Assert.Equal("UNSUPPORTED_CAPABILITY", Call("{\"id\":2,\"method\":\"objects.show\",\"params\":{\"address\":\"plc:PLC_1/blocks/X\"}}").GetProperty("error").GetProperty("code").GetString());
-        Assert.False(_s.LastShowSave);
-        Call("{\"id\":3,\"method\":\"objects.show\",\"params\":{\"address\":\"plc:PLC_1/blocks/X\",\"save\":true}}");
-        Assert.True(_s.LastShowSave);
     }
 
     [Fact] public void HardwareCompileRoute() =>

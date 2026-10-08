@@ -72,39 +72,6 @@ describe("rung CLI from inside a workspace", () => {
 });
 
 describe("TIA Portal on another PC (Linux, macOS): the bridge over ssh", () => {
-  it("check --host passes JSON through unchanged and uses the bridge's ssh conventions without secrets", async () => {
-    const log = join(tmpdir(), `ssh-${Date.now()}-${Math.random()}.log`);
-    const answer = '[ { "id": "tia", "group": "plc", "name": "TIA Portal", "status": "ok", "detail": "V21", "enables": "engineering" } ]\r\n';
-    const t = setup({ RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_SSH_LOG: log, FAKE_CHECK_JSON: answer, RUNG_PLC_PASSWORD: "secret-password" });
-    expect(await t.run("check", "--host", "elmir@tia-pc", "--json")).toBe(0);
-    expect(t.out.join("")).toBe(answer);
-    expect(JSON.parse(readFileSync(log, "utf8").trim())).toEqual(["-T", "-o", "BatchMode=yes", "--", "elmir@tia-pc", "rung check --json"]);
-    t.out.length = 0;
-    expect(await t.run("check", "--host", "elmir@tia-pc")).toBe(0);
-    expect(t.out.join("")).toContain("TIA Portal");
-    expect(t.out.join("")).toContain("V21");
-    expect(t.out.join("")).not.toContain('"id"');
-  });
-
-  it("check refuses invalid hosts before ssh and explains unreachable hosts", async () => {
-    const t = setup({ RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify(["-e", "process.exit(255)"]) });
-    expect(await t.run("check", "--host=-oProxyCommand=calc")).toBe(1);
-    expect(t.err.join("")).toContain("is not an ssh destination");
-    t.err.length = 0;
-    expect(await t.run("check", "--host", "elmir@tia-pc", "--json")).toBe(1);
-    expect(t.err.join("")).toMatch(/CHECK_UNREACHABLE:.*elmir@tia-pc.*ssh elmir@tia-pc.*rung check/s);
-  });
-
-  it("check explains an unreadable remote answer while JSON still passes through unchanged", async () => {
-    const answer = "remote shell banner\n";
-    const t = setup({ RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_CHECK_JSON: answer });
-    expect(await t.run("check", "--host", "elmir@tia-pc")).toBe(1);
-    expect(t.err.join("")).toMatch(/CHECK_UNREACHABLE:.*elmir@tia-pc.*rung check --json/s);
-    expect(t.out).toEqual([]);
-    expect(await t.run("check", "--host", "elmir@tia-pc", "--json")).toBe(0);
-    expect(t.out.join("")).toBe(answer);
-  });
-
   it("init --host, then pull and sync carry the files across the connection", async () => {
     const log = join(tmpdir(), `ssh-${Date.now()}-${Math.random()}.log`);
     const ssh = { RUNG_SSH: process.execPath, RUNG_SSH_ARGS: JSON.stringify([fileURLToPath(new URL("./fake-ssh.mjs", import.meta.url))]), FAKE_SSH_LOG: log };

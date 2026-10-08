@@ -12,8 +12,6 @@ namespace Rung.Bridge.Core
     /// <summary>Everything the dispatcher needs from a TIA adapter. Implemented per TIA version.</summary>
     public interface ITiaSession
     {
-        SessionState GetSessionState();
-        void ReleaseSession(bool save);
         ProjectInfo GetProjectInfo();
         /// <param name="known">What the client knows from earlier listings (RevisionCache); may be null.</param>
         IReadOnlyList<ObjectEntry> ListObjects(string device, IReadOnlyDictionary<string, KnownRevision> known = null);
@@ -27,29 +25,24 @@ namespace Rung.Bridge.Core
         void Delete(string address, string expectedTiaRevision, string operationId);
         /// <summary>Cross references reported by TIA Portal for one object.</summary>
         IReadOnlyList<XRefEntry> XRef(string address);
-        /// <summary>TIA Portal's lasting identity of listed objects (kept through a rename); empty where the version has none.</summary>
-        IReadOnlyDictionary<string, string> Identify(string[] addresses);
         /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi, techobjects or libraries.</summary>
         DescribeNode Describe(string scope, int maxNodes);
         /// <summary>Compiles the hardware configuration of the PLC device (and its software).</summary>
         IReadOnlyList<CompileMessage> CompileHardware(string device);
         /// <summary>action: state | online | offline. Uses the target when given, else the one TIA has configured.</summary>
-        OnlineStatus Online(string device, string action, ConnectionTarget target, OnlineCredentialsInput credentials);
+        OnlineStatus Online(string device, string action, ConnectionTarget target);
         /// <summary>Renames a block, type or tag table (uses follow in TIA); returns the new address.</summary>
         string Rename(string address, string newName, string expectedTiaRevision, string operationId);
         /// <summary>Compares the project's PLC software with the PLC (read-only); connects with the target when given.</summary>
-        CompareOutcome Compare(string device, ConnectionTarget target, OnlineCredentialsInput credentials);
+        CompareOutcome Compare(string device, ConnectionTarget target);
         /// <summary>Modes, PG/PC interfaces and target interfaces TIA offers; scan also lists reachable devices.</summary>
         ConnectionOptions Connections(string device, bool scan);
         /// <summary>Downloads to the PLC, answering TIA's questions with DownloadPolicy (docs/downloads.md).</summary>
         DownloadOutcome Download(DownloadRequest request);
         /// <summary>Reads the station of a PLC into the project as a new station (the PLC is only read), then saves.</summary>
         UploadOutcome UploadStation(UploadRequest request);
-        /// <summary>
-        /// Opens the object's editor in a TIA Portal window; a project held by rung's keeper moves into a new TIA Portal
-        /// window first (WindowHandoff). save: changes in the project may be saved for that move.
-        /// </summary>
-        void Show(string address, bool save);
+        /// <summary>Opens the object's editor in the TIA Portal window (needs a TIA Portal with user interface).</summary>
+        void Show(string address);
         /// <summary>Saves the project if it has changes and archives it (compressed) into the folder, default
         /// %LOCALAPPDATA%\rung\backups\&lt;project&gt;; keeps the newest <paramref name="keep"/> archives of the project there.</summary>
         ArchiveOutcome Archive(string directory, int keep);

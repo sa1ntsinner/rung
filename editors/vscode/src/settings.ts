@@ -36,7 +36,7 @@ export function readSettings(): Settings {
   const refresh = Math.max(0, c.get<number>("online.refreshInterval") ?? 0);
   return {
     command: command.length ? command : ["rung"],
-    autoStartWatch: c.get<boolean>("watch.autoStart") ?? true,
+    autoStartWatch: c.get<boolean>("watch.autoStart") ?? false,
     statusBar: c.get<boolean>("statusBar.enabled") ?? true,
     codeLens: c.get<boolean>("codeLens.enabled") ?? true,
     compileOnSave: c.get<boolean>("compileOnSave") ?? false,

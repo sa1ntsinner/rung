@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung compile / online / interfaces / download / open (docs/downloads.md).
 import { readFile } from "node:fs/promises";
-import { isIPv4 } from "node:net";
 import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
-import { addressChange, candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, withNetworkAddress, type Candidate } from "./connect.js";
-import { WorkspaceError, loadConfig, parseAddress, writeFileAtomic, type RungConfig } from "@rung/core";
-import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineCredentials, OnlineStatus, ProjectInfo, UploadOutcome, UploadRequest } from "@rung/bridge-client";
+import { candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, type Candidate } from "./connect.js";
+import { WorkspaceError, loadConfig, parseAddress, type RungConfig } from "@rung/core";
+import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineStatus, ProjectInfo, UploadOutcome, UploadRequest } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages, recordCompile } from "@rung/sync";
 import { bridgeFor, findWorkspace, importFlags, type Io } from "./common.js";
 
@@ -41,8 +40,6 @@ class PlcLink {
     private readonly download = false,
     /** Whether its own bridge may open the project in a TIA Portal without window ([tia] start). */
     private readonly headless = true,
-    /** Its own bridge opens the project in a TIA Portal with window when none has it (rung open). */
-    private readonly window = false,
   ) {
     PlcLink.open.add(this);
   }
@@ -54,7 +51,7 @@ class PlcLink {
     // that is a write into the project, so only where this workspace may write
     const save = this.config.sync.import === "auto" && !this.config.writesOff && this.config.sync.save !== "never";
     const config = this.headless ? this.config : { ...this.config, tia: { ...this.config.tia, start: "never" as const } };
-    this.bridge ??= bridgeFor(config, this.io, [...(this.download && this.config.download.enabled ? ["--allow-download"] : []), ...(save ? ["--save-after-import"] : []), ...(this.window ? ["--open-window"] : [])]);
+    this.bridge ??= bridgeFor(config, this.io, [...(this.download && this.config.download.enabled ? ["--allow-download"] : []), ...(save ? ["--save-after-import"] : [])]);
     return direct(await this.bridge);
   }
 
@@ -65,15 +62,6 @@ class PlcLink {
     this.bridge = undefined;
     if (b) await (await b.catch(() => undefined))?.close();
   }
-}
-
-/** The PLC's password and user come from the environment; certificate consent belongs to this run only. */
-function plcCredentials(io: Io, trustCertificate: boolean): OnlineCredentials | undefined {
-  const password = io.env.RUNG_PLC_PASSWORD;
-  return password || trustCertificate ? {
-    ...(password ? { password, ...(io.env.RUNG_PLC_USER ? { user: io.env.RUNG_PLC_USER } : {}) } : {}),
-    ...(trustCertificate ? { trustCertificate: true } : {}),
-  } : undefined;
 }
 
 /** Ends the TIA connections the PLC commands opened; main calls it after every command. */
@@ -137,31 +125,7 @@ async function ensureTarget(link: PlcLink, ws: string, config: RungConfig, io: I
   }
   await saveTarget(ws, device, pick.target);
   say(`${device}: ${describe(pick)}; saved as [plc.${device}] in rung.toml\n`);
-  const change = pick.found ? addressChange(options, pick.found.address) : undefined;
-  if (change) {
-    if (config.project.tiaVersion === "V21") {
-      say(`V21 can go online at ${change.to}; the project stays unchanged.\n`);
-      if (canPrompt(io) && /^y/i.test((await ask(io, `Go online at ${change.to} (save address in rung.toml)? [y/N] `)).trim())) {
-        pick.target.address = change.to;
-        await saveTarget(ws, device, pick.target);
-      } else say(`To use it: rung connect --address ${change.to}\n`);
-      return pick.target;
-    }
-    say(`The project gives ${device} ${change.from} (${change.interface}), and it answered at ${change.to}: TIA Portal goes online only at the project's address.\n`);
-    if (canPrompt(io) && /^y/i.test((await ask(io, `Put ${change.to} into the project's network settings (plc/${device}/hardware/network.yaml)? [y/N] `)).trim())) await setAddress(ws, device, change, say);
-    else say(`To use it: rung connect --address ${change.to}\n`);
-  }
   return pick.target;
-}
-
-/** Writes the address into network.yaml; sync takes it to TIA Portal like any edit (writes on). */
-async function setAddress(ws: string, device: string, change: { interface: string; from: string; to: string }, say: (s: string) => void): Promise<void> {
-  const file = join(ws, "plc", device, "hardware", "network.yaml");
-  const text = await readFile(file, "utf8").catch(() => {
-    throw new WorkspaceError("NOT_MIRRORED", `plc/${device}/hardware/network.yaml is not mirrored yet: rung pull first`);
-  });
-  await writeFileAtomic(file, withNetworkAddress(text, device, change.interface, change.to));
-  say(`plc/${device}/hardware/network.yaml: ${change.interface} ${change.from} → ${change.to}. rung sync takes it to TIA Portal (with writes on); then go online.\n`);
 }
 
 /** rung connect: find the PLC (or pick among what answers) and remember it; --json lists the choices for editors. */
@@ -187,7 +151,6 @@ function offeredTarget(t: ConnectionTarget, c: ConnectionOptions): ConnectionTar
 }
 
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  if (v["project-address"] && !v.address) throw new WorkspaceError("BAD_ARGUMENT", "--project-address requires --address");
   const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v, ws, link);
   if (v.use) {
@@ -207,40 +170,20 @@ export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io
     io.stdout(`${device}: ${t.pcInterface}${t.targetInterface ? ` → ${t.targetInterface}` : ""}; saved as [plc.${device}] in rung.toml${checked ? "" : " (not checked: no TIA Portal has the project open)"}\n`);
     return 0;
   }
-  if (v.address) {
-    const ip = String(v.address);
-    if (!isIPv4(ip)) throw new WorkspaceError("BAD_ARGUMENT", `${ip} is not an IP address such as 192.168.0.1`);
-    if (config.project.tiaVersion === "V21" && !v["project-address"]) {
-      const target = targetOf(config, device) ?? await ensureTarget(link, ws, config, io, device, "connect");
-      if (!target) throw new WorkspaceError("NO_TARGET", "Choose a PG/PC interface with rung connect --pick first");
-      await saveTarget(ws, device, { ...target, address: ip });
-      io.stdout(`${device}: go online at ${ip}; saved in rung.toml, the project stays unchanged\n`);
-      return 0;
-    }
-    const options = await link.call<ConnectionOptions>("connections", { device, scan: false }, (b) => b.connections(device, false));
-    const change = addressChange(options, ip);
-    if (!change) {
-      io.stdout(`${device} already has ${ip} in the project\n`);
-      return 0;
-    }
-    await setAddress(ws, device, change, io.stdout);
-    return 0;
-  }
   if (v.json) {
     const options = await link.call<ConnectionOptions>("connections", { device, scan: true }, (b) => b.connections(device, true));
     const all = candidates(options);
-    const choice = (c: Candidate) => ({ ...c, label: describe(c), ...(c.found && addressChange(options, c.found.address) ? { addressChange: addressChange(options, c.found.address) } : {}) });
-    io.stdout(JSON.stringify({ device, saved: targetOf(config, device) ?? null, configuredInTia: options.configured, plcAddresses: options.plcAddresses, candidates: all.map(choice), reachable: reachable(options).map(choice), notFound: all.length ? null : notFoundMessage(device, options) }, null, 2) + "\n");
+    io.stdout(JSON.stringify({ device, saved: targetOf(config, device) ?? null, configuredInTia: options.configured, plcAddresses: options.plcAddresses, candidates: all.map((c) => ({ ...c, label: describe(c) })), reachable: reachable(options).map((c) => ({ ...c, label: describe(c) })), notFound: all.length ? null : notFoundMessage(device, options) }, null, 2) + "\n");
     return 0;
   }
   await ensureTarget(link, ws, config, io, device, "connect", !!v.pick || !!targetOf(config, device));
   return 0;
 }
 
-async function workspace(dir: string, io: Io, download = false, headless = true, window = false) {
+async function workspace(dir: string, io: Io, download = false, headless = true) {
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
-  return { ws, config, link: new PlcLink(ws, config, io, download, headless, window) };
+  return { ws, config, link: new PlcLink(ws, config, io, download, headless) };
 }
 
 async function printCompile(ws: string, _config: RungConfig, io: Io, raw: CompileMessage[], device: string, scope: string[] | "all" = "all"): Promise<number> {
@@ -288,8 +231,7 @@ export async function cmdOnline(dir: string, v: Record<string, unknown>, io: Io)
   const device = await deviceOf(config, v, ws, link);
   const action = v.off ? "offline" : v.state ? "state" : "online";
   const target = action === "online" ? await ensureTarget(link, ws, config, io, device, "online") : targetOf(config, device);
-  const credentials = plcCredentials(io, v["trust-certificate"] === true);
-  const s = await link.call<OnlineStatus>("online", { device, action, ...(target ? { target } : {}), ...(credentials ? { credentials } : {}) }, (b) => b.online(device, action, target, credentials));
+  const s = await link.call<OnlineStatus>("online", { device, action, ...(target ? { target } : {}) }, (b) => b.online(device, action, target));
   io.stdout(`${s.device}: ${s.state}\n`);
   return action === "online" && s.state !== "Online" ? 2 : 0;
 }
@@ -301,8 +243,7 @@ export async function cmdCompare(dir: string, v: Record<string, unknown>, io: Io
   const { ws, config, link } = await workspace(dir, io);
   const device = await deviceOf(config, v, ws, link);
   const target = await ensureTarget(link, ws, config, io, device, "online", false, !!v.json);
-  const credentials = plcCredentials(io, v["trust-certificate"] === true);
-  const r = await link.call<CompareOutcome>("compare", { device, ...(target ? { target } : {}), ...(credentials ? { credentials } : {}) }, (b) => b.compare(device, target, credentials));
+  const r = await link.call<CompareOutcome>("compare", { device, ...(target ? { target } : {}) }, (b) => b.compare(device, target));
   const objects = await snapshot(ws);
   const items = r.items.map((i) => ({ ...i, file: i.address ? objects.find((o) => o.address === i.address)?.path : undefined }));
   if (v.json) {
@@ -377,7 +318,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   }
 
   const what = [hardware ? "hardware" : "", software ? (onlyChanges ? "software (changes)" : "software (all blocks)") : ""].filter(Boolean).join(" + ");
-  io.stdout(`\nDownload ${what} to ${device}${target.address ? ` at ${target.address}` : ""} via ${target.pcInterface}${target.targetInterface ? ` / ${target.targetInterface}` : ""}.\n`);
+  io.stdout(`\nDownload ${what} to ${device} via ${target.pcInterface}${target.targetInterface ? ` / ${target.targetInterface}` : ""}.\n`);
   if (allow.length) io.stdout(`Allowed answers: ${allow.join(", ")}\n`);
   if (!v.yes) {
     const answer = (await ask(io, config.download.confirm === "yes-no" ? "Continue? [y/N] " : `Type the PLC name (${device}) to download: `)).trim();
@@ -421,47 +362,26 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   return r.state === "Error" ? 2 : 0;
 }
 
-export async function cmdOpen(dir: string, file: string, io: Io, save = false): Promise<number> {
-  // a TIA Portal without window has no editors: the bridge opens the project in one with window, or moves it there
-  // from rung's keeper; with no TIA Portal at all it starts one with window
-  const { ws, link } = await workspace(dir, io, false, false, true);
+export async function cmdOpen(dir: string, file: string, io: Io): Promise<number> {
+  // a TIA Portal started without a window has no editors: rung open never starts one, it would wait a minute to fail
+  const { ws, config, link } = await workspace(dir, io, false, false);
   const rel = relative(ws, resolve(io.cwd, file)).split(sep).join("/");
   const s = (await snapshot(ws)).find((x) => x.path === rel);
   if (!s) throw new WorkspaceError("NOT_MIRRORED", `${rel} is not a mirrored object`);
   try {
-    await link.call("show", { address: s.address, save }, (b) => b.show(s.address, save));
+    await link.call("show", { address: s.address }, (b) => b.show(s.address));
   } catch (e) {
-    if ((e as { code?: string }).code === "PROJECT_UNSAVED")
-      throw new WorkspaceError("PROJECT_UNSAVED", `${(e as Error).message.replace(/\s*Save them to go on.*$/, "")} To save them and open it: rung open ${rel} --save`);
+    if (["TIA_NOT_RUNNING", "NO_PROJECT", "UNSUPPORTED_CAPABILITY"].includes((e as { code?: string }).code ?? ""))
+      throw new WorkspaceError("NO_TIA_WINDOW", `rung open shows ${rel} in TIA Portal's editor: open ${config.project.path} in TIA Portal (with its window) first`);
     throw e;
   }
   io.stdout(`opened ${s.address} in TIA Portal\n`);
   return 0;
 }
 
-/** Inspect or release an existing portal, through watch when it owns the workspace. */
-export async function cmdSession(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { config, link } = await workspace(dir, io, false, false);
-  if (v.save && !v.release) throw new WorkspaceError("BAD_ARGUMENT", "--save requires --release");
-  if (v.release) {
-    const r = await link.call("sessionRelease", { save: !!v.save }, (b) => b.releaseSession(!!v.save));
-    io.stdout(v.json ? JSON.stringify(r) + "\n" : "released the project from rung's background TIA Portal\n");
-  } else {
-    const r = await link.call("sessionState", {}, (b) => b.sessionState()).catch((e: { code?: string }) => {
-      if (["TIA_NOT_RUNNING", "NO_PROJECT"].includes(e.code ?? "")) return { projectPath: config.project.path, open: false as const };
-      throw e;
-    });
-    const report = r.open === false ? { projectPath: r.projectPath, open: false, ...("keeperPid" in r && r.keeperPid ? { keeperPid: r.keeperPid } : {}) } : r;
-    io.stdout(v.json ? JSON.stringify(report, null, 2) + "\n" : r.open === false
-      ? `${r.projectPath}\nNo TIA Portal has the project open; ${"keeperPid" in r && r.keeperPid ? `keeper record exists (${r.keeperPid})` : "no keeper record"}.\n`
-      : `${r.projectPath}\nTIA Portal ${r.tiaPid}: ${r.mode}, held by ${r.heldBy}${r.keeperPid ? ` (${r.keeperPid})` : ""}, ${r.attachedSessions} attached sessions\n`);
-  }
-  return 0;
-}
-
 /** --use/--mode/--number of rung connect name the PG/PC interface; without --use the bridge takes the only one. */
 export function uploadRequest(address: string, v: Record<string, unknown>): UploadRequest {
-  if (!isIPv4(address)) throw new WorkspaceError("BAD_ARGUMENT", `${address} is not an IP address such as 192.168.0.1`);
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) throw new WorkspaceError("BAD_ARGUMENT", `${address} is not an IP address such as 192.168.0.1`);
   return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v) } : {}) };
 }
 

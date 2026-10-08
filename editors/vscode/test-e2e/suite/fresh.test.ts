@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// First run: a folder without rung.toml. Open TIA Project mirrors, pulls and starts watch; the views fill.
+// First run: a folder without rung.toml. Initialize from a TIA Portal project, pull, and the views fill.
 import * as assert from "node:assert/strict";
 import * as vscode from "vscode";
 import type { RungExtensionApi } from "../../src/extension";
@@ -31,24 +31,22 @@ describe("first run in a folder without rung.toml", function () {
   it("commands that need a workspace offer to initialize", async () => {
     await vscode.commands.executeCommand("rung.sync");
     assert.deepEqual(d.texts, ["warning: This folder is not a rung workspace (no rung.toml)."]);
-    assert.deepEqual(d.of("warning")[0]!.items, ["Open TIA Project…"]);
+    assert.deepEqual(d.of("warning")[0]!.items, ["Initialize…"]);
     assert.equal(cli.runs.length, 0);
   });
 
-  it("Open TIA Project runs rung init --project and the pull without asking, starts watch and fills the views", async () => {
+  it("Initialize runs rung init --project, then offers the pull and fills the views", async () => {
     d.reset();
-    d.pickLabel(/^TIA Portal on this PC$/);
-    d.open(vscode.Uri.file(process.env.RUNG_E2E_PROJECT!));
+    d.open(vscode.Uri.file(process.env.RUNG_E2E_PROJECT!)).answer("Pull");
     await vscode.commands.executeCommand("rung.init");
     assert.deepEqual(d.of("openDialog").length, 1);
-    assert.deepEqual(cli.lines().slice(0, 2), [`init --project ${vscode.Uri.file(process.env.RUNG_E2E_PROJECT!).fsPath}`, "pull"]);
+    assert.deepEqual(cli.lines(), [`init --project ${vscode.Uri.file(process.env.RUNG_E2E_PROJECT!).fsPath}`, "pull"]);
     assert.equal(cli.runs[0]!.result.code, 0, cli.runs[0]!.result.output);
     assert.equal(cli.runs[1]!.result.code, 0, cli.runs[1]!.result.output);
     await waitFor("objects in the Project view", async () => (await outline(api.project)).some((l) => l.startsWith("PLC_1 [7")), 15_000);
     assert.equal(api.ws.hasConfig, true);
-    await waitFor("watch started", () => api.watch.status === "running" || api.watch.status === "starting", 30_000);
+    await waitFor("status bar", () => api.statusBar.visible && api.statusBar.text === "$(circle-slash) rung · watch off");
     assert.match((await outline(api.plc)).join("\n"), /^PLC_1 \[state not checked\]/m);
-    await vscode.commands.executeCommand("rung.watch.stop");
   });
 
   it("the language server works after initializing", async () => {

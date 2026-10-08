@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
 import { isCompileSummary } from "../src/core/args";
-import { automaticChoice, connectAddressArgs, connectUseArgs, parseConnectJson, parseNoTarget, sameTarget, splitExplanation, type ConnectReport } from "../src/core/connect";
+import { automaticChoice, connectUseArgs, parseConnectJson, parseNoTarget, sameTarget, splitExplanation, type ConnectReport } from "../src/core/connect";
 
 const NOT_FOUND = [
   "PLC_1 was not found on the network.",
@@ -97,13 +97,5 @@ describe("connect helpers", () => {
   it("isCompileSummary", () => {
     expect(isCompileSummary("Compiling finished (errors: 1; warnings: 0)")).toBe(true);
     expect(isCompileSummary("Tag #Missing not defined.")).toBe(false);
-  });
-});
-
-describe("a PLC answering at another address", () => {
-  it("keeps the address change rung reports and builds the command that puts it into the project", () => {
-    const r = parseConnectJson(JSON.stringify({ device: "PLC_1", saved: null, configuredInTia: false, candidates: [], reachable: [{ target: { mode: "PN/IE", pcInterface: "Wi-Fi" }, label: "plc_1 at 10.0.0.7", reason: "reachable", found: { address: "10.0.0.7" }, addressChange: { interface: "PROFINET interface_1", from: "192.168.0.1", to: "10.0.0.7" } }], notFound: null }));
-    expect(r?.reachable[0]?.addressChange).toEqual({ interface: "PROFINET interface_1", from: "192.168.0.1", to: "10.0.0.7" });
-    expect(connectAddressArgs("PLC_1", "10.0.0.7")).toEqual(["connect", "--address", "10.0.0.7", "--plc", "PLC_1"]);
   });
 });

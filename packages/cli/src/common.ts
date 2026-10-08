@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { bridgeExecutable, tiaOf, type TiaVersion } from "./paths.js";
+import { bridgeExecutable } from "./paths.js";
 import { codesysBridgeCommand } from "./codesys.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
 import { BridgeClient, type BridgeEvent } from "@rung/bridge-client";
@@ -27,10 +27,6 @@ export const HINTS: Record<string, string> = {
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "rung init binds a folder to a TIA Portal project; in a clone of a workspace, rung pull is enough.",
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
-  ONLINE_FAILED:
-    "TIA Portal could not go online with the connection it has for this PLC ([plc.<name>] in rung.toml, or the one configured in TIA Portal). Check that the PLC is on and on that network; rung interfaces --scan shows what TIA Portal can reach, rung connect --pick chooses another connection.",
-  PASSWORD_REQUIRED: "The PLC asks for a password to go online: set it in RUNG_PLC_PASSWORD (and the user in RUNG_PLC_USER for a PLC with user management) for this command; rung never keeps it in a file. VS Code asks for it and keeps it in its secret storage.",
-  TLS_UNTRUSTED: "Check the certificate details above. --trust-certificate trusts the certificate TIA Portal shows for this connection, for this run only; or go online in TIA Portal and trust it there.",
   READ_ONLY: "rung writes into TIA Portal only when writes are on (rung writes on); know-how protected, fail-safe, system and GRAPH blocks and instances of library types it never changes.",
 };
 
@@ -75,13 +71,13 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
   }
   const tiaArgs = ["--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   if (config.bridge.host) {
-    const client = await remoteBridge(config.bridge.host, config.bridge.command, [...config.bridge.args, ...tiaArgs], tiaOf(config.project.tiaVersion), io);
+    const client = await remoteBridge(config.bridge.host, config.bridge.command, [...config.bridge.args, ...tiaArgs], config.project.tiaVersion === "V21" ? "V21" : "V20", io);
     client.onEvent((e) => showBridgeEvent(io, e));
     return client;
   }
   // Environment override wins so tests and dev setups can swap the bridge without editing rung.toml.
   const env = defaultBridge(io.env);
-  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, tiaOf(config.project.tiaVersion));
+  const command = io.env.RUNG_BRIDGE ? env.command : config.bridge.command || bridgeExecutable(io.env, config.project.tiaVersion === "V21" ? "V21" : "V20");
   const args = [...(io.env.RUNG_BRIDGE ? env.args : config.bridge.args), "--project", config.project.path, ...(config.tia.start === "headless" ? ["--open-headless"] : []), ...extra];
   // the first request may start TIA Portal without window and open the project: minutes on a cold start
   const client = await BridgeClient.spawn({
@@ -89,7 +85,7 @@ export async function bridgeFor(config: RungConfig, io: Io, extra: string[] = []
     args,
     env: bridgeEnv(io.env, {}, extra.includes("--allow-download")),
     firstRequestTimeoutMs: 300_000,
-    onSlowStart: () => io.stderr("rung: waiting for TIA Portal: starting it and opening the project can take a minute or two\n"),
+    onSlowStart: () => io.stderr("rung: waiting for TIA Portal: opening the project without a window can take a minute or two\n"),
   });
   client.onEvent((e) => showBridgeEvent(io, e));
   return client;
@@ -119,23 +115,19 @@ export function decodeArgs(word: string): string[] {
 /** An ssh destination (user@host, host, ssh://user@host:port); never something ssh would read as an option. */
 const SSH_HOST = /^[^\s"'`\u0000-\u001f-][^\s"'`\u0000-\u001f]*$/;
 
-export function sshCommand(host: string, line: string, env: Io["env"]): { command: string; args: string[] } {
-  if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
-  // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
-  const prefix = env.RUNG_SSH_ARGS ? (JSON.parse(env.RUNG_SSH_ARGS) as string[]) : [];
-  return { command: env.RUNG_SSH ?? "ssh", args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line] };
-}
-
 /**
  * The bridge on the Windows PC that runs TIA Portal, over ssh (Linux, macOS): `rung bridge` there (rung installed on
  * that PC) or the given command. Key-based login only: BatchMode never waits for a password. Files cross the
  * connection (BridgeClient remote).
  */
-export async function remoteBridge(host: string, command: string, args: string[], tia: TiaVersion, io: Io): Promise<BridgeClient> {
-  const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia !== "V20" ? ["--tia", tia] : []), ...args])}`;
-  const ssh = sshCommand(host, line, io.env);
+export async function remoteBridge(host: string, command: string, args: string[], tia: "V20" | "V21", io: Io): Promise<BridgeClient> {
+  if (!SSH_HOST.test(host)) throw new WorkspaceError("BAD_ARGUMENT", `${JSON.stringify(host)} is not an ssh destination such as user@tia-pc`);
+  // RUNG_SSH (+ RUNG_SSH_ARGS, a JSON list put first): another ssh, or a stand-in in tests
+  const ssh = io.env.RUNG_SSH ?? "ssh";
+  const prefix = io.env.RUNG_SSH_ARGS ? (JSON.parse(io.env.RUNG_SSH_ARGS) as string[]) : [];
+  const line = `${command || "rung bridge"} --args ${encodeArgs([...(tia === "V21" ? ["--tia", "V21"] : []), ...args])}`;
   try {
-    return await BridgeClient.spawn({ ...ssh, env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
+    return await BridgeClient.spawn({ command: ssh, args: [...prefix, "-T", "-o", "BatchMode=yes", "--", host, line], env: bridgeEnv(io.env), remote: true, requestTimeoutMs: 300_000 });
   } catch (e) {
     throw new WorkspaceError(
       "BRIDGE_UNREACHABLE",
@@ -177,7 +169,7 @@ export async function findWorkspace(start: string): Promise<string> {
 
 /** Warnings that describe how an object is mirrored, not a problem: they are printed but do not make the exit code 2. */
 // states the person chose or knows (writes off, a block TIA has not compiled): reported, never a failed run
-const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT", "WRITE_BACK_DROPPED", "WRITES_OFF", "IMPORT_MANUAL", "RENAMED_IN_TIA"]);
+const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT", "WRITE_BACK_DROPPED", "WRITES_OFF", "IMPORT_MANUAL"]);
 export const isNotice = (code: string) => NOTICES.has(code);
 
 export function printWarnings(io: Io, warnings: readonly { address: string; path?: string; code: string; message?: string }[]) {

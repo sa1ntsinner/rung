@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import * as p from "@clack/prompts";
 import { LINKS, WorkspaceError, realProbes, runChecks, writeFileAtomic, type CheckItem } from "@rung/core";
 import { bridgeExecutable, devPath, installRoot } from "./paths.js";
-import { whitelistHere } from "./setup.js";
+import { whitelistStatus } from "./setup.js";
 import type { Io } from "./common.js";
 
 const run = promisify(execFile);
@@ -238,7 +238,7 @@ export async function cmdSetupWizard(dir: string, v: Record<string, unknown>, io
   if (interactive) p.intro("rung setup");
   const spin = interactive ? p.spinner() : null;
   spin?.start("Checking this PC");
-  const checks: CheckItem[] = await runChecks(realProbes(env, () => whitelistHere(env)));
+  const checks: CheckItem[] = await runChecks(realProbes(env, () => whitelistStatus(bridgeExecutable(env))));
   spin?.stop("Checked this PC");
   const has = (id: string) => checks.find((c) => c.id === id)?.status === "ok";
 

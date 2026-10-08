@@ -4,8 +4,7 @@
   Adds executables to the TIA Portal Openness whitelist, so TIA Portal does not ask "Openness access: Yes / Yes to all".
 .DESCRIPTION
   TIA Portal remembers an allowed Openness client by file name + SHA-256 (base64) + UTC write time under
-  HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist\<exe>\Entry (V21 and later: ...\Openness\AllowList\<exe>\Entry).
-  The hash changes with every build,
+  HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist\<exe>\Entry. The hash changes with every build,
   so developer builds would prompt again. The bridge and spike builds call this script after each build.
 
   Writing under HKLM needs rights: run once, elevated, with -GrantUser to let that user maintain the whitelist.
@@ -25,8 +24,7 @@ param(
     [switch]$Quiet
 )
 $ErrorActionPreference = 'Stop'
-# V21 and later keep one AllowList for every version and do not read <version>\Whitelist
-$root = if ([int]($Version.Split('.')[0]) -ge 21) { "HKLM:\SOFTWARE\Siemens\Automation\Openness\AllowList" } else { "HKLM:\SOFTWARE\Siemens\Automation\Openness\$Version\Whitelist" }
+$root = "HKLM:\SOFTWARE\Siemens\Automation\Openness\$Version\Whitelist"
 
 try {
     if ($GrantUser) {

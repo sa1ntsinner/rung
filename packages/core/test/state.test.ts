@@ -35,17 +35,6 @@ describe("StateStore", () => {
     await s.close();
   });
 
-  it("keeps TIA Portal's identity of an address when a state is built anew without it", async () => {
-    const s = await StateStore.open(root(), binding);
-    s.upsert({ ...obj("plc:P/blocks/A", "plc/P/blocks/A.scl"), tiaId: "id-7" });
-    s.upsert({ ...obj("plc:P/blocks/A", "plc/P/blocks/A.scl"), status: "conflicted" });
-    expect(s.get("plc:P/blocks/A")?.tiaId).toBe("id-7");
-    s.remove("plc:P/blocks/A");
-    s.upsert(obj("plc:P/blocks/A", "plc/P/blocks/A.scl"));
-    expect(s.get("plc:P/blocks/A")?.tiaId).toBeUndefined();
-    await s.close();
-  });
-
   it("returned records cannot mutate the store", async () => {
     const s = await StateStore.open(root(), binding);
     s.upsert(obj("plc:P/blocks/A", "plc/P/blocks/A.scl"));

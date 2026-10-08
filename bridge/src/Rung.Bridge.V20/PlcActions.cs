@@ -56,63 +56,7 @@ namespace Rung.Bridge.V20
             return messages;
         }
 
-        /// <summary>
-        /// What the PLC asked while going online (OnlineLegitimation): a password of its access protection or a user of
-        /// its user management, answered with the request's credentials; a TLS certificate, refused unless explicitly trusted.
-        /// </summary>
-        sealed class Legitimation
-        {
-            public bool PasswordAsked, TlsAsked, UserNeeded;
-            public string TlsInfo;
-            readonly OnlineCredentialsInput _given;
-            public Legitimation(OnlineCredentialsInput given) { _given = given; }
-
-            public void Answer(Siemens.Engineering.Online.Configurations.OnlineConfiguration c)
-            {
-                switch (c)
-                {
-                    case Siemens.Engineering.Online.Configurations.OnlineAuthenticationConfiguration auth:
-                    {
-                        // the PLC's user management: a user type it supports is chosen, like in TIA Portal's dialog;
-                        // a password alone only where the PLC offers its password-only user
-                        PasswordAsked = true;
-                        var types = auth.GetSupportedAuthenticationTypes();
-                        Siemens.Engineering.Online.Configurations.AuthenticationType Of(Siemens.Engineering.Online.Configurations.UserType u) => types.FirstOrDefault(x => x.CurrentUserType == u);
-                        var passwordOnly = Of(Siemens.Engineering.Online.Configurations.UserType.PasswordOnly);
-                        var named = Of(Siemens.Engineering.Online.Configurations.UserType.ProjectUser) ?? Of(Siemens.Engineering.Online.Configurations.UserType.GlobalUser);
-                        var hasUser = !string.IsNullOrEmpty(_given?.User);
-                        var type = hasUser ? named : passwordOnly;
-                        if (type == null) { UserNeeded = !hasUser && named != null; return; }
-                        if (string.IsNullOrEmpty(_given?.Password) || auth.OnlineCredentials == null) { UserNeeded = passwordOnly == null; return; }
-                        auth.OnlineCredentials.Type = type.CurrentUserType;
-                        if (hasUser) auth.OnlineCredentials.Name = _given.User;
-                        auth.OnlineCredentials.SetPassword(Secure(_given.Password));
-                        break;
-                    }
-                    case Siemens.Engineering.Online.Configurations.OnlinePasswordConfiguration pw:
-                        PasswordAsked = true;
-                        if (!string.IsNullOrEmpty(_given?.Password)) pw.SetPassword(Secure(_given.Password));
-                        break;
-                    case Siemens.Engineering.Online.Configurations.TlsVerificationConfiguration tls:
-                        tls.CurrentSelection = _given?.TrustCertificate == true
-                            ? Siemens.Engineering.Online.Configurations.TlsVerificationConfigurationSelection.Trusted
-                            : Siemens.Engineering.Online.Configurations.TlsVerificationConfigurationSelection.NonTrusted;
-                        TlsAsked = true;
-                        TlsInfo = Convert.ToString(tls.VerificationInfo);
-                        break;
-                }
-            }
-
-            static SecureString Secure(string s)
-            {
-                var ss = new SecureString();
-                foreach (var ch in s) ss.AppendChar(ch);
-                ss.MakeReadOnly();
-                return ss;
-            }
-        }
-
-        public OnlineStatus Online(string device, string action, ConnectionTarget target, OnlineCredentialsInput credentials = null)
+        public OnlineStatus Online(string device, string action, ConnectionTarget target)
         {
             Alive();
             Listen();
@@ -126,17 +70,24 @@ namespace Rung.Bridge.V20
                     case "state":
                         break;
                     case "online":
-                        CheckOnlineAddress(target);
-                        if (!ConnectionTarget.NeedsConnection(provider.State == OnlineState.Online, target)) break;
+                        if (provider.State == OnlineState.Online) break;
                         // NotReachable, Connecting and friends still count as online mode for Openness: leave it first
                         GoOfflineQuietly(provider);
-                        var asked = GoOnlineAnswering(provider, device, credentials, target);
+                        if (target != null && !string.IsNullOrEmpty(target.Mode))
+                            provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
+                        else if (!provider.Configuration.IsConfigured)
+                            throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
+                        try { provider.GoOnline(); }
+                        catch (EngineeringException)
+                        {
+                            GoOfflineQuietly(provider);
+                            throw;
+                        }
                         // a half-open connection (not reachable, wrong device) would block compile and download
                         if (provider.State != OnlineState.Online)
                         {
                             reached = provider.State.ToString();
                             GoOfflineQuietly(provider);
-                            ThrowIfAsked(device, asked, credentials);
                         }
                         break;
                     case "offline":
@@ -148,57 +99,6 @@ namespace Rung.Bridge.V20
             }
             catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
             return new OnlineStatus { Device = device, State = reached ?? provider.State.ToString() };
-        }
-
-        static void CheckOnlineAddress(ConnectionTarget target)
-        {
-#if !TIA_V21
-            target?.CheckAddress(false);
-#else
-            target?.CheckAddress(true);
-#endif
-        }
-
-        static Legitimation GoOnlineAnswering(OnlineProvider provider, string device, OnlineCredentialsInput credentials, ConnectionTarget target)
-        {
-            if (string.IsNullOrEmpty(target?.Address))
-            {
-                if (target != null && !string.IsNullOrEmpty(target.Mode))
-                    provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
-                else if (!provider.Configuration.IsConfigured)
-                    throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
-            }
-            var asked = new Legitimation(credentials);
-            provider.Configuration.OnlineLegitimation += asked.Answer;
-            try
-            {
-#if TIA_V21
-                if (!string.IsNullOrEmpty(target?.Address))
-                    provider.GoOnline(ResolvePcInterface(provider.Configuration, target, device).Addresses.Create(target.Address));
-                else
-#endif
-                    provider.GoOnline();
-            }
-            catch (EngineeringException)
-            {
-                GoOfflineQuietly(provider);
-                ThrowIfAsked(device, asked, credentials);
-                throw;
-            }
-            finally { provider.Configuration.OnlineLegitimation -= asked.Answer; }
-            return asked;
-        }
-
-        static void ThrowIfAsked(string device, Legitimation asked, OnlineCredentialsInput given)
-        {
-            if (asked.TlsAsked && given?.TrustCertificate != true)
-                throw new RpcException(ErrorCodes.TlsUntrusted, device + " shows a certificate TIA Portal does not trust yet" + (string.IsNullOrEmpty(asked.TlsInfo) ? "" : " (" + asked.TlsInfo + ")") + ". Decide whether to trust this certificate for this connection.");
-            if (asked.UserNeeded)
-                throw new RpcException(ErrorCodes.PasswordRequired, device + " asks for a user and a password to go online (its user management).");
-            if (asked.PasswordAsked)
-                throw new RpcException(ErrorCodes.PasswordRequired, string.IsNullOrEmpty(given?.Password)
-                    ? device + " asks for a password to go online."
-                    : device + " did not take the password" + (string.IsNullOrEmpty(given.User) ? "" : " of " + given.User) + ".");
         }
 
         void LeaveOnline(string device)
@@ -247,31 +147,29 @@ namespace Rung.Bridge.V20
             }
         }
 
-        public CompareOutcome Compare(string device, ConnectionTarget target, OnlineCredentialsInput credentials = null)
+        public CompareOutcome Compare(string device, ConnectionTarget target)
         {
-            CheckOnlineAddress(target);
             Alive();
             Listen();
             var plc = Plc(device);
             var provider = CpuItem(device).GetService<OnlineProvider>();
             if (provider == null) throw new RpcException(ErrorCodes.UnsupportedCapability, device + " has no online access");
             var byName = AddressesByName(device);
-            var wasOnline = provider.State == OnlineState.Online;
             var wentOnline = false;
             try
             {
                 // CompareToOnline needs online mode; go online for it and leave again when rung went online itself
-                if (ConnectionTarget.NeedsConnection(provider.State == OnlineState.Online, target))
+                if (provider.State != OnlineState.Online)
                 {
                     GoOfflineQuietly(provider);
+                    if (target != null && !string.IsNullOrEmpty(target.Mode))
+                        provider.Configuration.ApplyConfiguration(ResolveTarget(provider.Configuration, target, device));
+                    else if (!provider.Configuration.IsConfigured)
+                        throw new RpcException(ErrorCodes.NoTarget, NoTargetMessage(device));
                     wentOnline = true;
-                    var asked = GoOnlineAnswering(provider, device, credentials, target);
+                    provider.GoOnline();
                     if (provider.State != OnlineState.Online)
-                    {
-                        ThrowIfAsked(device, asked, credentials);
                         throw new RpcException(ErrorCodes.OnlineFailed, device + " is " + provider.State + "; the comparison needs an online connection");
-                    }
-                    wentOnline = !wasOnline;
                 }
                 var result = plc.CompareToOnline();
                 // TIA fills the result lazily over the online connection: read all of it before going offline,
@@ -330,7 +228,7 @@ namespace Rung.Bridge.V20
                             foreach (var d in pc.GetAccessibleDevices())
                                 info.Accessible.Add(new AccessibleDeviceInfo { Name = d.Name, Address = d.Address, DeviceSeries = d.DeviceSeries, MacAddress = d.MACAddress });
                         }
-                        catch (EngineeringException e) { info.ScanError = TiaText.Clean(e.Message); } // interface not usable right now (cable, driver)
+                        catch (EngineeringException) { /* interface not usable right now (cable, driver): report it without devices */ }
                     }
                     m.PcInterfaces.Add(info);
                 }
@@ -343,7 +241,6 @@ namespace Rung.Bridge.V20
         {
             if (!_args.AllowDownload)
                 throw new RpcException(ErrorCodes.DownloadDisabled, "This bridge was not started for downloads: only rung download starts one that may download (--allow-download). Nothing was downloaded.");
-            CheckOnlineAddress(request.Target);
             Listen();
             Alive();
             var item = CpuItem(request.Device);
@@ -364,15 +261,7 @@ namespace Rung.Bridge.V20
             using (OfflineFor(request.Device))
             try
             {
-#if TIA_V21
-                var result = request.Target.DownloadAt(true,
-                    () => provider.Download(target, pre, post, options),
-                    address => provider.Download(target, ResolvePcInterface(provider.Configuration, request.Target, request.Device).Addresses.Create(address), pre, post, options));
-#else
-                var result = request.Target.DownloadAt(false,
-                    () => provider.Download(target, pre, post, options),
-                    address => throw new RpcException(ErrorCodes.BadRequest, "TIA Portal V19/V20 require the project address"));
-#endif
+                var result = provider.Download(target, pre, post, options);
                 outcome.Errors = result.ErrorCount;
                 outcome.Warnings = result.WarningCount;
                 Collect(result.Messages, outcome.Messages);
@@ -387,10 +276,9 @@ namespace Rung.Bridge.V20
             return outcome;
         }
 
-        public void Show(string address, bool save)
+        public void Show(string address)
         {
             Alive();
-            MoveToWindow(save);
             var r = Resolve(address);
             var m = r.Obj.GetType().GetMethod("ShowInEditor", Type.EmptyTypes);
             if (m == null) throw new RpcException(ErrorCodes.UnsupportedObject, address + " has no editor");
@@ -566,7 +454,7 @@ namespace Rung.Bridge.V20
             }
         }
 
-        static ConfigurationPcInterface ResolvePcInterface(ConnectionConfiguration cfg, ConnectionTarget t, string device)
+        static ConfigurationTargetInterface ResolveTarget(ConnectionConfiguration cfg, ConnectionTarget t, string device)
         {
             // an S7-PLCSIM instance has no PLC certificate, so the secure PG/PC channel TIA V20 uses by default fails
             // with "Connect to module failed"; TIA Portal's own "Start simulation" talks to it the legacy way. Both the
@@ -576,12 +464,6 @@ namespace Rung.Bridge.V20
             var mode = cfg.Modes.Find(t.Mode) ?? throw new RpcException(ErrorCodes.NoTarget, "No connection mode \"" + t.Mode + "\" for " + device + "; run rung interfaces");
             var pc = mode.PcInterfaces.Find(t.PcInterface, t.PcInterfaceNumber <= 0 ? 1 : t.PcInterfaceNumber)
                 ?? throw new RpcException(ErrorCodes.NoTarget, "No PG/PC interface \"" + t.PcInterface + "\" (" + t.PcInterfaceNumber + ") in mode " + t.Mode + "; run rung interfaces");
-            return pc;
-        }
-
-        static ConfigurationTargetInterface ResolveTarget(ConnectionConfiguration cfg, ConnectionTarget t, string device)
-        {
-            var pc = ResolvePcInterface(cfg, t, device);
             if (!string.IsNullOrEmpty(t.TargetInterface))
                 return pc.TargetInterfaces.Find(t.TargetInterface) ?? throw new RpcException(ErrorCodes.NoTarget, "No target interface \"" + t.TargetInterface + "\" on " + t.PcInterface + "; run rung interfaces");
             var all = pc.TargetInterfaces.ToList();

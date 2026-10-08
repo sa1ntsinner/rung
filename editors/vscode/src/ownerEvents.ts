@@ -15,7 +15,7 @@ export class OwnerEvents implements vscode.Disposable {
   private connectedTo: string | undefined;
   private retry: NodeJS.Timeout | undefined;
   private delay = 1000;
-  private readonly fired = new vscode.EventEmitter<{ event: string; params: unknown; at?: number }>();
+  private readonly fired = new vscode.EventEmitter<{ event: string; params: unknown }>();
   readonly onEvent = this.fired.event;
   private readonly sub: vscode.Disposable;
 
@@ -58,7 +58,7 @@ export class OwnerEvents implements vscode.Disposable {
     sock.on("connect", () => {
       this.delay = 1000;
       this.fired.fire({ event: "connected", params: {} });
-      sock.write(JSON.stringify({ id: 1, token: info.token, method: "subscribe", params: { replay: true } }) + "\n");
+      sock.write(JSON.stringify({ id: 1, token: info.token, method: "subscribe" }) + "\n");
       sock.write(JSON.stringify({ id: 2, token: info.token, method: "status" }) + "\n");
     });
     let buf = "";
@@ -69,8 +69,8 @@ export class OwnerEvents implements vscode.Disposable {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
         try {
-          const msg = JSON.parse(line) as { id?: number; result?: unknown; event?: string; params?: unknown; at?: number };
-          if (msg.event) this.fired.fire({ event: msg.event, params: msg.params, ...(typeof msg.at === "number" ? { at: msg.at } : {}) });
+          const msg = JSON.parse(line) as { id?: number; result?: unknown; event?: string; params?: unknown };
+          if (msg.event) this.fired.fire({ event: msg.event, params: msg.params });
           else if (msg.id === 2 && msg.result) this.fired.fire({ event: "status", params: msg.result });
         } catch {
           /* not ours */

@@ -22,7 +22,7 @@ const TAGS = `<?xml version="1.0" encoding="utf-8"?>
 const USER = `FUNCTION_BLOCK "Fx_User"
 VAR
    Motor : "Fx_Motor";
-   Delay {InstructionName := 'TON_TIME'} : TON_TIME;
+   Timer {InstructionName := 'TON_TIME'} : TON_TIME;
    Cfg : "Fx_Types";
 END_VAR
 VAR_TEMP
@@ -31,8 +31,8 @@ END_VAR
 BEGIN
    #Motor(Start := "Start_Button", Stop := FALSE, SpeedSetpoint := "Fx_Global".Station.Setpoint);
    #speed := #Motor.SpeedOut;
-   #Delay(IN := #Motor.Running, PT := T#2s);
-   IF #Delay.Q AND #Cfg.Enabled THEN
+   #Timer(IN := #Motor.Running, PT := T#2s);
+   IF #Timer.Q AND #Cfg.Enabled THEN
       "Fx_Global".Count := "Fx_Global".Count + 1;
    END_IF;
    #nope := 1;
@@ -110,10 +110,10 @@ describe("workspace features", () => {
       idx.set(user(), USER, 2);
       return r;
     };
-    expect(labels("#sp")).toEqual(expect.arrayContaining(["speed", "Motor", "Delay"]));
+    expect(labels("#sp")).toEqual(expect.arrayContaining(["speed", "Motor", "Timer"]));
     expect(labels("#Motor.")).toEqual(["Start", "Stop", "SpeedSetpoint", "Running", "SpeedOut", "Latch"]);
     expect(labels('"Fx_Global".Station.')).toEqual(["Enabled", "Mode", "Setpoint", "Label"]);
-    expect(labels("#Delay.")).toEqual(["IN", "PT", "Q", "ET"]);
+    expect(labels("#Timer.")).toEqual(["IN", "PT", "Q", "ET"]);
     expect(labels('"Fx_')).toEqual(expect.arrayContaining(["Fx_Global", "Fx_Motor", "Start_Button"]));
   });
 

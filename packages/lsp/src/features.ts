@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
-import { analyse } from "./analysis.js";
-import { argumentMismatches, typeMismatches } from "./typecheck.js";
 import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
 import type { Token } from "./lexer.js";
 import { nearest } from "./nearest.js";
 import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, orderedParams, paramsOf, unknownArgs, type CallSite } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
-import { RESERVED } from "./declarationEdit.js";
 
 export interface Location {
   uri: string;
@@ -20,11 +17,9 @@ export interface Location {
 export interface FeatureDiagnostic {
   start: number;
   end: number;
-  severity: "error" | "warning" | "information" | "hint";
+  severity: "error" | "warning" | "information";
   message: string;
   code: string;
-  /** Shown faded: code nobody uses. */
-  unnecessary?: true;
 }
 
 export type CompletionKind = "variable" | "field" | "function" | "class" | "keyword" | "type" | "constant" | "module";
@@ -190,17 +185,6 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
-  // a name SCL reserves (tod, time, date) is no name TIA Portal takes unquoted ("Syntax error: the value tod is invalid")
-  if (/\.(scl|db|udt)$/i.test(uri)) {
-    const walk = (vars: VarDecl[]) => {
-      for (const v of vars) {
-        if (v.src && doc.text[v.src.name.start] !== '"' && RESERVED.has(v.name.toUpperCase()))
-          out.push({ start: v.src.name.start, end: v.src.name.end, severity: "error", code: "RESERVED_NAME", message: `${v.name} is a word SCL reserves: TIA Portal refuses it as a name; call it otherwise, or write it in quotes ("${v.name}")` });
-        if (v.members) walk(v.members);
-      }
-    };
-    for (const b of doc.parsed.blocks) walk(b.vars);
-  }
   // a TIA tag table as text: TIA Portal keeps every PLC tag at an address; what the import refuses shows here first
   if (TAG_TEXT.test(uri)) {
     const table: FeatureDiagnostic[] = [];
@@ -243,7 +227,6 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
     if (missing.length)
       out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input, in/out and output${missing.some((p) => p.section !== "Output") ? " (quick fix: add the inputs)" : ""}`, code: "MISSING_PARAMETER" });
   }
-  if (/\.scl$/i.test(uri)) out.push(...argumentMismatches(index, uri));
   for (const block of doc.parsed.blocks) {
     for (const ref of block.refs) {
       if (ref.kind === "local") {
@@ -270,7 +253,6 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       if (m) out.push({ start: m.start, end: m.end, severity: "warning", message: `${m.name} is not a member of ${m.parent}${m.suggestion ? ` (did you mean ${m.suggestion}?)` : ""}`, code: "UNKNOWN_MEMBER" });
     }
     if (/\.scl$/i.test(uri)) out.push(...literalMismatches(index, uri, doc.parsed.tokens, block));
-    if (/\.scl$/i.test(uri)) out.push(...analyse(block, doc.parsed.tokens, doc.text), ...typeMismatches(index, uri, block, doc.parsed.tokens, doc.text));
   }
   return out;
 }

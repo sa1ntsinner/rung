@@ -29,14 +29,8 @@ export function mergeText(base: string | null, file: string, tia: string): Merge
   for (const r of regions) {
     if (r.ok) out.push(...r.ok);
     else if (r.conflict) {
-      // declarations both sides added at the end of a section (a variable here, another in TIA Portal) both stay
-      const c = r.conflict;
-      if (!c.o.length && inDeclarations(out) && c.a.every(isDeclaration) && c.b.every(isDeclaration)) {
-        out.push(...c.a, ...c.b);
-        continue;
-      }
       conflicts++;
-      out.push(...markerLines(c.a, c.o, c.b));
+      out.push(...markerLines(r.conflict.a, r.conflict.o, r.conflict.b));
     }
   }
   return conflicts ? { kind: "conflict", text: join(out), conflicts } : { kind: "clean", text: join(out) };
@@ -46,55 +40,6 @@ function markerLines(file: string[], base: string[], tia: string[]): string[] {
   return ["<<<<<<< file", ...file, "||||||| base", ...base, "=======", ...tia, ">>>>>>> tia"];
 }
 const markers = (a: string[], o: string[], b: string[]) => join(markerLines(a, o, b));
-
-const DECLARATION = /^\s*("[^"]+"|[A-Za-z_]\w*)\s*(\{[^}]*\}\s*)?(AT\s+%\S+\s*)?:\s*[^;]+;\s*(\/\/.*)?$/i;
-const isDeclaration = (l: string) => !l.trim() || /^\s*\/\//.test(l) || DECLARATION.test(l);
-/** Whether the merged lines so far end inside a VAR section (or a STRUCT in one): where declarations stand. */
-function inDeclarations(out: string[]): boolean {
-  for (let i = out.length - 1; i >= 0; i--) {
-    const l = out[i]!.trim().toUpperCase();
-    if (/^END_VAR\b/.test(l) || /^BEGIN\b/.test(l)) return false;
-    if (/^VAR(_\w+)?\b/.test(l)) return true;
-  }
-  return false;
-}
-/** Lines that are whole items of a YAML list at one indentation (test cases, steps), with their own deeper lines. */
-function yamlItems(ls: string[], indent: string | undefined): string | undefined {
-  const first = /^(\s*)- /.exec(ls[0] ?? "");
-  if (!first || (indent !== undefined && first[1] !== indent)) return undefined;
-  return ls.every((l) => !l.trim() || l.startsWith(`${first[1]}- `) || (/^\s*/.exec(l)![0].length > first[1]!.length)) ? first[1] : undefined;
-}
-
-/**
- * A three-way merge of a source for git (rung merge-driver): by line, as git merges, except where both sides only
- * added lines at the same place and those are declarations in a VAR section, or whole items of a YAML list (test
- * cases, steps): both additions stay, ours first. Two people who each declared a variable, or each wrote a test case,
- * get no conflict; anything else they both changed still is one.
- */
-export function mergeSource(base: string, ours: string, theirs: string, path = ""): MergeResult {
-  const a = normalizeText(ours);
-  const b = normalizeText(theirs);
-  const o = normalizeText(base);
-  if (a === b || b === o) return { kind: "clean", text: a };
-  if (a === o) return { kind: "clean", text: b };
-  const yaml = /\.ya?ml$/i.test(path);
-  const out: string[] = [];
-  let conflicts = 0;
-  for (const r of diff3Merge(lines(a), lines(o), lines(b), { excludeFalseConflicts: true })) {
-    if (r.ok) {
-      out.push(...r.ok);
-      continue;
-    }
-    const c = r.conflict!;
-    const both = !c.o.length && (yaml ? yamlItems(c.b, yamlItems(c.a, undefined)) !== undefined : inDeclarations(out) && c.a.every(isDeclaration) && c.b.every(isDeclaration));
-    if (both) out.push(...c.a, ...c.b);
-    else {
-      conflicts++;
-      out.push("<<<<<<< ours", ...c.a, "||||||| base", ...c.o, "=======", ...c.b, ">>>>>>> theirs");
-    }
-  }
-  return conflicts ? { kind: "conflict", text: join(out), conflicts } : { kind: "clean", text: join(out) };
-}
 
 export const SOURCE_FORMS = new Set(["scl", "awl", "db", "udt", "st", "tags.st", "yaml"]);
 

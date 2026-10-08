@@ -184,8 +184,6 @@ const SECTIONS: Record<string, Section> = {
 /** Opening keyword → closing keyword for statements checked in bodies. */
 const NESTING: Record<string, string> = { IF: "END_IF", CASE: "END_CASE", FOR: "END_FOR", WHILE: "END_WHILE", REPEAT: "END_REPEAT", REGION: "END_REGION" };
 const CLOSERS = new Set(Object.values(NESTING));
-/** Keywords a parenthesis may follow that call nothing: NOT (a > b), ELSIF (x), UNTIL (y) */
-const NO_CALL = new Set(["NOT", "AND", "OR", "XOR", "MOD", "ELSIF", "UNTIL", "TO", "BY", "THEN", "DO", "OF", "ELSE", "RETURN", "EXIT"]);
 
 export const unquote = (t: string) => (t.startsWith("#") ? t.slice(1) : t).replace(/^"|"$/g, "");
 
@@ -477,7 +475,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       if (t.kind !== "ident") continue;
-      if (peek().text === "(" && !NESTING[t.upper] && !CLOSERS.has(t.upper) && !NO_CALL.has(t.upper)) {
+      if (peek().text === "(" && !NESTING[t.upper] && !CLOSERS.has(t.upper)) {
         block.refs.push({ kind: "call", name: t.text, start: t.start, end: t.end, members: [], access: "call" });
         continue;
       }

@@ -39,16 +39,6 @@ namespace Rung.Bridge.Core.Protocol
         public const string OnlineFailed = "ONLINE_FAILED";
         /// <summary>The PLC has no connection target configured in rung.toml or TIA Portal.</summary>
         public const string NoTarget = "NO_TARGET";
-        /// <summary>Moving the project into a TIA Portal window would close it with changes nobody allowed rung to save.</summary>
-        public const string ProjectUnsaved = "PROJECT_UNSAVED";
-        /// <summary>Another program holds the project in a TIA Portal without window; rung does not close it.</summary>
-        public const string ProjectBusy = "PROJECT_BUSY";
-        /// <summary>Another workspace still uses the keeper, so release would restart its Watch.</summary>
-        public const string ProjectInUse = "PROJECT_IN_USE";
-        /// <summary>The PLC asks for a password (access protection or a user) to go online, or did not take the one given.</summary>
-        public const string PasswordRequired = "PASSWORD_REQUIRED";
-        /// <summary>The PLC shows a TLS certificate TIA Portal does not trust yet; trusting it is the engineer's step in TIA Portal.</summary>
-        public const string TlsUntrusted = "TLS_UNTRUSTED";
     }
 
     /// <summary>Nonfatal warning codes attached to results.</summary>

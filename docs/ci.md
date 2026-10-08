@@ -52,16 +52,6 @@ jobs:
 
 `rung sync` exits with code 2 when there are warnings, compile errors or conflicts, so the job fails visibly.
 
-## Merging branches
-
-Two people who each declare a variable in the same VAR section, or each write a test case, get a conflict from git's line merge, although both changes belong in the file. `rung merge-driver` merges SCL, DB, UDT and test files as git does, except that it keeps both additions in those two cases; anything else both branches changed is still a conflict with the usual markers. `rung init` writes the attributes into `.gitattributes` (`*.scl merge=rung`, likewise `.db`, `.udt`, `.test.yaml`); each clone turns the driver on once:
-
-```
-git config merge.rung.driver "rung merge-driver %O %A %B %P"
-```
-
-Without that setting git merges these files as text, as before.
-
 ## Review record for FAT/SAT
 
 ```

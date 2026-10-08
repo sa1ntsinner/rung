@@ -1,10 +1,10 @@
 # Quickstart
 
-rung turns a Siemens TIA Portal project into a folder of text files that stays in sync with TIA Portal, so you can work on it in VS Code, Zed or Neovim and keep it in git.
+rung turns a Siemens TIA Portal project into a folder of text files that stays in sync with TIA Portal, so you can work on it in VS Code, Zed or Neovim, keep it in git, and let AI agents help.
 
 ## 1. Install and check
 
-- Windows with a licensed **TIA Portal V19, V20 or V21** and the Openness option (installed with TIA Portal). rung uses your TIA Portal and its licence; it does not replace either. rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
+- Windows with **TIA Portal V20** and the Openness option (installed with TIA Portal). rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
 - Unzip `rung-<version>-win-x64.zip` and add the folder to `PATH`. Or install only the rung extension in VS Code: it brings rung with it, and **rung: Put rung on PATH** makes it a command in terminals too. With Node.js 22 or newer, `npm install -g @rung-plc/cli` gives the same rung (bridge included) on Windows, and the language server, `rung test` and the ssh bridge on Linux and macOS.
 - rung is not code-signed. To check a download, compare `Get-FileHash rung-<version>-win-x64.zip` with its line in `SHA256SUMS.txt` on the release page. If Windows shows "Windows protected your PC" for rung.exe, choose **More info → Run anyway**; files unzipped from a download can be unblocked at once with `Get-ChildItem -Recurse | Unblock-File` in the rung folder. With Smart App Control turned on, Windows does not start unsigned programs at all.
 - Run `rung check`. It lists what is installed (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS, editors, agents) and says how to get what is missing:
@@ -34,12 +34,6 @@ It installs the VS Code extension, adds rung's MCP server to the agents it finds
 
 ## 3. Mirror a project
 
-In VS Code, run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap19`, `.ap20` or `.ap21` file. rung checks TIA Portal and Openness, initializes the mirror folder, pulls the files and starts watch. It uses the open folder, or asks you to choose one.
-
-For another Windows PC, choose **TIA Portal on another PC (ssh)…**. Enter the SSH destination (for example `engineer@tia-pc`) and the Windows project path on that PC. It needs key-based SSH login, rung on PATH and `rung setup openness` run there once ([setup](remote.md)). The files stay in your local mirror folder.
-
-Opening a trusted folder with `rung.toml` starts watch too. `rung.watch.autoStart` is on by default; set it to `false` in VS Code settings to start watch by hand. The status bar says **starting TIA Portal** while it starts.
-
 To try rung without touching a real project first: `powershell -ExecutionPolicy Bypass -File tools\demo\New-DemoProject.ps1` (from a clone of the repository) makes a small conveyor project in `%USERPROFILE%\rung-demo` and a workspace next to it, pulled, with tests and a first git commit. It takes a minute or two.
 
 In an empty folder:
@@ -52,17 +46,7 @@ git init && git add -A && git commit -m "baseline"
 
 `rung init` also writes `.gitignore` (`.rung/` is machine state) and `.gitattributes` (`* text=auto eol=lf`, so git for Windows does not check the files out with CRLF; a file that differs only in line endings is never sent to TIA Portal anyway). A colleague who clones the folder runs `rung pull` there, not `rung init`.
 
-If the project is not open, rung opens it in a TIA Portal without window (`[tia] start = "headless"` in `rung.toml`; `"never"` turns that off). A keeper holds it open for every command and editor of the project, so only the first one waits for it. It closes after 10 minutes with no clients attached, unless the project has unsaved changes. Set `RUNG_KEEPER_IDLE_S` to a positive number of seconds on the TIA Portal PC before starting the keeper to change that limit. The keeper never saves the project itself.
-
-**Open in TIA Portal** (`rung open <file>`) moves the project into a TIA Portal window and shows the object there. If the background project has unsaved changes, VS Code offers **Save and Open**; the CLI needs `rung open <file> --save`. After you close the window, the next command or watch pass opens it in the background again. Over SSH, opening a window needs an interactive desktop on the Windows PC; see [remote setup](remote.md).
-
-```sh
-rung session                  # existing TIA Portal, mode, holder and attached sessions; starts none
-rung session --release        # stops watch and closes the project held by rung's keeper
-rung session --release --save # save unsaved changes before releasing
-```
-
-Release refuses a TIA Portal window or a session held by another program. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
+If the project is not open, rung opens it in a TIA Portal without window (`[tia] start = "headless"` in `rung.toml`; `"never"` turns that off). Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works the same way, through a CODESYS without window: see [CODESYS](codesys.md).
 
 ## 4. Work two-way
 
@@ -86,7 +70,6 @@ The right is kept in `.rung/`, never in git, and names the project: a colleague 
 - A new `.scl`, `.db` or `.udt` file creates the object in TIA Portal. Deleting a file deletes nothing until you run `rung confirm-delete <file>`; a block other blocks still use needs `--force`, and the list of them comes first.
 - `rung restore <file>` puts TIA Portal's version of one file back (yours is kept in `.rung/recovery`): an edit you do not want, a read-only file edited by mistake, a file deleted by mistake.
 - `rung rename <file> <new-name>` renames in TIA Portal like TIA's rename: the header and every file that uses it follow.
-- A block, data type or DB someone renames or moves to another group in TIA Portal itself (V20 and later) keeps its file: `rung pull`, `rung sync` and `rung watch` know it is the same object by TIA Portal's own identity, move the file (when it has no local edits), bring back the files that name it and rename it in the tests.
 - Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor and sync check for a missing address, a type that does not fit it, two tags on one line and a name used twice. Sync refuses the table until these are fixed; TIA Portal itself can accept a mismatched type and show the tag red. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
 - `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
@@ -107,8 +90,6 @@ rung download               # you type the PLC name to confirm; TIA's risky ques
 ```
 
 `rung download` never picks a PLC by itself: run `rung connect` once (or `rung connect --pick` to choose among what answers). rung's agent tools never download; a person does. Everything about TIA's questions (stop the CPU, reinitialise data blocks, …) is in [downloads](downloads.md).
-
-In VS Code, the PLC picker puts the last PLC you chose first the next time; it still lists every PLC. See [Going online](online.md) for other addresses, passwords and certificates.
 
 ## More
 

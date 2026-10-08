@@ -46,8 +46,6 @@ export interface ObjectState {
   notSent?: { code: string; message: string };
   /** Epoch ms of the last verification by export + hash (weak revisions). */
   verifiedAt?: number;
-  /** TIA Portal's lasting identity of the object (ObjectIdentifierProvider, V20 and later): the same after a rename there. */
-  tiaId?: string;
   /** Set while status is "conflicted": the TIA revision and files the conflict was computed against. */
   /** deletedInTia: the object is gone from TIA Portal while the file was edited (resolve --ours recreates it). */
   /** tiaForm: the form TIA Portal's side came in, when it is not the file's (a tag table that became .tags.st). */
@@ -262,9 +260,6 @@ export class StateStore {
 
   upsert(o: ObjectState): void {
     this.assertOpen();
-    // TIA Portal's identity belongs to the address until it is removed: a state built anew (an import, an export) keeps it
-    const prev = this.objects.get(o.address);
-    if (prev?.tiaId && o.tiaId === undefined) o = { ...o, tiaId: prev.tiaId };
     this.put(o);
     this.dirty = true;
   }

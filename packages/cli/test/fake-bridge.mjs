@@ -66,18 +66,6 @@ rl.on("line", (line) => {
       // no TIA Portal has a project open, and none was named: what the real bridge answers then
       if (process.env.FAKE_NO_PROJECT && !projectArg) return fail("NO_PROJECT", "No TIA Portal instance has a project open.");
       return reply(db.project);
-    case "session.state":
-      if (process.env.FAKE_SESSION_ERROR) return fail(process.env.FAKE_SESSION_ERROR, "No TIA Portal has the project open.");
-      if (process.env.FAKE_NO_PROJECT || db.sessionReleased) return reply({ projectPath: db.project.path, open: false, ...(db.closedKeeperPid ? { keeperPid: db.closedKeeperPid } : {}) });
-      return reply({ projectPath: db.project.path, tiaPid: 42, mode: db.sessionMode ?? "headless", heldBy: db.sessionHeldBy ?? "keeper", keeperPid: 7, attachedSessions: 1 });
-    case "session.release":
-      if (db.sessionMode === "ui" || (db.sessionHeldBy ?? "keeper") !== "keeper") return fail("PROJECT_BUSY", "another program holds it");
-      if ((db.sessionAttachedSessions ?? 1) > 2) return fail("PROJECT_IN_USE", "other bridges are still attached; stop their Watch sessions first");
-      if (db.sessionModified && !p.save && !argv.includes("--save-after-import")) return fail("PROJECT_UNSAVED", "unsaved changes");
-      db.sessionSaved = !!db.sessionModified;
-      db.sessionReleased = true;
-      save(db);
-      return reply({ released: true });
     case "objects.list":
       return reply(db.objects.filter((o) => o.address.startsWith(`plc:${p.device}/`)).map(entry));
     case "objects.export": {
@@ -135,32 +123,16 @@ rl.on("line", (line) => {
     }
     case "plc.online": {
       if (process.env.FAKE_ONLINE_ERROR && p.action === "online") return fail("NO_TARGET", process.env.FAKE_ONLINE_ERROR);
-      if (db.plcCertificate && p.action === "online" && p.credentials?.trustCertificate !== true)
-        return fail("TLS_UNTRUSTED", db.plcCertificate);
-      // db.plcPassword: the PLC asks for it to go online, as the real bridge reports it
-      if (db.plcUser && p.action === "online" && p.credentials?.user !== db.plcUser)
-        return fail("PASSWORD_REQUIRED", "PLC_1 asks for a user and a password to go online (its user management).");
-      if (db.plcPassword && p.action === "online" && p.credentials?.password !== db.plcPassword)
-        return fail("PASSWORD_REQUIRED", p.credentials?.password ? `PLC_1 did not take the password${db.plcUser ? ` of ${db.plcUser}` : ""}.` : "PLC_1 asks for a password to go online.");
       db.online = p.action === "online" ? "Online" : p.action === "offline" ? "Offline" : (db.online ?? "Offline");
       if (p.action === "online") db.onlineTarget = p.target ?? null;
       save(db);
       return reply({ device: p.device, state: db.online });
     }
-    case "xref.get":
-      // db.xref[address]: entries as the real bridge answers them; none otherwise
-      return reply((db.xref ?? {})[p.address] ?? []);
     case "plc.read":
       // db.values: expression -> value; one it does not have reads as an error, as CODESYS answers it
       if (db.online !== "Online") return fail("NOT_ONLINE", `${p.device} is not online; rung online first`);
       return reply(p.expressions.map((name) => (name in (db.values ?? {}) ? { name, value: db.values[name] } : { name, error: `${name} is unknown` })));
     case "plc.compare": {
-      if (db.plcCertificate && p.credentials?.trustCertificate !== true)
-        return fail("TLS_UNTRUSTED", db.plcCertificate);
-      if (db.plcUser && p.credentials?.user !== db.plcUser)
-        return fail("PASSWORD_REQUIRED", "PLC_1 asks for a user and a password to go online (its user management).");
-      if (db.plcPassword && p.credentials?.password !== db.plcPassword)
-        return fail("PASSWORD_REQUIRED", p.credentials?.password ? `PLC_1 did not take the password${db.plcUser ? ` of ${db.plcUser}` : ""}.` : "PLC_1 asks for a password to go online.");
       // db.compare: items to report; default: one mirrored block differs
       db.compareTarget = p.target ?? null;
       save(db);
@@ -201,11 +173,7 @@ rl.on("line", (line) => {
       return reply({ state: "Success", station: "S7-1500 station_2", plcs: ["PLC_2"], messages: ["Upload completed"], ...(process.env.FAKE_SAVE_ERROR ? { saveError: process.env.FAKE_SAVE_ERROR, stationRemoved: true } : {}) });
     }
     case "objects.show":
-      // like the bridge: a project with unsaved changes moves into a TIA Portal window only when it may be saved
-      if (db.unsavedProject && !p.save) return fail("PROJECT_UNSAVED", "The project has changes that are not saved; opening it in a TIA Portal window closes it here first.");
-      db.shown = [...(db.shown ?? []), { address: p.address, save: !!p.save, window: argv.includes("--open-window") }];
-      save(db);
-      return reply({ shown: true });
+      return fail("UNSUPPORTED_CAPABILITY", "TIA Portal was started without user interface");
     case "project.archive": {
       // like TIA Portal: an archive of the saved project; FAKE_ARCHIVE_ERROR makes it fail
       if (process.env.FAKE_ARCHIVE_ERROR) return fail("INTERNAL", process.env.FAKE_ARCHIVE_ERROR);

@@ -51,7 +51,6 @@ describe("rung rename", () => {
     expect(JSON.parse(readFileSync(join(root, ".rung", "diagnostics.json"), "utf8")).items).toEqual([]);
     expect(readFileSync(join(root, "tests", "drives", "counter.test.yaml"), "utf8")).toBe("block: Fx_Pulse # the FB\ncases:\n  - steps:\n      - expect: { '\"Fx_Pulse\".x': 1 }\n");
     expect(r.users).toContain("tests/drives/counter.test.yaml");
-    expect(r.pull.warnings.map((w) => w.code)).not.toContain("RENAMED_IN_TIA"); // the person renamed it here
     expect(r).toMatchObject({ from: "plc:PLC_1/blocks/Drives/Fx_Counter", to: "plc:PLC_1/blocks/Drives/Fx_Pulse", oldPath: "plc/PLC_1/blocks/Drives/Fx_Counter.scl", newPath: "plc/PLC_1/blocks/Drives/Fx_Pulse.scl" });
     expect(r.users).toContain("plc/PLC_1/blocks/Fx_CounterDB.db");
     expect(existsSync(join(root, "plc/PLC_1/blocks/Drives/Fx_Counter.scl"))).toBe(false);

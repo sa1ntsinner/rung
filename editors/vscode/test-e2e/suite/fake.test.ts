@@ -3,7 +3,7 @@
 // status bar, CodeLens, every command, compile → Problems, watch, online / connect, download, the LSP.
 import * as assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { RungExtensionApi } from "../../src/extension";
@@ -15,7 +15,6 @@ interface FakeDb {
   downloads?: { allow: string[]; hardware: boolean; software: boolean; onlyChanges: boolean; startAfter: boolean; target: Record<string, unknown> }[];
   reach?: { pc: string; address: string }[];
   scans?: number;
-  shown?: { address: string; save: boolean; window: boolean }[];
 }
 
 const OBJECTS = process.env.RUNG_E2E_OBJECTS!;
@@ -257,21 +256,12 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.match(run!.result.output, /Fx_Motor: follows start/);
     });
 
-    it("open in TIA Portal shows the block in a TIA Portal window, asking first when unsaved changes would be closed", async () => {
+    it("open in TIA Portal explains a TIA Portal without user interface", async () => {
       await openDoc(PUMP);
       await vscode.commands.executeCommand("rung.openInTia");
       assert.deepEqual(cli.find("open")?.args, ["open", PUMP]);
-      assert.equal(d.texts.length, 0, d.texts.join("\n"));
-      // through rung watch's bridge when watch runs, else through one that may open a TIA Portal window
-      assert.deepEqual({ ...fakeDb().shown?.at(-1), window: undefined }, { address: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", save: false, window: undefined });
-
-      patchFake({ unsavedProject: true });
-      d.reset();
-      d.answer("Save and Open");
-      await vscode.commands.executeCommand("rung.openInTia");
-      assert.match(d.texts[0]!, /^warning: The project has unsaved changes in rung's background TIA Portal/);
-      assert.equal(fakeDb().shown?.at(-1)?.save, true);
-      patchFake({ unsavedProject: false });
+      assert.equal(d.texts.length, 1, d.texts.join("\n"));
+      assert.match(d.texts[0]!, /^warning: No TIA Portal window has this project open, so TIA Portal cannot show Fx_Pump/);
     });
   });
 
@@ -365,13 +355,6 @@ describe("rung extension on a fake-bridge workspace", function () {
         assert.equal(ed.document.isDirty, false);
         const plan = api.monitor.plan!;
         assert.equal(plan.instance, '"Fx_Pump_DB"');
-        // the declarations table shows the values in its Monitor value column, row by row
-        await vscode.commands.executeCommand("rung.declarations.open");
-        const panel = await waitFor("the table shows Fx_Pump", () => (api.declarations()?.shown?.block?.name === "Fx_Pump" ? api.declarations() : undefined));
-        const values = await waitFor("monitored rows", () => panel.monitoredValues);
-        const idOf = (name: string) => panel.shown!.sections.flatMap((s) => s.rows).find((r) => r.name === name)!.id;
-        assert.equal(values[idOf("start")], "TRUE");
-        assert.equal(values[idOf("speed")], "0");
         const line = String(positionOf(ed.document, "#running := #start").line);
         writeFileSync(file(PUMP).fsPath, saved);
         assert.deepEqual(plan.lines[line], ["#running", "#start"]);
@@ -571,92 +554,6 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.match(text, /^ {2}Ethernet \[PN\/IE · 1 X1\] \{rung\.connection\} <link>/m);
     });
 
-    it("a PLC that asks for a password: VS Code asks once, keeps it in its secret storage and goes online", async () => {
-      patchFake({ plcPassword: "s3cret" });
-      d.input("s3cret");
-      await vscode.commands.executeCommand("rung.goOnline");
-      assert.deepEqual(d.of("inputBox").map((c) => c.message), ["Password of PLC_1"]);
-      assert.equal(fakeDb().online, "Online");
-      await vscode.commands.executeCommand("rung.goOffline");
-      // the next time it is not asked again
-      d.reset();
-      await vscode.commands.executeCommand("rung.goOnline");
-      assert.equal(d.of("inputBox").length, 0);
-      assert.equal(fakeDb().online, "Online");
-      await vscode.commands.executeCommand("rung.goOffline");
-      // a PLC with user management: the user is asked too, then both are kept
-      patchFake({ plcPassword: "pw2", plcUser: "eng" });
-      d.reset();
-      d.input("eng").input("pw2");
-      await vscode.commands.executeCommand("rung.goOnline");
-      assert.deepEqual(d.of("inputBox").map((c) => c.message), ["User of PLC_1", "Password of PLC_1"]);
-      assert.equal(fakeDb().online, "Online");
-      await vscode.commands.executeCommand("rung.goOffline");
-      patchFake({ plcPassword: undefined, plcUser: undefined });
-    });
-    for (const command of ["rung.goOnline", "rung.compare"]) {
-      it(`${command} retains TLS consent through a rejected named password`, async () => {
-        const verb = command === "rung.goOnline" ? "online" : "compare";
-        const user = `${verb}-retry-eng`;
-        patchFake({ plcCertificate: "SHA256 named-retry", plcPassword: "retry-correct", plcUser: user, compare: [] });
-        try {
-          d.answer("Trust for This Connection").input(user).input("typo").input("retry-correct");
-          await vscode.commands.executeCommand(command);
-          const runs = cli.runs.filter((r) => r.args[0] === verb);
-          assert.equal(runs.at(-1)!.result.code, 0);
-          assert.ok(runs.slice(1).every((r) => r.args.includes("--trust-certificate")));
-          assert.equal(d.of("warning").length, 1);
-          assert.deepEqual(d.of("inputBox").map((c) => c.message), ["User of PLC_1", "Password of PLC_1", "Password of PLC_1"]);
-        } finally {
-          patchFake({ plcCertificate: undefined, plcPassword: undefined, plcUser: undefined, compare: undefined });
-        }
-      });
-      it(`${command} stops password retries without collecting unused credentials`, async () => {
-        const verb = command === "rung.goOnline" ? "online" : "compare";
-        patchFake({ plcPassword: "never-entered", compare: [] });
-        try {
-          d.input("wrong-1").input("wrong-2").input("unused");
-          await vscode.commands.executeCommand(command);
-          const runs = cli.runs.filter((r) => r.args[0] === verb);
-          assert.equal(runs.length, 3);
-          assert.equal(d.of("inputBox").length, 2);
-          assert.ok(d.of("error").length > 0);
-        } finally {
-          patchFake({ plcPassword: undefined, compare: undefined });
-        }
-      });
-      it(`${command} asks about a TLS certificate and trusts it for this connection only`, async () => {
-        const verb = command === "rung.goOnline" ? "online" : "compare";
-        patchFake({ plcCertificate: "PLC_1 certificate: SHA256 AA:BB:CC", online: "Offline", compare: [] });
-        try {
-          d.answer("Trust for This Connection");
-          await vscode.commands.executeCommand(command);
-          const warning = d.of("warning")[0]!;
-          assert.equal(warning.modal, true);
-          assert.match(`${warning.message}\n${warning.detail}`, /SHA256 AA:BB:CC/);
-          assert.ok(warning.items.includes("Trust for This Connection"));
-          const runs = cli.runs.filter((r) => r.args[0] === verb);
-          assert.equal(runs.length, 2);
-          assert.equal(runs[0]!.args.includes("--trust-certificate"), false);
-          assert.equal(runs[1]!.args.includes("--trust-certificate"), true);
-          assert.equal(runs[1]!.result.code, 0);
-          // the decision is never remembered (rung.toml may gain the connection rung found, never a trust)
-          assert.doesNotMatch(readFileSync(join(root(), "rung.toml"), "utf8"), /trust/i);
-          if (verb === "online") await vscode.commands.executeCommand("rung.goOffline");
-          d.reset();
-          cli.clear();
-          // Esc on the next invocation refuses it again, without a retry.
-          await vscode.commands.executeCommand(command);
-          assert.equal(d.of("warning").length, 1);
-          assert.equal(cli.runs.filter((r) => r.args[0] === verb).length, 1);
-          assert.match(cli.find(verb)!.result.output, /TLS_UNTRUSTED/);
-          assert.equal(cli.find(verb)!.args.includes("--trust-certificate"), false);
-        } finally {
-          patchFake({ plcCertificate: undefined, compare: undefined });
-          d.reset();
-        }
-      });
-    }
     it("go offline and online state", async () => {
       await vscode.commands.executeCommand("rung.goOnline");
       await vscode.commands.executeCommand("rung.goOffline");
@@ -957,31 +854,6 @@ describe("rung extension on a fake-bridge workspace", function () {
       await closeAll();
     });
 
-    it("a PLC tag table in the table: tags with addresses, an address edited, a new tag at free bit memory", async () => {
-      await closeAll();
-      const rel = "plc/PLC_1/tags/E2E_Tags.tags.st";
-      mkdirSync(join(root(), "plc/PLC_1/tags"), { recursive: true });
-      writeFileSync(file(rel).fsPath, "VAR_GLOBAL\n    Start_PB AT %I0.0 : Bool;\n    Speed AT %MW10 : Int;\nEND_VAR\n");
-      try {
-        const ed = await openDoc(rel);
-        await vscode.commands.executeCommand("rung.declarations.open");
-        const panel = await waitFor("the table shows the tag table", () => (api.declarations()?.shown?.block?.kind === "TAGS" ? api.declarations() : undefined));
-        const shown = () => panel.shown!;
-        assert.deepEqual(shown().sections[0]!.rows.map((r) => `${r.name} ${r.address}`), ["Start_PB %I0.0", "Speed %MW10"]);
-        const r = await panel.receive({ v: 1, kind: "edit", req: 1, uri: shown().uri, version: shown().version, op: { op: "setAddress", row: "Speed", value: "%mw12" } });
-        assert.equal((r as { ok: boolean }).ok, true, JSON.stringify(r));
-        await waitFor("the new address in the text", () => ed.document.getText().includes("Speed AT %MW12 : Int;") || undefined);
-        await waitFor("the table has the new text", () => shown().sections[0]!.rows[1]!.address === "%MW12" || undefined);
-        const add = await panel.receive({ v: 1, kind: "add", req: 2, uri: shown().uri, version: shown().version, after: "Speed" });
-        assert.equal((add as { ok: boolean }).ok, true, JSON.stringify(add));
-        await waitFor("a new tag at free bit memory", () => /\n\s+Tag_1 AT %M\d+\.\d : Bool;\n/.test(ed.document.getText()) || undefined);
-      } finally {
-        await vscode.commands.executeCommand("workbench.action.files.revert");
-        await closeAll();
-        await vscode.workspace.fs.delete(file(rel)).then(undefined, () => {});
-      }
-    });
-
     it("edits from the table change the document: a default, add, delete, rename; undo restores; a stale edit is refused", async () => {
       await closeAll();
       const editor = await openDoc(PUMP);
@@ -1075,298 +947,6 @@ describe("rung extension on a fake-bridge workspace", function () {
       assert.deepEqual(cli.find("test")?.args.slice(0, 4), ["test", "--json", "--case", "tests/pump.test.yaml#0"]);
       await closeAll();
       await vscode.workspace.fs.delete(uri);
-    });
-
-    it("Format Document writes SCL code as TIA Portal does", async () => {
-      const ed = await openDoc(PUMP);
-      const original = ed.document.getText();
-      try {
-        const at = original.indexOf("BEGIN") + "BEGIN".length;
-        await ed.edit((e) => e.insert(ed.document.positionAt(original.indexOf("\n", at) + 1), "\tif #speed>100 then #running:=false; end_if;\n"));
-        const edits = await waitFor("formatting edits", async () => {
-          const r = await vscode.commands.executeCommand<vscode.TextEdit[]>("vscode.executeFormatDocumentProvider", ed.document.uri, { tabSize: 4, insertSpaces: true });
-          return r?.length ? r : undefined;
-        }, 60_000);
-        const w = new vscode.WorkspaceEdit();
-        w.set(ed.document.uri, edits);
-        await vscode.workspace.applyEdit(w);
-        assert.match(ed.document.getText(), /\n\tIF #speed > 100 THEN\n\t {4}#running := FALSE;\n\tEND_IF;\n/);
-      } finally {
-        await vscode.commands.executeCommand("workbench.action.files.revert", ed.document.uri);
-      }
-    });
-
-    it("Live Values reads pinned values from a virtual PLC while the view is open", async () => {
-      const db = file("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Pump_DB.db");
-      writeFileSync(db.fsPath, 'DATA_BLOCK "Fx_Pump_DB"\nVERSION : 0.1\nNON_RETAIN\n"Fx_Pump"\n\nBEGIN\n\nEND_DATA_BLOCK\n');
-      const tomlPath = join(root(), "rung.toml");
-      const toml = readFileSync(tomlPath, "utf8");
-      const inv = api.cli.invocation(["simulate", "--address", "127.0.0.1", "--port", "0", "--cycle", "20"]);
-      const sim = spawn(inv.file, inv.args, { cwd: root(), windowsHide: true, windowsVerbatimArguments: inv.shell });
-      let simOut = "";
-      sim.stdout.on("data", (d: Buffer) => (simOut += d.toString()));
-      sim.stderr.on("data", (d: Buffer) => (simOut += d.toString()));
-      const name = '"Fx_Pump_DB".running';
-      try {
-        const url = await waitFor("rung simulate to listen", () => /virtual PLC at (http:\/\/\S+)/.exec(simOut)?.[1], 30_000);
-        writeFileSync(tomlPath, `${toml}\n[live.webapi]\nurl = "${url}"\nuser = "any"\n`);
-        process.env.RUNG_WEBAPI_PASSWORD = "x";
-        await vscode.commands.executeCommand("rung.live.focus");
-        await api.live.add(name);
-        assert.deepEqual(api.live.pinned, [name]);
-        await waitFor("a value read", () => api.live.seen.get(name)?.value === true || undefined, 30_000, 200); // Main calls "Fx_Pump_DB"(start := TRUE)
-        // the flight recorder: a bookmark, a few more reads, the recording as CSV
-        await vscode.commands.executeCommand("rung.live.bookmark", "pump on");
-        const marked = Date.now();
-        await waitFor("reads after the bookmark", () => api.live.recorder.frames.filter((f) => f.at > marked).length >= 2 || undefined, 30_000, 200);
-        const csv = await vscode.commands.executeCommand<string>("rung.live.export");
-        assert.match(csv, /^time,ms,"""Fx_Pump_DB"".running",bookmark\n/);
-        assert.match(csv, /,TRUE,pump on\n/);
-        // the recording as a unit test of Fx_Pump: its input set, its output expected; it passes in the simulator
-        await api.live.add('"Fx_Pump_DB".start');
-        await waitFor("both values recorded", () => api.live.recorder.frames.some((f) => '"Fx_Pump_DB".start' in f.values) || undefined, 30_000, 200);
-        const from = Date.now();
-        await waitFor("two reads of both", () => api.live.recorder.frames.filter((f) => f.at >= from && '"Fx_Pump_DB".start' in f.values).length >= 2 || undefined, 30_000, 200);
-        const test = await vscode.commands.executeCommand<vscode.Uri>("rung.live.exportTest", "Fx_Pump_DB", from);
-        const yaml = readFileSync(test.fsPath, "utf8");
-        try {
-          assert.match(yaml, /^block: Fx_Pump$/m);
-          assert.match(yaml, /set: \{ start: true \}/);
-          assert.match(yaml, /expect: \{ running: true \}/);
-          const run = await api.cli.capture(["test", "--case", `tests/${test.path.split("/").pop()}#0`], { quiet: true });
-          assert.match(run.output, /1\/1 passed/, run.output);
-        } finally {
-          await vscode.workspace.fs.delete(test);
-        }
-      } finally {
-        await vscode.commands.executeCommand("rung.live.clear");
-        delete process.env.RUNG_WEBAPI_PASSWORD;
-        writeFileSync(tomlPath, toml);
-        if (process.platform === "win32" && sim.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(sim.pid)], { windowsHide: true });
-        else sim.kill();
-        await vscode.workspace.fs.delete(db).then(undefined, () => {});
-      }
-    });
-
-    it("Why? outside the debugger: the block's writers with the values a virtual PLC has now", async () => {
-      const db = file("plc/PLC_1/blocks/10_Drives/Pumps/Fx_Pump_DB.db");
-      writeFileSync(db.fsPath, 'DATA_BLOCK "Fx_Pump_DB"\nVERSION : 0.1\nNON_RETAIN\n"Fx_Pump"\n\nBEGIN\n\nEND_DATA_BLOCK\n');
-      const tomlPath = join(root(), "rung.toml");
-      const toml = readFileSync(tomlPath, "utf8");
-      const inv = api.cli.invocation(["simulate", "--address", "127.0.0.1", "--port", "0", "--cycle", "20"]);
-      const sim = spawn(inv.file, inv.args, { cwd: root(), windowsHide: true, windowsVerbatimArguments: inv.shell });
-      let simOut = "";
-      sim.stdout.on("data", (b: Buffer) => (simOut += b.toString()));
-      sim.stderr.on("data", (b: Buffer) => (simOut += b.toString()));
-      try {
-        const url = await waitFor("rung simulate to listen", () => /virtual PLC at (http:\/\/\S+)/.exec(simOut)?.[1], 30_000);
-        writeFileSync(tomlPath, `${toml}\n[live.webapi]\nurl = "${url}"\nuser = "any"\n`);
-        process.env.RUNG_WEBAPI_PASSWORD = "x";
-        await openDoc(PUMP);
-        const tree = await api.why.ask("#running");
-        assert.equal(tree?.value, "TRUE", JSON.stringify(tree)); // Main calls "Fx_Pump_DB"(start := TRUE), speed 0
-        const writers = tree!.children.filter((c) => c.kind === "write").map((c) => c.text);
-        assert.deepEqual(writers, ["#running := #start;", "#running := FALSE;"]);
-        const guarded = tree!.children.find((c) => c.text === "#running := FALSE;")!;
-        assert.deepEqual(guarded.children.map((c) => `${c.text} ${c.value}`), ["IF #speed > 100 THEN FALSE now"]);
-        // a snapshot for a report: the tree as Markdown, each statement with its file and line
-        const md = await vscode.commands.executeCommand<string>("rung.why.copy");
-        assert.match(md, /^- \*\*`#running`\*\* = `TRUE`\n/);
-        assert.match(md, /\n {2}- ← `#running := #start;` \(plc\/PLC_1\/blocks\/10_Drives\/Pumps\/Fx_Pump\.scl:\d+\)\n/);
-        assert.match(md, /\n_values read /);
-        assert.equal(await vscode.env.clipboard.readText(), md);
-      } finally {
-        delete process.env.RUNG_WEBAPI_PASSWORD;
-        writeFileSync(tomlPath, toml);
-        if (process.platform === "win32" && sim.pid) spawnSync("taskkill", ["/T", "/F", "/PID", String(sim.pid)], { windowsHide: true });
-        else sim.kill();
-        await vscode.workspace.fs.delete(db).then(undefined, () => {});
-      }
-    });
-
-    it("Compare Behaviour With… lists the cases that behave differently than at a git revision", async () => {
-      const r = root();
-      const test = join(r, "tests", "beh.test.yaml");
-      writeFileSync(test, ["block: Fx_Pump", "cases:", "  - name: fast stops", "    steps:", "      - set: { start: true, speed: 200 }", "      - cycle: 1", "      - expect: { running: false }", ""].join("\n"));
-      const pump = file(PUMP).fsPath;
-      const saved = readFileSync(pump, "utf8");
-      const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", ...args], { cwd: r, encoding: "utf8" });
-      git("init", "-q");
-      git("add", "-A");
-      git("commit", "-q", "-m", "base");
-      let shown: string[] = [];
-      try {
-        writeFileSync(pump, saved.replace("#speed > 100", "#speed > 300"));
-        d.pick((items) => {
-          shown = items.map((i) => `${i.label} | ${i.detail}`);
-          return undefined;
-        });
-        const found = await vscode.commands.executeCommand<{ case: string }[]>("rung.compareBehaviour", "HEAD");
-        assert.deepEqual(found?.map((x) => x.case), ["fast stops"]);
-        assert.match(shown[0] ?? "", /fast stops \| passed then, failed now · step 2: running FALSE → TRUE/);
-      } finally {
-        d.reset();
-        writeFileSync(pump, saved);
-        // git keeps its objects read-only: rmdir removes them, rmSync cannot
-        if (process.platform === "win32") spawnSync("cmd", ["/d", "/c", "rmdir", "/s", "/q", ".git"], { cwd: r, windowsHide: true });
-        else rmSync(join(r, ".git"), { recursive: true, force: true });
-        rmSync(test, { force: true });
-      }
-    });
-
-    it("Cross-Reference in TIA Portal lists who uses a block and what it uses", async () => {
-      const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
-      patchFake({
-        xref: {
-          "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump": [
-            { source: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", sourceName: "Fx_Pump", target: "plc:PLC_1/blocks/Main", targetName: "Main", targetType: "OB", access: "Call", referenceType: "UsedBy", location: "@Main ▶ Program code" },
-            { source: "plc:PLC_1/blocks/10_Drives/Pumps/Fx_Pump", sourceName: "Fx_Pump", targetName: "Screen_1", targetType: "HMI screen", access: "Read", referenceType: "UsedBy" },
-          ],
-        },
-      });
-      let shown: string[] = [];
-      d.pick((items) => {
-        shown = items.map((i) => (i.kind === vscode.QuickPickItemKind.Separator ? `-- ${i.label}` : `${i.label} | ${i.description}`));
-        return undefined;
-      });
-      try {
-        const rows = await vscode.commands.executeCommand<{ name: string }[]>("rung.xref", pump);
-        assert.deepEqual(rows?.map((r) => r.name), ["Main", "Screen_1"]);
-        assert.deepEqual(shown, ["-- Used by", "Main | Call · OB", "Screen_1 | Read · HMI screen"]);
-      } finally {
-        d.reset();
-      }
-    });
-
-    it("tells what an unsaved interface change breaks against TIA Portal (Interface Impact)", async () => {
-      const ed = await openDoc(PUMP);
-      const text = ed.document.getText();
-      const at = text.indexOf("speed : Int;");
-      assert.ok(at > 0);
-      await ed.edit((e) => e.replace(new vscode.Range(ed.document.positionAt(at), ed.document.positionAt(at + "speed : Int;".length)), "rate : Int;"));
-      let shown: string[] = [];
-      d.pick((items) => {
-        shown = items.map((i) => (i.kind === vscode.QuickPickItemKind.Separator ? `-- ${i.label}` : `${i.label} | ${i.description}`));
-        return undefined;
-      });
-      try {
-        const r = await waitFor("impact of the edit", async () => {
-          const x = await vscode.commands.executeCommand<{ changes: unknown[] }>("rung.impact");
-          return x?.changes.length ? x : undefined;
-        });
-        assert.deepEqual(r.changes, [{ kind: "renamed", section: "Input", name: "speed", to: "rate", after: "Int" }]);
-        assert.equal(shown[0], "-- Changed against TIA Portal");
-        assert.equal(shown[1], "speed → rate | renamed · Input · Int");
-      } finally {
-        d.reset();
-        await vscode.commands.executeCommand("workbench.action.files.revert");
-      }
-      assert.equal(ed.document.isDirty, false);
-    });
-
-    it("colours SCL names by what they are (semantic tokens)", async () => {
-      const ed = await openDoc(PUMP);
-      const tokens = await waitFor("semantic tokens", async () => {
-        const t = await vscode.commands.executeCommand<vscode.SemanticTokens>("vscode.provideDocumentSemanticTokens", ed.document.uri);
-        return t?.data.length ? t : undefined;
-      }, 60_000);
-      const legend = await vscode.commands.executeCommand<vscode.SemanticTokensLegend>("vscode.provideDocumentSemanticTokensLegend", ed.document.uri);
-      assert.ok(legend.tokenTypes.includes("parameter") && legend.tokenModifiers.includes("readonly"), JSON.stringify(legend));
-      assert.equal(tokens.data.length % 5, 0);
-      assert.equal(vscode.workspace.getConfiguration("editor", { languageId: "scl" }).get("semanticHighlighting.enabled"), true);
-    });
-
-    it("Record Expectations writes the values the engineer picks into the step under the cursor", async () => {
-      await closeAll();
-      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "rec.test.yaml"));
-      const yaml = ["block: Fx_Pump", "cases:", "  - name: fast stops", "    steps:", "      - set: { start: true, speed: 200 }", "      - cycle: 1", ""].join("\n");
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
-      try {
-        const ed = await vscode.window.showTextDocument(uri);
-        ed.selection = new vscode.Selection(5, 8, 5, 8); // on "cycle: 1"
-        await waitFor("the language server reads the test file", () => api.lsp.request("rung/testModel", { textDocument: { uri: uri.toString() } }).then((m) => m ?? undefined, () => undefined), 60_000);
-        let offered: string[] = [];
-        d.pick((items) => {
-          offered = items.map((i) => i.label);
-          return items.filter((i) => i.label.startsWith("running"));
-        });
-        assert.equal(await vscode.commands.executeCommand("rung.test.record"), true, JSON.stringify(d.calls.map((c) => c.message)));
-        assert.ok(offered.includes("running = false"), offered.join(", "));
-        assert.match(ed.document.getText(), /- cycle: 1\n {8}expect: \{ running: false \}\n/);
-        // the case passes as recorded
-        const r = await api.cli.capture(["test", "--json", "--case", "tests/rec.test.yaml#0"], { quiet: true });
-        assert.match(r.output, /"passed": true/);
-      } finally {
-        d.reset();
-        await closeAll();
-        await vscode.workspace.fs.delete(uri);
-      }
-    });
-
-    it("Run with Coverage marks the SCL lines the cases ran and the ones they never reached", async () => {
-      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "cov.test.yaml"));
-      const yaml = ["block: Fx_Pump", "cases:", "  - name: slow keeps running", "    steps:", "      - set: { start: true, speed: 50 }", "      - cycle: 1", ""].join("\n");
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
-      try {
-        const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
-        const lines = Buffer.from(await vscode.workspace.fs.readFile(pump)).toString("utf8").split(/\r?\n/);
-        const ifLine = lines.findIndex((l) => l.includes("IF #speed > 100"));
-        const inside = lines.findIndex((l) => l.includes("#running := FALSE"));
-        await api.tests()!.discoverNow();
-        await vscode.commands.executeCommand("testing.coverageAll");
-        const details = await waitFor("coverage of Fx_Pump", () => api.tests()!.coverageOf(pump), 120_000);
-        const count = (line: number) => details.find((d) => (d.location as vscode.Position).line === line)?.executed;
-        assert.equal(count(ifLine), 1);
-        assert.equal(count(inside), 0); // speed 50: the IF's body never ran
-      } finally {
-        await vscode.workspace.fs.delete(uri);
-      }
-    });
-
-    it("debugs a test case: stops at a breakpoint in the block, evaluates, steps back, reports the result", async () => {
-      await closeAll();
-      const uri = vscode.Uri.file(join(api.ws.root!, "tests", "dbg.test.yaml"));
-      const yaml = ["block: Fx_Pump", "cases:", "  - name: too fast stops", "    steps:", "      - set: { start: true, speed: 200 }", "      - cycle: 1", "      - expect: { running: false }", ""].join("\n");
-      await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(yaml));
-      const pump = vscode.Uri.file(join(api.ws.root!, PUMP));
-      const lines = Buffer.from(await vscode.workspace.fs.readFile(pump)).toString("utf8").split(/\r?\n/);
-      const target = lines.findIndex((l) => l.includes("#running := FALSE"));
-      const ifLine = lines.findIndex((l) => l.includes("IF #speed > 100"));
-      const bp = new vscode.SourceBreakpoint(new vscode.Location(pump, new vscode.Position(target, 0)));
-      vscode.debug.addBreakpoints([bp]);
-      const seen: { type: string; event?: string; body?: { output?: string } }[] = [];
-      const tracker = vscode.debug.registerDebugAdapterTrackerFactory("rung", { createDebugAdapterTracker: () => ({ onDidSendMessage: (m) => void seen.push(m) }) });
-      const events = (name: string) => seen.filter((m) => m.type === "event" && m.event === name).length;
-      try {
-        const started = await vscode.debug.startDebugging(undefined, { type: "rung", request: "launch", name: "Debug too fast stops", test: uri.fsPath, case: 0 });
-        assert.equal(started, true, JSON.stringify(seen));
-        await waitFor("stopped at the breakpoint", () => events("stopped") === 1, 60_000);
-        const session = vscode.debug.activeDebugSession!;
-        const top = async () => ((await session.customRequest("stackTrace", { threadId: 1 })) as { stackFrames: { line: number; name: string }[] }).stackFrames[0]!;
-        assert.deepEqual(await top(), { ...(await top()), name: "Fx_Pump", line: target + 1 });
-        assert.equal(((await session.customRequest("evaluate", { expression: "speed", frameId: 0 })) as { result: string }).result, "200");
-        const inline = await vscode.commands.executeCommand<vscode.InlineValue[]>("vscode.executeInlineValueProvider", pump, new vscode.Range(0, 0, target, 0), { frameId: 0, stoppedLocation: new vscode.Range(target, 0, target, 0) });
-        assert.ok(inline.some((v) => (v as vscode.InlineValueVariableLookup).variableName === "speed" && v.range.start.line === ifLine), JSON.stringify(inline));
-        // why is running TRUE here? the statement that wrote it, with its operand as it was
-        const why = await api.why.ask("#running");
-        assert.equal(why?.value, "TRUE", JSON.stringify(why));
-        assert.match(why!.children[0]!.text, /#running := #start/);
-        assert.equal(why!.children[0]!.children[0]!.text, "#start");
-        await session.customRequest("stepBack", { threadId: 1 });
-        await waitFor("stopped one statement back", () => events("stopped") === 2);
-        assert.equal((await top()).line, ifLine + 1);
-        await session.customRequest("continue", { threadId: 1 });
-        await waitFor("the breakpoint again", () => events("stopped") === 3);
-        assert.equal((await top()).line, target + 1);
-        await session.customRequest("continue", { threadId: 1 });
-        await waitFor("the case ran to its end", () => events("terminated") > 0);
-        assert.match(seen.filter((m) => m.event === "output").map((m) => m.body?.output).join(""), /passed: too fast stops/);
-      } finally {
-        tracker.dispose();
-        vscode.debug.removeBreakpoints([bp]);
-        await Promise.resolve(vscode.debug.stopDebugging()).catch(() => undefined);
-        await vscode.workspace.fs.delete(uri);
-      }
     });
 
     it("who writes a name fills the Usages tree, which stays while you open its places", async () => {

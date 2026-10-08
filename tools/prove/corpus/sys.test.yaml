@@ -1,8 +1,0 @@
-block: FB_ProveSys
-cases:
-  - name: block moves, many inputs, strings and times
-    steps:
-      - set: { base: 10, n: 4, t1: 1500ms, t2: T#2s, lt: LT#3s, num: -42 }
-        cycle: 1
-      - set: { base: -3, n: 20, t1: T#1m, t2: T#30s, lt: LT#250ms, num: 7 }
-        cycle: 1

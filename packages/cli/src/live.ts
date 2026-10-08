@@ -33,7 +33,7 @@ export interface LiveOptions {
 
 export async function cmdLive(dir: string, sub: string | undefined, args: string[], io: Io, opts: LiveOptions = {}): Promise<number> {
   if (sub !== "read" && sub !== "diag" && sub !== "watch") {
-    io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live watch "<DB>".<member> ... | rung live diag\n');
+    io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live diag\n');
     return 1;
   }
   // not a number would read the PLC without any pause between reads
@@ -41,14 +41,10 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     throw new WorkspaceError("BAD_ARGUMENT", `--interval is a number of milliseconds (--interval 500); got ${opts.intervalText ?? opts.intervalMs}`);
   if (sub === "watch") {
     const ws = await findWorkspace(dir);
-    if ((await loadConfig(ws)).project.tiaVersion === "CODESYS") {
-      if (!opts.file && args.length) throw new WorkspaceError("BAD_ARGUMENT", "pinned values come from a Siemens PLC's Web API; for CODESYS, watch a POU: rung live watch --file <POU file>");
-      return await watchCodesys(ws, io, opts);
-    }
+    if ((await loadConfig(ws)).project.tiaVersion === "CODESYS") return await watchCodesys(ws, io, opts);
   }
   // the plan comes first: a block that cannot be monitored needs no PLC connection to say so
-  // rung live watch "DB".x Tag …: pinned values, read together every interval (the editor's Live Values)
-  const plan = sub === "watch" ? (!opts.file && args.length ? { block: "pinned values", vars: Object.fromEntries(args.map((a) => [a, a])) } as MonitorPlan : await watchPlan(dir, io, opts)) : undefined;
+  const plan = sub === "watch" ? await watchPlan(dir, io, opts) : undefined;
   const client = await webApiFor(dir, io.env);
   try {
     if (plan) return await watchValues((names) => client.read(names), plan, io, opts);
@@ -144,14 +140,7 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
   void stop.then(() => (stopped = true));
   const interval = Math.max(100, opts.intervalMs ?? 500);
   while (!stopped) {
-    // a read that fails (PLC off, network gone) is told for every value, and the loop goes on: it comes back
-    let values: Record<string, unknown> = {};
-    let errors: Record<string, string> = {};
-    try {
-      ({ values, errors } = await readMonitorValues(read, plan));
-    } catch (e) {
-      errors = Object.fromEntries(labels.map((l) => [l, liveError(e)]));
-    }
+    const { values, errors } = await readMonitorValues(read, plan);
     if (opts.json) io.stdout(JSON.stringify({ at: Date.now(), values, ...(Object.keys(errors).length ? { errors } : {}) }) + "\n");
     else io.stdout(labels.map((l) => `  ${l.padEnd(32)} ${l in errors ? `ERROR ${errors[l]}` : JSON.stringify(values[l])}`).join("\n") + "\n\n");
     await Promise.race([stop, new Promise((r) => setTimeout(r, interval))]);

@@ -8,7 +8,6 @@ import {
   CodeActionKind,
   createConnection,
   DiagnosticSeverity,
-  DiagnosticTag,
   DocumentSymbol,
   MarkupKind,
   MessageType,
@@ -26,19 +25,15 @@ import {
 } from "vscode-languageserver/node.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { OwnerClient, type Diagnostic as SyncDiagnostic } from "@rung/sync";
-import { TAG_TEXT, WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
+import { WorkspaceIndex, deviceOfUri, scopedTo } from "./workspace.js";
 import { ELEMENTARY_TYPES, STANDARD } from "./catalog.js";
 import { declarationModel } from "./declarations.js";
-import { semanticTokens, TOKEN_MODIFIERS, TOKEN_TYPES } from "./semantic.js";
-import { formatScl } from "./format.js";
-import { incomingCalls, outgoingCalls, prepareCallHierarchy, type HierarchyItem } from "./callHierarchy.js";
 import { planDeclarationEdit, type DeclOp } from "./declarationEdit.js";
 import { parsePastedRows } from "./declarationPaste.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
-import { codeActions, freeMemory } from "./actions.js";
+import { codeActions } from "./actions.js";
 import { testFilesOf, testKeyEdits } from "./testkeys.js";
-import { baseText, interfaceImpact, workspaceTests } from "./impact.js";
 import { testSkeleton } from "./testSkeleton.js";
 import { newObject, type NewObjectRequest } from "./newObject.js";
 import { escapeSegment, unescapeSegment } from "@rung/core";
@@ -52,7 +47,7 @@ import { foldingRanges } from "./folding.js";
 import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
 
-const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information, hint: DiagnosticSeverity.Hint } as const;
+const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information } as const;
 const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
   variable: CompletionItemKind.Variable,
   field: CompletionItemKind.Field,
@@ -116,7 +111,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   async function publish(uri: string) {
     const doc = index.docs.get(uri);
     if (!doc) return;
-    const items: LspDiagnostic[] = diagnostics(index, uri).map((d) => ({ range: range(uri, d.start, d.end), severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung", ...(d.unnecessary ? { tags: [DiagnosticTag.Unnecessary] } : {}) }));
+    const items: LspDiagnostic[] = diagnostics(index, uri).map((d) => ({ range: range(uri, d.start, d.end), severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung" }));
     // Compile/conflict diagnostics describe the file as synced; hide them while the buffer differs from disk.
     let onDisk = doc.text;
     try {
@@ -193,9 +188,6 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         documentSymbolProvider: true,
         workspaceSymbolProvider: true,
         foldingRangeProvider: true,
-      callHierarchyProvider: true,
-      documentFormattingProvider: true,
-      semanticTokensProvider: { legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [...TOKEN_MODIFIERS] }, full: true },
         inlayHintProvider: !!monitor,
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
         executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
@@ -286,15 +278,13 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   );
   // rung's own request: who writes and who reads what is under the cursor, with the line and the block
   // the declaration table: the block at the position (or the file's first) as sections and rows with exact ranges
-  /** In a tag table: the bit memory a new tag gets, the next free one of its PLC. */
-  const nextTagAddress = (uri: string) => (TAG_TEXT.test(uri) ? freeMemory(index, 1, uri) : undefined);
   connection.onRequest("rung/declarations", (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {
     const doc = index.docs.get(p.textDocument.uri);
     if (!doc?.parsed) return null;
     const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
     const isFb = (name: string) => scopedTo(index, p.textDocument.uri).global(name)?.block?.kind === "FB";
     // the errors and warnings the editor shows, on the cells they are about
-    return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb, diagnostics(index, p.textDocument.uri), nextTagAddress(p.textDocument.uri));
+    return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb, diagnostics(index, p.textDocument.uri));
   });
   // the data types a declaration table offers: elementary, TIA's instruction FBs, the file's PLC's UDTs and FBs
   connection.onRequest("rung/typeNames", (p: { textDocument: { uri: string } }) => ({
@@ -407,16 +397,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     if (!doc?.parsed) return { ok: false, reason: "The file is not open" };
     if (p.textDocument.version !== live) return { ok: false, reason: "The file changed. Review this value again." };
     const offset = p.position ? offsetOf(p.textDocument.uri, p.position) : undefined;
-    const plan = planDeclarationEdit(doc.text, declarationModel(p.textDocument.uri, live, doc.text, doc.parsed, offset, undefined, [], nextTagAddress(p.textDocument.uri)), p.op);
+    const plan = planDeclarationEdit(doc.text, declarationModel(p.textDocument.uri, live, doc.text, doc.parsed, offset), p.op);
     if (!plan.ok) return plan;
     return { ok: true, version: plan.version, edits: plan.edits.map((e) => ({ range: range(p.textDocument.uri, e.start, e.end), old: e.old, newText: e.text })) };
-  });
-  // what the interface in the editor (saved or not) breaks against the version TIA Portal has
-  connection.onRequest("rung/impact", async (p: { textDocument: { uri: string } }) => {
-    if (!root) return { reason: "No rung workspace is open." };
-    const before = await baseText(root, p.textDocument.uri);
-    if (before === undefined) return { reason: "This block is not in TIA Portal yet (never synced): nothing uses it there." };
-    return interfaceImpact(index, p.textDocument.uri, before, await workspaceTests(root)) ?? { reason: "The file holds no FB, FC or PLC data type." };
   });
   connection.onRequest("rung/usages", (p: { textDocument: { uri: string }; position: { line: number; character: number } }) => {
     const r = usagesAt(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position));
@@ -513,57 +496,6 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.onWorkspaceSymbol((p) =>
     workspaceSymbols(index, p.query).map((s) => ({ name: s.name, kind: globalKind(s), location: { uri: s.uri, range: range(s.uri, s.start, s.end) }, ...(s.container ? { containerName: s.container } : {}) })),
   );
-  connection.languages.semanticTokens.on((p) => {
-    const doc = index.docs.get(p.textDocument.uri);
-    const data: number[] = [];
-    if (!doc) return { data };
-    let line = 0;
-    let char = 0;
-    for (const tk of semanticTokens(index, p.textDocument.uri)) {
-      const a = doc.lines.position(tk.start);
-      const b = doc.lines.position(tk.end);
-      if (a.line !== b.line) continue; // a token is on one line
-      data.push(a.line - line, a.line === line ? a.character - char : a.character, b.character - a.character, TOKEN_TYPES.indexOf(tk.type), tk.modifiers.reduce((m, x) => m | (1 << TOKEN_MODIFIERS.indexOf(x)), 0));
-      line = a.line;
-      char = a.character;
-    }
-    return { data };
-  });
-  // call hierarchy: items carry the block in data; ranges become positions in their own files
-  const lspRange = (uri: string, start: number, end: number) => {
-    const d = index.docs.get(uri);
-    return d ? { start: d.lines.position(start), end: d.lines.position(end) } : { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } };
-  };
-  const toItem = (it: HierarchyItem) => ({
-    name: it.name,
-    kind: it.kind === "FB" ? SymbolKind.Class : SymbolKind.Function,
-    detail: it.kind,
-    uri: it.uri,
-    range: lspRange(it.uri, it.start, it.end),
-    selectionRange: lspRange(it.uri, it.nameStart, it.nameEnd),
-    data: it,
-  });
-  connection.languages.callHierarchy.onPrepare((p) => {
-    const d = index.docs.get(p.textDocument.uri);
-    const it = d ? prepareCallHierarchy(index, p.textDocument.uri, d.lines.offset(p.position.line, p.position.character)) : undefined;
-    return it ? [toItem(it)] : null;
-  });
-  connection.languages.callHierarchy.onIncomingCalls((p) =>
-    incomingCalls(index, p.item.data as HierarchyItem).map((c) => ({ from: toItem(c.from), fromRanges: c.ranges.map((r) => lspRange(c.from.uri, r.start, r.end)) })),
-  );
-  connection.languages.callHierarchy.onOutgoingCalls((p) => {
-    const it = p.item.data as HierarchyItem;
-    return outgoingCalls(index, it).map((c) => ({ to: toItem(c.to), fromRanges: c.ranges.map((r) => lspRange(it.uri, r.start, r.end)) }));
-  });
-  // Format Document: SCL as TIA Portal writes it (format.ts); TwinCAT/IEC files and text with errors are left alone
-  connection.onDocumentFormatting((p) => {
-    const doc = documents.get(p.textDocument.uri);
-    if (!doc || !/\.scl$/i.test(p.textDocument.uri)) return [];
-    const text = doc.getText();
-    const formatted = formatScl(text);
-    if (formatted === undefined || formatted === text) return [];
-    return [{ range: { start: { line: 0, character: 0 }, end: doc.positionAt(text.length) }, newText: formatted }];
-  });
   connection.onFoldingRanges((p) => {
     const doc = index.docs.get(p.textDocument.uri);
     return doc ? foldingRanges(doc) : [];

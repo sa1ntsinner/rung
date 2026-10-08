@@ -75,8 +75,6 @@ export class RungWorkspace implements vscode.Disposable {
   }
 
   private memento: vscode.Memento | undefined;
-  get lastDevice(): string | undefined { return this.memento?.get<string>(`rung.lastDevice:${this.root}`); }
-  async rememberDevice(device: string): Promise<void> { await this.memento?.update(`rung.lastDevice:${this.root}`, device); }
   /** Several rung workspaces in one window: told once which one rung works on, never silently the first. */
   private told = false;
 

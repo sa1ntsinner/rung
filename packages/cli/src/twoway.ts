@@ -129,8 +129,6 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   const config = await loadConfig(dir);
   const state = await openState(dir, config); // single writer: fails with STATE_LOCKED if another owner runs
   let server: OwnerServer | undefined;
-  let released!: () => void;
-  const releaseSignal = new Promise<void>((r) => { released = r; });
   // rung writes on/off and rung.toml as they are now: the watch reads them before every pass
   let live = config;
   // an open conflict or pending delete is in every pass: print a pass when it did something or when what
@@ -143,15 +141,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     reloadConfig: async () => (live = await loadConfig(dir)),
     validateTags,
     // the watch takes downloads only when they are on for the workspace (and checks the confirmed PLC itself)
-    bridgeFactory: async () => {
-      const b = await bridgeFor(live, io, [...importFlags(live), ...(config.download.enabled ? ["--allow-download"] : [])]);
-      // the editors show it while TIA Portal starts (the keeper in the background, or a window for Open in TIA Portal)
-      b.onEvent((e) => {
-        if (e.event === "tia-starting") server?.emit("phase", { phase: "starting-tia", detail: (e.params as { headless?: boolean } | undefined)?.headless === false ? "window" : "background" });
-        else if (e.event === "tia-started") server?.emit("phase", { phase: "tia-started" });
-      });
-      return b;
-    },
+    bridgeFactory: () => bridgeFor(live, io, [...importFlags(live), ...(config.download.enabled ? ["--allow-download"] : [])]),
     onReport: (r) => {
       const now = standing(r);
       if (r.exported + r.imported + r.created + r.merged + r.removed || now !== shown) printReport(io, r);
@@ -208,17 +198,10 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       if (b) await recordBackup(dir, config, b.path, Date.now());
       return b;
     },
-    online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never, p.credentials as never),
+    online: async (p) => tools().online(String(p.device), p.action as "state" | "online" | "offline", p.target as never),
     connections: async (p) => tools().connections(String(p.device), !!p.scan),
-    compare: async (p) => tools().compare(String(p.device), p.target as never, p.credentials as never),
+    compare: async (p) => tools().compare(String(p.device), p.target as never),
     projectInfo: async () => tools().projectInfo(),
-    sessionState: async () => tools().sessionState(),
-    sessionRelease: async (p) => {
-      await watcher.stop(async () => { await tools().releaseSession(!!p.save); });
-      // Reply over IPC before shutting down the owner and releasing its workspace lock.
-      setTimeout(released, 0);
-      return { released: true };
-    },
     read: async (p) => tools().read(String(p.device), (p.expressions as string[]) ?? []),
     download: async (p) => {
       // rung download's own checks, applied here too: whatever else reaches the owner cannot skip them
@@ -228,8 +211,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
         throw new WorkspaceError("BAD_ARGUMENT", "a download names the PLC a person confirmed it for; run rung download, which asks for it");
       return tools().download(request as never);
     },
-    show: async (p) => tools().show(String(p.address), !!p.save),
-    xref: async (p) => tools().xref(String(p.address)),
+    show: async (p) => tools().show(String(p.address)),
     compile: async (p) => {
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
@@ -241,7 +223,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   });
   io.stdout(`rung watch: ${dir} ⇄ ${config.project.path} (poll ${config.sync.pollMs} ms, writes ${writesLabel(config)}). Ctrl+C to stop.\n`);
   watcher.start();
-  await Promise.race([releaseSignal, io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r()))]);
+  await (io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r())));
   await watcher.stop();
   await server.close();
   await state.close();

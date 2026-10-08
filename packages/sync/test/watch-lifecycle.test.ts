@@ -102,21 +102,3 @@ it("records the rights captured when a slow bridge factory started", async () =>
   } finally { release.resolve(); await w.stop(); await state.close(); }
 });
 
-
-it("a pass that failed on a TIA Portal that went away does not hold the next try back; only the backoff does", async () => {
-  const { root, config, state } = await fixture();
-  class Dying extends Bridge {
-    dead = false;
-    override async projectInfo() {
-      if (this.dead) { await new Promise(r => setTimeout(r, 60)); throw new BridgeError("BRIDGE_EXITED", "TIA Portal ended"); }
-      return super.projectInfo();
-    }
-  }
-  const b = new Dying().add(address, { content: "a\n" });
-  const w = new Watcher(root, state, { config, bridgeFactory: async () => b });
-  await w.syncNow();
-  b.dead = true;
-  assert.equal(await w.syncNow(), null);
-  // idle polling waits twice the last pass; a pass that hung on a dead TIA Portal must not make the reconnect wait
-  assert.equal(w.lastPassMs, 0);
-});

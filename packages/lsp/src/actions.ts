@@ -135,7 +135,7 @@ function tagFixes(index: WorkspaceIndex, text: string, uri: string, block: Block
  * last byte of bits. None when a bit memory tag has a type of unknown size (a PLC data type, a String): its end
  * cannot be known.
  */
-export function freeMemory(index: WorkspaceIndex, bits: number, tableUri: string): string | undefined {
+function freeMemory(index: WorkspaceIndex, bits: number, tableUri: string): string | undefined {
   const device = deviceOfUri(tableUri);
   for (const g of index.allGlobals())
     if (deviceOfUri(g.uri) === device && g.tag?.address && /^%M/i.test(g.tag.address) && !TYPE_BITS[g.tag.dataType.toUpperCase()]) return undefined;

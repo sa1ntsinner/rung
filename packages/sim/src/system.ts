@@ -166,8 +166,7 @@ export function valStrg(value: number, integer: boolean, size: number, prec: num
 
 /** DELETE: L characters of IN from position P (the first character is 1). */
 export function deleteChars(s: string, l: number, p: number): string {
-  // past the end, an S7 CPU deletes to the end (PLCSIM Advanced: DELETE('xy', L := 2, P := 2) = 'x')
-  if (!Number.isInteger(l) || !Number.isInteger(p) || l < 0 || p < 1 || p > s.length) throw new Unsupported(`L ${l} characters from P ${p} are not within IN (${s.length} characters)`);
+  if (!Number.isInteger(l) || !Number.isInteger(p) || l < 0 || p < 1 || p + l - 1 > s.length) throw new Unsupported(`L ${l} characters from P ${p} are not within IN (${s.length} characters)`);
   return s.slice(0, p - 1) + s.slice(p - 1 + l);
 }
 

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Journal, WorkspaceError, parseAddress, pathKey, publishBundle, shellPath, type ObjectState, type RungConfig, type StateStore } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
 import { takeInventory, type Warning } from "./inventory.js";
-import { buildState, diskHash, isLockError, isReadOnlyEntry, isStrong, localStatus, markUsersStale, planPublication, renameInTests, renamesInTia, caseOrphan, stageExport, type BridgeLike } from "./objects.js";
+import { buildState, diskHash, isLockError, isReadOnlyEntry, isStrong, localStatus, planPublication, stageExport, type BridgeLike } from "./objects.js";
 import { recordTombstone, tombstoneOf } from "./tombstones.js";
 
 export { STAGED_STEM, isReadOnlyEntry, type BridgeLike } from "./objects.js";
@@ -21,8 +21,6 @@ export interface PullReport {
   tooLong: string[];
   /** Local edits --force replaced, each with the folder that keeps the person's version. */
   overwritten: { path: string; copy: string }[];
-  /** Objects renamed or moved in TIA Portal (V20 and later): their files followed, and the tests that named them. */
-  renamed?: { from: string; to: string; oldPath: string; newPath: string; tests: string[] }[];
 }
 
 export interface PullOptions {
@@ -76,9 +74,6 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
   const orphans = new Map<string, ObjectState>();
   for (const s of state.all()) if (!live.has(s.address)) orphans.set(pathKey(s.path.slice(0, -(s.form.length + 1))), s);
   const adopted = new Set<string>();
-  // renamed or moved in TIA Portal: the same object by its lasting identity; its file moves, its users come back
-  const { ids, renamed, recognized } = await renamesInTia(root, bridge, state, inv.items, orphans.values(), FATAL_BRIDGE_CODES);
-  await markUsersStale(root, state, recognized);
   const pendingOps: string[] = [];
   const journal = new Journal(root);
   const checkpoint = async () => {
@@ -94,7 +89,7 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
       let prev = state.get(entry.address);
       let adoptedFrom: string | undefined;
       if (!prev) {
-        const o = renamed.get(entry.address) ?? caseOrphan(entry.address, orphans.get(pathKey(stem)), recognized);
+        const o = orphans.get(pathKey(stem));
         if (o && !adopted.has(o.address)) {
           prev = { ...o, address: entry.address };
           adoptedFrom = o.address;
@@ -125,8 +120,6 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
       }
       const next = await buildState(root, entry.address, staged, readOnly, now());
       if (!next.tiaFingerprint) next.tiaFingerprint = entry.fingerprint;
-      const tiaId = ids[entry.address] ?? prev?.tiaId;
-      if (tiaId) next.tiaId = tiaId;
       if (plan.targets.length || plan.removes.length) {
         const opId = randomUUID();
         await publishBundle(root, { opId, address: entry.address, targets: plan.targets, removes: plan.removes, nextState: next }, { force: !!opts.force, keepJournal: true });
@@ -137,17 +130,6 @@ export async function pull(root: string, bridge: BridgeLike, state: StateStore, 
       if (adoptedFrom) {
         state.remove(adoptedFrom);
         adopted.add(adoptedFrom);
-        const was = renamed.get(entry.address);
-        if (was?.address === adoptedFrom) {
-          const from = parseAddress(adoptedFrom);
-          const to = parseAddress(entry.address);
-          const tests = from.name === to.name ? [] : await renameInTests(root, from.name, to.name, to.device);
-          (report.renamed ??= []).push({ from: adoptedFrom, to: entry.address, oldPath: was.path, newPath: next.path, tests });
-          // the old file coming back with git (another branch) is this object under its old name, not a new block
-          const tomb = tombstoneOf(was, { to: entry.address });
-          if (tomb) await recordTombstone(root, tomb).catch(() => undefined);
-          warn(entry.address, "RENAMED_IN_TIA", `${from.name === to.name ? "moved" : `renamed from ${from.name}`} in TIA Portal; its file moved here from ${was.path}${tests.length ? `, and the tests that named it: ${tests.join(", ")}` : ""}`);
-        }
       }
       for (const w of staged.result.warnings ?? []) warn(entry.address, w, EXPORT_HINTS[w]);
       // re-verified objects without a fingerprint (force tables) whose bytes did not change are not "exported"

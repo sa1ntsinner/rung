@@ -60,30 +60,4 @@ describe("declarations session", () => {
     expect(env.applied).toEqual([]);
     s.dispose();
   });
-
-  it("monitored values leave the table when it shows another block", async () => {
-    const A = "file:///a.scl", B = "file:///b.scl";
-    env.docs = [doc(A), doc(B)];
-    let bound = A;
-    const posted: any[] = [];
-    let changed: () => void = () => {};
-    const monitor = { monitoring: { toString: () => A }, plan: { vars: { x: '"A_DB".x' } }, values: { x: true }, errors: {}, onDidChange: (f: () => void) => ((changed = f), { dispose() {} }) };
-    const request = async (method: string, p: any) => (method === "rung/declarations" ? model(p.textDocument.uri) : undefined);
-    const s = new DeclarationsSession({ onDidReceiveMessage: () => ({ dispose() {} }), postMessage: async (m: any) => (posted.push(m), true) } as any, { lsp: { request }, ws: { rel: (p: string) => p }, monitor } as any, {
-      uri: () => bound,
-      position: () => undefined,
-      visible: () => true,
-      title: () => {},
-      pinned: () => false,
-      focus: () => {},
-    });
-    await s.receive({ v: 1, kind: "ready" });
-    expect(posted.filter((m) => m.kind === "values").at(-1)).toMatchObject({ on: true, values: { x: "TRUE" } });
-    bound = B; // the panel follows another editor; monitoring goes on for A
-    await s.refresh();
-    expect(posted.filter((m) => m.kind === "values").at(-1)).toMatchObject({ on: false, values: {} });
-    changed(); // a later read of A says nothing to B's table
-    expect(posted.filter((m) => m.kind === "values").at(-1)).toMatchObject({ on: false });
-    s.dispose();
-  });
 });

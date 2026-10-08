@@ -9,37 +9,10 @@ namespace Rung.Bridge.Core
     /// <summary>Where to connect: the names TIA shows in "Extended download / Go online".</summary>
     public sealed class ConnectionTarget
     {
-        public string Address;
         public string Mode;              // e.g. "PN/IE"
         public string PcInterface;       // e.g. "Intel(R) Ethernet Connection I219-LM" or "PLCSIM"
         public int PcInterfaceNumber = 1;
         public string TargetInterface;   // e.g. "1 X1"; null = the one TIA has configured
-
-        public static bool NeedsConnection(bool online, ConnectionTarget target) => !online || !string.IsNullOrEmpty(target?.Address);
-
-        public void CheckAddress(bool supported)
-        {
-            if (string.IsNullOrEmpty(Address)) return;
-            if (!supported) throw new Protocol.RpcException(Protocol.ErrorCodes.BadRequest, "TIA Portal V19/V20 require the project address; use rung connect --address to change network.yaml.");
-            if (!System.Net.IPAddress.TryParse(Address, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || ip.ToString() != Address)
-                throw new Protocol.RpcException(Protocol.ErrorCodes.BadRequest, "target.address must be an IPv4 address");
-        }
-
-        public T DownloadAt<T>(bool supportsAddress, Func<T> projectAddress, Func<string, T> onlineAddress)
-        {
-            CheckAddress(supportsAddress);
-            return string.IsNullOrEmpty(Address) ? projectAddress() : onlineAddress(Address);
-        }
-    }
-
-    /// <summary>What a person typed for a PLC that asks before going online; travels with the request, never stored by the bridge.</summary>
-    public sealed class OnlineCredentialsInput
-    {
-        /// <summary>A user of the PLC's user management; null for the access protection password.</summary>
-        public string User;
-        public string Password;
-        /// <summary>Trust the certificate TIA Portal shows for this connection, for this request only.</summary>
-        public bool TrustCertificate;
     }
 
     public sealed class OnlineStatus
@@ -116,8 +89,6 @@ namespace Rung.Bridge.Core
         public string[] Subnets;
         /// <summary>Only filled when a network scan was requested.</summary>
         public List<AccessibleDeviceInfo> Accessible;
-        /// <summary>Why scanning this interface failed (cable, driver); null when it worked or was not asked for.</summary>
-        public string ScanError;
     }
 
     public sealed class AccessibleDeviceInfo

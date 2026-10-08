@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { readFile } from "node:fs/promises";
-import { isIPv4 } from "node:net";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { writeFileAtomic } from "./atomic.js";
@@ -54,7 +53,6 @@ export interface RungConfig {
 }
 
 export interface PlcConnection {
-  address?: string;
   mode: string;
   pcInterface: string;
   pcInterfaceNumber: number;
@@ -80,8 +78,8 @@ export interface DownloadSettings {
 
 export const CONFIG_FILE = "rung.toml";
 
-export type EngineeringVersion = "V19" | "V20" | "V21" | "CODESYS";
-export const ENGINEERING_VERSIONS: readonly EngineeringVersion[] = ["V19", "V20", "V21", "CODESYS"];
+export type EngineeringVersion = "V20" | "V21" | "CODESYS";
+export const ENGINEERING_VERSIONS: readonly EngineeringVersion[] = ["V20", "V21", "CODESYS"];
 
 export function defaultConfig(projectPath: string, tiaVersion: EngineeringVersion, bridgeCommand = "", devices: string[] = []): RungConfig {
   return {
@@ -111,7 +109,7 @@ export function parseConfig(text: string): RungConfig {
   if (raw.format !== 1) fail(`unsupported format ${String(raw.format)}`);
   const project = raw.project as Record<string, unknown> | undefined;
   if (!project || typeof project.path !== "string" || !project.path) fail("project.path is required");
-  if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V19, V20, V21 or CODESYS");
+  if (!ENGINEERING_VERSIONS.includes(project.tiaVersion as EngineeringVersion)) fail("project.tiaVersion must be V20, V21 or CODESYS");
   const bridge = (raw.bridge ?? {}) as Record<string, unknown>;
   if (bridge.command !== undefined && typeof bridge.command !== "string") fail("bridge.command must be a path");
   if (bridge.host !== undefined && (typeof bridge.host !== "string" || !/^[^\s"']+$/.test(bridge.host))) fail("bridge.host must be an ssh destination such as elmir@tia-pc");
@@ -132,8 +130,7 @@ export function parseConfig(text: string): RungConfig {
     const n = v.pc_interface_number ?? 1;
     if (typeof n !== "number" || !Number.isInteger(n) || n < 1) fail(`plc.${name}.pc_interface_number must be a positive integer`);
     if (v.target_interface !== undefined && typeof v.target_interface !== "string") fail(`plc.${name}.target_interface must be a string`);
-    if (v.address !== undefined && (typeof v.address !== "string" || !isIPv4(v.address))) fail(`plc.${name}.address must be an IPv4 address`);
-    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}), ...(typeof v.address === "string" ? { address: v.address } : {}) };
+    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}) };
   }
   const rawDl = (raw.download ?? {}) as Record<string, unknown>;
   const download: DownloadSettings = {
@@ -196,7 +193,7 @@ export function formatConfig(c: RungConfig): string {
       ...(Object.keys(c.plc).length
         ? {
             plc: Object.fromEntries(
-              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.targetInterface ? { target_interface: v.targetInterface } : {}), ...(v.address ? { address: v.address } : {}) }]),
+              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.targetInterface ? { target_interface: v.targetInterface } : {}) }]),
             ),
           }
         : {}),

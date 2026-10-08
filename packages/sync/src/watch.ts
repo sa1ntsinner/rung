@@ -207,9 +207,6 @@ export class Watcher {
     } catch (e) {
       const err = e as Error;
       this.lastError = err.message;
-      // the idle rule (twice the last pass) is for a TIA Portal at work; a pass that hung on one that went away would
-      // hold the reconnect back by twice its hang (measured: 30 s after the engineer closed the TIA Portal window)
-      this.lastPassMs = 0;
       // what this pass was to look at is looked at again, completely
       this.wantFull = true;
       // Bridge-level trouble: drop the bridge and retry with exponential backoff; the workspace stays safe.
@@ -246,19 +243,12 @@ export class Watcher {
     return syncOnce(this.root, this.bridge, this.state, { config: this.config, preview: true });
   }
 
-  async stop(beforeClose?: () => Promise<void>): Promise<void> {
+  async stop(): Promise<void> {
     this.stopped = true;
-    try {
-      await this.queued;
-      await this.running;
-      await beforeClose?.();
-    } catch (e) {
-      this.stopped = false; // a refused release keeps watch running
-      throw e;
-    }
     this.fsWatcher?.close();
     if (this.timer) clearInterval(this.timer);
     if (this.debounce) clearTimeout(this.debounce);
+    await this.running;
     await this.bridge?.close().catch(() => {});
     this.bridge = null;
   }

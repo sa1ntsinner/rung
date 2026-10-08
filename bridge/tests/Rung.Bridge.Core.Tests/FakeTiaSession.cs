@@ -10,43 +10,23 @@ using Rung.Bridge.Core.Protocol;
 
 public sealed class FakeTiaSession : ITiaSession
 {
-    public bool SessionWindow, SessionModified, SessionSaveAfterImport, SessionClosed, SessionSaved;
-    public bool SessionKeeper = true;
-    public SessionState GetSessionState() => new SessionState { ProjectPath = GetProjectInfo().Path, TiaPid = 42, Mode = SessionWindow ? "ui" : "headless", HeldBy = SessionKeeper ? "keeper" : "other", AttachedSessions = 1 };
-    public void ReleaseSession(bool save)
-    {
-        var step = SessionRelease.Decide(SessionWindow, SessionKeeper, SessionModified, save || SessionSaveAfterImport);
-        if (step == WindowStep.Busy) throw new RpcException(ErrorCodes.ProjectBusy, "another program holds it");
-        if (step == WindowStep.Unsaved) throw new RpcException(ErrorCodes.ProjectUnsaved, "unsaved changes");
-        SessionSaved = step == WindowStep.SaveAndMove;
-        SessionClosed = true;
-    }
     public DownloadRequest LastDownload;
     public string OnlineState = "Offline";
     public IReadOnlyList<CompileMessage> CompileHardware(string device) => new[] { new CompileMessage { Severity = "info", Description = "hardware ok" } };
-    public OnlineCredentialsInput LastCredentials;
-    public ConnectionTarget LastOnlineTarget;
-    public OnlineStatus Online(string device, string action, ConnectionTarget target, OnlineCredentialsInput credentials)
+    public OnlineStatus Online(string device, string action, ConnectionTarget target)
     {
-        LastOnlineTarget = target;
-        LastCredentials = credentials;
         if (action == "online") OnlineState = "Online";
         else if (action == "offline") OnlineState = "Offline";
         else if (action != "state") throw new RpcException(ErrorCodes.BadRequest, "action");
         return new OnlineStatus { Device = device, State = OnlineState };
     }
-    public CompareOutcome Compare(string device, ConnectionTarget target, OnlineCredentialsInput credentials)
+    public CompareOutcome Compare(string device, ConnectionTarget target) => new CompareOutcome
     {
-        LastOnlineTarget = target;
-        LastCredentials = credentials;
-        return new CompareOutcome
-        {
-            Device = device,
-            State = "FolderContentsDifferent",
-            Identical = 3,
-            Items = { new CompareItem { Path = "Program blocks/Fx_Motor", Name = "Fx_Motor", State = "Different", Address = "plc:PLC_1/blocks/Fx_Motor" } },
-        };
-    }
+        Device = device,
+        State = "FolderContentsDifferent",
+        Identical = 3,
+        Items = { new CompareItem { Path = "Program blocks/Fx_Motor", Name = "Fx_Motor", State = "Different", Address = "plc:PLC_1/blocks/Fx_Motor" } },
+    };
     public ConnectionOptions Connections(string device, bool scan) => new ConnectionOptions
     {
         Device = device,
@@ -75,8 +55,7 @@ public sealed class FakeTiaSession : ITiaSession
         if (d.Blocks) o.NeedsAllow = new[] { d.Name };
         return o;
     }
-    public bool? LastShowSave;
-    public void Show(string address, bool save) { LastShowSave = save; throw new RpcException(ErrorCodes.UnsupportedCapability, "no UI"); }
+    public void Show(string address) => throw new RpcException(ErrorCodes.UnsupportedCapability, "no UI");
 
     public Exception ThrowOnInfo;
 
@@ -125,9 +104,6 @@ public sealed class FakeTiaSession : ITiaSession
 
     public IReadOnlyList<XRefEntry> XRef(string address) =>
         new[] { new XRefEntry { Source = address, SourceName = "Fx_Motor", TargetName = "Start_Button", TargetType = "Tag", TargetAddress = "%I0.0", Access = "Read", ReferenceType = "Uses", Location = "@Fx_Motor NW1" } };
-
-    public IReadOnlyDictionary<string, string> Identify(string[] addresses) =>
-        addresses.Where(a => Objects.Exists(o => o.Address == a)).ToDictionary(a => a, a => "id:" + a);
 
     public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
     {
