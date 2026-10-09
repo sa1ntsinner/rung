@@ -29,6 +29,8 @@ export function whyMarkdown(root: WhyNode, note?: string): string {
 }
 
 export class WhyView implements vscode.TreeDataProvider<WhyNode>, vscode.Disposable {
+  captured?: () => { uri: string; identity: object; ask: (expression: string) => Promise<WhyNode | undefined> } | undefined;
+  private captureShown?: object;
   private root?: WhyNode;
   private readonly changed = new vscode.EventEmitter<WhyNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
@@ -73,11 +75,16 @@ export class WhyView implements vscode.TreeDataProvider<WhyNode>, vscode.Disposa
   }
 
   private show(root: WhyNode | undefined, message?: string) {
+    this.captureShown = undefined;
     this.root = root;
     this.view.message = message;
     this.panel.message = message;
     void vscode.commands.executeCommand("setContext", "rung.why.shown", !!root || !!message);
     this.changed.fire(undefined);
+  }
+
+  invalidateCapture(): void {
+    if (this.captureShown && this.captured?.()?.identity !== this.captureShown) this.show(undefined, "The capture or source changed: run Why? again.");
   }
 
   /** Why? on the running PLC (or rung simulate): the block's writers with the values read now (rung why). */
@@ -87,9 +94,17 @@ export class WhyView implements vscode.TreeDataProvider<WhyNode>, vscode.Disposa
       void vscode.window.showInformationMessage("Why? works in an SCL block (with the PLC's values through [live.webapi], or rung simulate), or while debugging a test case.");
       return undefined;
     }
+    const captured = this.captured?.();
     const selected = !editor.selection.isEmpty ? editor.document.getText(editor.selection) : editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active, /#?"?[A-Za-z_][\w."[\]]*"?/));
     const expression = typeof arg === "string" ? arg : await vscode.window.showInputBox({ title: "Why is this value what it is?", prompt: "A variable of this block, e.g. #Running or \"Plant\".Ready", value: selected ?? "" });
     if (!expression) return undefined;
+    if (captured?.uri === editor.document.uri.toString()) {
+      const tree = await captured.ask(expression);
+      this.show(tree, tree ? "Recorded reconstruction; PLC execution unverified." : "Captured reconstruction unavailable or changed.");
+      this.captureShown = tree ? this.captured?.()?.identity : undefined;
+      await vscode.commands.executeCommand("rung.whyLive.focus");
+      return tree;
+    }
     const ask = async (instance?: string) => {
       const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: "rung: why?" }, () => this.cli!.capture(["why", editor.document.uri.fsPath, expression, "--json", ...(instance ? ["--instance", instance] : [])], { quiet: true }));
       return JSON.parse(r.output) as { source: string; tree: WhyNode };

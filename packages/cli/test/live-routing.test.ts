@@ -11,6 +11,29 @@ import { PassThrough } from "node:stream";
 
 afterEach(() => vi.restoreAllMocks());
 
+it("keeps subscription observations separate from unavailable cycle reconstruction", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rung-live-status-")), dir = join(root, "plc", "P", "blocks");
+  await saveConfig(root, defaultConfig("fixture.ap20", "V20", "", ["P"])); await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "Motor.scl"), 'FUNCTION_BLOCK "Motor"\nVAR_OUTPUT\nCount : Int;\nEND_VAR\nBEGIN\n#Count := #Count + 1;\nEND_FUNCTION_BLOCK');
+  await writeFile(join(dir, "Motor_DB.db"), 'DATA_BLOCK "Motor_DB"\n"Motor"\nBEGIN\nEND_DATA_BLOCK');
+  let stop!: () => void; const stopSignal = new Promise<void>(r => { stop = r; });
+  const close = vi.fn(async () => {}), release = vi.fn(async () => {}), output: string[] = [];
+  vi.spyOn(broker, "brokerReader").mockResolvedValue({ read: async () => [], close, subscribe: async (_labels, _cycle, cb) => {
+    for (const state of ["live", "stale", "disconnected"] as const) cb({ at: 12, scope: { device: "P", address: "192.168.250.1", transport: "s7commplus", epoch: 2 },
+      values: { Count: 5, "#Count": 5 }, errors: {}, observedAt: { Count: 10, "#Count": 11 }, state });
+    stop(); return { close: release };
+  } });
+  expect(await main(["live", "watch", "--file", "plc/P/blocks/Motor.scl", "--json"], {
+    cwd: root, env: {}, stdout: s => output.push(s), stderr() {}, stopSignal,
+  })).toBe(0);
+  const frames = output.slice(1).map(s => JSON.parse(s));
+  expect(frames).toHaveLength(3);
+  expect(frames[0]).toMatchObject({ at: 12, observedAt: { Count: 10, "#Count": 11 }, values: { Count: 5 },
+    programStatus: { kind: "unavailable", exact: false, coherence: "subscription-sample", reason: expect.stringMatching(/pre-cycle/i) } });
+  expect(frames[1].programStatus.reason).toMatch(/stale/i); expect(frames[2].programStatus.reason).toMatch(/disconnected/i);
+  expect(release).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce();
+});
+
 it("releases the editor subscription on parent stdin EOF without stopping the shared broker", async () => {
   const root = await mkdtemp(join(tmpdir(), "rung-parent-watch-"));
   const config = defaultConfig("fixture.ap20", "V20", "", ["P"]);

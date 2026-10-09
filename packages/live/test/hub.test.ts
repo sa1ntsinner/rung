@@ -1,10 +1,29 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as live from "../src/index.js";
-import type { LiveFrame, OnlineReadResult } from "@rung/bridge-client";
+import type { LiveFrame, OnlineReadResult, OnlineNativeCapture } from "@rung/bridge-client";
 
 const scope = { device: "P", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 1 };
 const frame = (names: string[], at = 10, epoch = 1): OnlineReadResult => ({ at, scope: { ...scope, epoch }, items: names.map(name => ({ name, value: at, observedAt: at, type: "REAL", display: `${at}.0` })) });
+it("native capture reuses active readers and drops results after their generation closes", async () => {
+  const sample: OnlineNativeCapture = { scope, coherence: "subscription-sample", capture: { bodies: [], scalars: [],
+    route: { instance: "DB", database: 4, functionBlock: 4, sac: 118, compilationUnit: "1", element: "258" }, codeSignature: "signature", samples: [] } };
+  let calls = 0, finish: ((value: OnlineNativeCapture) => void) | undefined;
+  const hub = new live.LiveHub(async () => ({ read: async names => frame(names),
+    subscribe: async (names, _cycle, push) => { push(frame(names)); return { close: async () => {} }; },
+    capture: async () => ++calls === 1 ? sample : new Promise<OnlineNativeCapture>(resolve => { finish = resolve; }), close: async () => {} }));
+  try {
+    await expect(hub.capture("P", "F", "DB", scope)).rejects.toThrow(/reader/i);
+    const lease = await hub.subscribe("P", { x: "X" }, 250, () => {});
+    expect(await hub.capture("P", "F", "DB", scope)).toEqual(sample);
+    await expect(hub.capture("P", "F", "DB", { ...scope, epoch: 99 })).rejects.toThrow(/scope/i);
+    expect(calls).toBe(1);
+    const late = hub.capture("P", "F", "DB", scope);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await lease.close(); finish!(sample);
+    await expect(late).rejects.toThrow(/reader|generation/i);
+  } finally { await hub.close(); }
+});
 function fixture() {
   const subscriptions: { names: string[]; cycle: number; push: (f: OnlineReadResult) => void; closed: boolean }[] = [];
   let opens = 0, closes = 0;

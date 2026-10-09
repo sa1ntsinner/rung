@@ -8,9 +8,10 @@ import type { Output } from "./output";
 import { RungCli } from "./runner/cli";
 import { stopLive, startProcess } from "./runner/terminal";
 import type { RungWorkspace } from "./workspace";
-import { lineText, type MonitorPlan } from "./core/monitorText";
+import { lineText, reconstructedLines, type MonitorPlan } from "./core/monitorText";
 import type { LiveAccess } from "./liveAccess";
 import type { LiveFrame } from "./core/liveFrames";
+import type { WhyNode } from "./views/whyView";
 
 export type { MonitorPlan };
 
@@ -27,10 +28,15 @@ interface Session {
   scope?: LiveFrame["scope"];
   state?: LiveFrame["state"];
   instances?: string[];
+  programStatus?: LiveFrame["programStatus"];
+  nativeLines?: Record<number, string>;
 }
 
 export class Monitor implements vscode.Disposable {
   private session: Session | undefined;
+  private replay?: { uri: vscode.Uri; lines: Record<number, string>; hover: string; capture: vscode.Uri; instance: string };
+  private replayPending = false;
+  private replayScope?: string;
   private generation = 0;
   private readonly deco = vscode.window.createTextEditorDecorationType({
     after: { margin: "0 0 0 2.5em", color: new vscode.ThemeColor("editorCodeLens.foreground") },
@@ -46,21 +52,65 @@ export class Monitor implements vscode.Disposable {
     private readonly out: Output,
     private readonly access: LiveAccess,
   ) {
+    const sources = vscode.workspace.createFileSystemWatcher("**/*.{scl,db,udt,awl,st,s7dcl,TcPOU,TcDUT,TcGVL,xml,sd,yaml}");
+    const sourceChanged = (uri: vscode.Uri) => {
+      if ((this.replayPending || this.replay || this.session?.programStatus?.kind === "reconstructed") && ws.rel(uri.fsPath)) void this.stop("a workspace source changed");
+    };
     this.subs.push(
-      ws.onDidChange(() => { if (this.session && this.session.workspace !== this.access.scope) void this.stop("the live target changed"); }),
+      sources, sources.onDidChange(sourceChanged), sources.onDidCreate(sourceChanged), sources.onDidDelete(sourceChanged),
+      ws.onDidChange(() => { if ((this.replayPending || this.replay) && this.replayScope !== this.access.scope || this.session && this.session.workspace !== this.access.scope) void this.stop("the workspace or live target changed"); }),
       vscode.window.onDidChangeVisibleTextEditors(() => this.render()),
       // TIA Portal stops monitoring when the block is edited; so does rung (the lines no longer match)
       vscode.workspace.onDidChangeTextDocument((e) => {
-        if (this.session && e.contentChanges.length && e.document.uri.toString() === this.session.uri.toString()) void this.stop("the block was edited");
+        if (e.contentChanges.length && ((this.replayPending || this.replay || this.session?.programStatus?.kind === "reconstructed") && ws.rel(e.document.uri.fsPath) || this.session && e.document.uri.toString() === this.session.uri.toString())) void this.stop("the source was edited");
       }),
       vscode.workspace.onDidCloseTextDocument((d) => {
-        if (this.session && d.uri.toString() === this.session.uri.toString()) void this.stop();
+        if ((this.replay?.uri ?? this.session?.uri)?.toString() === d.uri.toString()) void this.stop();
       }),
     );
   }
 
   get monitoring(): vscode.Uri | undefined {
-    return this.session?.uri;
+    return this.replay?.uri ?? this.session?.uri;
+  }
+
+  get captured(): { uri: string; identity: object; ask: (expression: string) => Promise<WhyNode | undefined> } | undefined {
+    const replay = this.replay, generation = this.generation;
+    if (replay) return { uri: replay.uri.toString(), identity: replay, ask: expression => generation === this.generation
+      ? this.reconstruct(replay.uri, replay.capture, replay.instance, expression) : Promise.resolve(undefined) };
+    const session = this.session, status = session?.programStatus;
+    if (status?.kind !== "reconstructed" || session?.state !== "live") return;
+    return { uri: session.uri.toString(), identity: status, ask: async expression => this.session === session && generation === this.generation
+      && session.programStatus === status && session.state === "live" ? status.why?.[expression.replace(/^#/, "").toUpperCase()] : undefined };
+  }
+
+  async reconstruct(uri?: vscode.Uri, capture?: vscode.Uri, instance?: string, why?: string): Promise<WhyNode | undefined> {
+    const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+    if (!target || !this.ws.rel(target.fsPath)) return;
+    await this.stop();
+    const generation = this.generation;
+    this.replayPending = true;
+    this.replayScope = this.access.scope;
+    try {
+      const dirty = () => vscode.workspace.textDocuments.some(d => d.isDirty && this.ws.rel(d.uri.fsPath));
+      if (dirty()) { void vscode.window.showWarningMessage("Save or revert workspace sources before reconstructing a capture."); return; }
+      const selected = capture ?? (await vscode.window.showOpenDialog({ title: "Open a pre/post-cycle capture", canSelectMany: false, filters: { "Cycle capture": ["json"] } }))?.[0];
+      const db = instance ?? (selected && await vscode.window.showInputBox({ title: "Instance DB in the capture", prompt: "Choose the DB whose pre-cycle memory was captured" }));
+      if (!selected || !db || generation !== this.generation || dirty()) return;
+      const version = vscode.workspace.textDocuments.find(d => d.uri.toString() === target.toString())?.version;
+      const run = await this.cli.capture(["program-status", target.fsPath, "--capture", selected.fsPath, "--instance", db, "--json", ...(why ? ["--why", why] : [])], { timeoutMs: 15_000, quiet: true });
+      if (generation !== this.generation || dirty() || version !== vscode.workspace.textDocuments.find(d => d.uri.toString() === target.toString())?.version) return;
+      if (run.output.length > 3_145_728 || run.code !== 0 && run.code !== 2) throw new Error(RungCli.summary(run.output));
+      const result: unknown = JSON.parse(run.output);
+      const lines = reconstructedLines(result, target.toString());
+      const details = result as { scope: unknown; coherence: unknown; divergences: unknown[]; why?: WhyNode };
+      this.replay = { uri: target, lines, capture: selected, instance: db, hover: "Historical reconstruction; PLC execution unverified.\n" + JSON.stringify({ scope: details.scope,
+        coherence: details.coherence, divergences: details.divergences.slice(0, 20) }, null, 2).slice(0, 16_384) };
+      void vscode.commands.executeCommand("setContext", "rung.monitoring", true);
+      this.render(); this.changed.fire();
+      return details.why;
+    } catch (error) { void vscode.window.showWarningMessage(`Reconstruction unavailable: ${error instanceof Error ? error.message : String(error)}`); }
+    finally { if (generation === this.generation) this.replayPending = false; }
   }
   get plan(): MonitorPlan | undefined {
     return this.session?.plan;
@@ -169,6 +219,26 @@ export class Monitor implements vscode.Disposable {
         s.scope = m.scope;
       }
       if (m.values) {
+        const previous = s.programStatus;
+        s.programStatus = m.programStatus;
+        s.nativeLines = undefined;
+        if (s.programStatus?.kind === "reconstructed") {
+          const status = s.programStatus;
+          if (status.freshness !== "native-sample" || status.coherence !== "subscription-sample"
+            || !Number.isSafeInteger(status.observedAt) || status.observedAt <= 0 || !Number.isSafeInteger(status.sequence) || status.sequence < 0
+            || m.state !== "live" || !m.scope || status.scope?.plc !== m.scope.device || status.scope?.epoch !== m.scope.epoch
+            || s.plan?.instance && status.scope.instance.replace(/^"|"$/g, "") !== s.plan.instance.replace(/^"|"$/g, "")
+            || vscode.workspace.textDocuments.some(d => d.isDirty && this.ws.rel(d.uri.fsPath))) s.programStatus = undefined;
+          else {
+            try {
+              s.nativeLines = reconstructedLines(status, s.uri.toString());
+              if (previous?.kind === "reconstructed" && previous.observedAt === status.observedAt && previous.sequence === status.sequence
+                && previous.scope.epoch === status.scope.epoch && previous.scope.plc === status.scope.plc && previous.scope.instance === status.scope.instance)
+                s.programStatus = previous;
+            }
+            catch { s.programStatus = undefined; }
+          }
+        }
         s.values = m.values;
         s.errors = m.errors ?? {};
         s.display = m.display;
@@ -186,6 +256,22 @@ export class Monitor implements vscode.Disposable {
   private render(): void {
     const s = this.session;
     for (const ed of vscode.window.visibleTextEditors) {
+      if (this.replay && ed.document.uri.toString() === this.replay.uri.toString()) {
+        ed.setDecorations(this.deco, Object.entries(this.replay.lines).flatMap(([line, text]) => {
+          const n = Number(line); if (n >= ed.document.lineCount) return [];
+          const end = ed.document.lineAt(n).range.end;
+          return [{ range: new vscode.Range(end, end), hoverMessage: this.replay!.hover, renderOptions: { after: { contentText: text } } }];
+        }));
+        continue;
+      }
+      if (s?.nativeLines && ed.document.uri.toString() === s.uri.toString()) {
+        ed.setDecorations(this.deco, Object.entries(s.nativeLines).flatMap(([line, text]) => {
+          const n = Number(line); if (n >= ed.document.lineCount) return [];
+          const end = ed.document.lineAt(n).range.end;
+          return [{ range: new vscode.Range(end, end), hoverMessage: s.programStatus?.reason ?? "Native subscription sample; PLC execution unverified", renderOptions: { after: { contentText: text } } }];
+        }));
+        continue;
+      }
       if (!s?.plan || ed.document.uri.toString() !== s.uri.toString()) {
         ed.setDecorations(this.deco, []);
         continue;
@@ -195,7 +281,7 @@ export class Monitor implements vscode.Disposable {
         const n = Number(line);
         if (n >= ed.document.lineCount) continue;
         const end = ed.document.lineAt(n).range.end;
-        opts.push({ range: new vscode.Range(end, end), hoverMessage: `${s.scope ? `${s.scope.device} · ${s.scope.transport} · ${s.scope.address}\n` : ""}${labels.map(name => s.errors[name]).filter(Boolean).join("\n")}`, renderOptions: { after: { contentText: lineText(labels, s.values, s.errors, s.display) } } });
+        opts.push({ range: new vscode.Range(end, end), hoverMessage: `${s.scope ? `${s.scope.device} · ${s.scope.transport} · ${s.scope.address}\n` : ""}${s.programStatus?.reason ?? ""}\n${labels.map(name => s.errors[name]).filter(Boolean).join("\n")}`, renderOptions: { after: { contentText: lineText(labels, s.values, s.errors, s.display) } } });
       }
       ed.setDecorations(this.deco, opts);
     }
@@ -207,6 +293,8 @@ export class Monitor implements vscode.Disposable {
 
   async stop(why?: string): Promise<void> {
     this.generation++;
+    this.replayPending = false;
+    if (this.replay) { this.replay = undefined; this.clear(); void vscode.commands.executeCommand("setContext", "rung.monitoring", false); this.changed.fire(); }
     const s = this.session;
     if (!s) return;
     s.stopping = true;

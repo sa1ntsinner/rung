@@ -29,6 +29,7 @@ function installedCode(): string | undefined {
 }
 
 const USER_SETTINGS = {
+  "rung.command": ["node", join(repo, "packages", "cli", "dist", "index.js")],
   "security.workspace.trust.enabled": false,
   "update.mode": "none",
   "extensions.autoUpdate": false,

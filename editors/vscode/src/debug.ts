@@ -13,6 +13,7 @@ class RungDebugAdapter implements vscode.DebugAdapter {
   readonly onDidSendMessage = this.sent.event;
   private readonly child;
   private buf = Buffer.alloc(0);
+  private closed = false;
 
   constructor(cli: RungCli, cwd: string | undefined) {
     const inv = cli.invocation(["debug", "--stdio"]);
@@ -21,8 +22,13 @@ class RungDebugAdapter implements vscode.DebugAdapter {
     let err = "";
     this.child.stderr.on("data", (c: Buffer) => (err += c.toString()));
     const fail = (why: string) => this.sent.fire({ type: "event", event: "output", body: { category: "stderr", output: `rung debug: ${why}\n` } } as vscode.DebugProtocolMessage);
+    this.child.stdin.on("error", (e: NodeJS.ErrnoException) => {
+      this.closed = true;
+      if (e.code !== "EPIPE") fail(e.message);
+    });
     this.child.on("error", (e) => fail(`${e.message} (set "rung.command" to the rung executable)`));
     this.child.on("exit", (code) => {
+      this.closed = true;
       if (code) fail(err.trim() || `exited with code ${code}`);
       this.sent.fire({ type: "event", event: "terminated" } as vscode.DebugProtocolMessage);
     });
@@ -41,12 +47,13 @@ class RungDebugAdapter implements vscode.DebugAdapter {
   }
 
   handleMessage(message: vscode.DebugProtocolMessage): void {
+    if (this.closed || this.child.stdin.destroyed || !this.child.stdin.writable) return;
     const body = Buffer.from(JSON.stringify(message), "utf8");
-    this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-    this.child.stdin.write(body);
+    this.child.stdin.write(Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]));
   }
 
   dispose(): void {
+    this.closed = true;
     killTree(this.child); // through the rung.cmd shim rung debug is a child of cmd.exe
     this.sent.dispose();
   }

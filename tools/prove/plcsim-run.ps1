@@ -4,20 +4,34 @@
 # Called by prove.mjs with a plan file:
 #   { instance, db, cycleNs, cases: [{ name, steps: [{ step, set: { member: value }, cycles, read: [member] }] }] }
 # Each case starts from a warm restart (STOP, RUN): a NON_RETAIN instance DB is back at its start values.
-param([Parameter(Mandatory)][string]$Plan)
+param([Parameter(Mandatory)][string]$Plan, [switch]$ValidateOnly)
 $ErrorActionPreference = 'Stop'
-Add-Type -Path 'C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll'
 $p = Get-Content $Plan -Raw | ConvertFrom-Json
+if ($p.captureBefore) {
+  foreach ($c in $p.cases) { foreach ($s in $c.steps) {
+    if ([int]$s.cycles -ne 1) { throw 'Capture requires exactly one cycle per step' }
+    foreach ($m in $s.read) { if ($p.restore -notcontains $m) { throw "Capture must restore every read member: $m" } }
+    foreach ($prop in $s.set.PSObject.Properties) { if ($p.restore -notcontains $prop.Name) { throw "Capture must restore every written member: $($prop.Name)" } }
+  } }
+}
+if ($ValidateOnly) { return }
+Add-Type -Path 'C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll'
 $i = [Siemens.Simatic.Simulation.Runtime.SimulationRuntimeManager]::CreateInterface($p.instance)
+if ($p.captureBefore) {
+  if ($p.instance -cne 'RungProve' -or $i.ControllerName -cne 'PLC_1' -or
+      @($i.ControllerIPSuite4 | ForEach-Object { [string]$_.IPAddress }) -notcontains '192.168.250.1' -or
+      [string]$i.OperatingState -ne 'Run' -or [string]$i.OperatingMode -ne 'Default') { throw 'Cycle capture requires the verified local RungProve fixture in normal Run' }
+}
 $i.UpdateTagList([Siemens.Simatic.Simulation.Runtime.ETagListDetails]::IOMCTDB, $true)
 $types = @{}
-foreach ($t in $i.TagInfos) { $types[$t.Name.ToUpperInvariant()] = [string]$t.DataType }
+$names = @{}
+foreach ($t in $i.TagInfos) { $types[$t.Name.ToUpperInvariant()] = [string]$t.DataType; $names[$t.Name.ToUpperInvariant()] = $t.Name }
 
 function Tag([string]$member) {
   $name = "$($p.db).$member"
   $type = $types[$name.ToUpperInvariant()]
   if (-not $type) { throw "PLCSIM knows no tag $name" }
-  return @{ name = $name; type = $type }
+  return @{ name = $names[$name.ToUpperInvariant()]; type = $type }
 }
 function Put([string]$member, $value) {
   $t = Tag $member
@@ -84,6 +98,9 @@ function Frozen { for ($n = 0; [string]$i.OperatingState -ne 'Freeze' -and $n -l
 function Drain { for ($n = 0; $n -lt 1000; $n++) { if ([string]$i.WaitForOnSyncPointReachedEvent(1).ErrorCode -ne 'OK') { return } } }
 function Cycles([int]$n) { for ($k = 0; $k -lt $n; $k++) { Frozen; Drain; $i.RunToNextSyncPoint(); [void]$i.WaitForOnSyncPointReachedEvent(10000); Frozen } }
 
+$original = @{}
+foreach ($m in $p.restore) { $original[$m] = Get $m }
+$originalCycle = $i.OverwrittenMinimalCycleTime_ns
 $out = @()
 try {
   $i.RegisterOnSyncPointReachedEvent()
@@ -99,15 +116,39 @@ try {
     $steps = @()
     foreach ($s in $c.steps) {
       if ($s.set) { foreach ($prop in $s.set.PSObject.Properties) { Put $prop.Name $prop.Value } }
+      $before = [ordered]@{}
+      if ($p.captureBefore) { foreach ($m in $s.read) { $before[$m] = Get $m } }
       Cycles ([int]$s.cycles)
       $values = [ordered]@{}
       foreach ($m in $s.read) { $values[$m] = Get $m }
-      $steps += [ordered]@{ step = $s.step; values = $values }
+      $row = [ordered]@{ step = $s.step; values = $values }
+      if ($p.captureBefore) { $row.before = $before; $row.cycles = [int]$s.cycles }
+      $steps += $row
     }
     $out += [ordered]@{ name = $c.name; steps = $steps }
   }
 } finally {
-  try { $i.UnregisterOnSyncPointReachedEvent() } catch { }
-  $i.OperatingMode = [Siemens.Simatic.Simulation.Runtime.EOperatingMode]::Default
+  $restoreErrors = @()
+  foreach ($m in $p.restore) {
+    try { Put $m $original[$m] } catch { $restoreErrors += "${m}: $_" }
+  }
+  try { $i.UnregisterOnSyncPointReachedEvent() } catch { $restoreErrors += "Unregister: $_" }
+  try { $i.OperatingMode = [Siemens.Simatic.Simulation.Runtime.EOperatingMode]::Default } catch { $restoreErrors += "Mode: $_" }
+  if ($p.captureBefore) {
+    try { $i.OverwrittenMinimalCycleTime_ns = $originalCycle } catch { $restoreErrors += "Cycle time: $_" }
+    try {
+      if ([string]$i.OperatingState -ne 'Run') { [void]$i.Run(30000) }
+      if ([string]$i.OperatingState -ne 'Run' -or [string]$i.OperatingMode -ne 'Default') { throw 'Fixture did not return to normal Run' }
+    } catch { $restoreErrors += "Run: $_" }
+  }
+  if ($restoreErrors.Count) { throw "PLCSIM restoration failed: $($restoreErrors -join '; ')" }
 }
-ConvertTo-Json @{ cases = $out } -Depth 6 -Compress
+$result = @{ cases = $out }
+if ($p.captureBefore) {
+  $restored = [ordered]@{}
+  foreach ($m in $p.restore) { $restored[$m] = Get $m }
+  $result.capture = @{ instance = $p.instance; db = $p.db; controller = $i.ControllerName; cycleNs = $p.cycleNs }
+  $result.restoration = @{ expected = $original; observed = $restored; state = [string]$i.OperatingState; mode = [string]$i.OperatingMode;
+    expectedCycleNs = $originalCycle; cycleNs = $i.OverwrittenMinimalCycleTime_ns }
+}
+ConvertTo-Json $result -Depth 6 -Compress

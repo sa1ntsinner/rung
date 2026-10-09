@@ -63,6 +63,16 @@ export interface OnlineReadItem {
   error?: string; errorCode?: string;
 }
 export interface OnlineReadResult { at: number; scope: LiveScope; items: OnlineReadItem[]; connectionState?: "connected" | "stale" | "reconnecting" | "disconnected"; errorCode?: string }
+export interface OnlineNativeCapture {
+  scope: LiveScope; coherence: "subscription-sample";
+  capture: {
+    bodies: { compilationUnit: string; text: string }[];
+    scalars: { name: string; bitOffset: number; bits: number; type: string }[];
+    route: { instance: string; database: number; functionBlock: number; sac: number; compilationUnit: string; element: string };
+    codeSignature: string;
+    samples: { observedAt: number; sequence: number; state: { before: Record<string, number | boolean>; after: Record<string, number | boolean> } }[];
+  };
+}
 export interface OnlineStateResult { at: number; scope: LiveScope; identity: OnlineIdentity; state: { mode: string; cycleMs?: number | null; memory?: { name: string; totalBytes: number; usedBytes: number }[] | null; unavailable?: string[] | null } }
 export interface OnlineAlarm { id: string; sourceRelationId: number; sourceAlarmId: number; domain: number; messageType: number; rawStates: number;
   sequence: number; active: boolean; cpuTimestamp?: string | null; receivedAt: number; requestedLcid: number; textLcid?: number | null; text: string }
@@ -77,6 +87,7 @@ export interface LiveFrame {
 }
 /** Reserved contracts; only capability-advertised methods can be invoked. */
 export interface OnlineMethods {
+  "online.capture": { params: { sessionId: string; block: string; instance: string; scope: LiveScope }; result: OnlineNativeCapture };
   "online.watchTable": { params: { xml: string }; result: WatchTableDefinition };
   "online.connect": { params: OnlineConnectRequest; result: OnlineConnectResult };
   "online.browse": { params: { sessionId: string; filter?: string; offset?: number; limit?: number }; result: { scope: LiveScope; symbols: OnlineSymbol[]; total: number } };

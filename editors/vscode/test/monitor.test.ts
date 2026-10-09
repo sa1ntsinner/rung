@@ -1,8 +1,25 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { formatValue, lineText, readError, rowValues } from "../src/core/monitorText";
+import { formatValue, lineText, readError, rowValues, reconstructedLines } from "../src/core/monitorText";
 
 describe("monitoring text", () => {
+  it("labels native samples as reconstructed and keeps execution unverified", () => {
+    const rows = reconstructedLines({ kind: "reconstructed", exact: false, freshness: "native-sample", trace: [
+      { uri: "file:///C:/a", line: 3, kind: "statement" }, { uri: "file:///C:/a", line: 3, kind: "expression", value: 3 },
+    ], divergences: [] }, "file:///C:/a");
+    expect(rows[0]).toMatch(/native sample.*PLC execution unverified/i);
+    expect(rows[2]).toBe("reconstructed: executed · 3");
+  });
+  it("labels captured execution and divergence separately and excludes another source", () => {
+    const rows = reconstructedLines({ kind: "reconstructed", exact: false, freshness: "capture-only", trace: [
+      { uri: "file:///C:/a", line: 3, kind: "statement" }, { uri: "file:///C:/a", line: 3, kind: "expression", value: false },
+      { uri: "file:///C:/b", line: 3, kind: "expression", value: 99 },
+    ], divergences: [{ path: "COUNT", reconstructed: 5, observed: 6 }] }, "file:///C%3A/a");
+    expect(rows[2]).toBe("reconstructed: executed · FALSE");
+    expect(rows[0]).toMatch(/historical capture.*1 divergence/i);
+    expect(JSON.stringify(rows)).not.toContain("99");
+    expect(() => reconstructedLines({ kind: "unavailable", reason: "missing state" }, "file:///a")).toThrow(/missing state/);
+  });
   it("preserves typed REAL zero in inline and declaration values while integers stay integers", () => {
     const values = { speed: 0, count: 0, "samples[0]": 0 };
     const display = { speed: "0.0", "samples[0]": "0.0" };

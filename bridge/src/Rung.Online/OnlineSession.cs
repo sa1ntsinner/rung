@@ -27,6 +27,7 @@ public interface IOnlineDriver : IAsyncDisposable
     Task<IAsyncDisposable> SubscribeAlarmsAsync(int lcid, Action<OnlineAlarm[], bool> notify, Action<Exception> fail, CancellationToken token) => throw new RpcException(ErrorCodes.UnsupportedCapability, "Alarms unavailable.");
     Task InvalidateAsync(CancellationToken token) => Task.CompletedTask;
     Task DisconnectAsync(CancellationToken token) => Task.CompletedTask;
+    Task<NativeCaptureResult> CaptureAsync(string block, string instance, CancellationToken token) => throw new RpcException(ErrorCodes.UnsupportedCapability, "Native capture unavailable.");
     Task<IAsyncDisposable> SubscribeAsync(PlcTag[] tags, int cycleMs, Action<OnlineReadItem[]> notify, Action<Exception> fail, CancellationToken token) => throw new NotSupportedException();
 }
 

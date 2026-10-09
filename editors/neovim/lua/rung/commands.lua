@@ -4,7 +4,7 @@
 local cli = require("rung.cli")
 local M = {}
 
-local terminal = function(args) return function(rest) cli.terminal(vim.list_extend(args, rest)) end end
+local terminal = function(args) return function(rest) cli.terminal(vim.list_extend(vim.deepcopy(args), rest)) end end
 
 M.commands = {
   status = terminal({ "status" }),
@@ -27,6 +27,7 @@ M.commands = {
   xref = function() require("rung.xref").show() end,
   impact = function() require("rung.impact").show() end,
   live = function(rest) require("rung.live").command(rest) end,
+  ["program-status"] = terminal({ "program-status" }),
 }
 
 function M.setup(cfg)

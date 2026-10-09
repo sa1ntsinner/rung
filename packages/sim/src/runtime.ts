@@ -275,6 +275,13 @@ export class Simulator {
   private depth = 0;
   /** Called before each statement runs (the debugger); it may throw to stop the run. */
   onStatement?: (s: Stmt, f: Frame) => void;
+  /** Paired with onStatement, including control-flow exits and failures. */
+  onStatementEnd?: (s: Stmt, f: Frame) => void;
+  onMissingGlobal?: (name: string) => void;
+  /** Actual evaluated value after type rounding; observing must never evaluate it again. */
+  onExpression?: (e: Expr, f: Frame | null, value: Value) => void;
+  /** Actual destination and stored value, after conversion; never resolve the reference again. */
+  onWrite?: (obj: Struct | Value[], key: string | number, value: Value, frame: Frame | null) => void;
   /** The frames running, outermost first. */
   readonly frames: Frame[] = [];
 
@@ -644,6 +651,7 @@ export class Simulator {
   private global(name: string): { obj: Struct; key: string } {
     const key = name.toUpperCase();
     if (!(key in this.globals)) {
+      this.onMissingGlobal?.(name);
       const g = this.index.global(name);
       if (g?.kind === "GVAR") return { obj: this.global(g.gvar!.list).obj[g.gvar!.list.toUpperCase()] as Struct, key: g.name.toUpperCase() };
       if (g?.block?.kind === "GVL" || g?.block?.kind === "PRG") this.globals[key] = g.block.kind === "GVL" ? this.structOf(g.block.vars, g.block) : this.newInstance(g.block.name);
@@ -802,6 +810,7 @@ export class Simulator {
     // an assigned structure or array is copied, as on the PLC: #b := #a; then #a.x := 5; leaves #b.x alone
     (obj as Record<string | number, Value>)[key] =
       typeof value === "number" ? fitNumber(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
+    this.onWrite?.(obj, key, (obj as Record<string | number, Value>)[key]!, frame);
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -943,7 +952,9 @@ export class Simulator {
     const value = this.evalValue(e, frame);
     // Round each REAL intermediate before its parent expression consumes it, not just the final assignment.
     const d = typeof value === "number" ? this.staticDecl(e, frame) : undefined;
-    return typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : value;
+    const rounded = typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : value;
+    this.onExpression?.(e, frame, rounded);
+    return rounded;
   }
 
   private evalValue(e: Expr, frame: Frame | null): Value {
@@ -1322,8 +1333,10 @@ export class Simulator {
     type Declared = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members">;
     const get = (at: Place): Value => (at.obj as Record<string | number, Value>)[at.key];
     // as write() stores a value, into a place that a VARIANT names
-    const put = (at: Place, v: Value, d: Declared | undefined) =>
-      void ((at.obj as Record<string | number, Value>)[at.key] = typeof v === "number" ? fitNumber(v, d) : typeof v === "string" ? fitString(v, d) : copyValue(v));
+    const put = (at: Place, v: Value, d: Declared | undefined) => {
+      (at.obj as Record<string | number, Value>)[at.key] = typeof v === "number" ? fitNumber(v, d) : typeof v === "string" ? fitString(v, d) : copyValue(v);
+      this.onWrite?.(at.obj, at.key, get(at), frame);
+    };
     /** Where an operand is and its declared type; for a VARIANT parameter, the caller's variable it is bound to. */
     const bound = (param: string, pos: number): { at: Place; decl: Declared | undefined } => {
       const e = argOf(param, pos).value;
@@ -1434,7 +1447,7 @@ export class Simulator {
           if (from.items === to.items && from.from < to.from + count && to.from < from.from + count && count) throw new Unsupported("IN and OUT overlap in one array: an overlapping copy is not simulated");
           values = from.items.slice(from.from, from.from + count).map(copyValue);
         }
-        values.forEach((v, k) => (to.items[to.from + k] = v));
+        values.forEach((v, k) => { to.items[to.from + k] = v; this.onWrite?.(to.items, to.from + k, v, frame); });
         return undefined;
       }
       case "VAL_STRG": {
@@ -1505,7 +1518,7 @@ export class Simulator {
         if (di + count > dst.items.length) throw new Unsupported(`DEST_INDEX ${di} and COUNT ${count} run past DEST (${dst.items.length} element${dst.items.length === 1 ? "" : "s"})`);
         if (src.items === dst.items && si < di + count && di < si + count && count) throw new Unsupported("SRC and DEST overlap in one array: an overlapping copy is not simulated");
         const values = src.items.slice(si, si + count).map(copyValue);
-        if (dst.array) values.forEach((v, k) => (dst.items[di + k] = v));
+        if (dst.array) values.forEach((v, k) => { dst.items[di + k] = v; this.onWrite?.(dst.items, di + k, v, frame); });
         else if (count) put(target.at, values[0], target.decl);
         return 0;
       }
@@ -1722,6 +1735,7 @@ export class Simulator {
       const value = this.eval(a.value, caller);
       const d = params.find((p) => p.name.toUpperCase() === key);
       mem[key] = inOut ? value : typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : copyValue(value);
+      this.onWrite?.(mem, key, mem[key]!, caller);
     });
   }
 
@@ -2011,8 +2025,8 @@ export class Simulator {
 
   private stmt(s: Stmt, f: Frame) {
     this.onStatement?.(s, f);
-    this.tick(f, s.at);
     try {
+      this.tick(f, s.at);
       switch (s.k) {
         case "empty":
           return;
@@ -2101,6 +2115,8 @@ export class Simulator {
     } catch (e) {
       if (e instanceof SimError && e.offset === undefined) throw new SimError(e.message, e.block ?? f.block.name, s.at);
       throw e;
+    } finally {
+      this.onStatementEnd?.(s, f);
     }
   }
 

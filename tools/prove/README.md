@@ -31,3 +31,14 @@ A block must finish its cycle with the start values (a loop that depends on an i
 
 Exit 0 when every compared value is the same, 2 when a case differs. Steps with `within`, `always` or `never` are not
 compared (their length depends on the code). `plcsim-run.ps1` needs the PLCSIM Advanced 7.0 API at its default path.
+
+## Captured cycle files for the editor
+
+For the guarded local `RungProve` fixture, use a `captureBefore` plan with `plcsim-run.ps1` (all read and written members must be restored, exactly one cycle per step). Save its JSON only after successful restoration. Convert that raw result using:
+
+```powershell
+node tools/prove/reconstruct.mjs <workspace> plc/PLC_1/blocks/FB_ProveMath.scl ProveMath_DB <raw.json> <new-capture-directory>
+rung program-status <workspace>/plc/PLC_1/blocks/FB_ProveMath.scl --capture <new-capture-directory>/cycle-1.json --instance ProveMath_DB --why COUNTED --json
+```
+
+The converter validates replay and emits one complete capture per controlled cycle, including mirrored source revision, instance scope and separate pre/post memory. Existing capture files are never overwritten. Open a generated file through **rung: Reconstruct SCL from Cycle Capture** for inline values and Why?. The converter is offline and trusts the fixture exports; it does not generalize the stepping operation to an ordinary PLC. Hidden standard-FB/global state and clock-dependent capture require additional producer support; virtual time zero covers the clock-independent fixture cases only.

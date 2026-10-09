@@ -14,9 +14,11 @@ import { onlineHost, trustLiveCertificate } from "./liveTrust.js";
 import { brokerReader, liveSelection, type BackendOptions } from "./liveServer.js";
 import type { MutationAction, MutationEvidence } from "@rung/live";
 import type { OnlinePreparedWrite } from "@rung/bridge-client";
-import type { OnlineAlarmResult } from "@rung/bridge-client";
+import type { OnlineAlarmResult, OnlineNativeCapture, LiveScope } from "@rung/bridge-client";
 import { createInterface } from "node:readline/promises";
 import { frontendConfirmation } from "./liveMutation.js";
+import { reconstructionRevision } from "@rung/sim";
+import { reconstructNativeSample } from "./liveReconstruction.js";
 
 export async function webApiFor(dir: string, env: Io["env"], opts: BackendOptions = {}): Promise<WebApiClient> {
   const ws = await findWorkspace(dir);
@@ -212,7 +214,7 @@ async function watchPlan(dir: string, io: Io, opts: LiveOptions): Promise<Monito
   const file = resolve(io.cwd, opts.file);
   const uri = uriOf(file);
   if (!index.docs.get(uri)) index.set(uri, await readFile(file, "utf8"), 0);
-  return monitorPlan(index, uri, opts.instance);
+  return { ...monitorPlan(index, uri, opts.instance), sourceRevision: reconstructionRevision(index, uri) };
 }
 
 /** Reads the plan's variables every interval until stopped. */
@@ -239,6 +241,7 @@ async function watchCodesys(ws: string, io: Io, opts: LiveOptions): Promise<numb
 }
 
 export interface LiveReader {
+  capture?(block: string, instance: string, scope: LiveScope): Promise<OnlineNativeCapture>;
   alarms?(lcid: number): Promise<OnlineAlarmResult>;
   subscribeAlarms?(lcid: number, callback: (frame: OnlineAlarmResult) => void): Promise<{ close(): Promise<void> }>;
   prepare?(action: MutationAction): Promise<OnlinePreparedWrite>;
@@ -298,14 +301,72 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
   const stop = io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r()));
   void stop.then(() => (stopped = true));
   const interval = Math.max(100, opts.intervalMs ?? 500);
+  const programStatus = (state?: LiveFrame["state"]) => plan.kind === "FB" ? {
+    kind: "unavailable", exact: false, coherence: "subscription-sample",
+    reason: state && state !== "live" ? `PLC ${state}; cycle reconstruction is unavailable`
+      : "Subscription observations lack complete pre-cycle state; use program-status with a cycle capture",
+  } : undefined;
   if (reader?.subscribe) {
-    const lease = await reader.subscribe(plan.vars, interval, (frame) => {
+    let latest: LiveFrame | undefined, generation = 0, ready = false, capturing = false, attemptedAt = 0;
+    let sourceWatcher: ReturnType<typeof watch> | undefined, sourceChanged = false;
+    let nativeStatus: ReturnType<typeof reconstructNativeSample> | ReturnType<typeof programStatus>;
+    let context: Promise<{ index: WorkspaceIndex; root: string; uri: string; revision: string }> | undefined;
+    const publish = (frame: LiveFrame) => {
       if (stopped) return;
       frame = { ...frame, errors: { ...plan.errors, ...frame.errors } };
-      if (opts.json) io.stdout(JSON.stringify(frame) + "\n");
+      if (opts.json) io.stdout(JSON.stringify({ ...frame, programStatus: frame.state === "live" ? nativeStatus ?? programStatus(frame.state) : programStatus(frame.state) }) + "\n");
       else io.stdout(labels.map((l) => `  ${labelText(l).padEnd(32)} ${l in frame.errors ? "ERROR " + frame.errors[l] : frame.display?.[l] ?? JSON.stringify(frame.values[l])}`).join("\n") + "\n\n");
+    };
+    const invalidateSource = () => {
+      if (stopped || sourceChanged) return;
+      sourceChanged = true; generation++;
+      nativeStatus = { ...programStatus()!, reason: "Workspace source changed; restart monitoring" };
+      if (latest) publish(latest);
+    };
+    const capture = async () => {
+      if (!ready || stopped || sourceChanged || capturing || latest?.state !== "live" || !reader.capture || plan.kind !== "FB" || !plan.instance || !opts.file || Date.now() - attemptedAt < 5000) return;
+      capturing = true; attemptedAt = Date.now();
+      const owner = generation, expected = latest.scope;
+      try {
+        context ??= (async () => {
+          const root = await findWorkspace(io.cwd), uri = uriOf(resolve(io.cwd, opts.file!)), index = new WorkspaceIndex();
+          await index.load(root);
+          if (!stopped) {
+            sourceWatcher = watch(root, { recursive: true }, (_event, name) => {
+              const file = name?.toString().replace(/\\/g, "/");
+              if (!file) { invalidateSource(); return; }
+              if (/^(?:\.rung|\.git|node_modules)\//i.test(file)) return;
+              const device = /^plc\/([^/]+)\//i.exec(file)?.[1];
+              if (device && device !== expected.device) return;
+              if (file === "rung.toml" || /\.(?:scl|db|udt|awl|st|s7dcl|xml|yaml)$/i.test(file)) invalidateSource();
+            });
+            sourceWatcher.on("error", invalidateSource);
+          }
+          return { index, root, uri, revision: plan.sourceRevision ?? reconstructionRevision(index, uri) };
+        })();
+        const source = await context;
+        if (stopped || owner !== generation) return;
+        if (reconstructionRevision(source.index, source.uri) !== source.revision) throw new Error("Workspace source changed; restart monitoring");
+        const instance = plan.instance.replace(/^"|"$/g, "");
+        const record = await reader.capture(plan.block, instance, expected);
+        const current = new WorkspaceIndex(); await current.load(source.root);
+        if (stopped || owner !== generation) return;
+        if (reconstructionRevision(current, source.uri) !== source.revision) throw new Error("Workspace source changed; restart monitoring");
+        nativeStatus = reconstructNativeSample(current, source.uri, record, expected, instance);
+      } catch (error) {
+        if (stopped || owner !== generation) return;
+        nativeStatus = { ...programStatus()!, reason: liveError(error) };
+      } finally { capturing = false; }
+      if (!stopped && owner === generation && latest) publish(latest);
+    };
+    const lease = await reader.subscribe(plan.vars, interval, (frame) => {
+      if (stopped) return;
+      if (latest && (frame.state !== latest.state || frame.scope.device !== latest.scope.device || frame.scope.address !== latest.scope.address
+        || frame.scope.transport !== latest.scope.transport || frame.scope.epoch !== latest.scope.epoch)) { generation++; nativeStatus = undefined; }
+      latest = frame; publish(frame); void capture();
     });
-    try { await stop; } finally { await lease.close(); }
+    ready = true; void capture();
+    try { await stop; } finally { generation++; sourceWatcher?.close(); await lease.close(); }
     return 0;
   }
   while (!stopped) {
@@ -318,7 +379,7 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
       errors = Object.fromEntries(labels.map((l) => [l, liveError(e)]));
     }
     errors = { ...plan.errors, ...errors };
-    if (opts.json) io.stdout(JSON.stringify({ at: Date.now(), values, ...(Object.keys(errors).length ? { errors } : {}) }) + "\n");
+    if (opts.json) io.stdout(JSON.stringify({ at: Date.now(), values, ...(Object.keys(errors).length ? { errors } : {}), programStatus: programStatus() }) + "\n");
     else io.stdout(labels.map((l) => `  ${labelText(l).padEnd(32)} ${l in errors ? `ERROR ${errors[l]}` : JSON.stringify(values[l])}`).join("\n") + "\n\n");
     await Promise.race([stop, new Promise((r) => setTimeout(r, interval))]);
   }

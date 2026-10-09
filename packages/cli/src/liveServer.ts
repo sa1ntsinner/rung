@@ -4,7 +4,7 @@ import { relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { loadConfig, WorkspaceError } from "@rung/core";
-import { BridgeError, type OnlineAlarmResult } from "@rung/bridge-client";
+import { BridgeError, type OnlineAlarmResult, type OnlineNativeCapture, type LiveScope } from "@rung/bridge-client";
 import { OwnerClient, OwnerServer } from "@rung/sync";
 import { LiveHub, createS7Backend, createWebApiBackend, selectLiveTarget, WebApiClient, plainHttpRefusal, type LiveBackend, type LiveFrame, type OnlineReadResult } from "@rung/live";
 import { onlineHost } from "./liveTrust.js";
@@ -51,7 +51,7 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
     if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
     return createWebApiBackend(new WebApiClient({ ...w, password: auth.password }), { device: selected.device, address: selected.target.address, transport: "webapi", epoch: 1 });
   }));
-  const leases = new Map<string, { clientId: string; close(): Promise<void> }>();
+  const leases = new Map<string, { clientId: string; key?: string; close(): Promise<void> }>();
   const opening = new Set<string>();
   const consumers = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
@@ -79,6 +79,16 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
     commit: async (p, c) => mutations.commit(c.clientId, String(p.operationId), String(p.preview), p.confirmed === true),
     cancel: async (p, c) => mutations.cancel(c.clientId, String(p.operationId)),
     read: async (p, c) => { touch(c.clientId); return hub.read(await bind(p), p.names as string[]); },
+    capture: async (p, c) => {
+      touch(c.clientId); const key = await bind(p);
+      if (![...leases.values()].some(lease => lease.clientId === c.clientId && lease.key === key))
+        throw new BridgeError("BRIDGE_EXITED", "Native capture requires this client's active value reader");
+      if (typeof p.block !== "string" || typeof p.instance !== "string") throw new BridgeError("BAD_REQUEST", "Native capture requires block and instance names");
+      const result = await hub.capture(key, p.block, p.instance, p.scope as LiveScope);
+      if (closed || !consumers.has(c.clientId) || ![...leases.values()].some(lease => lease.clientId === c.clientId && lease.key === key))
+        throw new BridgeError("BRIDGE_EXITED", "Native reader closed during capture");
+      return result;
+    },
     state: async (p, c) => { touch(c.clientId); return hub.state(await bind(p)); },
     alarms: async (p, c) => { touch(c.clientId); return hub.alarms(await bind(p), Number(p.lcid)); },
     alarmLease: async (p, c) => {
@@ -99,9 +109,10 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
       if (leases.size + opening.size >= 256) throw new BridgeError("RESOURCE_LIMIT", "Too many broker subscriptions");
       opening.add(id);
       try {
-        const lease = await hub.subscribe(await bind(p), p.labels as Record<string, string>, Number(p.cycleMs), (frame) => server.emitTo(c.clientId, "values", { id, subscriptionId: id, frame }));
+        const key = await bind(p);
+        const lease = await hub.subscribe(key, p.labels as Record<string, string>, Number(p.cycleMs), (frame) => server.emitTo(c.clientId, "values", { id, subscriptionId: id, frame }));
         if (!consumers.has(c.clientId) || closed) await lease.close();
-        else leases.set(id, { clientId: c.clientId, close: lease.close });
+        else leases.set(id, { clientId: c.clientId, key, close: lease.close });
         return { id };
       } finally { opening.delete(id); }
     },
@@ -163,6 +174,12 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
   });
   const readFrame = (names: string[]) => client.request<OnlineReadResult>("read", { key, names, credentials });
   return {
+    capture: async (block, instance, scope) => {
+      if (closed) throw new BridgeError("BRIDGE_EXITED", "Live reader is closed");
+      const result = await client.request<OnlineNativeCapture>("capture", { key, block, instance, scope, credentials });
+      if (closed) throw new BridgeError("BRIDGE_EXITED", "Live reader closed during capture");
+      return result;
+    },
     alarms: lcid => client.request("alarms", { key, lcid, credentials }),
     subscribeAlarms: async (lcid, callback) => {
       if (closed) throw new BridgeError("BRIDGE_EXITED", "Live reader is closed");

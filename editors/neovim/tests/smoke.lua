@@ -32,6 +32,14 @@ require("rung").setup({ cmd = cmd })
 -- :Rung is there, with completion
 check(":Rung exists", vim.fn.exists(":Rung") == 2)
 check("completion", vim.tbl_contains(vim.fn.getcompletion("Rung te", "cmdline"), "test"))
+check("program-status completion", vim.tbl_contains(vim.fn.getcompletion("Rung program", "cmdline"), "program-status"))
+local cli_module = require("rung.cli")
+local original_terminal, invocations = cli_module.terminal, {}
+cli_module.terminal = function(args) table.insert(invocations, vim.deepcopy(args)) end
+require("rung.commands").commands["program-status"]({ "first.scl" })
+require("rung.commands").commands["program-status"]({ "second.scl" })
+cli_module.terminal = original_terminal
+check("repeated program-status uses fresh arguments", #invocations[2] == 2 and invocations[2][2] == "second.scl", invocations)
 
 -- cases and the case under the cursor
 vim.cmd("edit tests/conveyor.test.yaml")

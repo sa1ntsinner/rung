@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as live from "../src/index.js";
-import type { OnlineReadResult } from "@rung/bridge-client";
+import type { OnlineReadResult, OnlineNativeCapture } from "@rung/bridge-client";
 import type { WebApiClient } from "../src/webapi.js";
 import { createServer } from "node:https";
 import { readFileSync } from "node:fs";
@@ -9,6 +9,24 @@ import { readFileSync } from "node:fs";
 afterEach(() => vi.useRealTimers());
 
 describe("subscription backend", () => {
+  it("routes capture through the existing session and rejects completion after close", async () => {
+    const scope = { device: "P", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 1 };
+    let finish!: (value: OnlineNativeCapture) => void;
+    const calls: { method: string; params: Record<string, unknown> }[] = [];
+    const backend = await live.createS7Backend({ onEvent() {}, async request(method, params) {
+      calls.push({ method, params });
+      if (method === "online.connect") return { sessionId: "s", scope };
+      if (method === "online.capture") return new Promise<OnlineNativeCapture>(resolve => { finish = resolve; });
+      return {};
+    } }, { device: "P", address: scope.address, certificateSha256: "A".repeat(64) });
+    const pending = backend.capture!("F", "DB", scope);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect(calls.at(-1)).toEqual({ method: "online.capture", params: { sessionId: "s", block: "F", instance: "DB", scope } });
+    const closing = backend.close();
+    finish({ scope, coherence: "subscription-sample", capture: { bodies: [], scalars: [], route: { instance: "DB", database: 4, functionBlock: 4, sac: 118, compilationUnit: "1", element: "258" }, codeSignature: "signature", samples: [] } });
+    await expect(pending).rejects.toMatchObject({ code: "BRIDGE_EXITED" });
+    await closing;
+  });
   it("retains startup alarms and marks them disconnected if the host exits", async () => {
     let emit!: (event: { event: string; params: unknown }) => void;
     const scope = { device: "P", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 1 };

@@ -4,7 +4,7 @@ import { WorkspaceError, type RungConfig, type LivePlcConfig } from "@rung/core"
 import { BridgeError, type OnlineConnectRequest, type OnlineConnectResult, type OnlineReadResult, type OnlineStateResult, type OnlineMethods } from "@rung/bridge-client";
 
 export interface OnlineRpc { request(method: string, params: Record<string, unknown>): Promise<unknown> }
-const READ_METHODS = new Set(["online.connect", "online.browse", "online.read", "online.state", "online.disconnect", "online.certificate", "online.subscribe", "online.unsubscribe", "online.watchTable", "online.alarms"]);
+const READ_METHODS = new Set(["online.connect", "online.browse", "online.read", "online.state", "online.disconnect", "online.certificate", "online.subscribe", "online.unsubscribe", "online.watchTable", "online.alarms", "online.capture"]);
 
 /** Read-only adapter over the existing bridge envelope. The caller owns the host process. */
 export class S7CommPlusClient {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import type { Frame } from "./recording";
+import type { WhyNode } from "../views/whyView";
 
 export interface LiveFrame extends Frame {
   errors?: Record<string, string>;
@@ -7,6 +8,11 @@ export interface LiveFrame extends Frame {
   observedAt?: Record<string, number>;
   state?: "live" | "stale" | "disconnected";
   scope?: { device: string; address: string; transport: string; epoch: number };
+  programStatus?: { kind: "unavailable"; exact: false; coherence: "subscription-sample"; reason: string }
+    | { kind: "reconstructed"; exact: false; coherence: "subscription-sample"; freshness: "native-sample"; reason?: string;
+      scope: { plc: string; instance: string; epoch: number }; observedAt: number; sequence: number;
+      trace: { uri: string; line: number; kind: string; value?: unknown }[];
+      divergences: unknown[]; why?: Record<string, WhyNode> };
 }
 export interface Seen { value?: unknown; display?: string; error?: string; at: number; history: unknown[]; state?: LiveFrame["state"] }
 export function takeLiveFrame(seen: Map<string, Seen>, names: readonly string[], frame: LiveFrame): Frame | undefined {

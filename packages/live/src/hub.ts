@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { randomUUID } from "node:crypto";
-import { BridgeError, type LiveFrame, type OnlineReadResult, type OnlineStateResult, type OnlineAlarmResult } from "@rung/bridge-client";
+import { BridgeError, type LiveFrame, type OnlineReadResult, type OnlineStateResult, type OnlineAlarmResult, type OnlineNativeCapture, type LiveScope } from "@rung/bridge-client";
 
 export interface LiveLease { id: string; close(): Promise<void> }
 export interface LiveBackend {
+  capture?(block: string, instance: string, scope: LiveScope): Promise<OnlineNativeCapture>;
   read(names: string[]): Promise<OnlineReadResult>;
   subscribe(names: string[], cycleMs: number, onFrame: (frame: OnlineReadResult) => void): Promise<{ close(): Promise<void> }>;
   state?(): Promise<OnlineStateResult>;
@@ -60,6 +61,26 @@ export class LiveHub {
     const e = await this.entry(key);
     e.busy++;
     try { return await e.backend.read(names); } finally { e.busy--; this.idle(key, e); }
+  }
+  async capture(key: string, block: string, instance: string, scope: LiveScope): Promise<OnlineNativeCapture> {
+    const e = await this.entry(key), generation = e.generation;
+    e.busy++;
+    try {
+      const current = () => {
+        if (this.closed || !e.consumers.size || generation !== e.generation) throw new BridgeError("BRIDGE_EXITED", "Native reader generation closed");
+        const latest = e.latest;
+        if (!scope || !latest || latest.connectionState && latest.connectionState !== "connected"
+          || latest.scope.epoch !== scope.epoch || latest.scope.device !== scope.device || latest.scope.address !== scope.address || latest.scope.transport !== scope.transport)
+          throw new BridgeError("ONLINE_FAILED", "Native capture scope changed or PLC is stale");
+      };
+      current();
+      if (!e.backend.capture) throw new BridgeError("UNSUPPORTED_CAPABILITY", "Native capture is unavailable for this transport");
+      const result = await e.backend.capture(block, instance, scope);
+      current();
+      if (result.scope.epoch !== scope.epoch || result.scope.device !== scope.device || result.scope.address !== scope.address || result.scope.transport !== scope.transport)
+        throw new BridgeError("ONLINE_FAILED", "Native capture result scope changed");
+      return result;
+    } finally { e.busy--; this.idle(key, e); }
   }
   async state(key: string): Promise<OnlineStateResult> {
     const e = await this.entry(key);

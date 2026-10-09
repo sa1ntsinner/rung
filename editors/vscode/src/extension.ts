@@ -133,11 +133,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const decorations = new ObjectDecorations(ws);
   const environment = new EnvironmentView(cli);
   const monitor = new Monitor(ws, cli, out, access);
+  why.captured = () => monitor.captured;
+  context.subscriptions.push(monitor.onDidChange(() => why.invalidateCapture()));
   context.subscriptions.push(...registerLiveCpuCommands(ws, cli, access));
   context.subscriptions.push(
     monitor,
     vscode.commands.registerCommand("rung.monitor.toggle", (uri?: vscode.Uri) => monitor.toggle(uri instanceof vscode.Uri ? uri : undefined)),
     vscode.commands.registerCommand("rung.monitor.stop", () => monitor.stop()),
+    vscode.commands.registerCommand("rung.monitor.reconstruct", (uri?: vscode.Uri) => monitor.reconstruct(uri instanceof vscode.Uri ? uri : undefined)),
   );
   const lens = new BlockCodeLens(ws);
   context.subscriptions.push(project, plc, environment, decorations, statusBar, activityView, changes, lens);

@@ -4,6 +4,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig, saveConfig } from "@rung/core";
+import type { OnlineNativeCapture } from "@rung/bridge-client";
 import { startLiveServer, brokerReader, liveSelection } from "../src/liveServer.js";
 import { webApiFor } from "../src/live.js";
 import { main } from "../src/main.js";
@@ -169,4 +170,25 @@ it("uses an explicit Web API fallback for the chosen PLC and refuses a conflicti
   await expect(liveSelection(root, { device: "A", file: "plc/B/blocks/X.scl" })).rejects.toThrow(/conflicts/);
   await expect(webApiFor(root, { RUNG_WEBAPI_PASSWORD: "secret" }, { device: "A", transport: "webapi" })).resolves.toBeDefined();
   await expect(webApiFor(root, { RUNG_WEBAPI_PASSWORD: "secret" }, { device: "A" })).rejects.toThrow(/transport webapi/);
+});
+
+it("native captures belong to the client's existing value-reader lease", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rung-native-broker-"));
+  const config = defaultConfig("fixture.ap20", "V20", "", ["A"]);
+  config.live = { plc: { A: { transport: "s7commplus", address: "192.168.250.1", allowWrites: false, certificateSha256: "a".repeat(64) } } };
+  await saveConfig(root, config);
+  const scope = { device: "A", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 1 };
+  const native: OnlineNativeCapture = { scope, coherence: "subscription-sample", capture: { bodies: [], scalars: [], route: { instance: "DB", database: 4, functionBlock: 4, sac: 118, compilationUnit: "1", element: "258" }, codeSignature: "signature", samples: [] } };
+  const capture = vi.fn(async () => native);
+  const server = await startLiveServer(root, {}, { backendFactory: async () => ({ capture, read: async () => ({ at: 10, scope, items: [] }),
+    subscribe: async (_names, _cycle, push) => { push({ at: 10, scope, items: [{ name: "X", value: 1 }] }); return { close: async () => {} }; }, close: async () => {} }) });
+  closing.push(() => server.close());
+  const a = await brokerReader(root, {}, { device: "A" }), b = await brokerReader(root, {}, { device: "A" });
+  closing.push(() => a.close(), () => b.close());
+  const lease = await a.subscribe!({ x: "X" }, 250, () => {});
+  expect(await a.capture!("F", "DB", scope)).toEqual(native);
+  await expect(b.capture!("F", "DB", scope)).rejects.toThrow(/reader/i);
+  await lease.close();
+  await expect(a.capture!("F", "DB", scope)).rejects.toThrow(/reader/i);
+  expect(capture).toHaveBeenCalledOnce();
 });

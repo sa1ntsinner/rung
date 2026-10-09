@@ -12,6 +12,7 @@ const EXAMPLES: Record<string, string> = {
   simulate: "simulate --block FB_Conveyor", "codesys-bridge": "codesys-bridge --project Line.project", assignments: "assignments --json",
   who: `who '"Line_DB".PartsTotal'`, upload: "upload --ip 192.168.0.1",
   bridge: "bridge --tia V20",
+  "program-status": "program-status plc/PLC_1/blocks/Counter.scl --capture cycle.json --instance Counter_DB --json",
 };
 const VALUES: Record<string, string> = {
   project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", coverage: "lcov file", filter: "text", case: "file#n", file: "file", plc: "name",
@@ -19,8 +20,12 @@ const VALUES: Record<string, string> = {
   address: "ip", port: "number", cycle: "ms", block: "name", use: "PG/PC interface", mode: "mode", number: "n", target: "interface",
   instance: "DB", interval: "ms", ip: "address", "from-plc": "ip", host: "user@windows-pc",
   args: "encoded arguments",
+  capture: "cycle.json",
+  why: "member",
 };
 const DETAIL: Record<string, string> = {
+  capture: "replay complete pre-cycle state and compare observed results from a historical JSON capture; stays offline",
+  why: "explain the last captured write using recorded operands and controls; no live connection",
   lcid: "alarm text language (Windows LCID; default 1033), with explicit fallback provenance",
   stream: "keep observing complete alarm snapshots until Ctrl+C",
   "confirm-stdin": "editor flow: show a prepared operation and receive its exact human confirmation on private stdin",

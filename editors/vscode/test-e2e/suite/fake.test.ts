@@ -55,6 +55,38 @@ describe("rung extension on a fake-bridge workspace", function () {
   });
 
   describe("activation", () => {
+    it("historical reconstruction shows captured SCL status and clears it on an edit", async () => {
+      const block = file("plc/PLC_1/blocks/ReplayCounter.scl"), db = file("plc/PLC_1/blocks/ReplayCounter_DB.db"), capture = file("replay-cycle.json");
+      writeFileSync(block.fsPath, 'FUNCTION_BLOCK "ReplayCounter"\nVAR\nCount : Int;\nEND_VAR\nBEGIN\n#Count := #Count + 1;\nEND_FUNCTION_BLOCK');
+      writeFileSync(db.fsPath, 'DATA_BLOCK "ReplayCounter_DB"\n"ReplayCounter"\nBEGIN\nEND_DATA_BLOCK');
+      const repo = process.env.RUNG_E2E_REPO!;
+      const script = `import {WorkspaceIndex} from ${JSON.stringify(vscode.Uri.file(join(repo, "packages/lsp/dist/index.js")).toString())};
+        import {reconstructionRevision} from ${JSON.stringify(vscode.Uri.file(join(repo, "packages/sim/dist/index.js")).toString())};
+        import {writeFileSync} from 'node:fs'; const index=new WorkspaceIndex(); await index.load(${JSON.stringify(root())});
+        writeFileSync(${JSON.stringify(capture.fsPath)}, JSON.stringify({scope:{plc:'PLC_1',instance:'"ReplayCounter_DB"',epoch:1},
+          sourceRevision:reconstructionRevision(index,${JSON.stringify(block.toString())}),time:0,clockStart:0,coherence:'controlled-cycle',
+          before:{mem:{COUNT:4},globals:{}},observed:{COUNT:5}}));`;
+      const prepared = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8" });
+      assert.equal(prepared.status, 0, prepared.stderr);
+      try {
+        await api.ws.reload(); await sleep(500);
+        const ed = await vscode.window.showTextDocument(block);
+        await api.monitor.reconstruct(block, capture, "ReplayCounter_DB");
+        assert.equal(api.monitor.monitoring?.toString(), block.toString(), JSON.stringify({ cli: cli.find("program-status"), dialogs: d.calls }));
+        assert.ok(cli.find("program-status"));
+        const answer = await api.why.ask("#Count");
+        assert.equal(answer?.value, "5");
+        assert.equal(answer?.children[0]?.at?.line, 6);
+        assert.match(JSON.stringify(answer), /Historical reconstruction; PLC execution unverified/);
+        await ed.edit(e => e.insert(new vscode.Position(0, 0), "// edited\n"));
+        await waitFor("capture cleared after source edit", () => api.monitor.monitoring === undefined);
+        assert.equal(api.why.shown, undefined);
+        await vscode.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+      } finally {
+        await api.monitor.stop();
+        for (const path of [block.fsPath, db.fsPath, capture.fsPath]) rmSync(path, { force: true });
+      }
+    });
     it("finds the workspace and its objects", () => {
       assert.equal(api.ws.root?.toLowerCase(), root().toLowerCase());
       assert.equal(api.ws.hasConfig, true);
@@ -381,6 +413,25 @@ describe("rung extension on a fake-bridge workspace", function () {
         assert.deepEqual(plan.lines[line], ["#running", "#start"]);
         assert.equal(api.monitor.values["#start"], true); // Main calls "Fx_Pump_DB"(start := TRUE)
         assert.equal(api.monitor.values["#running"], true);
+        // Exercise the JSON frame boundary and existing Why view in the real extension host.
+        // Native recorded state stays separate from the ordinary observed declaration value.
+        const native = api.monitor as unknown as { session: { child: { stdout: { pause(): void } } }; take(session: unknown, line: string): void };
+        native.session.child.stdout.pause(); // the virtual Web API has no native producer; inject a stable native stream below
+        const answer = { kind: "value", text: "RUNNING", value: "FALSE", children: [{ kind: "note", text: "PLC execution unverified", children: [] }] };
+        const nativeFrame = JSON.stringify({ values: api.monitor.values, state: "live",
+          scope: { device: "PLC_1", address: "127.0.0.1", transport: "webapi", epoch: 1 },
+          programStatus: { kind: "reconstructed", exact: false, coherence: "subscription-sample", freshness: "native-sample",
+            scope: { plc: "PLC_1", instance: plan.instance, epoch: 1 },
+            observedAt: 20, sequence: 1,
+            trace: [{ kind: "statement", uri: ed.document.uri.toString(), line: Number(line) + 1 }], divergences: [], why: { RUNNING: answer } } });
+        native.take(native.session, nativeFrame);
+        assert.equal((await api.why.ask("#running"))?.value, "FALSE");
+        assert.equal(api.monitor.values["#running"], true);
+        native.take(native.session, nativeFrame);
+        assert.equal(api.why.shown?.value, "FALSE", "unchanged native sample survives ordinary value updates");
+        native.take(native.session, JSON.stringify({ values: api.monitor.values, state: "stale" }));
+        assert.equal(api.monitor.captured, undefined);
+        assert.equal(api.why.shown, undefined);
         await vscode.commands.executeCommand("rung.monitor.stop");
         assert.equal(api.monitor.monitoring, undefined);
       } finally {
@@ -530,6 +581,7 @@ describe("rung extension on a fake-bridge workspace", function () {
       await waitFor("rung watch to serve", () => api.ws.watching, 60_000, 250);
       vscode.window.terminals.find((t) => t.name === "rung watch")!.sendText("\u0003", false);
       await waitFor("the stopped notice", () => d.texts.find((t) => t.startsWith("warning: rung watch stopped.")), 30_000);
+      await waitFor("watch owner removal and stopped state", () => !api.ws.watching && api.watch.status === "stopped", 30_000);
       assert.equal(api.watch.status, "stopped");
       assert.equal(api.statusBar.text.includes("watch off"), true);
       await closeWatchTerminals();

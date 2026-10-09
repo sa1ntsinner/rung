@@ -7,6 +7,7 @@ import { WorkspaceError } from "@rung/core";
 import type { WatchTableDefinition } from "@rung/live";
 
 export interface MonitorPlan {
+  sourceRevision?: string;
   table?: WatchTableDefinition;
   errors?: Record<string, string>;
   block: string;

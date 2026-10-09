@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { BridgeError, type OnlineConnectRequest, type OnlineReadResult, type OnlineAlarmResult, type LiveScope } from "@rung/bridge-client";
+import { BridgeError, type OnlineConnectRequest, type OnlineReadResult, type OnlineAlarmResult, type LiveScope, type OnlineNativeCapture } from "@rung/bridge-client";
 import { S7CommPlusClient, type OnlineRpc } from "./s7commplus.js";
 import { WebApiClient } from "./webapi.js";
 import type { LiveBackend } from "./hub.js";
@@ -49,6 +49,16 @@ export async function createS7Backend(rpc: OnlineEventRpc, target: OnlineConnect
     else if (openingCount && early.size < 512) early.set(frame.subscriptionId, frame);
   });
   return {
+    async capture(block, instance, scope) {
+      if (closed) throw new BridgeError("BRIDGE_EXITED", "Online backend is closed");
+      const pending = client.call<OnlineNativeCapture>("online.capture", { sessionId: info.sessionId, block, instance, scope });
+      opening.add(pending);
+      try {
+        const result = await pending;
+        if (closed) throw new BridgeError("BRIDGE_EXITED", "Online backend closed during capture");
+        return result;
+      } finally { opening.delete(pending); }
+    },
     read: names => client.readFrame(names),
     state: () => client.state(),
     alarms: lcid => client.call("online.alarms", { sessionId: info.sessionId, lcid }),

@@ -17,10 +17,10 @@ export interface WhyOptions {
   depth?: number;
 }
 
-function lines(n: WhyNode, pad = ""): string[] {
+export function whyLines(n: WhyNode, pad = ""): string[] {
   const head =
     n.kind === "value" ? `${n.text} = ${n.value ?? "?"}` : n.kind === "write" ? `← ${n.text}${n.at ? `   (line ${n.at.line})` : ""}` : n.kind === "condition" ? `because ${n.text}${n.value ? `  → ${n.value}` : ""}` : `· ${n.text}`;
-  return [pad + head, ...n.children.flatMap((c) => lines(c, pad + "  "))];
+  return [pad + head, ...n.children.flatMap((c) => whyLines(c, pad + "  "))];
 }
 
 export async function cmdWhy(target: string | undefined, name: string | undefined, opts: WhyOptions, io: Io): Promise<number> {
@@ -67,6 +67,6 @@ export async function cmdWhy(target: string | undefined, name: string | undefine
     io.stdout(JSON.stringify({ source, tree }, null, 2) + "\n");
     return 0;
   }
-  io.stdout(`${lines(tree).join("\n")}\n(${source})\n`);
+  io.stdout(`${whyLines(tree).join("\n")}\n(${source})\n`);
   return 0;
 }

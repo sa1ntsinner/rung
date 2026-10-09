@@ -322,6 +322,8 @@ public class SubscriptionsTests
     }
     internal sealed class Driver : IOnlineDriver
     {
+        public Func<CancellationToken, Task<NativeCaptureResult>>? Capture;
+        public Task<NativeCaptureResult> CaptureAsync(string block, string instance, CancellationToken token) => Capture!(token);
         public readonly Lease Lease = new();
         public Action<OnlineReadItem[]>? Notify;
         public Action<Exception>? Fail;

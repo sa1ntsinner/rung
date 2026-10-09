@@ -238,6 +238,12 @@
         "icon": "$(eye)"
       },
       {
+        "command": "rung.monitor.reconstruct",
+        "title": "Reconstruct SCL from Cycle Capture",
+        "category": "rung",
+        "icon": "$(history)"
+      },
+      {
         "command": "rung.monitor.stop",
         "title": "Stop Monitoring",
         "category": "rung",

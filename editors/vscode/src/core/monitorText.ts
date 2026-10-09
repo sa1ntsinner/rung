@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // What monitoring shows at the end of a line (pure, for tests).
+import { fileURLToPath } from "node:url";
 
 export interface MonitorPlan {
   block: string;
@@ -15,6 +16,31 @@ export function formatValue(v: unknown): string {
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(Number(v.toPrecision(6)));
   if (typeof v === "string") return `'${v}'`;
   return JSON.stringify(v);
+}
+
+/** Historical replay uses its own labels; live observed values never enter this display. */
+export function reconstructedLines(result: unknown, uri: string): Record<number, string> {
+  const r = result as { kind?: string; exact?: boolean; freshness?: string; reason?: string;
+    trace?: { uri: string; line: number; kind: string; value?: unknown }[]; divergences?: unknown[] } | null;
+  if (r?.kind !== "reconstructed" || r.exact !== false || !["capture-only", "native-sample"].includes(r.freshness ?? "")
+    || !Array.isArray(r.trace) || r.trace.length > 10_000 || !Array.isArray(r.divergences)) throw new Error(r?.reason ?? "Invalid reconstruction result");
+  const lines: Record<number, string> = { 0: `reconstructed: ${r.freshness === "native-sample" ? "native sample" : "historical capture"} · ${r.divergences.length} divergence(s) · PLC execution unverified` };
+  const values = new Map<number, string[]>();
+  const sourcePath = (source: string) => process.platform === "win32" ? fileURLToPath(source).toLowerCase() : fileURLToPath(source);
+  for (const entry of r.trace) {
+    if (sourcePath(entry.uri) !== sourcePath(uri)) continue;
+    if (!Number.isSafeInteger(entry.line) || entry.line < 1) throw new Error("Invalid reconstruction source line");
+    const line = entry.line - 1;
+    if (entry.kind === "statement") lines[line] ??= "reconstructed: executed";
+    if (entry.kind === "expression") {
+      const row = values.get(line) ?? [];
+      // ponytail: eight values per line; the complete trace remains in CLI JSON.
+      if (row.length < 8) row.push(formatValue(entry.value).slice(0, 120));
+      values.set(line, row);
+    }
+  }
+  for (const [line, row] of values) lines[line] = `${lines[line] ?? "reconstructed"} · ${row.join(" → ")}`;
+  return lines;
 }
 
 /** Each declaration row's value while monitoring: the plan labels a row by its path of names (Motor.Speed). */

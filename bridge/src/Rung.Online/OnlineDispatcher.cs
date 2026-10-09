@@ -12,7 +12,7 @@ namespace Rung.Online;
 public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factory = null, WriterConfiguration? writerConfiguration = null,
     Func<ConnectRequest, PreparedWrite, CancellationToken, Task<WriteResult>>? send = null) : IAsyncDisposable
 {
-    public static readonly string[] Capabilities = ["online.connect", "online.browse", "online.read", "online.state", "online.disconnect", "online.certificate", "online.subscribe", "online.unsubscribe", "online.watchTable", "online.alarms"];
+    public static readonly string[] Capabilities = ["online.connect", "online.browse", "online.read", "online.state", "online.disconnect", "online.certificate", "online.subscribe", "online.unsubscribe", "online.watchTable", "online.alarms", "online.capture"];
     public event Action<string>? Event;
     readonly Dictionary<string, OnlineSession> sessions = new();
     long epoch;
@@ -104,6 +104,10 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
         }
         if (!sessions.TryGetValue(sessionId, out var active)) throw new RpcException(ErrorCodes.NotFound, "Online session not found.");
         switch (method) {
+            case "online.capture":
+                var expected = p.TryGetProperty("scope", out var scope) ? scope.Deserialize<LiveScope>(RpcWire.Json) : null;
+                if (expected == null) throw new RpcException(ErrorCodes.BadRequest, "Native capture requires expected scope.");
+                return await active.CaptureAsync(String(p, "block"), String(p, "instance"), expected, token);
             case "online.alarms":
                 return await active.AlarmsAsync(p.TryGetProperty("lcid", out var lcid) ? lcid.GetInt32() : 1033,
                     p.TryGetProperty("subscribe", out var subscribe) && subscribe.ValueKind == JsonValueKind.True, token);

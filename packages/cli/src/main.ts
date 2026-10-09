@@ -41,6 +41,7 @@ import { cmdFormat } from "./format.js";
 import { behaviourAgainst } from "./behaviour.js";
 import { cmdXref } from "./xref.js";
 import { cmdWhy } from "./why.js";
+import { cmdProgramStatus } from "./program-status.js";
 import { cmdImpact } from "./impact.js";
 import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
@@ -64,6 +65,7 @@ Usage:
                                        TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
                                        (kept while nothing mirrored changed; --fresh asks TIA Portal again)
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
+  rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
@@ -378,6 +380,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   format: { options: ["check"], positionals: 1 },
   xref: { options: ["json", "fresh"], positionals: 1 },
   why: { options: ["instance", "json"], positionals: 2 },
+  "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
@@ -469,6 +472,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         coverage: { type: "string" },
         against: { type: "string" },
         observe: { type: "boolean" },
+        capture: { type: "string" },
+        why: { type: "string" },
         filter: { type: "string" },
         case: { type: "string" },
         hw: { type: "boolean" },
@@ -719,6 +724,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "why":
         return await cmdWhy(target, positionals[2], { instance: v.instance as string | undefined, json: !!v.json }, io);
+      case "program-status":
+        return await cmdProgramStatus(target, { capture: v.capture as string | undefined, instance: v.instance as string | undefined, json: !!v.json, why: v.why as string | undefined }, io);
       case "merge-driver":
         return await cmdMergeDriver(positionals.slice(1), io);
       case "impact":
