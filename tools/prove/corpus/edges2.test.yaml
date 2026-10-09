@@ -1,0 +1,28 @@
+block: FB_ProveEdges
+cases:
+  - name: overflow at the ends of the ranges
+    steps:
+      - set: { i: -32768, d: 1000000000, r: 1.0E13, lr: 2.5 }
+        cycle: 1
+      - set: { i: 32767, d: -2147483648, r: -2.0, lr: -2.5 }
+        cycle: 1
+      - set: { i: 0, d: 715827883, r: 3.5, lr: 1234567.5 }
+        cycle: 1
+  - name: a retentive timer and an up/down counter
+    steps:
+      - set: { run: true }
+        advance: 60ms
+      - set: { run: false }
+        advance: 50ms
+      - set: { run: true }
+        advance: 60ms
+      - set: { reset: true, run: false }
+        cycle: 1
+      - set: { reset: false, up: true }
+        cycle: 1
+      - set: { up: false }
+        cycle: 1
+      - set: { up: true }
+        cycle: 1
+      - set: { up: false, down: true }
+        cycle: 1

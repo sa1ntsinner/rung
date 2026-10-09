@@ -9,6 +9,7 @@ import { nearest } from "./nearest.js";
 import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, orderedParams, paramsOf, unknownArgs, type CallSite } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
+import { RESERVED } from "./declarationEdit.js";
 
 export interface Location {
   uri: string;
@@ -189,6 +190,17 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
   const doc = index.docs.get(uri);
   if (!doc?.parsed) return [];
   const out: FeatureDiagnostic[] = doc.parsed.diagnostics.map((d) => ({ start: d.start, end: d.end, severity: d.severity, message: d.message, code: "SYNTAX" }));
+  // a name SCL reserves (tod, time, date) is no name TIA Portal takes unquoted ("Syntax error: the value tod is invalid")
+  if (/\.(scl|db|udt)$/i.test(uri)) {
+    const walk = (vars: VarDecl[]) => {
+      for (const v of vars) {
+        if (v.src && doc.text[v.src.name.start] !== '"' && RESERVED.has(v.name.toUpperCase()))
+          out.push({ start: v.src.name.start, end: v.src.name.end, severity: "error", code: "RESERVED_NAME", message: `${v.name} is a word SCL reserves: TIA Portal refuses it as a name; call it otherwise, or write it in quotes ("${v.name}")` });
+        if (v.members) walk(v.members);
+      }
+    };
+    for (const b of doc.parsed.blocks) walk(b.vars);
+  }
   // a TIA tag table as text: TIA Portal keeps every PLC tag at an address; what the import refuses shows here first
   if (TAG_TEXT.test(uri)) {
     const table: FeatureDiagnostic[] = [];

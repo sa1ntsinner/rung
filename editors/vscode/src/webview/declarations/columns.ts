@@ -3,7 +3,7 @@
 import type { AttrState, DeclRow, DeclSection } from "../../protocol/declarations";
 import type { GridColumn } from "../grid/types";
 
-export type Preset = "code" | "hmi" | "commissioning";
+export type Preset = "code" | "hmi" | "commissioning" | "tags";
 export type AttrKey = "accessible" | "writable" | "visible" | "setpoint";
 
 /** TIA Portal's names for the attribute columns, for tooltips, the inspector and screen readers. */
@@ -18,13 +18,20 @@ const NAME: GridColumn = { key: "name", label: "Name", mono: true, width: 220 };
 const TYPE: GridColumn = { key: "type", label: "Data type", mono: true, width: 180 };
 const START: GridColumn = { key: "start", label: "Default value", mono: true, align: "end", width: 120 };
 const COMMENT: GridColumn = { key: "comment", label: "Comment", width: 0 };
+const ADDRESS: GridColumn = { key: "address", label: "Address", mono: true, width: 110 };
+const VALUE: GridColumn = { key: "start", label: "Value", mono: true, align: "end", width: 100 };
 const attrColumn = (key: AttrKey, label: string): GridColumn => ({ key, label, tooltip: ATTR_LABEL[key], align: "center", width: 84 });
 
 export const PRESETS: Record<Preset, { label: string; columns: GridColumn[] }> = {
   code: { label: "Code", columns: [NAME, TYPE, START, COMMENT] },
   hmi: { label: "HMI access", columns: [NAME, TYPE, attrColumn("accessible", "Accessible"), attrColumn("writable", "Writable"), attrColumn("visible", "Visible"), attrColumn("setpoint", "Setpoint"), COMMENT] },
   commissioning: { label: "Commissioning", columns: [NAME, TYPE, START, attrColumn("setpoint", "Setpoint"), COMMENT] },
+  // a PLC tag table, as TIA Portal's: a constant's value in the Value column
+  tags: { label: "Tags", columns: [NAME, TYPE, ADDRESS, VALUE, attrColumn("accessible", "Accessible"), attrColumn("writable", "Writable"), attrColumn("visible", "Visible"), COMMENT] },
 };
+
+/** The presets a table offers: a tag table has its own. */
+export const presetsFor = (kind: string | undefined): Preset[] => (kind === "TAGS" ? ["tags"] : ["code", "hmi", "commissioning"]);
 
 export const isAttr = (column: string): column is AttrKey => column in ATTR_LABEL;
 
@@ -44,6 +51,8 @@ export function cellText(row: DeclRow, column: string): string {
       return row.start ?? "";
     case "comment":
       return row.comment ?? "";
+    case "address":
+      return row.address ?? "";
     default:
       return "";
   }

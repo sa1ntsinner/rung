@@ -24,11 +24,13 @@ export interface DeclRow {
   kind: "plain" | "struct" | "array" | "instance";
   start?: string;
   comment?: string;
+  /** a PLC tag's address (a tag table) */
+  address?: string;
   attrs: { accessible: AttrState; visible: AttrState; writable: AttrState; setpoint: AttrState };
   /** whether TIA's HMI/OPC UA attributes apply (not to temporaries and constants) */
   hmi: boolean;
   other: { key: string; value: string }[];
-  ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange };
+  ranges: { whole: DRange; name: DRange; type: DRange; start?: DRange; comment?: DRange; attrs?: DRange; address?: DRange };
   /** the language server's errors and warnings about this declaration's name, type or value */
   problems?: DeclProblem[];
   children?: DeclRow[];
@@ -60,6 +62,8 @@ export interface DeclModel {
   editable: boolean;
   reason?: string;
   unavailable: DRange[];
+  /** a tag table: the bit memory a new tag gets */
+  nextAddress?: string;
 }
 
 /** A declaration a table adds (mirrors packages/lsp/src/declarationEdit.ts). */
@@ -68,6 +72,7 @@ export interface NewRow {
   type: string;
   start?: string;
   comment?: string;
+  address?: string;
 }
 
 /** One edit of the table; the language server plans its text (rung/declarationEdit). */
@@ -77,7 +82,8 @@ export type DeclOp =
   | { op: "setAttr"; row: string; key: string; state: "on" | "off" | "default" }
   | { op: "setType"; row: string; type: string }
   | { op: "insertRows"; after?: string; into?: string; section?: string; rows: NewRow[] }
-  | { op: "deleteRow"; row: string };
+  | { op: "deleteRow"; row: string }
+  | { op: "setAddress"; row: string; value: string | null };
 
 /** Rows read from pasted text (rung/declarationPaste). */
 export interface PasteResult {
@@ -138,7 +144,7 @@ const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
 function isNewRow(x: unknown): boolean {
   if (!x || typeof x !== "object") return false;
   const r = x as Record<string, unknown>;
-  return str(r.name) && str(r.type) && optStr(r.start) && optStr(r.comment);
+  return str(r.name) && str(r.type) && optStr(r.start) && optStr(r.comment) && optStr(r.address);
 }
 
 function isOp(x: unknown): x is DeclOp {
@@ -147,6 +153,7 @@ function isOp(x: unknown): x is DeclOp {
   switch (o.op) {
     case "setStart":
     case "setComment":
+    case "setAddress":
       return str(o.row) && nullStr(o.value);
     case "setAttr":
       return str(o.row) && ATTR_KEYS.has(String(o.key)) && (o.state === "on" || o.state === "off" || o.state === "default");

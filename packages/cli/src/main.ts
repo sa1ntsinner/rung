@@ -41,6 +41,7 @@ import { behaviourAgainst } from "./behaviour.js";
 import { cmdXref } from "./xref.js";
 import { cmdWhy } from "./why.js";
 import { cmdImpact } from "./impact.js";
+import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
@@ -63,6 +64,7 @@ Usage:
                                        (kept while nothing mirrored changed; --fresh asks TIA Portal again)
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
+  rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
@@ -233,7 +235,9 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     if (ignore.length) await appendFile(gi, (current && !current.endsWith("\n") ? "\n" : "") + ignore.join("\n") + "\n");
     // git for Windows checks text out with CRLF by default; the files stay as TIA Portal's export writes them
     const ga = join(dir, ".gitattributes");
-    if (!(await exists(ga))) await writeFile(ga, "* text=auto eol=lf\n");
+    // rung's merge of SCL and tests (git config merge.rung.driver "rung merge-driver %O %A %B %P"); without that
+    // setting git merges these files as text, as before
+    if (!(await exists(ga))) await writeFile(ga, "* text=auto eol=lf\n*.scl merge=rung\n*.db merge=rung\n*.udt merge=rung\n*.test.yaml merge=rung\n");
     if (!(await exists(join(dir, "AGENTS.md")))) await writeFile(join(dir, "AGENTS.md"), await agentsTemplate(info.path));
     const bridgeExe = io.env.RUNG_BRIDGE ?? (config.bridge.command || bridge.command);
     const wl = /rung-bridge-v\d\d\.exe$/i.test(bridgeExe) ? await whitelistStatus(bridgeExe, `${tiaOf(tia).slice(1)}.0`) : "unknown";
@@ -360,6 +364,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   xref: { options: ["json", "fresh"], positionals: 1 },
   why: { options: ["instance", "json"], positionals: 2 },
   impact: { options: ["json"], positionals: 1 },
+  "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
@@ -672,6 +677,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "why":
         return await cmdWhy(target, positionals[2], { instance: v.instance as string | undefined, json: !!v.json }, io);
+      case "merge-driver":
+        return await cmdMergeDriver(positionals.slice(1), io);
       case "impact":
         return await cmdImpact(target, !!v.json, io);
       case "xref":

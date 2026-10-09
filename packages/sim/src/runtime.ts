@@ -899,6 +899,14 @@ export class Simulator {
     return d && targetDecl(d, /^REFERENCE\s+TO\s+/i);
   }
 
+  /** Whether an operand is a DATE, a TIME_OF_DAY or a TIME, by its declaration or its literal. */
+  private dateKind(e: Expr, frame: Frame | null): "DATE" | "TOD" | "TIME" | undefined {
+    if (e.k === "lit") return e.typeName === "DATE" ? "DATE" : e.typeName === "TOD" ? "TOD" : e.type === "time" ? "TIME" : undefined;
+    const d = e.k === "ref" ? this.staticDecl(e, frame) : undefined;
+    const t = (d?.typeRef ?? d?.type)?.toUpperCase();
+    return t === "DATE" ? "DATE" : t === "TOD" || t === "TIME_OF_DAY" ? "TOD" : t === "TIME" ? "TIME" : undefined;
+  }
+
   private kindOf(e: Expr, frame: Frame | null): Kind {
     switch (e.k) {
       case "lit":
@@ -974,6 +982,18 @@ export class Simulator {
             r = Math.fround(r);
           }
         }
+        // a DATE (days) and a TIME_OF_DAY (ms of the day) with a TIME; an S7 CPU does not wrap a TOD at midnight
+        // (PLCSIM Advanced: TOD#23:15:00 + T#1H30M = 89100000 ms)
+        if ((e.op === "+" || e.op === "-") && typeof l === "number" && typeof r === "number") {
+          const kl = this.dateKind(e.l, frame);
+          const kr = this.dateKind(e.r, frame);
+          const DAY = 86_400_000;
+          if (kl === "DATE" && kr === "TIME") return e.op === "+" ? l + Math.trunc(r / DAY) : l - Math.trunc(r / DAY);
+          if (kl === "TIME" && kr === "DATE" && e.op === "+") return r + Math.trunc(l / DAY);
+          if (kl === "DATE" && kr === "DATE" && e.op === "-") return (l - r) * DAY;
+          if (kl === "TOD" && kr === "TIME") return e.op === "+" ? l + r : l - r;
+          if (kl === "TIME" && kr === "TOD" && e.op === "+") return l + r;
+        }
         switch (e.op) {
           case "XOR":
             return typeof l === "number" ? bitwise("XOR", l, r as number) : !!l !== !!r;
@@ -998,6 +1018,8 @@ export class Simulator {
           case "**":
             return Math.pow(l as number, r as number);
           case "MOD":
+            // an S7 CPU gives 0 (PLCSIM Advanced); CODESYS stops with an exception
+            if (r === 0 && !this.isIec(frame?.block)) return 0;
             if (r === 0) throw new SimError("integer division by zero (MOD 0)", frame?.block.name);
             return (l as number) % (r as number);
           case "/": {
@@ -1007,6 +1029,7 @@ export class Simulator {
             // otherwise (types unknown to the workspace) decide by the values
             const real = kl === "real" || kr === "real" || (!(kl === "int" && kr === "int") && !(Number.isInteger(l) && Number.isInteger(r)));
             if (real) return (l as number) / (r as number); // x / 0.0 gives ±Inf or NaN like the PLC
+            if (r === 0 && !this.isIec(frame?.block)) return 0; // an S7 CPU gives 0 (PLCSIM Advanced)
             if (r === 0) throw new SimError("integer division by zero", frame?.block.name);
             // past 2^53 the quotient of two doubles rounds before it is cut: divide exactly (BigInt cuts towards 0, as SCL)
             if (!Number.isSafeInteger(l) && Number.isInteger(l) && Number.isInteger(r)) return exactInteger(BigInt(l as number) / BigInt(r as number));
@@ -1066,8 +1089,11 @@ export class Simulator {
         if (m) return this.callMethod(base, m, c, frame);
       }
     }
-    // FB instance call: #inst(...), "Inst_DB"(...), #inst.sub(...)
-    if (c.callee.root.kind !== "ident" || c.callee.path.length || (frame && (upper in frame.mem || upper in frame.temps))) {
+    // FB instance call: #inst(...), "Inst_DB"(...), #inst.sub(...); a plain name a variable has (IEC: inst(...)) calls
+    // that instance, but SHL(...) stays the instruction when the block also has a Word called shl
+    const local = frame && (upper in frame.mem || upper in frame.temps) ? (frame.mem[upper] ?? frame.temps[upper]) : undefined;
+    const calledByName = local !== undefined && (isInstance(local) || !(STANDARD_BY_NAME.has(upper) || /^\w+_TO_\w+$/.test(upper)));
+    if (c.callee.root.kind !== "ident" || c.callee.path.length || calledByName) {
       const target = c.callee.root.kind === "global" && !c.callee.path.length ? this.index.global(name) : undefined;
       // a stubbed FC, or a block the workspace does not have, called by its name
       const stubbed = c.callee.root.kind === "global" && !c.callee.path.length ? this.stubOf(name) : undefined;
@@ -1160,6 +1186,10 @@ export class Simulator {
         }
         case "TRUNC":
           return Math.trunc(n(args[0]));
+        case "FRAC": {
+          const x = n(args[0]);
+          return x - Math.trunc(x);
+        }
         case "ROUND":
           return this.round(n(args[0]), frame);
         case "CEIL":
@@ -1219,10 +1249,30 @@ export class Simulator {
       const to = upper.split("_TO_")[1] ?? "";
       if (/^(BOOL)$/.test(to)) return !!args[0] && args[0] !== 0;
       if (REAL_TYPES.test(to)) return fitNumber(conversionNumber(args[0]), { type: to, isArray: false });
-      if (STRING_TYPES.test(to)) return this.isIec(frame?.block) && typeof args[0] === "boolean" ? (args[0] ? "TRUE" : "FALSE") : String(args[0]);
+      // a character and its code: CHAR_TO_INT('q') = 113, INT_TO_CHAR(81) = 'Q'
+      const from = upper.split("_TO_")[0] ?? "";
+      if (/^W?CHAR$/.test(to) && INT_TYPES.test(from) && typeof args[0] === "number") return String.fromCharCode(args[0]);
+      if (/^W?CHAR$/.test(from) && INT_TYPES.test(to) && typeof args[0] === "string") return wrapInteger(args[0].charCodeAt(0) || 0, { type: to, isArray: false });
+      if (STRING_TYPES.test(to)) {
+        if (this.isIec(frame?.block)) return typeof args[0] === "boolean" ? (args[0] ? "TRUE" : "FALSE") : String(args[0]);
+        // as an S7 CPU writes them (PLCSIM Advanced): a signed whole number with its sign, a REAL as +2.250000E+0
+        const v = args[0];
+        if (typeof v === "number" && /^(SINT|INT|DINT|LINT)$/.test(from)) return `${v < 0 ? "" : "+"}${v}`;
+        if (typeof v === "number" && from === "REAL") return `${v < 0 ? "" : "+"}${Math.fround(v).toExponential(6).toUpperCase()}`;
+        if (typeof v === "number" && from === "LREAL") return `${v < 0 ? "" : "+"}${v.toExponential(13).toUpperCase()}`;
+        return String(v);
+      }
       // the value of the target type: WORD_TO_INT(16#FFFF) is -1 also inside an expression
-      if (INT_TYPES.test(to)) return wrapInteger(typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : this.round(conversionNumber(args[0]), frame), { type: to, isArray: false });
-      if (TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : this.round(conversionNumber(args[0]), frame);
+      if (INT_TYPES.test(to)) {
+        const n = typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : this.round(conversionNumber(args[0]) * (from === "LTIME" && !this.isIec(frame?.block) ? 1_000_000 : 1), frame);
+        const fit = wrapInteger(n, { type: to, isArray: false });
+        // a real out of the target's range: an S7 CPU leaves the result undefined (PLCSIM Advanced gave REAL_TO_INT(32767.6) = -205)
+        if (fit !== n && REAL_TYPES.test(upper.split("_TO_")[0] ?? "") && !this.isIec(frame?.block))
+          throw new SimError(`${upper}(${typeof args[0] === "number" ? realText(args[0]) : String(args[0])}): out of the range of ${to}; a CPU leaves the result undefined (ENO = FALSE): limit the value first`, frame?.block.name, c.callee.start);
+        return fit;
+      }
+      // rung keeps every duration in ms; an LTIME as a number is nanoseconds on an S7 CPU (LTIME_TO_LINT(LT#3s) = 3000000000)
+      if (TIME_TYPES.test(to)) return typeof args[0] === "boolean" ? (args[0] ? 1 : 0) : to === "LTIME" && INT_TYPES.test(from) && !this.isIec(frame?.block) ? conversionNumber(args[0]) / 1_000_000 : this.round(conversionNumber(args[0]), frame);
       throw new SimError(`function ${name} is not supported by the simulator`, frame?.block.name, c.callee.start);
     }
     const g = this.index.global(name);
@@ -1842,6 +1892,23 @@ export class Simulator {
           m.ET = 0;
           m.Q = false;
         }
+        s.prev = !!m.IN;
+        break;
+      }
+      case "TONR": {
+        // ET adds up the time IN is TRUE and stays while IN is FALSE; R clears it
+        if (m.R) {
+          s.acc = 0;
+          m.ET = 0;
+          m.Q = false;
+          s.prev = false;
+          break;
+        }
+        const acc = (s.acc as number | undefined) ?? 0;
+        if (m.IN && !s.prev) s.start = now;
+        if (m.IN) m.ET = Math.min(acc + now - (s.start as number), m.PT as number);
+        else if (s.prev) s.acc = m.ET = Math.min(acc + now - (s.start as number), m.PT as number);
+        m.Q = (m.ET as number) >= (m.PT as number);
         s.prev = !!m.IN;
         break;
       }

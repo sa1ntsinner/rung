@@ -3,7 +3,7 @@
 // status bar, CodeLens, every command, compile → Problems, watch, online / connect, download, the LSP.
 import * as assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { RungExtensionApi } from "../../src/extension";
@@ -859,6 +859,31 @@ describe("rung extension on a fake-bridge workspace", function () {
       await openDoc(PUMP);
       await waitFor("the panel followed the active SCL editor", () => /Fx_Pump/.test(tab()?.label ?? ""));
       await closeAll();
+    });
+
+    it("a PLC tag table in the table: tags with addresses, an address edited, a new tag at free bit memory", async () => {
+      await closeAll();
+      const rel = "plc/PLC_1/tags/E2E_Tags.tags.st";
+      mkdirSync(join(root(), "plc/PLC_1/tags"), { recursive: true });
+      writeFileSync(file(rel).fsPath, "VAR_GLOBAL\n    Start_PB AT %I0.0 : Bool;\n    Speed AT %MW10 : Int;\nEND_VAR\n");
+      try {
+        const ed = await openDoc(rel);
+        await vscode.commands.executeCommand("rung.declarations.open");
+        const panel = await waitFor("the table shows the tag table", () => (api.declarations()?.shown?.block?.kind === "TAGS" ? api.declarations() : undefined));
+        const shown = () => panel.shown!;
+        assert.deepEqual(shown().sections[0]!.rows.map((r) => `${r.name} ${r.address}`), ["Start_PB %I0.0", "Speed %MW10"]);
+        const r = await panel.receive({ v: 1, kind: "edit", req: 1, uri: shown().uri, version: shown().version, op: { op: "setAddress", row: "Speed", value: "%mw12" } });
+        assert.equal((r as { ok: boolean }).ok, true, JSON.stringify(r));
+        await waitFor("the new address in the text", () => ed.document.getText().includes("Speed AT %MW12 : Int;") || undefined);
+        await waitFor("the table has the new text", () => shown().sections[0]!.rows[1]!.address === "%MW12" || undefined);
+        const add = await panel.receive({ v: 1, kind: "add", req: 2, uri: shown().uri, version: shown().version, after: "Speed" });
+        assert.equal((add as { ok: boolean }).ok, true, JSON.stringify(add));
+        await waitFor("a new tag at free bit memory", () => /\n\s+Tag_1 AT %M\d+\.\d : Bool;\n/.test(ed.document.getText()) || undefined);
+      } finally {
+        await vscode.commands.executeCommand("workbench.action.files.revert");
+        await closeAll();
+        await vscode.workspace.fs.delete(file(rel)).then(undefined, () => {});
+      }
     });
 
     it("edits from the table change the document: a default, add, delete, rename; undo restores; a stale edit is refused", async () => {

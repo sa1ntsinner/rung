@@ -1,0 +1,57 @@
+FUNCTION_BLOCK "FB_ProveEdges"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      i : Int;
+      d : DInt;
+      r : Real;
+      run : Bool;
+      up : Bool;
+      down : Bool;
+      reset : Bool;
+      lr : LReal;
+   END_VAR
+
+   VAR_OUTPUT
+      absI : Int;
+      negI : Int;
+      dMul : DInt;
+      dNeg : DInt;
+      rBig : Real;
+      rInf : Bool;
+      lrRound : DInt;
+      lrTrunc : DInt;
+      accQ : Bool;
+      accET : Time;
+      udCV : Int;
+      udQU : Bool;
+      udQD : Bool;
+      sCmp : Bool;
+      sLess : Bool;
+   END_VAR
+
+   VAR
+      acc {InstructionName := 'TONR_TIME'; LibVersion := '1.0'} : TONR_TIME;
+      ud {InstructionName := 'CTUD_INT'; LibVersion := '1.0'} : CTUD_INT;
+      a : String[8];
+      b : String[8];
+   END_VAR
+
+
+BEGIN
+	#absI := ABS(#i);
+	#negI := -#i;
+	#dMul := #d * 3;
+	#dNeg := -#d;
+	#rBig := #r * #r * #r;
+	#rInf := #rBig > 3.0E38;
+	#lrRound := ROUND(#lr);
+	#lrTrunc := TRUNC(#lr);
+	#acc(IN := #run, R := #reset, PT := T#100MS, Q => #accQ, ET => #accET);
+	#ud(CU := #up, CD := #down, R := #reset, LD := FALSE, PV := 2, QU => #udQU, QD => #udQD, CV => #udCV);
+	#a := 'abc';
+	#b := 'abd';
+	#sCmp := #a = 'abc';
+	#sLess := #a < #b;
+END_FUNCTION_BLOCK
+

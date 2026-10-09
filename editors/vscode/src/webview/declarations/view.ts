@@ -8,7 +8,7 @@ import type { GridColumn, GridSection } from "../grid/types";
 import "../grid/rg-treegrid";
 import { guardNativeUndo } from "../nativeUndo";
 import type { CellEdit, RgTreegrid } from "../grid/rg-treegrid";
-import { ATTR_LABEL, PRESETS, attrLabel, cellText, countRows, filterSections, findRow, isAttr, type AttrKey, type Preset } from "./columns";
+import { ATTR_LABEL, PRESETS, attrLabel, cellText, countRows, filterSections, findRow, isAttr, presetsFor, type AttrKey, type Preset } from "./columns";
 
 interface VsCodeApi {
   postMessage(m: ViewToHost): void;
@@ -185,6 +185,7 @@ export class RgDeclarations extends LitElement {
   private readonly editable = (row: DeclRow, column: string): CellEdit => {
     if (isAttr(column)) return row.hmi ? "toggle" : false;
     if ((column === "type" || column === "start") && row.kind === "struct") return false;
+    if (column === "address") return this.model?.block?.kind === "TAGS" && !!this.model.sections.find((s) => s.title === "Tags" && s.rows.includes(row)) ? "text" : false;
     return column === "name" || column === "type" || column === "start" || column === "comment" ? "text" : false;
   };
 
@@ -217,6 +218,7 @@ export class RgDeclarations extends LitElement {
     const v = value.trim() ? value : null;
     if (column === "start") return this.op({ op: "setStart", row: rowId, value: v }, pending);
     if (column === "comment") return this.op({ op: "setComment", row: rowId, value: v }, pending);
+    if (column === "address") return this.op({ op: "setAddress", row: rowId, value: v }, pending);
   }
 
   private toggle(rowId: string, column: string) {
@@ -334,7 +336,10 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     }
     const monitored = this.monitor;
     // the Monitor value column follows the default value (or the type), in every preset
-    const preset = PRESETS[this.preset].columns;
+    // a tag table has its own columns; a block the code, HMI or commissioning ones
+    const offered = presetsFor(model.block?.kind);
+    const shownPreset = offered.includes(this.preset) ? this.preset : offered[0]!;
+    const preset = PRESETS[shownPreset].columns;
     const after = preset.some((c) => c.key === "start") ? "start" : "type";
     const columns = monitored ? preset.flatMap((c) => (c.key === after ? [c, MONITOR] : [c])) : preset;
     const monitorable = model.block?.kind === "DB" || model.block?.kind === "FB";
@@ -363,8 +368,8 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
           ? html`<button class="rg-icon-btn" data-action="monitor" aria-pressed=${monitored ? "true" : "false"} title=${watching} aria-label=${watching} @click=${() => this.post({ v: 1, kind: "monitor" })}><span class="codicon codicon-eye"></span></button>`
           : nothing}
         <div class="rg-presets" role="group" aria-label="Columns">
-          ${(Object.keys(PRESETS) as Preset[]).map(
-            (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === this.preset ? "true" : "false"} @click=${() => {
+          ${offered.map(
+            (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === shownPreset ? "true" : "false"} @click=${() => {
               this.preset = p;
               this.save();
             }}>${PRESETS[p].label}</button>`,

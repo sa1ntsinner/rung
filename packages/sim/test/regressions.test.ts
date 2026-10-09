@@ -157,7 +157,7 @@ describe("Simulator QA regressions", () => {
     expect([(m.ITEMS as unknown as { items: unknown[] }).items.length, (m.MORE as unknown as { items: unknown[] }).items.length]).toEqual([4, 6]);
   });
 
-  it("rounds half to even like the PLC, divides REAL by zero to ±Inf/NaN, reports integer division by zero", () => {
+  it("rounds half to even like the PLC, divides REAL by zero to ±Inf/NaN, an integer by zero to 0 as an S7 CPU does", () => {
     const s = sim({
       M: fb(
         "M",
@@ -167,7 +167,8 @@ describe("Simulator QA regressions", () => {
     });
     const m = run(s, "M", { z: 0 });
     expect([m.R1, m.R2, m.R3, m.R4, m.INF, Number.isNaN(m.NAN)]).toEqual([2, 0, -2, 2, -Infinity, true]);
-    expect(errorOf(() => run(s, "M", { z: 1 }))).toMatch(/integer division by zero/);
+    // an S7 CPU gives 0 for an integer divided by zero (PLCSIM Advanced, tools/prove); the case goes on
+    expect(run(s, "M", { z: 1 }).Q).toBe(0);
   });
 
   it("gives readable errors for EXIT outside a loop, deep recursion and syntax errors", () => {

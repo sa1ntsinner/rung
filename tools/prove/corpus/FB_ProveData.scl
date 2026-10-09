@@ -1,0 +1,92 @@
+FUNCTION_BLOCK "FB_ProveData"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      s : String[20];
+      k : Int;
+      x : LReal;
+      big : DInt;
+      li : LInt;
+   END_VAR
+
+   VAR_OUTPUT
+      arr : Array[0..3] of Int;
+      pt : Struct
+         x : Int;
+         y : Real;
+         ok : Bool;
+      END_STRUCT;
+      sLen : Int;
+      sJoin : String[40];
+      sLeft : String[10];
+      sMid : String[10];
+      sFind : Int;
+      sEq : Bool;
+      lr : LReal;
+      lrInt : DInt;
+      dWrap : DInt;
+      liSum : LInt;
+      whileCount : Int;
+      repeatCount : Int;
+      skipSum : Int;
+      nested : Int;
+   END_VAR
+
+   VAR
+      j : Int;
+   END_VAR
+
+
+BEGIN
+	// arrays and structures
+	FOR #j := 0 TO 3 DO
+	    #arr[#j] := #k * #j - #j;
+	END_FOR;
+	#pt.x := #arr[3] + 1;
+	#pt.y := INT_TO_REAL(#pt.x) / 7.0;
+	#pt.ok := #pt.y > 1.0;
+	// strings
+	#sLen := LEN(#s);
+	#sJoin := CONCAT(IN1 := #s, IN2 := '!');
+	#sLeft := LEFT(IN := #s, L := 3);
+	#sMid := MID(IN := #s, L := 2, P := 2);
+	#sFind := FIND(IN1 := #s, IN2 := 'b');
+	#sEq := #s = 'abc';
+	// 64 bits and wide reals
+	#lr := #x * #x / 3.0;
+	#lrInt := LREAL_TO_DINT(#x * 10.0);
+	#dWrap := #big * 2;
+	#liSum := #li + 1;
+	// loops with EXIT and CONTINUE
+	#whileCount := 0;
+	WHILE #whileCount < 100 AND #k > 0 DO
+	    #whileCount := #whileCount + #k;
+	    IF #whileCount > 40 THEN
+	        EXIT;
+	    END_IF;
+	END_WHILE;
+	#repeatCount := 0;
+	REPEAT
+	    #repeatCount := #repeatCount + 1;
+	UNTIL #repeatCount * #k >= 30 OR #repeatCount >= 50
+	END_REPEAT;
+	#skipSum := 0;
+	FOR #j := 1 TO 10 DO
+	    IF #j MOD 3 = 0 THEN
+	        CONTINUE;
+	    END_IF;
+	    #skipSum := #skipSum + #j;
+	END_FOR;
+	IF #k > 5 THEN
+	    IF #k > 10 THEN
+	        #nested := 2;
+	    ELSIF #k = 7 THEN
+	        #nested := 7;
+	    ELSE
+	        #nested := 1;
+	    END_IF;
+	ELSE
+	    #nested := 0;
+	END_IF;
+END_FUNCTION_BLOCK
+

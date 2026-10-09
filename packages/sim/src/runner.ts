@@ -103,7 +103,29 @@ function nearest(name: string, names: Iterable<string>): string | undefined {
   return nearestSpelling(name, candidates) ?? candidates.find((n) => n.length >= 3 && upper.startsWith(n.toUpperCase()));
 }
 
+const isDate = (t?: string) => /^DATE$/i.test(t?.trim() ?? "");
+const isTod = (t?: string) => /^(TOD|TIME_OF_DAY)$/i.test(t?.trim() ?? "");
+/** A DATE as rung keeps it (days since 1970) from D#2024-02-28; a TIME_OF_DAY (ms of the day) from TOD#23:15:00.5. */
+function dateValue(v: string): number | undefined {
+  const d = /^(?:D|DATE)#(\d{4}-\d{2}-\d{2})$/i.exec(v.trim());
+  if (d) return Date.parse(`${d[1]}T00:00:00Z`) / 86_400_000;
+  const t = /^(?:TOD|TIME_OF_DAY)#(\d+):(\d+)(?::(\d+(?:\.\d+)?))?$/i.exec(v.trim());
+  return t ? Math.round(((Number(t[1]) * 60 + Number(t[2])) * 60 + Number(t[3] ?? 0)) * 1000) : undefined;
+}
+/** How a test writes a DATE or a TIME_OF_DAY back: D#2024-02-29, TOD#00:45:00 (with .fff when it has milliseconds). */
+export function dateText(v: number, type?: string): string {
+  if (isDate(type)) return `D#${new Date(v * 86_400_000).toISOString().slice(0, 10)}`;
+  // hours past 24 stay as they are: a CPU does not wrap a TIME_OF_DAY at midnight
+  const two = (n: number) => String(n).padStart(2, "0");
+  const ms = v % 1000;
+  return `TOD#${two(Math.floor(v / 3_600_000))}:${two(Math.floor(v / 60_000) % 60)}:${two(Math.floor(v / 1000) % 60)}${ms ? `.${String(ms).padStart(3, "0")}` : ""}`;
+}
+
 function normalizeExpected(v: unknown, type?: string): unknown {
+  if (typeof v === "string" && (isDate(type) || isTod(type))) return dateValue(v) ?? v;
+  // a whole number written as TIA Portal does: 16#00F3, 2#0000_0101, WORD#16#FF, INT#16#7F
+  const based = typeof v === "string" ? /^(?:[A-Z]+#)?(2|8|16)#([0-9A-F]+(?:_[0-9A-F]+)*)$/i.exec(v.trim()) : null;
+  if (based) return parseInt(based[2]!.replace(/_/g, ""), Number(based[1]));
   if (typeof v === "string" && ((!type || isTime(type)) && /^(T|TIME|LT|LTIME)#/i.test(v) || isTime(type) && /^\d+(?:\.\d+)?(?:ms|s|m|h)$/i.test(v))) return toMs(v);
   return v;
 }
@@ -214,6 +236,8 @@ export function checkType(name: string, type: string, value: Value) {
     if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${shown(value)}`);
     if (value < range[0] || value > range[1]) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
   } else if (isTime(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a duration, such as T#500ms, got ${shown(value)}`);
+  else if (isDate(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a date, such as D#2024-02-28, got ${shown(value)}`);
+  else if (isTod(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a time of day, such as TOD#08:30:00, got ${shown(value)}`);
   else if (t === "BOOL" && typeof value !== "boolean") throw new SimError(`${name} expects a BOOL (true/false), got ${shown(value)}`);
   else if (/^(W?STRING|W?CHAR)(?:\[\s*\d+\s*\])?$/.test(t)) {
     if (typeof value !== "string") throw new SimError(`${name} is ${type}: expects text, got ${shown(value)}`);
@@ -443,7 +467,9 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
       if (global?.kind === "OBJECT") add(global.name, "is not simulated");
       if (r.access !== "call") continue;
       let type = r.name;
-      let member: Member | undefined = r.kind !== "global" ? g.block.vars.find((v) => v.name.toUpperCase() === r.name.toUpperCase()) ?? global?.gvar?.decl : global?.block?.dbOf ? { name: r.name, type: global.block.dbOf, typeRef: global.block.dbOf, isArray: false } : undefined;
+      // an instruction called by its name (SHL(...)) is the instruction, whatever the block names its variables
+      const instruction = r.kind === "call" && (STANDARD_BY_NAME.has(r.name.toUpperCase()) || SYSTEM_FUNCTIONS.has(r.name.toUpperCase()) || /^\w+_TO_\w+$/i.test(r.name));
+      let member: Member | undefined = instruction ? undefined : r.kind !== "global" ? g.block.vars.find((v) => v.name.toUpperCase() === r.name.toUpperCase()) ?? global?.gvar?.decl : global?.block?.dbOf ? { name: r.name, type: global.block.dbOf, typeRef: global.block.dbOf, isArray: false } : undefined;
       for (const seg of r.members) {
         if (!member) break;
         const hit = seen.membersOf(member).find((m) => m.name.toUpperCase() === seg.name.toUpperCase());
@@ -628,7 +654,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         const actual = target.get();
         if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
         const expected = normalizeExpected(v, target.decl?.type);
-        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
+        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : (isDate(target.decl?.type) || isTod(target.decl?.type)) && typeof expected === "number" ? dateText(expected, target.decl?.type) : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
       }
       return out;
     };
@@ -639,16 +665,23 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       const names = [...own.map((v) => ({ name: v.name, type: v.type })), ...(!isFb && g.block!.returnType && !/^void$/i.test(g.block!.returnType) ? [{ name: g.block!.name, type: g.block!.returnType }] : [])];
       const statics: string[] = [];
       // a value as a test writes it; an array's elements and a structure's members by their paths (arr[1], st.a)
-      const put = (key: string, v: Value, decl: Pick<Member, "type" | "members"> | undefined, isStatic: boolean, depth: number) => {
+      const put = (key: string, v: Value, decl: Pick<Member, "type" | "members"> | undefined, isStatic: boolean, depth: number, sameArray = false) => {
         const type = decl?.type;
         if (typeof v === "number" && isTime(type)) values[key] = `T#${v}ms`;
+        else if (typeof v === "number" && (isDate(type) || isTod(type))) values[key] = dateText(v, type);
         else if (typeof v === "number" && isReal(type)) values[key] = Number(realText(v));
         else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[key] = v;
         else if (depth > 0 && isArrayValue(v) && v.items.length <= 32) {
-          const element = splitArrayType(type ?? "")?.element;
-          v.items.forEach((x, i) => put(`${key}[${v.lo + i}]`, x, element ? { type: element } : undefined, isStatic, depth - 1));
+          const at = splitArrayType(type ?? "");
+          // a further dimension of the same array: grid[0,1], as TIA Portal and tests write it, not grid[0][1]
+          const inner = at && at.dims.length > 1 ? { type: `Array[${at.dims.slice(1).join(", ")}] of ${at.element}`, ...(decl?.members ? { members: decl.members } : {}) } : undefined;
+          // an array of an inline STRUCT: its members are the array's own declaration's (pts[0].x, not pts[0].X)
+          const element = at?.element ? { type: at.element, ...(decl?.members ? { members: decl.members } : {}) } : undefined;
+          v.items.forEach((x, i) => put(sameArray ? `${key.slice(0, -1)},${v.lo + i}]` : `${key}[${v.lo + i}]`, x, inner ?? element, isStatic, inner ? depth : depth - 1, !!inner));
         } else if (depth > 0 && v && typeof v === "object" && !("__fb" in v) && !("__ptr" in v)) {
-          const members = decl?.members ?? seen.membersOf({ type: type ?? "", isArray: false, name: key });
+          // a PLC data type's members by its name without quotes (pt.x, not pt.X)
+          const typeRef = (decl as { typeRef?: string } | undefined)?.typeRef ?? type?.replace(/^"|"$/g, "");
+          const members = decl?.members ?? seen.membersOf({ type: type ?? "", ...(typeRef ? { typeRef } : {}), isArray: false, name: key });
           for (const [mk, mv] of Object.entries(v as Struct)) {
             const m = members.find((x) => x.name.toUpperCase() === mk);
             put(`${key}.${m?.name ?? mk}`, mv, m, isStatic, depth - 1);

@@ -1,0 +1,19 @@
+block: FB_Pump
+cases:
+  - name: start, delay, pressure and alarm
+    steps:
+      - set: { Stop: false, Start: true, Pressure: 2.0 }
+        cycle: 1
+      - set: { Start: false }
+        advance: 1s
+      - advance: 2500ms
+      - set: { Pressure: 6.6 }
+        cycle: 1
+      - set: { Fault: true }
+        cycle: 1
+      - set: { Fault: false }
+        cycle: 1
+      - set: { Start: true }
+        cycle: 1
+      - set: { Stop: true, Start: false }
+        cycle: 1
