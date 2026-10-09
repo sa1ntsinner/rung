@@ -13,6 +13,23 @@ export function lspMonitor(io: Io, open = liveReader): MonitorProvider {
     instances: monitorInstances,
     open: async (uri, plan) => {
       const reader = await open(uri, io);
+      if (reader.subscribe) {
+        let lease: Promise<{ close(): Promise<void> }> | undefined;
+        let stopped = false;
+        return {
+          read: () => readMonitorValues(reader.read, plan),
+          subscribe: (cb) => {
+            lease = reader.subscribe!(plan.vars, 250, (frame) => {
+              if (!stopped) cb({ values: frame.values,
+                errors: frame.state === "stale" || frame.state === "disconnected" ? { ...Object.fromEntries(Object.keys(plan.vars).map(name => [name, `PLC ${frame.state}`])), ...frame.errors } : frame.errors,
+                ...(frame.display ? { display: frame.display } : {}) });
+            });
+            void lease.catch(() => { if (!stopped) cb({ values: {}, errors: Object.fromEntries(Object.keys(plan.vars).map((name) => [name, "subscription failed"])) }); });
+            return () => { stopped = true; };
+          },
+          close: async () => { stopped = true; try { await (await lease)?.close(); } finally { await reader.close(); } },
+        };
+      }
       return { read: () => readMonitorValues(reader.read, plan), close: () => reader.close() };
     },
     error: liveError,

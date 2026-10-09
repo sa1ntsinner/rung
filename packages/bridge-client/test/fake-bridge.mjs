@@ -17,6 +17,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   const fail = (code, message) => out({ id: req.id, error: { code, message } });
   if (mode === "hang-hello") return;
   switch (req.method) {
+    case "online.commit":
+      return;
     case "bridge.hello":
       reply({ protocol: mode === "protocol2" ? 2 : 1, tiaVersion: "V20", bridgeVersion: "fake", capabilities: ["export"] });
       if (mode === "crash-after-hello") setTimeout(() => process.exit(3), 20);

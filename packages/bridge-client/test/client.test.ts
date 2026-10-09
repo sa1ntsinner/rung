@@ -25,6 +25,24 @@ afterEach(async () => {
 });
 
 describe("BridgeClient", () => {
+  it("passes startup policy privately before the RPC handshake", async () => {
+    const bootstrap = { workspace: "fixture", allowWrites: false, text: "line\nnext" };
+    const c = await spawn({ command: process.execPath, args: [fileURLToPath(new URL("./bootstrap-bridge.mjs", import.meta.url))], bootstrap, requestTimeoutMs: 500 });
+    expect(await c.request("test.bootstrap", {})).toEqual(bootstrap);
+    expect(c.sentMethods).toEqual(["bridge.hello", "test.bootstrap"]);
+  });
+  it("notifies event consumers when the host exits", async () => {
+    const c = await spawn(fake("crash-after-hello"));
+    const events: string[] = [];
+    c.onEvent(e => events.push(e.event));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(events).toContain("exit");
+  });
+  it("reports an online commit timeout as unknown and sends it once", async () => {
+    const c = await spawn(fake("ok", { requestTimeoutMs: 300 }));
+    await expect(c.request("online.commit", { operationId: "op" })).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
+    expect(c.sentMethods.filter((m) => m === "online.commit")).toHaveLength(1);
+  });
   it("handshakes and lists", async () => {
     const c = await spawn(fake("ok"));
     expect(c.info.tiaVersion).toBe("V20");

@@ -31,6 +31,8 @@ import {
 export interface BridgeClientOptions {
   command: string;
   args?: string[];
+  /** One private JSON startup frame before hello, only for hosts launched in a bootstrap mode. */
+  bootstrap?: Record<string, unknown>;
   /** Merged over the parent environment. */
   env?: Record<string, string>;
   /** Default 120 s. A timed-out mutation rejects with OUTCOME_UNKNOWN and is never replayed. */
@@ -59,7 +61,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download", "plc.upload", "session.release"]);
+const MUTATIONS = new Set(["objects.import", "objects.delete", "objects.rename", "plc.download", "plc.upload", "session.release", "online.commit"]);
 const MAX_NOISE = 200;
 const MAX_MALFORMED = 50;
 
@@ -85,6 +87,7 @@ export class BridgeClient {
         if (this.exited) return;
         this.exited = true;
         this.failAll(new BridgeError(ErrorCodes.BRIDGE_EXITED, "rung-bridge exited"));
+        this.emit({ event: "exit", params: {} });
         // the TIA Portal the bridge started inherits its pipes and may keep them open: let go of them, or this
         // process waits for that TIA Portal to end
         setTimeout(() => [child.stdout, child.stderr, child.stdin].forEach((s) => s.destroy()), 1000).unref();
@@ -119,6 +122,11 @@ export class BridgeClient {
       ...(opts.onSlowStart ? { onSlowStart: opts.onSlowStart, slowStartMs: opts.slowStartMs ?? 10_000 } : {}),
     });
     try {
+      if (opts.bootstrap) {
+        const initial = JSON.stringify(opts.bootstrap);
+        if (Buffer.byteLength(initial) > (opts.maxLineBytes ?? 64 * 1024 * 1024)) throw new BridgeError(ErrorCodes.RESOURCE_LIMIT, "Startup frame too large");
+        child.stdin.write(initial + "\n");
+      }
       const hello = (await client.request("bridge.hello", {})) as HelloResult;
       if (hello?.protocol !== PROTOCOL_VERSION)
         throw new BridgeError(ErrorCodes.PROTOCOL_MISMATCH, `bridge speaks protocol ${hello?.protocol}, expected ${PROTOCOL_VERSION}`);
@@ -152,7 +160,7 @@ export class BridgeClient {
         this.pending.delete(id);
         reject(
           mutation
-            ? new BridgeError(ErrorCodes.OUTCOME_UNKNOWN, `${method} timed out; it may or may not have been applied in TIA Portal`)
+            ? new BridgeError(ErrorCodes.OUTCOME_UNKNOWN, `${method} timed out; its outcome is unknown`)
             : new BridgeError(ErrorCodes.TIMEOUT, `${method} timed out after ${timeoutMs} ms`),
         );
       }, timeoutMs);

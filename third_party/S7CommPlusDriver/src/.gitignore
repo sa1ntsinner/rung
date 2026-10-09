@@ -1,0 +1,14 @@
+## Ignore Visual Studio temporary files and build results
+
+# User-specific files
+*.suo
+*.user
+.vs/
+.editorconfig
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+build/

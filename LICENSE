@@ -16,3 +16,9 @@ every source file carries an SPDX-License-Identifier header.
   commercial product and not part of this repository.
 
 See docs/faq.md for what this means in practice.
+
+S7CommPlusDriver under third_party/ is LGPL-3.0-or-later (its original notices
+and LICENSE remain). Its distributed DLL can be modified and replaced, and
+reverse engineering the combined work to debug those library modifications is
+permitted regardless of other component restrictions. Release source and
+replacement instructions accompany the DLL; see tools/online/REPLACEMENT.md.

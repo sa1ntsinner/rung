@@ -13,10 +13,12 @@ export interface MonitorPlan {
 export interface MonitorValues {
   values: Record<string, unknown>;
   errors: Record<string, string>;
+  display?: Record<string, string>;
 }
 
 export interface MonitorReader {
   read(): Promise<MonitorValues>;
+  subscribe?(onValues: (values: MonitorValues) => void): () => void;
   close(): Promise<void>;
 }
 
@@ -38,6 +40,7 @@ interface Session {
   latest?: MonitorValues;
   reading?: Promise<MonitorValues>;
   timer?: NodeJS.Timeout;
+  unsubscribe?: () => void;
 }
 
 export class Monitoring {
@@ -85,7 +88,12 @@ export class Monitoring {
       if (this.session !== session) return; // stop() closes it
       session.plan = plan;
       session.reader = reader;
-      await this.read(session);
+      if (reader.subscribe) session.unsubscribe = reader.subscribe((latest) => {
+        if (this.session !== session) return;
+        session.latest = latest;
+        this.refresh();
+      });
+      else await this.read(session);
     } catch (error) {
       this.failed(session, error);
     }
@@ -115,6 +123,7 @@ export class Monitoring {
     if (!session || (uri && session.uri !== uri)) return;
     this.session = undefined;
     clearTimeout(session.timer);
+    session.unsubscribe?.();
     const closed = this.close(session).catch(() => undefined);
     this.closing.add(closed);
     void closed.then(() => this.closing.delete(closed));
@@ -147,7 +156,7 @@ export class Monitoring {
       if (n < range.start.line || n > range.end.line ||
         (n === range.start.line && position.character < range.start.character) ||
         (n === range.end.line && position.character > range.end.character)) return [];
-      return [{ position, label: lineText(labels, session.latest!.values, session.latest!.errors), paddingLeft: true }];
+      return [{ position, label: lineText(labels, session.latest!.values, session.latest!.errors, session.latest!.display), paddingLeft: true }];
     });
   }
 }

@@ -29,12 +29,20 @@ export function killTree(child: ChildProcess): void {
   else child.kill("SIGINT");
 }
 
+/** Read-only live clients release their lease on EOF; killing their tree also kills a shared broker. */
+export function stopLive(child: ChildProcess): void {
+  if (child.exitCode !== null) return;
+  child.stdin?.end();
+  const timer = setTimeout(() => killTree(child), 2000); timer.unref();
+  child.once("exit", () => clearTimeout(timer));
+}
+
 /** Starts a child process and collects its output. */
-export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void, env: Record<string, string> = {}): { child: ChildProcess; done: Promise<RunResult> } {
+export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void, env: Record<string, string> = {}, parentStdio = false): { child: ChildProcess; done: Promise<RunResult> } {
   const child = spawn(inv.file, inv.args, {
     cwd,
     env: { ...process.env, FORCE_COLOR: "0", ...env },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [parentStdio ? "pipe" : "ignore", "pipe", "pipe"],
     windowsHide: true,
     windowsVerbatimArguments: inv.shell,
   });

@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 import { formatValue, lineText, readError, rowValues } from "../src/core/monitorText";
 
 describe("monitoring text", () => {
+  it("preserves typed REAL zero in inline and declaration values while integers stay integers", () => {
+    const values = { speed: 0, count: 0, "samples[0]": 0 };
+    const display = { speed: "0.0", "samples[0]": "0.0" };
+    expect(lineText(["speed", "count"], values, {}, display)).toBe("speed = 0.0   count = 0");
+    expect(lineText(["speed"], values, { speed: "unreadable" }, display)).toBe("speed = ?");
+    expect(rowValues([{ rows: [{ id: "s", name: "speed" }, { id: "c", name: "count" }, { id: "a", name: "samples" }] }],
+      { vars: { speed: "x", count: "y", "samples[0]": "z" } }, values, {}, display)).toEqual({ s: "0.0", c: "0", a: "[0.0]" });
+  });
   it("reads like TIA Portal's monitoring: TRUE/FALSE, short reals, quoted strings", () => {
     expect([true, false, 42, 12.345678901, 1e-7, "on", undefined].map(formatValue)).toEqual(["TRUE", "FALSE", "42", "12.3457", "1e-7", "'on'", "…"]);
   });

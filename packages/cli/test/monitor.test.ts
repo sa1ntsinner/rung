@@ -7,6 +7,15 @@ const fb = (name: string, input: string) => `FUNCTION_BLOCK "${name}"\n   VAR_IN
 const db = (name: string, of: string) => `DATA_BLOCK "${name}"\n"${of}"\nBEGIN\nEND_DATA_BLOCK\n`;
 
 describe("monitoring a DB", () => {
+  it("reports instance choices as structured error details", () => {
+    const idx = new WorkspaceIndex(), uri = "file:///w/plc/P/blocks/Motor.scl";
+    idx.set(uri, fb("Motor", "Run"), 0);
+    idx.set("file:///w/plc/P/blocks/A.db", db("A", "Motor"), 0);
+    idx.set("file:///w/plc/P/blocks/B.db", db("B", "Motor"), 0);
+    let error: unknown;
+    try { monitorPlan(idx, uri); } catch (e) { error = e; }
+    expect(error).toMatchObject({ code: "NO_INSTANCE", details: { instances: ["A", "B"] } });
+  });
   it("reads the members of its STRUCTs too, each on its own line, labelled with its path", () => {
     const idx = new WorkspaceIndex();
     const text = 'DATA_BLOCK "Line_DB"\n   VAR \n      Ready : Bool;\n      Motor : Struct\n         Speed : Int;\n         "Set point" : Real;\n      END_STRUCT;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n';

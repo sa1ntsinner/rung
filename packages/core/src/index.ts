@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 export const RUNG_FORMAT_VERSION = 1 as const;
+export type { LivePlcConfig, LiveWebApiConfig } from "./config.js";
 
 export { AddressError, escapeSegment, unescapeSegment, leafSegment, splitLeaf } from "./escape.js";
 export {

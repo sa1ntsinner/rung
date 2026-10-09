@@ -9,7 +9,7 @@
 //   RUNG_PROJECT=<.ap20>                the fixture (default %USERPROFILE%\rung-fixtures\RungFixture\RungFixture.ap20)
 //   VSCODE_EXE=<Code.exe>               VS Code to run (default: the installed one, else downloaded)
 //   RUNG_E2E_KEEP=1                     keep the temp folders
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -62,8 +62,9 @@ async function runSuite(name: string, folder: string, base: string, env: Record<
       ...(code ? { vscodeExecutablePath: code } : {}),
       extensionDevelopmentPath: extensionDir,
       extensionTestsPath: join(__dirname, "suite", "index.js"),
-      launchArgs: [folder, "--user-data-dir", userDir, "--extensions-dir", extensionsDir, "--disable-extensions", "--disable-workspace-trust", "--skip-welcome", "--skip-release-notes", "--new-window", "--disable-gpu"],
-      extensionTestsEnv: { ...env, RUNG_E2E_SUITE: name, RUNG_E2E_REPO: repo, ...(process.env.RUNG_E2E_GREP ? { RUNG_E2E_GREP: process.env.RUNG_E2E_GREP } : {}) },
+      launchArgs: [folder, "--user-data-dir", userDir, "--extensions-dir", extensionsDir, "--disable-extensions", "--disable-workspace-trust", "--skip-welcome", "--skip-release-notes", "--new-window", "--disable-gpu",
+        ...(name === "online" && process.env.RUNG_E2E_RENDERER_PORT ? [`--remote-debugging-port=${Number(process.env.RUNG_E2E_RENDERER_PORT)}`, "--remote-debugging-address=127.0.0.1"] : [])],
+      extensionTestsEnv: { ...env, RUNG_E2E_SUITE: name, RUNG_E2E_REPO: repo, ...(process.env.RUNG_E2E_RENDERER_PORT ? { RUNG_E2E_RENDERER_PORT: process.env.RUNG_E2E_RENDERER_PORT } : {}), ...(process.env.RUNG_E2E_GREP ? { RUNG_E2E_GREP: process.env.RUNG_E2E_GREP } : {}) },
     });
     return true;
   } catch (e) {
@@ -117,6 +118,16 @@ async function main(): Promise<void> {
     if (suites.includes("fake")) {
       const fake = createFakeWorkspace(repo, base);
       ok = (await runSuite("fake", fake.dir, base, { ...fake.env, RUNG_E2E_OBJECTS: fake.objects })) && ok;
+    }
+    if (suites.includes("online")) {
+      const pin = process.env.RUNG_TEST_CERT_SHA256;
+      if (process.platform !== "win32" || !/^[a-fA-F0-9]{64}$/.test(pin ?? "")) throw new Error("online suite requires Windows and an explicitly approved RungProve pin");
+      const gate = spawnSync("powershell.exe", ["-NoProfile", "-File", join(repo, "tools/online/plcsim-check.ps1")], { encoding: "utf8", windowsHide: true });
+      if (gate.status !== 0) throw new Error(`Fixture identity refused: ${gate.stderr}`);
+      const online = createFakeWorkspace(repo, base); // Project-tree fixture only; live values use the actual native host.
+      const toml = join(online.dir, "rung.toml");
+      writeFileSync(toml, readFileSync(toml, "utf8") + `\n[live.plc.PLC_1]\ntransport = "s7commplus"\naddress = "192.168.250.1"\ncertificate_sha256 = "${pin}"\nallow_writes = false\n`);
+      ok = (await runSuite("online", online.dir, base, { ...online.env, RUNG_ONLINE_HOST: join(repo, "bridge/src/Rung.Online/bin/Release/net10.0/win-x64/publish/rung-online.exe") })) && ok;
     }
     if (suites.includes("tia")) {
       const { folder, why } = tiaWorkspace(base);

@@ -356,10 +356,14 @@ describe("rung extension on a fake-bridge workspace", function () {
         process.env.RUNG_WEBAPI_PASSWORD = "x";
         const ed = await openDoc(PUMP);
         const saved = readFileSync(file(PUMP).fsPath, "utf8");
-        // an unsaved line above the code: monitoring asks before it saves (a save goes to TIA Portal under watch), so
-        // the values stay on their statements
+        // Starting monitoring must never save an edited file (a save may import it through watch).
         await ed.edit((e) => e.insert(new vscode.Position(0, 0), "// monitored\n"));
-        d.answer("Save and Monitor");
+        await api.monitor.toggle(ed.document.uri);
+        assert.equal(ed.document.isDirty, true);
+        assert.equal(readFileSync(file(PUMP).fsPath, "utf8"), saved);
+        assert.equal(api.monitor.monitoring, undefined);
+        assert.ok(!d.of("warning").at(-1)?.items.includes("Save and Monitor"));
+        await vscode.commands.executeCommand("workbench.action.files.revert");
         void api.monitor.toggle(ed.document.uri);
         await waitFor("two reads", () => api.monitor.reads >= 2 || undefined, 30_000, 200);
         assert.equal(ed.document.isDirty, false);

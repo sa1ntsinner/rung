@@ -4,6 +4,11 @@ import { Recorder, formatted, recordingAsTest } from "../src/core/recording";
 import { testModel } from "@rung/lsp";
 
 describe("Live Values formats", () => {
+  it("keeps the PLC decimal display for REAL zero and retains explicit integer formats", () => {
+    expect(formatted(0, "dec", "0.0")).toBe("0.0");
+    expect(formatted(0)).toBe("0");
+    expect(formatted(255, "hex", "255")).toBe("16#FF");
+  });
   it("shows integers as TIA Portal does in hex and binary, two's complement for negatives", () => {
     expect([formatted(255, "hex"), formatted(5, "bin"), formatted(-1, "hex"), formatted(70000, "hex"), formatted(255)]).toEqual(["16#FF", "2#0000_0101", "16#FF", "16#00011170", "255"]);
     expect([formatted(true, "hex"), formatted(2.5, "hex"), formatted("on", "bin"), formatted(undefined)]).toEqual(["TRUE", "2.5", "'on'", "…"]);

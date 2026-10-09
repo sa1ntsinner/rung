@@ -35,6 +35,11 @@ user = "rung"
 const conn = { mode: "PN/IE", pcInterface: "Intel(R) Ethernet", pcInterfaceNumber: 1, targetInterface: "1 X1" };
 
 describe("parseRungToml", () => {
+  it("reads per-PLC native and Web API monitoring targets", () => {
+    const c = parseRungToml(`${toml}\n[live.plc.PLC_1]\ntransport = "s7commplus"\naddress = "192.168.250.1"\nuser = "engineer"\ncertificate_sha256 = "${"A".repeat(64)}"`);
+    expect(c).toHaveProperty("live.plc.PLC_1", { transport: "s7commplus", address: "192.168.250.1", user: "engineer", certificateSha256: "A".repeat(64) });
+    expect(c).toHaveProperty("live.webapi", { url: "https://192.168.0.1", user: "rung" });
+  });
   it("reads devices, connections and download defaults", () => {
     const c = parseRungToml(toml);
     expect(c.devices).toEqual(["PLC_1"]);

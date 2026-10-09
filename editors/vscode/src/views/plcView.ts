@@ -5,12 +5,18 @@ import * as vscode from "vscode";
 import type { OnlineMonitor } from "../online";
 import type { WatchController } from "../runner/watch";
 import type { RungWorkspace } from "../workspace";
+import type { RungCli } from "../runner/cli";
+import type { LiveAccess } from "../liveAccess";
+import { stopLive, startProcess } from "../runner/terminal";
+import type { ChildProcess } from "node:child_process";
 
 type Node =
   | { type: "watch" }
   | { type: "writes" }
   | { type: "plc"; device: string }
-  | { type: "connection"; device: string };
+  | { type: "connection"; device: string }
+  | { type: "state" | "alarms"; device: string }
+  | { type: "detail"; device: string; text: string };
 
 
 const STATE_ICON: Readonly<Record<string, [string, string | undefined]>> = {
@@ -42,31 +48,98 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
   readonly onDidChangeTreeData = this.changed.event;
   readonly view: vscode.TreeView<PlcItem>;
   private readonly subs: vscode.Disposable[] = [];
+  private readonly alarmJobs = new Map<string, ChildProcess>();
+  private readonly alarmOpening = new Set<string>();
+  private readonly alarmExpanded = new Set<string>();
+  private readonly alarmRows = new Map<string, { alarms: { id: string; active: boolean; text: string; cpuTimestamp?: string; receivedAt: number }[]; connectionState?: string; scope: { address: string } }>();
+  private readonly alarmErrors = new Map<string, string>();
+  private generation = 0;
 
   constructor(
     private readonly ws: RungWorkspace,
     private readonly online: OnlineMonitor,
     private readonly watch: WatchController,
+    private readonly cli?: RungCli,
+    private readonly access?: LiveAccess,
   ) {
     this.view = vscode.window.createTreeView("rung.plc", { treeDataProvider: this });
     const fire = () => this.changed.fire(undefined);
     this.subs.push(this.view, ws.onDidChange(fire), online.onDidChange(fire), watch.onDidChange(fire));
+    if (cli && access) {
+      let workspace = access.scope;
+      this.subs.push(ws.onDidChange(() => { if (workspace !== access.scope) { workspace = access.scope; this.stopAlarms(); this.alarmRows.clear(); this.alarmErrors.clear(); fire(); } }),
+        this.view.onDidChangeVisibility(() => { if (!this.view.visible) this.stopAlarms(); else fire(); }),
+        online.onDidChange(() => { this.alarmErrors.clear(); fire(); }),
+        this.view.onDidExpandElement(({ element }) => { if (element.node.type === "alarms") { this.alarmExpanded.add(element.node.device); void this.startAlarms(element.node.device); } }),
+        this.view.onDidCollapseElement(({ element }) => { if (element.node.type === "alarms") { this.alarmExpanded.delete(element.node.device); const child = this.alarmJobs.get(element.node.device); if (child) stopLive(child); this.alarmJobs.delete(element.node.device); } }));
+    }
   }
 
   getTreeItem(e: PlcItem): vscode.TreeItem {
     return e;
   }
 
-  getChildren(e?: PlcItem): PlcItem[] {
+  getChildren(e?: PlcItem): PlcItem[] | Promise<PlcItem[]> {
     if (!this.ws.hasConfig) return [];
     if (!e) return [this.watchItem(), this.writesItem(), ...this.ws.devices().map((d) => this.plcItem(d))];
     if (e.node.type === "plc") {
       const d = e.node.device;
       // the actions are the row's inline buttons and context menu (and the rung quick pick), not rows of their own
-      return [this.connectionItem(d)];
+      return [this.connectionItem(d), ...(this.cli && this.ws.config?.live?.plc[d]?.transport === "s7commplus" ? [
+        new PlcItem({ type: "state", device: d }, "CPU diagnostics", vscode.TreeItemCollapsibleState.Collapsed),
+        new PlcItem({ type: "alarms", device: d }, "PLC alarms", vscode.TreeItemCollapsibleState.Collapsed),
+      ] : [])];
+    }
+    if (e.node.type === "state") return this.cpuDetails(e.node.device);
+    if (e.node.type === "alarms") {
+      const d = e.node.device; void this.startAlarms(d);
+      const frame = this.alarmRows.get(d);
+      if (!frame) return [this.detail(d, this.alarmErrors.get(d) ?? "Reading PLC alarms…")];
+      // ponytail: tree shows 200 rows; the CLI JSON snapshot exposes the complete bounded set.
+      const rows = frame.alarms.slice(0, 200).map(a => this.detail(d, `${a.active ? "ACTIVE" : "CLEARED"} ${a.id} · ${a.text}`, `CPU: ${a.cpuTimestamp ?? "unavailable"}\nReceived: ${new Date(a.receivedAt).toLocaleString()}\n${frame.scope.address} · ${frame.connectionState ?? "connected"}`));
+      return [this.detail(d, `${frame.connectionState ?? "connected"} · ${frame.scope.address}`), ...(rows.length ? rows : [this.detail(d, "No active alarms")]), ...(frame.alarms.length > 200 ? [this.detail(d, `${frame.alarms.length - 200} more; use rung live alarms --json`)] : [])];
     }
     return [];
   }
+
+  private detail(device: string, text: string, tooltip?: string): PlcItem {
+    const item = new PlcItem({ type: "detail", device, text }, text, vscode.TreeItemCollapsibleState.None);
+    item.tooltip = tooltip ?? text; return item;
+  }
+  private async cpuDetails(device: string): Promise<PlcItem[]> {
+    const connection = await this.access?.select(device); if (!connection || !this.cli) return [];
+    const env = await this.access!.environment(connection); if (!env) return [];
+    const result = await this.cli.capture(["live", "state", "--device", device, "--json"], { env, quiet: true, timeoutMs: 30_000 });
+    if (connection.workspace !== this.access!.scope) return [];
+    try {
+      if (result.code !== 0) throw new Error();
+      const frame = JSON.parse(result.output) as { scope: { address: string }; identity: { plcName: string; cpu: string; serial: string }; state: { mode: string; cycleMs?: number; memory?: { name: string; usedBytes: number; totalBytes: number }[] } };
+      return [this.detail(device, `${frame.state.mode} · ${frame.scope.address}`), this.detail(device, `${frame.identity.plcName} · ${frame.identity.cpu} · ${frame.identity.serial}`),
+        this.detail(device, frame.state.cycleMs == null ? "Cycle unavailable" : `Cycle: ${frame.state.cycleMs} ms`),
+        ...(frame.state.memory?.map(m => this.detail(device, `${m.name}: ${m.usedBytes}/${m.totalBytes} bytes`)) ?? [this.detail(device, "Memory unavailable")])];
+    } catch { return [this.detail(device, "CPU diagnostics unavailable; see rung output")]; }
+  }
+  private async startAlarms(device: string): Promise<void> {
+    if (!this.cli || !this.access || !this.view.visible || !this.alarmExpanded.has(device) || this.alarmJobs.has(device) || this.alarmOpening.has(device) || this.alarmErrors.has(device)) return;
+    this.alarmOpening.add(device); const generation = this.generation;
+    try {
+      const connection = await this.access.select(device); if (!connection) return;
+      const env = await this.access.environment(connection); if (!env || generation !== this.generation || !this.alarmExpanded.has(device) || connection.workspace !== this.access.scope || !this.view.visible) return;
+      let partial = "";
+      const { child, done } = startProcess(this.cli.invocation(["live", "alarms", "--device", device, "--stream", "--json", "--parent-stdio"]), this.ws.root, chunk => {
+        if (generation !== this.generation) return;
+        partial += chunk; if (partial.length > 2 * 1024 * 1024) { stopLive(child); return; }
+        let end: number;
+        while ((end = partial.indexOf("\n")) >= 0) {
+          const line = partial.slice(0, end); partial = partial.slice(end + 1);
+          try { const frame = JSON.parse(line); if (Array.isArray(frame.alarms) && frame.scope?.device === device) { this.alarmRows.set(device, frame); this.changed.fire(undefined); } } catch { }
+        }
+      }, env, true);
+      this.alarmJobs.set(device, child);
+      void done.then(result => { if (this.alarmJobs.get(device) !== child) return; this.alarmJobs.delete(device); this.alarmErrors.set(device, result.code ? "PLC alarms unavailable; see rung output" : "Alarm stream disconnected"); this.changed.fire(undefined); });
+    } finally { this.alarmOpening.delete(device); }
+  }
+  private stopAlarms(): void { this.generation++; for (const child of this.alarmJobs.values()) stopLive(child); this.alarmJobs.clear(); }
 
   private watchItem(): PlcItem {
     const status = this.watch.status;
@@ -145,6 +218,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
   }
 
   dispose(): void {
+    this.stopAlarms();
     for (const s of this.subs) s.dispose();
     this.changed.dispose();
   }

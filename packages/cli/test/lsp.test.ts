@@ -9,11 +9,14 @@ import { WorkspaceIndex } from "@rung/lsp";
 import { monitorServer, until } from "../../lsp/test/monitorHarness.js";
 import { main } from "../src/main.js";
 import * as lsp from "../src/lsp.js";
+import { startLiveServer } from "../src/liveServer.js";
 import type { Io } from "../src/common.js";
 
 const servers: Awaited<ReturnType<typeof monitorServer>>[] = [];
+const brokers: Awaited<ReturnType<typeof startLiveServer>>[] = [];
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.dispose();
+  for (const broker of brokers.splice(0)) await broker.close();
   vi.restoreAllMocks();
 });
 const io: Io = { cwd: ".", env: { RUNG_WEBAPI_PASSWORD: "secret" }, stdout: () => {}, stderr: () => {} };
@@ -25,6 +28,7 @@ async function boot(options: { url?: string; password?: boolean; webapi?: boolea
       const config = defaultConfig("fixture.ap20", "V20", "", ["PLC_1"]);
       if (options.webapi !== false) config.live = { webapi: { url: options.url ?? "https://plc.example", user: "reader" } };
       await saveConfig(root, config);
+      brokers.push(await startLiveServer(root, options.password === false ? {} : io.env));
       for (const name of ["Motor1_DB", "Motor2_DB"])
         await writeFile(join(root, "plc", "PLC_1", "blocks", name + ".db"), 'DATA_BLOCK "' + name + '"\n"Motor"\nBEGIN\nEND_DATA_BLOCK\n');
     },
@@ -34,6 +38,41 @@ async function boot(options: { url?: string; password?: boolean; webapi?: boolea
 }
 
 describe("rung lsp monitoring wiring", () => {
+  it("marks retained native values unreadable while reconnecting or disconnected", async () => {
+    let push!: (frame: any) => void;
+    const provider = lsp.lspMonitor(io, async () => ({ read: async () => [], close: async () => {},
+      subscribe: async (_labels, _cycle, cb) => { push = cb; return { close: async () => {} }; },
+    }));
+    const reader = await provider.open("file:///test.scl", { block: "X", vars: { speed: "wire" }, lines: {} });
+    let latest: any;
+    reader.subscribe!(frame => { latest = frame; });
+    for (const state of ["stale", "disconnected"]) {
+      push({ values: { speed: 0 }, errors: {}, display: { speed: "0.0" }, state });
+      expect(latest.errors.speed).toContain(state);
+    }
+    push({ values: { speed: 0 }, errors: {}, display: { speed: "0.0" }, state: "live" });
+    expect(latest.errors).toEqual({});
+    await reader.close();
+  });
+  it("maps subscription wire names to frontend labels and closes an opening lease", async () => {
+    let cb!: (frame: any) => void;
+    let resolveLease!: (lease: { close(): Promise<void> }) => void;
+    const close = vi.fn(async () => {}), closeLease = vi.fn(async () => {});
+    const provider = lsp.lspMonitor(io, async () => ({ read: async () => [], close,
+      subscribe: async (_labels: Record<string, string>, _cycle: number, onFrame: (frame: any) => void) => { cb = onFrame; return new Promise((resolve) => { resolveLease = resolve; }); },
+    }));
+    const reader = await provider.open("file:///test.scl", { block: "X", vars: { label: "wire" }, lines: {} });
+    let values: unknown;
+    const stop = reader.subscribe!((frame) => { values = frame; });
+    cb({ values: { label: 0 }, errors: {}, display: { label: "0.0" } });
+    expect(values).toEqual({ values: { label: 0 }, errors: {}, display: { label: "0.0" } });
+    stop();
+    const closed = reader.close();
+    resolveLease({ close: closeLease });
+    await closed;
+    expect(closeLease).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it("the lsp command injects the monitoring entry point with its environment", async () => {
     const started = vi.spyOn(lsp, "startLsp").mockImplementation(() => { throw new Error("started"); });
     await expect(main(["lsp", "--stdio"], io)).rejects.toThrow("started");
@@ -47,12 +86,15 @@ describe("rung lsp monitoring wiring", () => {
     const actions = await s.actions();
     expect(actions.map((action) => action.title)).toEqual(['Monitor values through "Motor1_DB"', 'Monitor values through "Motor2_DB"']);
     await s.execute(actions[1]!);
-    expect(read).toHaveBeenCalledWith(['"Motor2_DB".count', '"Motor2_DB".flag', '"Motor2_DB".count']);
+    await until(() => read.mock.calls.length > 0);
+    await until(() => s.refreshes.length > 0);
+    expect(read).toHaveBeenCalledWith(['"Motor2_DB".count', '"Motor2_DB".flag']);
     expect((await s.hints()).map((hint) => ({ line: hint.position.line, label: hint.label }))).toEqual([
       { line: 2, label: "count = 7" }, { line: 3, label: "flag = TRUE" }, { line: 6, label: "count = 7" },
     ]);
     await s.execute((await s.actions())[0]!);
-    expect(logout).toHaveBeenCalledTimes(1);
+    // The broker keeps its shared read session warm until idle shutdown.
+    expect(logout).not.toHaveBeenCalled();
     expect(await s.hints()).toEqual([]);
   });
 
@@ -70,15 +112,15 @@ describe("rung lsp monitoring wiring", () => {
     expect(await s.hints()).toEqual([]);
   });
 
-  it("preserves the live command's unreachable PLC wording", async () => {
+  it("keeps a failed pushed Web API subscription visible for recovery", async () => {
     vi.spyOn(WebApiClient.prototype, "read").mockRejectedValue(Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED" } }));
     const logout = vi.spyOn(WebApiClient.prototype, "logout").mockResolvedValue(undefined);
     const s = await boot();
     await s.execute((await s.actions())[0]!);
-    await until(() => s.messages.length === 1);
-    expect(s.messages[0]!.message).toBe("the PLC refused the connection (web server off?) (ECONNREFUSED)");
-    expect(logout).toHaveBeenCalledTimes(1);
-    expect(await s.hints()).toEqual([]);
+    await until(() => s.refreshes.length > 0);
+    expect(s.messages).toEqual([]);
+    expect((await s.hints())[0]!.label).toBe("count = ?");
+    expect(logout).not.toHaveBeenCalled();
   });
 
   it("a single instance offers Monitor values and an IEC plan uses PROGRAM instance paths", async () => {

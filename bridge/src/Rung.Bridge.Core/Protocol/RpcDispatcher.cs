@@ -16,13 +16,7 @@ namespace Rung.Bridge.Core.Protocol
     /// </summary>
     public sealed class RpcDispatcher
     {
-        public static readonly JsonSerializerOptions Json = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            IncludeFields = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        };
+        public static readonly JsonSerializerOptions Json = RpcWire.Json;
 
         readonly Func<ITiaSession> _factory;
         readonly BridgeInfo _info;
@@ -256,47 +250,8 @@ namespace Rung.Bridge.Core.Protocol
             return list.ToArray();
         }
 
-        static string Error(bool hasId, JsonElement id, string code, string message) =>
-            Write(hasId, id, w =>
-            {
-                w.WritePropertyName("error");
-                w.WriteStartObject();
-                w.WriteString("code", code);
-                w.WriteString("message", message ?? "");
-                w.WriteEndObject();
-            });
-
-        static string Write(bool hasId, JsonElement id, Action<Utf8JsonWriter> body)
-        {
-            using (var ms = new MemoryStream())
-            {
-                using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
-                {
-                    w.WriteStartObject();
-                    w.WritePropertyName("id");
-                    if (hasId) id.WriteTo(w); else w.WriteNullValue();
-                    body(w);
-                    w.WriteEndObject();
-                }
-                return new UTF8Encoding(false).GetString(ms.ToArray());
-            }
-        }
-
-        /// <summary>Serializes an unsolicited event line: {"event": name, "params": ...}.</summary>
-        public static string Event(string name, object parameters)
-        {
-            using (var ms = new MemoryStream())
-            {
-                using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
-                {
-                    w.WriteStartObject();
-                    w.WriteString("event", name);
-                    w.WritePropertyName("params");
-                    JsonSerializer.Serialize(w, parameters, parameters?.GetType() ?? typeof(object), Json);
-                    w.WriteEndObject();
-                }
-                return new UTF8Encoding(false).GetString(ms.ToArray());
-            }
-        }
+        static string Error(bool hasId, JsonElement id, string code, string message) => RpcWire.Error(hasId, id, code, message);
+        static string Write(bool hasId, JsonElement id, Action<Utf8JsonWriter> body) => RpcWire.Write(hasId, id, body);
+        public static string Event(string name, object parameters) => RpcWire.Event(name, parameters);
     }
 }

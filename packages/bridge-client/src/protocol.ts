@@ -4,6 +4,16 @@
 export const PROTOCOL_VERSION = 1;
 
 export const ErrorCodes = {
+  TLS_UNSUPPORTED: "TLS_UNSUPPORTED",
+  AUTHENTICATION_REQUIRED: "AUTHENTICATION_REQUIRED",
+  AUTHENTICATION_FAILED: "AUTHENTICATION_FAILED",
+  CERTIFICATE_UNTRUSTED: "CERTIFICATE_UNTRUSTED",
+  SYMBOL_NOT_FOUND: "SYMBOL_NOT_FOUND",
+  SYMBOL_AMBIGUOUS: "SYMBOL_AMBIGUOUS",
+  RESOURCE_LIMIT: "RESOURCE_LIMIT",
+  WRITES_DISABLED: "WRITES_DISABLED",
+  STALE_PREPARATION: "STALE_PREPARATION",
+  TARGET_REFUSED: "TARGET_REFUSED",
   TIA_NOT_RUNNING: "TIA_NOT_RUNNING",
   AMBIGUOUS_PORTAL: "AMBIGUOUS_PORTAL",
   NO_PROJECT: "NO_PROJECT",
@@ -38,6 +48,51 @@ export const ErrorCodes = {
   TIMEOUT: "TIMEOUT",
   PROTOCOL_MISMATCH: "PROTOCOL_MISMATCH",
 } as const;
+
+export type LiveTransport = "s7commplus" | "webapi";
+export interface LiveScope { device: string; address: string; transport: LiveTransport; epoch: number }
+export interface OnlineConnectRequest { device: string; address: string; certificateSha256: string; user?: string; password?: string }
+export interface OnlineWriterConfiguration { workspace: string; configRevision: string; device: string; address: string; certificateSha256: string; allowWrites: boolean }
+export interface OnlinePreparedWrite { operationId: string; preview: string; expiresAt: number }
+export interface OnlineWriteResult { outcome: "acknowledged" | "rejected" | "unknown"; errorCode?: string | null; observation?: OnlineReadResult | OnlineStateResult }
+export interface OnlineIdentity { cpu: string; firmware: string; serial: string; plcName: string }
+export interface OnlineConnectResult { sessionId: string; scope: LiveScope; identity: OnlineIdentity; capabilities: string[] }
+export interface OnlineSymbol { name: string; datatype: number; readable: boolean; arrayElementCount: number; absoluteAddress?: string | null; writable?: boolean }
+export interface OnlineReadItem {
+  name: string; value?: unknown; type?: string; display?: string; observedAt?: number;
+  error?: string; errorCode?: string;
+}
+export interface OnlineReadResult { at: number; scope: LiveScope; items: OnlineReadItem[]; connectionState?: "connected" | "stale" | "reconnecting" | "disconnected"; errorCode?: string }
+export interface OnlineStateResult { at: number; scope: LiveScope; identity: OnlineIdentity; state: { mode: string; cycleMs?: number | null; memory?: { name: string; totalBytes: number; usedBytes: number }[] | null; unavailable?: string[] | null } }
+export interface OnlineAlarm { id: string; sourceRelationId: number; sourceAlarmId: number; domain: number; messageType: number; rawStates: number;
+  sequence: number; active: boolean; cpuTimestamp?: string | null; receivedAt: number; requestedLcid: number; textLcid?: number | null; text: string }
+export interface OnlineAlarmResult { at: number; scope: LiveScope; lcid: number; alarms: OnlineAlarm[];
+  connectionState?: "connected" | "reconnecting" | "disconnected"; errorCode?: string | null }
+export interface WatchTableRow { key: string; name?: string | null; address?: string | null; displayFormat?: string | null; modifyValue?: string | null; comments: Record<string, string> }
+export interface WatchTableDefinition { name: string; engineeringVersion?: string | null; rows: WatchTableRow[] }
+export interface LiveFrame {
+  at: number; values: Record<string, unknown>; errors: Record<string, string>; scope: LiveScope;
+  observedAt: Record<string, number>; state: "connecting" | "live" | "stale" | "disconnected";
+  types?: Record<string, string>; display?: Record<string, string>;
+}
+/** Reserved contracts; only capability-advertised methods can be invoked. */
+export interface OnlineMethods {
+  "online.watchTable": { params: { xml: string }; result: WatchTableDefinition };
+  "online.connect": { params: OnlineConnectRequest; result: OnlineConnectResult };
+  "online.browse": { params: { sessionId: string; filter?: string; offset?: number; limit?: number }; result: { scope: LiveScope; symbols: OnlineSymbol[]; total: number } };
+  "online.read": { params: { sessionId: string; names: string[] }; result: OnlineReadResult };
+  "online.subscribe": { params: { sessionId: string; names: string[]; cycleMs: number }; result: { subscriptionId: string; snapshot: OnlineReadResult } };
+  "online.unsubscribe": { params: { subscriptionId: string }; result: { unsubscribed: boolean } };
+  "online.state": { params: { sessionId: string }; result: OnlineStateResult };
+  "online.alarms": { params: { sessionId: string; lcid: number; subscribe?: boolean }; result: OnlineAlarmResult | { subscriptionId: string; snapshot: OnlineAlarmResult } };
+  "online.prepare": { params: { sessionId: string; action: "modify" | "run" | "stop"; name?: string; literal?: string }; result: OnlinePreparedWrite };
+  "online.commit": { params: { sessionId: string; operationId: string; preview: string; confirmed: boolean }; result: OnlineWriteResult };
+  "online.disconnect": { params: { sessionId: string }; result: { disconnected: boolean } };
+}
+export type OnlineEvent =
+  | { event: "online.values"; params: OnlineReadResult & { sessionId: string; subscriptionId: string } }
+  | { event: "online.state"; params: OnlineStateResult & { sessionId: string } }
+  | { event: "online.alarms"; params: OnlineAlarmResult & { sessionId: string; subscriptionId: string } };
 
 export const WarningCodes = {
   UNSUPPORTED_UNIT: "UNSUPPORTED_UNIT",

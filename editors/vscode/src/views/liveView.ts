@@ -4,6 +4,7 @@
 // the handful of values that matter, side by side, wherever they live. A flight recorder keeps the last ten minutes of
 // reads with the person's bookmarks, for a CSV to look at later; integers show in decimal, hex or binary.
 import { spawn, type ChildProcess } from "node:child_process";
+import { basename, relative, resolve, sep } from "node:path";
 import * as vscode from "vscode";
 import { sparkline } from "../core/sparkline";
 import { Recorder, formatted, recordingAsTest, type Format, type Role } from "../core/recording";
@@ -11,19 +12,17 @@ import { readError } from "../core/monitorText";
 import type { Lsp } from "../lsp";
 import type { DeclModel, DeclRow } from "../protocol/declarations";
 import type { RungCli } from "../runner/cli";
-import { killTree } from "../runner/terminal";
+import { stopLive } from "../runner/terminal";
 import type { RungWorkspace } from "../workspace";
-
-interface Seen {
-  value?: unknown;
-  error?: string;
-  at: number;
-  history: unknown[];
-}
+import { takeLiveFrame, type LiveFrame, type Seen } from "../core/liveFrames";
+import type { LiveAccess } from "../liveAccess";
+import { mutateLive } from "../liveMutation";
 
 const KEY = "rung.liveValues";
 const FORMATS = "rung.liveValues.formats";
 const INTERVAL = 500;
+const TABLE_GROUP = "watch:table";
+interface Table { name: string; rows: { key: string; name?: string; address?: string; displayFormat?: string; modifyValue?: string; comments: Record<string, string> }[] }
 
 /** The FB an instance DB belongs to: the name on a line of its own between DATA_BLOCK and BEGIN (none for a global DB). */
 function instanceOf(text: string): string | undefined {
@@ -44,6 +43,12 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
   private proc?: ChildProcess;
   private paused = false;
   private retry?: NodeJS.Timeout;
+  private generation = 0;
+  private scope?: LiveFrame["scope"];
+  private device?: string;
+  private tableFile?: string;
+  private table?: Table;
+  private workspaceScope: string;
   private readonly changed = new vscode.EventEmitter<string | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly view: vscode.TreeView<string>;
@@ -54,16 +59,28 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
     private readonly ws: RungWorkspace,
     private readonly cli: RungCli,
     private readonly memento: vscode.Memento,
-    private readonly lsp?: Lsp,
+    private readonly lsp: Lsp | undefined,
+    private readonly access: LiveAccess,
   ) {
+    this.workspaceScope = access.scope;
     this.names = memento.get<string[]>(KEY, []);
     this.formats = memento.get<Record<string, Format>>(FORMATS, {});
     this.view = vscode.window.createTreeView("rung.live", { treeDataProvider: this });
     this.subs.push(
+      ws.onDidChange(() => {
+        if (this.workspaceScope === access.scope) return;
+        this.workspaceScope = access.scope; this.device = undefined; this.scope = undefined; this.tableFile = undefined; this.table = undefined;
+        this.seen.clear(); this.recorder.clear(); this.restart();
+      }),
       this.view,
       // read only while someone looks: no PLC traffic for a hidden view
       this.view.onDidChangeVisibility(() => this.restart()),
       vscode.commands.registerCommand("rung.live.add", (arg?: unknown) => this.add(typeof arg === "string" ? arg : undefined)),
+      vscode.commands.registerCommand("rung.live.table", (arg?: string | vscode.Uri) => this.watchTable(typeof arg === "string" ? arg : arg?.fsPath)),
+      vscode.commands.registerCommand("rung.live.modify", (name?: string, draft?: string, device?: string) => {
+        const row = this.table?.rows.find(row => row.key === name);
+        return mutateLive(this.ws, this.cli, this.access, "modify", row ? row.name || row.address : name, draft ?? row?.modifyValue, device ?? this.device);
+      }),
       vscode.commands.registerCommand("rung.live.remove", (name: string) => this.remove(name)),
       vscode.commands.registerCommand("rung.live.clear", () => this.set([])),
       vscode.commands.registerCommand("rung.live.pause", () => this.pause(true)),
@@ -74,7 +91,7 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
       vscode.commands.registerCommand("rung.live.exportTest", (db?: string, from?: number) => this.exportTest(db, from)),
     );
     // ages go on while values come in (or stop coming)
-    this.timer = setInterval(() => this.view.visible && this.names.length && this.changed.fire(undefined), 1000);
+    this.timer = setInterval(() => this.view.visible && [...this.seen.values()].some(s => s.state === "stale" || s.state === "disconnected") && this.changed.fire(undefined), 1000);
     void vscode.commands.executeCommand("setContext", "rung.live.paused", false);
   }
 
@@ -90,11 +107,28 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
   }
 
   private set(names: string[]) {
+    this.tableFile = undefined; this.table = undefined;
     this.names = names;
     void this.memento.update(KEY, names);
     for (const k of [...this.seen.keys()]) if (!names.includes(k)) this.seen.delete(k);
     this.changed.fire(undefined);
     this.restart();
+  }
+
+  private labels(): string[] { return this.tableFile ? this.table?.rows.map(r => r.key) ?? [] : this.names; }
+
+  private async watchTable(file?: string): Promise<void> {
+    if (!this.ws.root) return;
+    if (!file) {
+      const files = await vscode.workspace.findFiles(new vscode.RelativePattern(this.ws.root, "plc/*/watch/*.xml"));
+      file = (await vscode.window.showQuickPick(files.map(uri => ({ label: relative(this.ws.root!, uri.fsPath), file: uri.fsPath })), { title: "Watch a TIA table" }))?.file;
+    }
+    if (!file) return;
+    const rel = relative(this.ws.root, resolve(this.ws.root, file)).split(sep).join("/");
+    const device = /^plc\/([^/]+)\/watch\/[^/]+\.xml$/i.exec(rel)?.[1];
+    if (!device) return;
+    this.tableFile = rel; this.table = { name: basename(file), rows: [] }; this.device = device;
+    this.seen.clear(); this.recorder.clear(); this.restart();
   }
 
   async add(name?: string): Promise<void> {
@@ -229,22 +263,36 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
   }
 
   private stop() {
+    this.generation++;
     if (this.retry) clearTimeout(this.retry);
     this.retry = undefined;
     // through the rung.cmd shim the watch is a child of cmd.exe: end the whole tree
-    if (this.proc) killTree(this.proc);
+    if (this.proc) stopLive(this.proc);
     this.proc = undefined;
+    for (const s of this.seen.values()) s.state = "stale";
+    this.changed.fire(undefined);
   }
 
   private restart() {
     this.stop();
-    if (this.paused || !this.view.visible || !this.names.length || !this.ws.root) return;
-    const inv = this.cli.invocation(["live", "watch", ...this.names, "--json", "--interval", String(INTERVAL)]);
-    const proc = spawn(inv.file, inv.args, { cwd: this.ws.root, windowsVerbatimArguments: inv.shell, windowsHide: true });
+    void this.start(this.generation).catch(error => { this.view.message = (error as Error).message; });
+  }
+
+  private async start(generation: number, retryEnv?: Record<string, string>, authAttempt = 0) {
+    if (this.paused || !this.view.visible || !this.names.length && !this.tableFile || !this.ws.root) return;
+    const connection = await this.access.select(this.device);
+    if (!connection || generation !== this.generation) return;
+    const env = retryEnv ?? await this.access.environment(connection);
+    if (!env || generation !== this.generation || connection.workspace !== this.access.scope) return;
+    this.device = connection.device;
+    this.scope = undefined;
+    const inv = this.cli.invocation(["live", "watch", ...(this.tableFile ? ["--table", this.tableFile] : this.names), "--json", "--parent-stdio", "--device", connection.device, "--interval", String(connection.target.transport === "s7commplus" ? 250 : INTERVAL)]);
+    const proc = spawn(inv.file, inv.args, { cwd: this.ws.root, env: { ...process.env, ...env }, windowsVerbatimArguments: inv.shell, windowsHide: true });
     this.proc = proc;
     let buf = "";
     let err = "";
     proc.stdout.on("data", (d: Buffer) => {
+      if (generation !== this.generation || this.proc !== proc) return;
       buf += d.toString();
       for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
         const line = buf.slice(0, i);
@@ -253,64 +301,77 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
       }
     });
     proc.stderr.on("data", (d: Buffer) => (err += d.toString()));
-    proc.on("exit", (code) => {
+    proc.on("error", error => { if (this.proc === proc) { this.proc = undefined; this.view.message = error.message; } });
+    proc.on("exit", async (code) => {
       if (this.proc !== proc) return;
       this.proc = undefined;
-      if (code) this.view.message = `${err.trim().split(/\r?\n/).pop()?.replace(/^rung live:\s*/, "") || `rung live watch ended (${code})`} (trying again)`;
+      for (const s of this.seen.values()) s.state = "disconnected";
+      this.changed.fire(undefined);
+      if (authAttempt === 0 && /AUTHENTICATION_(REQUIRED|FAILED)|Api\.Login|401|Invalid credentials/i.test(err)) {
+        const env = await this.access.environment(connection, true, err);
+        if (env && generation === this.generation) void this.start(generation, env, 1);
+        return;
+      }
+      if (code) this.view.message = err.trim().split(/\r?\n/).pop()?.replace(/^rung live:\s*/, "") || `rung live watch ended (${code})`;
+      if (/CERTIFICATE_UNTRUSTED|TLS_UNSUPPORTED|TARGET_REFUSED|AUTHENTICATION_|ACCESS_DENIED|Api\.Login|401/i.test(err)) return;
       // the PLC may come back (switched on, network back): try again while someone looks
       this.retry = setTimeout(() => this.restart(), 5000);
     });
-    this.view.message = undefined;
+    this.view.message = `${connection.device} · ${connection.target.transport} · ${connection.target.address}`;
   }
 
   private take(line: string) {
-    let m: { at?: number; values?: Record<string, unknown>; errors?: Record<string, string> };
+    let m: LiveFrame & { plan?: { table?: Table; errors?: Record<string, string> } };
     try {
       m = JSON.parse(line);
     } catch {
       return;
     }
-    if (m.at === undefined) return; // the plan line
-    if (m.values && Object.keys(m.values).length) this.recorder.add({ at: m.at, values: { ...m.values } });
-    for (const n of this.names) {
-      const s = this.seen.get(n) ?? { at: 0, history: [] };
-      if (m.errors?.[n]) s.error = m.errors[n];
-      else if (m.values && n in m.values) {
-        s.error = undefined;
-        s.value = m.values[n];
-        s.history.push(s.value);
-        if (s.history.length > 32) s.history.shift();
-      }
-      s.at = m.at;
-      this.seen.set(n, s);
+    if (m.plan?.table && this.tableFile) {
+      this.table = m.plan.table; this.seen.clear(); this.recorder.clear();
+      for (const [key, error] of Object.entries(m.plan.errors ?? {})) this.seen.set(key, { error, at: 0, history: [] });
+      this.changed.fire(undefined);
     }
+    if (m.at === undefined) return;
+    if (m.scope) {
+      if (this.scope && (m.scope.device !== this.scope.device || m.scope.address !== this.scope.address || m.scope.transport !== this.scope.transport || m.scope.epoch < this.scope.epoch)) return;
+      this.scope = m.scope;
+    }
+    const recorded = takeLiveFrame(this.seen, this.labels(), { ...m, values: m.values ?? {} });
+    if (recorded) this.recorder.add(recorded);
     this.changed.fire(undefined);
   }
 
-  getChildren(): string[] {
-    return this.names;
+  getChildren(parent?: string): string[] {
+    if (this.tableFile) return parent === TABLE_GROUP ? this.labels() : parent ? [] : [TABLE_GROUP];
+    return parent ? [] : this.names;
   }
 
   getTreeItem(name: string): vscode.TreeItem {
+    if (name === TABLE_GROUP && this.table) return new vscode.TreeItem(this.table.name, vscode.TreeItemCollapsibleState.Expanded);
+    const row = this.tableFile ? this.table?.rows.find(r => r.key === name) : undefined;
     const s = this.seen.get(name);
-    const item = new vscode.TreeItem(name);
-    item.contextValue = "rung.liveValue";
+    const item = new vscode.TreeItem(row?.name || row?.address || name);
+    item.contextValue = row ? "rung.watchRow" : "rung.liveValue";
+    const comment = row ? Object.entries(row.comments).map(([culture, text]) => `${culture}: ${text}`).join("\n") : "";
+    item.tooltip = comment;
     if (!s) {
       item.description = this.paused ? "paused" : "…";
       item.iconPath = new vscode.ThemeIcon("circle-outline");
       return item;
     }
     const age = Date.now() - s.at;
-    const stale = age > INTERVAL * 4;
+    const stale = s.state === "stale" || s.state === "disconnected";
     if (s.error) {
       item.description = readError(s.error);
       item.iconPath = new vscode.ThemeIcon("warning", new vscode.ThemeColor("problemsWarningIcon.foreground"));
     } else {
       const line = sparkline(s.history);
-      item.description = `${formatted(s.value, this.formats[name])}${line ? `  ${line}` : ""}${stale ? `  · ${Math.round(age / 1000)} s old` : ""}`;
+      const format = row?.displayFormat === "Hex" ? "hex" : row?.displayFormat === "Bin" ? "bin" : this.formats[name];
+      item.description = `${formatted(s.value, format, s.display)}${line ? `  ${line}` : ""}${stale ? `  · ${Math.round(age / 1000)} s old` : ""}`;
       item.iconPath = new vscode.ThemeIcon(stale ? "circle-outline" : "circle-filled", stale ? undefined : new vscode.ThemeColor("charts.green"));
     }
-    item.tooltip = `${name}\nread ${new Date(s.at).toLocaleTimeString(undefined, { hour12: false })}${s.history.length > 1 ? `\nlast values: ${s.history.slice(-10).map((v) => formatted(v, this.formats[name])).join(", ")}` : ""}`;
+    item.tooltip = `${item.label}\n${comment ? `${comment}\n` : ""}${this.scope ? `${this.scope.device} · ${this.scope.transport} · ${this.scope.address}\n` : ""}${s.error ? `${s.error}\n` : ""}read ${new Date(s.at).toLocaleTimeString(undefined, { hour12: false })}${s.history.length > 1 ? `\nlast values: ${s.history.slice(-10).map((v) => formatted(v, this.formats[name])).join(", ")}` : ""}`;
     return item;
   }
 }

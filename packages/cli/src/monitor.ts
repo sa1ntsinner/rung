@@ -4,8 +4,11 @@
 // (read-only) every interval and prints one JSON line per read, for editors.
 import { deviceOfUri, scopedTo, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { WorkspaceError } from "@rung/core";
+import type { WatchTableDefinition } from "@rung/live";
 
 export interface MonitorPlan {
+  table?: WatchTableDefinition;
+  errors?: Record<string, string>;
   block: string;
   kind: string;
   /** The instance an FB is read through: "Fx_Motor_DB" or "Line_DB".Motor1. */
@@ -54,6 +57,7 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
         dbs.length
           ? `${block.name} has ${dbs.length} instance DBs (${dbs.join(", ")}); choose one with --instance`
           : `${block.name} has no instance DB of its own; name the instance with --instance, e.g. "Line_DB".Motor1`,
+        { instances: dbs },
       );
   } else if (block.kind !== "DB" && block.kind !== "FC" && block.kind !== "OB")
     throw new WorkspaceError("BAD_ARGUMENT", `a ${block.kind} holds no values to monitor`);
@@ -132,6 +136,7 @@ export function monitorPlanIec(index: WorkspaceIndex, uri: string, instance?: st
       throw new WorkspaceError(
         "NO_INSTANCE",
         uses.length ? `${block.name} has ${uses.length} instances (${uses.join(", ")}); choose one with --instance` : `${block.name} has no instance in a PROGRAM; name it with --instance, e.g. PLC_PRG.fbCount`,
+        { instances: uses },
       );
   } else if (block.kind !== "FC") throw new WorkspaceError("BAD_ARGUMENT", `a ${block.kind} holds no values to monitor`);
   const readable = (v: VarDecl | undefined) => !!v && v.section !== "Temp" && v.section !== "Constant";

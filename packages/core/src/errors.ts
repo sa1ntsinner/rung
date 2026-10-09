@@ -38,6 +38,7 @@ export class WorkspaceError extends Error {
   constructor(
     public readonly code: WorkspaceErrorCode,
     message: string,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }

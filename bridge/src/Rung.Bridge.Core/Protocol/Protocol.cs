@@ -12,6 +12,16 @@ namespace Rung.Bridge.Core.Protocol
     /// <summary>Wire error codes. Shared with packages/bridge-client/src/protocol.ts — keep in sync.</summary>
     public static class ErrorCodes
     {
+        public const string TlsUnsupported = "TLS_UNSUPPORTED";
+        public const string AuthenticationRequired = "AUTHENTICATION_REQUIRED";
+        public const string AuthenticationFailed = "AUTHENTICATION_FAILED";
+        public const string CertificateUntrusted = "CERTIFICATE_UNTRUSTED";
+        public const string SymbolNotFound = "SYMBOL_NOT_FOUND";
+        public const string SymbolAmbiguous = "SYMBOL_AMBIGUOUS";
+        public const string ResourceLimit = "RESOURCE_LIMIT";
+        public const string WritesDisabled = "WRITES_DISABLED";
+        public const string StalePreparation = "STALE_PREPARATION";
+        public const string TargetRefused = "TARGET_REFUSED";
         public const string TiaNotRunning = "TIA_NOT_RUNNING";
         public const string AmbiguousPortal = "AMBIGUOUS_PORTAL";
         public const string NoProject = "NO_PROJECT";

@@ -26,6 +26,7 @@ import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
+import { brokerReader, startLiveServer } from "./liveServer.js";
 import { agentsTemplatePath, bridgeExecutable, tiaOf, tiaOfProject, type TiaVersion } from "./paths.js";
 import { Coverage, runTests, toJUnit } from "@rung/sim";
 import { commandHelp } from "./help.js";
@@ -82,11 +83,21 @@ Usage:
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
-  rung live read <var>... [--dir <ws>] read live values from the PLC Web API (read-only)
+  rung live read <var>... [--dir <ws>] [--device <PLC>] [--transport s7commplus|webapi] [--json]
+                                     read values from the selected PLC backend (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
+  rung live watch --table plc/<PLC>/watch/<table>.xml [--device <PLC>] [--json]
   rung live watch <var>... [--interval 500] [--json]  these values every interval (read-only)
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
+  rung live state --device <PLC> [--json]  CPU mode, cycle and memory from the selected backend
+  rung live alarms --device <PLC> [--lcid 1033] [--stream] [--json]  active alarms and live changes
+  rung live trust --device <PLC> [--dir <ws>]  inspect and explicitly pin the PLC certificate
+  rung live modify <name> <SCL-literal> --device <PLC>  prepare and confirm one current scalar value
+  rung live run|stop --device <PLC>    prepare and confirm CPU control
+  rung live modify|run|stop --confirm-stdin --json  editor confirmation over private stdin
+  rung live watch|alarms --json --parent-stdio  editor stream ends when its parent closes stdin (alarms also needs --stream)
+  rung live-server [dir]              shared read-only broker; started automatically by live consumers
   rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
   rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the project library, software units and SimaticML tag tables
@@ -381,7 +392,8 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
-  live: { options: ["dir", "file", "instance", "json", "interval"], positionals: Infinity },
+  live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream"], positionals: Infinity },
+  "live-server": { options: [], positionals: 1 },
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
   mcp: { options: [], positionals: 1 },
@@ -486,12 +498,18 @@ export async function main(argv: string[], io: Io): Promise<number> {
         cycle: { type: "string" },
         block: { type: "string" },
         json: { type: "boolean" },
+        "confirm-stdin": { type: "boolean" },
+        "parent-stdio": { type: "boolean" },
+        lcid: { type: "string" },
+        stream: { type: "boolean" },
         use: { type: "string" },
         mode: { type: "string" },
         number: { type: "string" },
         target: { type: "string" },
         instance: { type: "string" },
+        table: { type: "string" },
         interval: { type: "string" },
+        transport: { type: "string" },
         ip: { type: "string" },
         "from-plc": { type: "string" },
         host: { type: "string" },
@@ -546,6 +564,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "live-server": {
+        await startLiveServer(dir, io.env);
+        return 0;
+      }
       case "session":
         return await cmdSession(dir, v, io);
       case "test": {
@@ -642,9 +664,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "live":
         return await cmdLive(dir, target, positionals.slice(2), io, {
+          ...(v.device ? { device: (v.device as string[])[0]! } : {}),
+          ...(v.transport ? { transport: String(v.transport) } : {}),
           ...(v.file ? { file: (v.file as string[])[0]! } : {}),
           ...(v.instance ? { instance: String(v.instance) } : {}),
+          ...(v.table ? { table: String(v.table) } : {}),
           json: !!v.json,
+          confirmStdin: !!v["confirm-stdin"],
+          parentStdio: !!v["parent-stdio"],
+          stream: !!v.stream,
+          ...(v.lcid ? { lcid: Number(v.lcid) } : {}),
           ...(v.interval ? { intervalMs: Number(String(v.interval).replace(/ms$/i, "")), intervalText: String(v.interval) } : {}),
         });
       case "views": {
@@ -680,6 +709,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const config = ws ? await loadConfig(ws) : null;
         await serveStdio({
           root: ws ?? dir,
+          env: io.env,
+          ...(ws ? { liveFactory: (options) => brokerReader(ws, io.env, options) } : {}),
           ...(config ? { bridgeFactory: () => bridgeFor(config, io, importFlags(config)) } : {}),
           bridgeWhitelisted: () => whitelistStatus(bridgeExecutable(io.env, tiaOf(config?.project.tiaVersion))),
         });

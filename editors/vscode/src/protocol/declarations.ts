@@ -110,7 +110,7 @@ export type HostToView =
   | { v: 1; kind: "pastePreview"; req: number; result: PasteResult }
   | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] }
   /** monitoring this block (a DB, an FB through its instance): each row's value as TIA Portal's Monitor value column */
-  | { v: 1; kind: "values"; on: boolean; values: Record<string, string>; instance?: string };
+  | { v: 1; kind: "values"; on: boolean; values: Record<string, string>; instance?: string; target?: string; state?: "live" | "stale" | "disconnected" };
 
 export type OpenTarget = "name" | "type" | "start" | "comment";
 
@@ -131,7 +131,8 @@ export type ViewToHost =
   | { v: 1; kind: "undo" }
   | { v: 1; kind: "redo" }
   /** start or stop monitoring the block the table shows */
-  | { v: 1; kind: "monitor" };
+  | { v: 1; kind: "monitor" }
+  | { v: 1; kind: "modify"; uri: string; version: number; rowId: string };
 
 const TARGETS: ReadonlySet<string> = new Set<OpenTarget>(["name", "type", "start", "comment"]);
 /** the attributes the table sets: a key from the view is never text written into the file */
@@ -182,6 +183,8 @@ export function isViewToHost(x: unknown): x is ViewToHost {
       return true;
     case "edit":
       return num(m.req) && str(m.uri) && num(m.version) && isOp(m.op);
+    case "modify":
+      return str(m.uri) && num(m.version) && str(m.rowId);
     case "rename":
       return num(m.req) && str(m.uri) && num(m.version) && str(m.rowId) && str(m.name);
     case "add":

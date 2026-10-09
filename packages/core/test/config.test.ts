@@ -6,6 +6,31 @@ import { join } from "node:path";
 import { defaultConfig, formatConfig, parseConfig, preflight, isContained, loadConfig, saveConfig, grantWrites, revokeWrites } from "../src/index.js";
 
 describe("config", () => {
+  const liveBase = () => formatConfig(defaultConfig("p", "V20", "", ["PLC_1"]));
+  const online = '\n[live.plc.PLC_1]\ntransport = "s7commplus"\naddress = "192.168.250.1"\n';
+  it("round trips per-PLC live configuration and defaults to read-only", () => {
+    const c = parseConfig(liveBase() + online + 'certificate_sha256 = "' + "AB".repeat(32) + '"\n[live.plc.PLC_1.webapi]\nurl = "https://192.168.250.1"\nuser = "monitor"\n');
+    expect(c.live?.plc?.PLC_1).toMatchObject({ transport: "s7commplus", address: "192.168.250.1", allowWrites: false, certificateSha256: "AB".repeat(32) });
+    expect(parseConfig(formatConfig(c))).toEqual(c);
+  });
+  it("keeps legacy Web API and simulator configuration", () => {
+    const c = parseConfig(liveBase() + '\n[live.webapi]\nurl = "http://127.0.0.1:8000"\nuser = "sim"\ninsecure = true\n');
+    expect(parseConfig(formatConfig(c))).toEqual(c);
+  });
+  it.each([
+    'address = "0192.168.250.1"', 'address = "plc.local"', 'address = "::ffff:192.168.250.1"',
+    'allow_writes = "false"', 'certificate_sha256 = "123"', 'transport = "auto"', 'password = "secret"',
+    'webapi = { url = "https://192.168.250.2", user = "m" }',
+    'webapi = { url = "https://192.168.250.1", user = "m", password = "secret" }',
+    'webapi = { url = "https://192.168.250.1", user = "m", insecure = "true" }',
+  ])("rejects invalid live configuration: %s", (line) => {
+    const initial = online.replace(/\n(address|transport) = [^\n]+/g, (text, key) => line.startsWith(key + " =") ? "" : text);
+    expect(() => parseConfig(liveBase() + initial + line + "\n")).toThrow();
+  });
+  it("rejects an unbound legacy fallback in a multi-PLC workspace", () => {
+    const c = defaultConfig("p", "V20", "", ["PLC_1", "PLC_2"]);
+    expect(() => parseConfig(formatConfig(c) + '\n[live.webapi]\nurl = "https://192.168.250.1"\nuser = "m"\n')).toThrow(/bind|PLC/i);
+  });
   it("round trips an online address", () => {
     const c = defaultConfig("C:/p/Plant.ap21", "V21");
     c.plc.PLC_1 = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, address: "10.0.0.7" };

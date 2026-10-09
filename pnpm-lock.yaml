@@ -79,6 +79,9 @@ importers:
 
   packages/live:
     dependencies:
+      '@rung/bridge-client':
+        specifier: workspace:*
+        version: link:../bridge-client
       '@rung/core':
         specifier: workspace:*
         version: link:../core

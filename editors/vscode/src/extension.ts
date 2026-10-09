@@ -33,6 +33,8 @@ import { registerTests } from "./testing";
 import { registerDebug } from "./debug";
 import { WhyView } from "./views/whyView";
 import { LiveView } from "./views/liveView";
+import { LiveAccess } from "./liveAccess";
+import { registerLiveCpuCommands } from "./liveMutation";
 import { ObjectDecorations, ProjectView } from "./views/projectView";
 import { PlcView } from "./views/plcView";
 import { EnvironmentView, FIXES, type CheckItem } from "./views/environmentView";
@@ -82,7 +84,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
   registerDebug(context, ws, cli);
   const why = new WhyView(ws, cli);
-  const live = new LiveView(ws, cli, context.workspaceState, lsp);
+  const access = new LiveAccess(ws, context.secrets);
+  const live = new LiveView(ws, cli, context.workspaceState, lsp, access);
   context.subscriptions.push(why, live);
 
   await ws.start(context.workspaceState);
@@ -119,7 +122,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       });
 
   const project = new ProjectView(ws);
-  const plc = new PlcView(ws, online, watch);
+  const plc = new PlcView(ws, online, watch, cli, access);
   // rung watch's events: the activity model hears them first, then the status bar and the view redraw
   const events = new OwnerEvents(ws);
   const activity = new Activity();
@@ -129,7 +132,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const changes = new ChangesView(ws, cli, events);
   const decorations = new ObjectDecorations(ws);
   const environment = new EnvironmentView(cli);
-  const monitor = new Monitor(ws, cli, out, context.secrets);
+  const monitor = new Monitor(ws, cli, out, access);
+  context.subscriptions.push(...registerLiveCpuCommands(ws, cli, access));
   context.subscriptions.push(
     monitor,
     vscode.commands.registerCommand("rung.monitor.toggle", (uri?: vscode.Uri) => monitor.toggle(uri instanceof vscode.Uri ? uri : undefined)),

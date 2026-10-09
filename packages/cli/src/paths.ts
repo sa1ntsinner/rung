@@ -33,6 +33,15 @@ export function devPath(rel: string): string | undefined {
   }
 }
 
+/** Start this CLI from a source checkout, installed bundle, or single executable. */
+export function rungCommand(args: string[], env: Record<string, string | undefined> = process.env): { command: string; args: string[]; env?: Record<string, string> } {
+  const electron = !!process.versions.electron;
+  const sea = !electron && !/node(\.exe)?$/i.test(process.execPath);
+  const root = installRoot(env);
+  const entry = sea ? undefined : root && existsSync(join(root, "rung.cjs")) ? join(root, "rung.cjs") : devPath("../dist/index.js");
+  return { command: process.execPath, args: [...(entry ? [entry] : []), ...args], ...(electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}) };
+}
+
 export type TiaVersion = "V19" | "V20" | "V21";
 
 /** The TIA Portal a version names (a project's tiaVersion, --tia); V20 when it names none. */
@@ -59,4 +68,12 @@ export function bridgeExecutable(env: Record<string, string | undefined>, tia: T
 export function agentsTemplatePath(env: Record<string, string | undefined> = process.env): string | undefined {
   const root = installRoot(env);
   return [root && join(root, "AGENTS.template.md"), devPath("../../../agents/AGENTS.template.md")].find((p): p is string => !!p && existsSync(p));
+}
+export function onlineExecutable(env: Record<string, string | undefined>): string {
+  if (env.RUNG_ONLINE_HOST) return env.RUNG_ONLINE_HOST;
+  const root = installRoot(env);
+  const candidates = [root && join(root, "bridge", "rung-online.exe"),
+    devPath("../../../bridge/src/Rung.Online/bin/Release/net10.0/rung-online.dll"),
+    devPath("../../../bridge/src/Rung.Online/bin/Debug/net10.0/rung-online.dll")].filter((p): p is string => !!p);
+  return candidates.find(p => existsSync(p)) ?? candidates[0] ?? "rung-online.exe";
 }

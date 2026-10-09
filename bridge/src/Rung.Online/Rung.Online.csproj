@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>rung-online</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <SelfContained Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</SelfContained>
+    <PublishSingleFile Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Rung.Bridge.Core/Protocol/Protocol.cs" Link="Protocol/Protocol.cs" />
+    <Compile Include="../Rung.Bridge.Core/Protocol/RpcWire.cs" Link="Protocol/RpcWire.cs" />
+    <ProjectReference Include="../../../third_party/S7CommPlusDriver/src/S7CommPlusDriver/S7CommPlusDriver.csproj" />
+  </ItemGroup>
+  <!-- Keep the LGPL library replaceable beside the self-contained executable. -->
+  <Target Name="KeepDriverReplaceable" BeforeTargets="_ComputeFilesToBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'S7CommPlusDriver.dll'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+</Project>

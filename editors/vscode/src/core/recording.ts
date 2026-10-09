@@ -10,7 +10,8 @@ export interface Frame {
 }
 
 /** A value as TIA Portal shows it in that format: 16#00FF, 2#0000_0101; booleans, reals and texts as they are. */
-export function formatted(v: unknown, f: Format = "dec"): string {
+export function formatted(v: unknown, f: Format = "dec", display?: string): string {
+  if (f === "dec" && display !== undefined) return display;
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
   if (typeof v === "string") return `'${v}'`;
   if (typeof v !== "number" || !Number.isInteger(v) || f === "dec") return v === undefined ? "…" : typeof v === "number" ? String(v) : JSON.stringify(v);

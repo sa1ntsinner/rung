@@ -18,16 +18,16 @@ export function formatValue(v: unknown): string {
 }
 
 /** Each declaration row's value while monitoring: the plan labels a row by its path of names (Motor.Speed). */
-export function rowValues(sections: readonly { rows: readonly MonitoredRow[] }[], plan: Pick<MonitorPlan, "vars">, values: Record<string, unknown>, errors: Record<string, string>): Record<string, string> {
+export function rowValues(sections: readonly { rows: readonly MonitoredRow[] }[], plan: Pick<MonitorPlan, "vars">, values: Record<string, unknown>, errors: Record<string, string>, display?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (rows: readonly MonitoredRow[], prefix: string) => {
     for (const r of rows) {
       const label = prefix ? `${prefix}.${r.name}` : r.name;
-      if (label in plan.vars) out[r.id] = label in errors ? "?" : formatValue(values[label]);
+      if (label in plan.vars) out[r.id] = label in errors ? "?" : display?.[label] ?? formatValue(values[label]);
       else {
         // an array: the page of elements monitoring reads, in order
         const elements = Object.keys(plan.vars).filter((k) => k.startsWith(`${label}[`));
-        if (elements.length) out[r.id] = `[${elements.map((k) => (k in errors ? "?" : formatValue(values[k]))).join(", ")}${elements.length >= 16 ? ", …" : ""}]`;
+        if (elements.length) out[r.id] = `[${elements.map((k) => (k in errors ? "?" : display?.[k] ?? formatValue(values[k]))).join(", ")}${elements.length >= 16 ? ", …" : ""}]`;
       }
       if (r.children) walk(r.children, label);
     }
@@ -43,8 +43,8 @@ export interface MonitoredRow {
 }
 
 /** The text after a line: `Lit = TRUE   On = TRUE`; a value that could not be read shows as ?. */
-export function lineText(labels: readonly string[], values: Record<string, unknown>, errors: Record<string, string>): string {
-  return labels.map((l) => `${l.replace(/^#/, "")} = ${l in errors ? "?" : formatValue(values[l])}`).join("   ");
+export function lineText(labels: readonly string[], values: Record<string, unknown>, errors: Record<string, string>, display?: Record<string, string>): string {
+  return labels.map((l) => `${l.replace(/^#/, "")} = ${l in errors ? "?" : display?.[l] ?? formatValue(values[l])}`).join("   ");
 }
 
 /** A read error in words: the Web API's code number dropped, "Address does not exist" said as what it means. */

@@ -35,6 +35,24 @@ async function connect(env: Record<string, string>, withLive: boolean) {
 }
 
 describe("rung_live_read", () => {
+  it("uses the selected shared backend and reports PLC provenance", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-mcp-live-"));
+    await saveConfig(root, defaultConfig("fixture.ap20", "V20", "", ["PLC_1"]));
+    const scope = { device: "PLC_1", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 2 };
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    let selected: unknown, closed = false;
+    await createMcpServer({ root, liveFactory: async (opts) => { selected = opts; return { readFrame: async (names) => ({ at: 1, scope, items: names.map((name) => ({ name, value: 7 })) }), close: async () => { closed = true; } }; } }).connect(a);
+    const c = new Client({ name: "t", version: "1" }); await c.connect(b);
+    const r = await c.callTool({ name: "rung_live_read", arguments: { names: ["x"], device: "PLC_1", transport: "s7commplus" } }) as { content: { text: string }[] };
+    expect(selected).toEqual({ device: "PLC_1", transport: "s7commplus" });
+    expect(JSON.parse(r.content[0]!.text)).toEqual({ at: 1, scope, items: [{ name: "x", value: 7 }] });
+    expect(closed).toBe(true);
+    const unavailable = await c.callTool({ name: "rung_live_alarms", arguments: { device: "PLC_1" } });
+    expect(unavailable.isError).toBe(true);
+    expect(JSON.stringify(unavailable.content)).toMatch(/unavailable/);
+    expect((await c.listTools()).tools.map(tool => tool.name)).not.toEqual(expect.arrayContaining(["rung_live_modify", "rung_live_run", "rung_live_stop", "rung_live_acknowledge"]));
+    await c.close();
+  });
   it("reads values from the PLC Web API", async () => {
     const c = await connect({ RUNG_WEBAPI_PASSWORD: "pw" }, true);
     const r = (await c.callTool({ name: "rung_live_read", arguments: { names: ['"Fx_Global".Counter'] } })) as { content: { text: string }[] };

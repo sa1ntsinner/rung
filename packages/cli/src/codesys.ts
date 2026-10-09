@@ -8,7 +8,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { WorkspaceError } from "@rung/core";
-import { devPath, installRoot } from "./paths.js";
+import { devPath, installRoot, rungCommand } from "./paths.js";
 import type { Io } from "./common.js";
 
 export interface CodesysInstall {
@@ -55,14 +55,7 @@ export function codesysScript(env: Record<string, string | undefined> = process.
 
 /** How rung starts itself as the bridge of a CODESYS project (in the source tree, node with this CLI). */
 export function codesysBridgeCommand(project: string): { command: string; args: string[]; env?: Record<string, string> } {
-  // rung.exe runs itself; rung.cjs and the source tree run their entry point with node (not process.argv[1],
-  // which is some other program when rung runs inside one, e.g. the tests). The VS Code extension's rung runs in
-  // VS Code's executable, which is Node.js only with ELECTRON_RUN_AS_NODE (else it opens a VS Code window).
-  const electron = !!process.versions.electron;
-  const sea = !electron && !/node(\.exe)?$/i.test(process.execPath);
-  const root = installRoot();
-  const entry = sea ? undefined : root && existsSync(join(root, "rung.cjs")) ? join(root, "rung.cjs") : devPath("../dist/index.js");
-  return { command: process.execPath, args: [...(entry ? [entry] : []), "codesys-bridge", "--project", project], ...(electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}) };
+  return rungCommand(["codesys-bridge", "--project", project]);
 }
 
 async function freePort(): Promise<number> {

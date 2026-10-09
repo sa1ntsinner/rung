@@ -19,6 +19,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@rung/bridge-client": "workspace:*",
     "@rung/core": "workspace:*"
   }
 }

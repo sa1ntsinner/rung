@@ -69,7 +69,7 @@ export class RgDeclarations extends LitElement {
   declare paste: { result: PasteResult; after?: string; section?: string } | undefined;
   declare typeNames: string[];
   /** monitoring: each row's value from the PLC (TIA Portal's Monitor value column) */
-  declare monitor: { values: Record<string, string>; instance?: string } | undefined;
+  declare monitor: { values: Record<string, string>; instance?: string; target?: string; state?: string } | undefined;
   private expanded: Set<string>;
   private req = 0;
   private readonly pending = new Map<number, Pending>();
@@ -124,7 +124,7 @@ export class RgDeclarations extends LitElement {
   private receive(m: HostToView) {
     if (!m || m.v !== 1) return;
     if (m.kind === "values") {
-      this.monitor = m.on ? { values: m.values, ...(m.instance ? { instance: m.instance } : {}) } : undefined;
+      this.monitor = m.on ? { values: m.values, instance: m.instance, target: m.target, state: m.state } : undefined;
       return;
     }
     if (m.kind === "model") {
@@ -343,7 +343,7 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     const after = preset.some((c) => c.key === "start") ? "start" : "type";
     const columns = monitored ? preset.flatMap((c) => (c.key === after ? [c, MONITOR] : [c])) : preset;
     const monitorable = model.block?.kind === "DB" || model.block?.kind === "FB";
-    const watching = monitored ? `Stop monitoring${monitored.instance ? ` (through ${monitored.instance})` : ""}` : "Monitor the values on the PLC (read-only)";
+    const watching = monitored ? `Stop monitoring${monitored.instance ? ` (through ${monitored.instance})` : ""}${monitored.target ? ` · ${monitored.target}` : ""}${monitored.state ? ` · ${monitored.state}` : ""}` : "Monitor the values on the PLC (read-only)";
     const total = model.sections.reduce((n, s) => n + countRows(s.rows), 0);
     const picked = this.selected ? findRow(model.sections, this.selected) : undefined;
     return html`
@@ -367,6 +367,9 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
         ${monitorable
           ? html`<button class="rg-icon-btn" data-action="monitor" aria-pressed=${monitored ? "true" : "false"} title=${watching} aria-label=${watching} @click=${() => this.post({ v: 1, kind: "monitor" })}><span class="codicon codicon-eye"></span></button>`
           : nothing}
+        ${monitored ? html`<button class="rg-icon-btn" data-action="modify" title="Modify current PLC value" aria-label="Modify current PLC value"
+          ?disabled=${!picked || picked.row.kind !== "plain" || monitored.state !== "live"}
+          @click=${() => picked && this.post({ v: 1, kind: "modify", uri: model.uri, version: model.version, rowId: picked.row.id })}><span class="codicon codicon-edit"></span></button>` : nothing}
         <div class="rg-presets" role="group" aria-label="Columns">
           ${offered.map(
             (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === shownPreset ? "true" : "false"} @click=${() => {

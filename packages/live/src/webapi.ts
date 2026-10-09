@@ -29,8 +29,9 @@ export class WebApiError extends Error {
   constructor(
     public readonly code: number | string,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -42,6 +43,7 @@ interface RpcResponse {
 
 /** Methods rung is allowed to call. Anything that writes is deliberately absent. */
 const READ_ONLY_METHODS = new Set(["Api.Login", "Api.Logout", "Api.Ping", "Api.GetPermissions", "Api.Version", "PlcProgram.Read", "PlcProgram.Browse", "DiagnosticBuffer.Browse", "Plc.ReadOperatingMode"]);
+const CERTIFICATE_ERRORS = new Set(["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "CERT_REVOKED", "CERT_SIGNATURE_FAILURE", "CERT_UNTRUSTED", "CERT_REJECTED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID", "INVALID_CA", "INVALID_PURPOSE"]);
 
 export class WebApiClient {
   private token: string | undefined;
@@ -76,7 +78,7 @@ export class WebApiClient {
         },
       );
       r.on("timeout", () => r.destroy(new WebApiError("TIMEOUT", "PLC did not answer")));
-      r.on("error", (e) => reject(e instanceof WebApiError ? e : new WebApiError("NETWORK", (e as Error).message)));
+      r.on("error", (e: NodeJS.ErrnoException) => reject(e instanceof WebApiError ? e : new WebApiError(CERTIFICATE_ERRORS.has(e.code ?? "") ? "CERTIFICATE_UNTRUSTED" : "NETWORK", e.message, { cause: e })));
       r.end(data);
     });
   }

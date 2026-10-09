@@ -5,7 +5,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { chmod, mkdir, readFile, realpath, unlink } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { writeFileAtomic } from "@rung/core";
+import { StateStore, writeFileAtomic } from "@rung/core";
 
 export const OWNER_PROTOCOL = 1;
 
@@ -17,7 +17,11 @@ export interface OwnerInfo {
   startedAt: number;
 }
 
-export type OwnerHandler = (params: Record<string, unknown>) => Promise<unknown>;
+export interface OwnerOptions {
+  service?: string;
+  onDisconnect?: (clientId: string) => void;
+}
+export type OwnerHandler = (params: Record<string, unknown>, context: { clientId: string }) => Promise<unknown>;
 
 export class OwnerError extends Error {
   override name = "OwnerError";
@@ -29,12 +33,17 @@ export class OwnerError extends Error {
   }
 }
 
-const ownerFile = (root: string) => join(root, ".rung", "owner.json");
+function servicePrefix(service?: string): string {
+  if (service !== undefined && !/^[a-z][a-z0-9-]*$/.test(service)) throw new OwnerError("BAD_REQUEST", "invalid owner service");
+  return service ? `${service}-` : "";
+}
+const ownerFile = (root: string, service?: string) => join(root, ".rung", `${servicePrefix(service)}owner.json`);
 
-async function pipeName(root: string): Promise<string> {
+async function pipeName(root: string, service?: string): Promise<string> {
   const id = createHash("sha256").update((await realpath(root)).toLowerCase()).digest("hex").slice(0, 16);
   // Unix socket paths are limited to ~108 bytes: keep them short, in the OS temp dir, user-only (0600).
-  return process.platform === "win32" ? `\\\\.\\pipe\\rung-${id}` : join(tmpdir(), `rung-${userInfo().uid}-${id}.sock`);
+  const namespace = servicePrefix(service);
+  return process.platform === "win32" ? `\\\\.\\pipe\\rung-${namespace}${id}` : join(tmpdir(), `rung-${userInfo().uid}-${namespace}${id}.sock`);
 }
 
 function alive(pid: number): boolean {
@@ -56,47 +65,80 @@ function lines(sock: Socket, onLine: (l: string) => void, maxBytes = 16 * 1024 *
     while ((nl = buf.indexOf("\n")) >= 0) {
       const l = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
+      if (Buffer.byteLength(l) > maxBytes) { sock.destroy(); return; }
       if (l.trim()) onLine(l);
+      if (sock.destroyed) return;
     }
-    if (buf.length > maxBytes) sock.destroy();
+    if (Buffer.byteLength(buf) > maxBytes) sock.destroy();
   });
 }
 
 export class OwnerServer {
   private server!: Server;
+  private socketLock?: StateStore;
+  private closed = false;
   private readonly subscribers = new Set<Socket>();
+  private readonly clients = new Map<string, Socket>();
+  private readonly queued = new Map<Socket, Map<string, string>>();
   /** the last passes' reports, with when they happened, for an editor that subscribes later */
   private readonly recent: string[] = [];
   private constructor(
     readonly root: string,
     readonly info: OwnerInfo,
     private readonly handlers: Record<string, OwnerHandler>,
+    private readonly options: OwnerOptions,
   ) {}
 
-  /** Start serving; the caller must already hold the workspace state lock (single owner). */
-  static async start(root: string, handlers: Record<string, OwnerHandler>): Promise<OwnerServer> {
-    const pipe = await pipeName(root);
-    if (process.platform !== "win32") await unlink(pipe).catch(() => {});
+  /** Named pipes arbitrate on Windows; Unix cleanup needs an exclusive owner lock. */
+  static async start(root: string, handlers: Record<string, OwnerHandler>, options: OwnerOptions = {}): Promise<OwnerServer> {
+    const pipe = await pipeName(root, options.service);
     const info: OwnerInfo = { protocol: OWNER_PROTOCOL, pid: process.pid, pipe, token: randomBytes(24).toString("hex"), startedAt: Date.now() };
     await mkdir(join(root, ".rung"), { recursive: true });
-    const s = new OwnerServer(root, info, handlers);
+    const s = new OwnerServer(root, info, handlers, options);
+    // Default owners already hold the project state lock. Isolate service locks from sync.
+    if (process.platform !== "win32" && options.service) s.socketLock = await StateStore.open(join(root, ".rung", `${options.service}-ipc`), { projectPath: root, tiaVersion: "ipc", devices: [] });
     s.server = createServer((sock) => s.accept(sock));
-    await new Promise<void>((resolve, reject) => {
-      s.server.once("error", reject);
-      s.server.listen(pipe, () => resolve());
-    });
-    if (process.platform !== "win32") await chmod(pipe, 0o600);
-    await writeFileAtomic(ownerFile(root), JSON.stringify(info));
+    try {
+      if (process.platform !== "win32") await unlink(pipe).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+      await new Promise<void>((resolve, reject) => {
+        s.server.once("error", reject);
+        s.server.listen({ path: pipe, exclusive: true }, () => resolve());
+      });
+      if (process.platform !== "win32") await chmod(pipe, 0o600);
+      await writeFileAtomic(ownerFile(root, options.service), JSON.stringify(info));
+    } catch (error) {
+      if (s.server.listening) await s.close();
+      else await s.socketLock?.close();
+      throw error;
+    }
     return s;
   }
 
   private accept(sock: Socket) {
+    const clientId = randomBytes(16).toString("hex");
+    this.clients.set(clientId, sock);
     sock.on("error", () => {});
-    sock.on("close", () => this.subscribers.delete(sock));
+    sock.on("end", () => sock.destroy());
+    sock.on("close", () => {
+      this.subscribers.delete(sock);
+      this.clients.delete(clientId);
+      this.queued.delete(sock);
+      this.options.onDisconnect?.(clientId);
+    });
+    sock.on("drain", () => {
+      const pending = this.queued.get(sock);
+      if (!pending) return;
+      for (const [key, line] of pending) {
+        pending.delete(key);
+        if (!sock.write(line)) break;
+      }
+      if (!pending.size) this.queued.delete(sock);
+    });
     lines(sock, async (line) => {
       let req: { id?: unknown; token?: string; method?: string; params?: Record<string, unknown> };
       try {
         req = JSON.parse(line);
+        if (!req || typeof req !== "object" || Array.isArray(req)) { sock.destroy(); return; }
       } catch {
         sock.destroy();
         return;
@@ -117,7 +159,7 @@ export class OwnerServer {
       const h = req.method ? this.handlers[req.method] : undefined;
       if (!h) return reply({ error: { code: "BAD_REQUEST", message: `unknown method ${req.method}` } });
       try {
-        reply({ result: (await h(req.params ?? {})) ?? null });
+        reply({ result: (await h(req.params ?? {}, { clientId })) ?? null });
       } catch (e) {
         const code = (e as { code?: string }).code ?? "INTERNAL";
         reply({ error: { code, message: (e as Error).message } });
@@ -128,22 +170,44 @@ export class OwnerServer {
   /** Pushes an event to every subscriber (diagnostics, status changes). */
   emit(event: string, params: unknown) {
     const line = JSON.stringify({ event, params }) + "\n";
-    for (const s of this.subscribers) if (s.writable) s.write(line);
+    for (const s of this.subscribers) this.sendEvent(s, event, params, line);
     if (event === "report") {
       this.recent.push(JSON.stringify({ event, params, at: Date.now(), replay: true }) + "\n");
       if (this.recent.length > 20) this.recent.shift();
     }
   }
 
+  /** Delivery is scoped to the socket that owns the subscription lease. */
+  emitTo(clientId: string, event: string, params: unknown) {
+    const sock = this.clients.get(clientId);
+    if (sock) this.sendEvent(sock, event, params, JSON.stringify({ event, params }) + "\n");
+  }
+
+  private sendEvent(sock: Socket, event: string, params: unknown, line: string) {
+    if (!sock.writable || sock.destroyed) return;
+    if (!sock.writableNeedDrain) { sock.write(line); return; }
+    // Each subscription retains just its latest complete frame while the consumer is slow.
+    const subscription = (params as { subscriptionId?: string } | null)?.subscriptionId ?? "";
+    const key = `${event}:${subscription}`;
+    let pending = this.queued.get(sock);
+    if (!pending) this.queued.set(sock, pending = new Map());
+    pending.set(key, line);
+    if (pending.size > 256 || [...pending.values()].reduce((bytes, value) => bytes + Buffer.byteLength(value), 0) > 16 * 1024 * 1024) sock.destroy();
+  }
+
   async close(): Promise<void> {
-    for (const s of this.subscribers) s.destroy();
+    if (this.closed) return;
+    this.closed = true;
+    for (const s of this.clients.values()) s.destroy();
     await new Promise<void>((r) => this.server.close(() => r()));
     try {
-      const cur = JSON.parse(await readFile(ownerFile(this.root), "utf8")) as OwnerInfo;
-      if (cur.token === this.info.token) await unlink(ownerFile(this.root));
+      const file = ownerFile(this.root, this.options.service);
+      const cur = JSON.parse(await readFile(file, "utf8")) as OwnerInfo;
+      if (cur.token === this.info.token) await unlink(file);
     } catch {
       /* gone */
     }
+    await this.socketLock?.close();
   }
 }
 
@@ -159,6 +223,7 @@ export class OwnerClient {
       let msg: { id?: number; result?: unknown; error?: { code: string; message: string }; event?: string; params?: unknown };
       try {
         msg = JSON.parse(l);
+        if (!msg || typeof msg !== "object" || Array.isArray(msg)) { sock.destroy(); return; }
       } catch {
         return;
       }
@@ -173,16 +238,18 @@ export class OwnerClient {
       else p.resolve(msg.result);
     });
     sock.on("close", () => {
-      for (const p of this.pending.values()) p.reject(new OwnerError("OWNER_GONE", "rung watch stopped"));
+      for (const p of this.pending.values()) p.reject(new OwnerError("OWNER_GONE", "workspace owner stopped"));
       this.pending.clear();
+      for (const cb of this.listeners) cb("disconnect", {});
     });
   }
 
   /** Connects to the running owner of `root`, or returns null if there is none. */
-  static async connect(root: string): Promise<OwnerClient | null> {
+  static async connect(root: string, options: Pick<OwnerOptions, "service"> = {}): Promise<OwnerClient | null> {
+    const file = ownerFile(root, options.service);
     let info: OwnerInfo;
     try {
-      info = JSON.parse(await readFile(ownerFile(root), "utf8")) as OwnerInfo;
+      info = JSON.parse(await readFile(file, "utf8")) as OwnerInfo;
     } catch {
       return null;
     }
@@ -210,6 +277,7 @@ export class OwnerClient {
   }
 
   request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    if (this.sock.destroyed || !this.sock.writable) return Promise.reject(new OwnerError("OWNER_GONE", "workspace owner stopped"));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
@@ -223,6 +291,6 @@ export class OwnerClient {
   }
 
   close() {
-    this.sock.end();
+    this.sock.destroy();
   }
 }

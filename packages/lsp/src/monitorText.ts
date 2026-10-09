@@ -31,6 +31,6 @@ export function formatValue(v: unknown): string {
 }
 
 /** The text after a line: `Lit = TRUE   On = TRUE`; a value that could not be read shows as ?. */
-export function lineText(labels: readonly string[], values: Record<string, unknown>, errors: Record<string, string>): string {
-  return labels.map((l) => `${l.replace(/^#/, "")} = ${l in errors ? "?" : formatValue(values[l])}`).join("   ");
+export function lineText(labels: readonly string[], values: Record<string, unknown>, errors: Record<string, string>, display?: Record<string, string>): string {
+  return labels.map((l) => `${l.replace(/^#/, "")} = ${l in errors ? "?" : display?.[l] ?? formatValue(values[l])}`).join("   ");
 }

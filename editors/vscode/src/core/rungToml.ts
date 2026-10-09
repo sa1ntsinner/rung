@@ -29,7 +29,10 @@ export interface RungToml {
   download: DownloadDefaults;
   syncImport?: string;
   bridgeHost?: string;
+  live?: { webapi?: LiveWebApi; plc: Record<string, LivePlc> };
 }
+export interface LiveWebApi { url: string; user: string; insecure?: boolean }
+export interface LivePlc { transport: "s7commplus" | "webapi"; address: string; user?: string; certificateSha256?: string; webapi?: LiveWebApi }
 
 export const DOWNLOAD_DEFAULTS: Readonly<DownloadDefaults> = {
   enabled: true,
@@ -76,6 +79,20 @@ export function parseRungToml(text: string): RungToml {
   if (typeof sync.import === "string") out.syncImport = sync.import;
   const bridge = table(raw.bridge);
   if (typeof bridge.host === "string") out.bridgeHost = bridge.host;
+  if (raw.live !== undefined) {
+    const live = table(raw.live);
+    const web = (v: unknown): LiveWebApi | undefined => {
+      const t = table(v);
+      return typeof t.url === "string" && typeof t.user === "string" ? { url: t.url, user: t.user, ...(typeof t.insecure === "boolean" ? { insecure: t.insecure } : {}) } : undefined;
+    };
+    const plc: Record<string, LivePlc> = {};
+    for (const [device, value] of Object.entries(table(live.plc))) {
+      const t = table(value);
+      if ((t.transport !== "s7commplus" && t.transport !== "webapi") || typeof t.address !== "string") continue;
+      plc[device] = { transport: t.transport, address: t.address, ...(typeof t.user === "string" ? { user: t.user } : {}), ...(typeof t.certificate_sha256 === "string" ? { certificateSha256: t.certificate_sha256 } : {}), ...(web(t.webapi) ? { webapi: web(t.webapi) } : {}) };
+    }
+    out.live = { plc, ...(web(live.webapi) ? { webapi: web(live.webapi) } : {}) };
+  }
   return out;
 }
 

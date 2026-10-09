@@ -3,9 +3,17 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installRoot, tiaOf, tiaOfProject } from "../src/paths.js";
+import { installRoot, tiaOf, tiaOfProject, onlineExecutable } from "../src/paths.js";
 
 describe("installRoot", () => {
+  it("finds the installed online host and honors its explicit override", () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-online-path-"));
+    mkdirSync(join(root, "bridge"));
+    const host = join(root, "bridge", "rung-online.exe");
+    writeFileSync(host, "");
+    expect(onlineExecutable({ RUNG_HOME: root })).toBe(host);
+    expect(onlineExecutable({ RUNG_HOME: root, RUNG_ONLINE_HOST: "custom.dll" })).toBe("custom.dll");
+  });
   it("is the folder of rung.cjs, also when npm starts it through a link named rung", (ctx) => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rung-paths-")));
     const pkg = join(dir, "lib", "node_modules", "@rung-plc", "cli");

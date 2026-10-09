@@ -620,6 +620,12 @@
         "icon": "$(add)"
       },
       {
+        "command": "rung.live.table",
+        "title": "Watch a TIA Table",
+        "category": "rung",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "rung.live.remove",
         "title": "Unpin",
         "category": "rung",
@@ -671,6 +677,24 @@
         "title": "Compare Behaviour With…",
         "category": "rung",
         "icon": "$(git-compare)"
+      },
+      {
+        "command": "rung.live.modify",
+        "title": "Modify Current PLC Value…",
+        "category": "rung",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "rung.live.run",
+        "title": "RUN PLC…",
+        "category": "rung",
+        "icon": "$(play)"
+      },
+      {
+        "command": "rung.live.stop",
+        "title": "STOP PLC…",
+        "category": "rung",
+        "icon": "$(debug-stop)"
       }
     ],
     "menus": {
@@ -1017,6 +1041,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "rung.live.table",
+          "when": "view == rung.live",
+          "group": "navigation@1"
+        },
+        {
           "command": "rung.live.pause",
           "when": "view == rung.live && !rung.live.paused",
           "group": "navigation@2"
@@ -1222,6 +1251,21 @@
           "command": "rung.live.format",
           "when": "view == rung.live && viewItem == rung.liveValue",
           "group": "1_format"
+        },
+        {
+          "command": "rung.live.modify",
+          "when": "view == rung.live && (viewItem == rung.liveValue || viewItem == rung.watchRow)",
+          "group": "live@3"
+        },
+        {
+          "command": "rung.live.run",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/",
+          "group": "live@0"
+        },
+        {
+          "command": "rung.live.stop",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/",
+          "group": "live@1"
         }
       ],
       "editor/title": [

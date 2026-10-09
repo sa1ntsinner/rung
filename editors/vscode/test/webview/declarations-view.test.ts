@@ -62,6 +62,12 @@ async function mount() {
 const headers = (v: HTMLElement) => [...v.querySelectorAll('[role="columnheader"]')].map((h) => h.textContent!.trim());
 
 describe("declarations view", () => {
+  it("shows the live PLC, backend and stale state in the monitor control", async () => {
+    const v = await mount();
+    window.dispatchEvent(new MessageEvent("message", { data: { v: 1, kind: "values", on: true, values: { Start: "TRUE" }, target: "PLC_1 · s7commplus · 192.168.250.1", state: "stale" } }));
+    await v.updateComplete;
+    expect(v.querySelector('[data-action="monitor"]')?.getAttribute("title")).toContain("PLC_1 · s7commplus · 192.168.250.1 · stale");
+  });
   beforeEach(() => {
     posted.length = 0;
     saved = undefined;

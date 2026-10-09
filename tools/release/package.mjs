@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stageOnline, auditOnlineRelease } from "./online.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const out = join(root, "dist", "release");
@@ -20,6 +21,7 @@ if (!process.argv.includes("--skip-build")) {
   run(`"${process.execPath}" tools/release/bundle.mjs`);
   run(`"${process.execPath}" tools/release/sea.mjs`);
   run("dotnet build bridge/src/Rung.Bridge.V20 -c Release");
+  run("dotnet publish bridge/src/Rung.Online -c Release -r win-x64 --self-contained true");
 }
 
 rmSync(stage, { recursive: true, force: true });
@@ -29,6 +31,7 @@ cpSync(join(out, "rung.exe"), join(stage, "rung.exe"));
 cpSync(join(out, "rung.cjs"), join(stage, "rung.cjs"));
 const bridgeBin = join(root, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48");
 for (const f of readdirSync(bridgeBin)) if (!f.endsWith(".pdb")) cpSync(join(bridgeBin, f), join(stage, "bridge", f));
+stageOnline(root, stage, join(root, "bridge", "src", "Rung.Online", "bin", "Release", "net10.0", "win-x64", "publish"));
 // the CODESYS bridge is a script that runs inside CODESYS (rung codesys-bridge starts it)
 mkdirSync(join(stage, "bridge", "codesys"), { recursive: true });
 cpSync(join(root, "bridge", "codesys", "rung_bridge_codesys.py"), join(stage, "bridge", "codesys", "rung_bridge_codesys.py"));
@@ -47,6 +50,11 @@ writeFileSync(
     "rung.exe embeds the Node.js runtime (MIT licence, https://github.com/nodejs/node/blob/main/LICENSE).\n" +
     "Siemens TIA Portal Openness libraries are NOT included; rung uses the ones installed with TIA Portal.\n",
 );
+writeFileSync(join(stage, "THIRD_PARTY_NOTICES.txt"), readFileSync(join(stage, "THIRD_PARTY_NOTICES.txt"), "utf8") +
+  "\nS7CommPlusDriver (upstream 5c84e77, modified): LGPL-3.0-or-later. Corresponding source and replacement/debugging permission: source/S7CommPlusDriver/REPLACEMENT.md. GNU LGPL and GPL texts: LICENSES/.\n" +
+  "BouncyCastle.Cryptography 2.7.0: MIT, LICENSES/BouncyCastle-MIT.txt.\n" +
+  "zlib.net-mutliplatform 1.1.0: BSD-3-Clause, Copyright 2006-2007 ComponentAce, 2022-2025 Sjofn LLC, LICENSES/zlib.net-BSD-3-Clause.txt.\n" +
+  "Microsoft .NET 10 runtime and Microsoft.Extensions.*: MIT; runtime source https://github.com/dotnet/runtime; dependency source https://github.com/dotnet/dotnet.\n");
 writeFileSync(
   join(stage, "README.txt"),
   `rung ${version} — PLC projects of TIA Portal and CODESYS as plain text\n\n1. Put this folder somewhere permanent and add it to PATH.\n2. Run rung check: it lists what is installed and what is missing (for TIA Portal: your Windows user in the group "Siemens TIA Openness").\n3. In an empty folder: rung init --project <your project>, rung pull, rung watch.\n4. Editors and agents: rung setup (asks first; rung setup --dry-run shows what it would change).\n\nrung.cjs is the same CLI for any OS with Node.js 22 or newer (node rung.cjs test on a Linux CI runner).\n\nLicence: see LICENSE.txt (core BUSL-1.1, free for individuals and organizations of up to 3 users; editor, grammar and file format MIT).\n`,
@@ -54,8 +62,9 @@ writeFileSync(
 
 // Audit: no Siemens binaries may ever be redistributed.
 const walk = (d) => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : [join(d, f)]));
-const siemens = walk(stage).filter((f) => /siemens/i.test(relative(stage, f)));
+const siemens = walk(stage).filter((f) => /siemens.*\.(dll|exe|so|dylib)$/i.test(relative(stage, f)));
 if (siemens.length) throw new Error(`Siemens files in the release: ${siemens.join(", ")}`);
+auditOnlineRelease(stage);
 
 // The VS Code extension carries the same rung without rung.exe (VS Code's own Node.js runs rung.cjs), so installing
 // the extension is enough. VERSION changes with the content: the extension copies a new one into place.

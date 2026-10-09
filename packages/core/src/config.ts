@@ -45,12 +45,22 @@ export interface RungConfig {
   /** How downloads behave (docs/downloads.md). A person always starts a download. */
   download: DownloadSettings;
   /** Optional live-data sources (read-only). Passwords never live in rung.toml: RUNG_WEBAPI_PASSWORD. */
-  live?: { webapi?: { url: string; user: string; insecure?: boolean } };
+  live?: { webapi?: LiveWebApiConfig; plc?: Record<string, LivePlcConfig> };
   /**
    * Not in rung.toml: set by loadConfig when sync.import is "auto" but this copy of the workspace was not given the
    * right to write into its project (`rung writes on`, kept in .rung/writes.json); sync.import then reads "manual".
    */
   writesOff?: true;
+}
+
+export interface LiveWebApiConfig { url: string; user: string; insecure?: boolean }
+export interface LivePlcConfig {
+  transport: "s7commplus" | "webapi";
+  address: string;
+  allowWrites: boolean;
+  certificateSha256?: string;
+  user?: string;
+  webapi?: LiveWebApiConfig;
 }
 
 export interface PlcConnection {
@@ -99,6 +109,22 @@ export function defaultConfig(projectPath: string, tiaVersion: EngineeringVersio
 
 function fail(msg: string): never {
   throw new WorkspaceError("CONFIG_INVALID", `rung.toml: ${msg}`);
+}
+
+function table(value: unknown, path: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${path} must be a table`);
+  return value as Record<string, unknown>;
+}
+
+function parseWebApi(value: unknown, path: string): LiveWebApiConfig {
+  const v = table(value, path);
+  if ("password" in v) fail(`${path}.password must not be stored in rung.toml; use RUNG_WEBAPI_PASSWORD`);
+  let url: URL;
+  try { url = new URL(String(v.url)); } catch { fail(`${path}.url must be an http(s) URL`); }
+  if (typeof v.url !== "string" || !["http:", "https:"].includes(url.protocol) || url.username || url.password) fail(`${path}.url must be an http(s) URL without credentials`);
+  if (typeof v.user !== "string" || !v.user) fail(`${path}.user is required`);
+  if (v.insecure !== undefined && typeof v.insecure !== "boolean") fail(`${path}.insecure must be true or false`);
+  return { url: v.url, user: v.user, ...(v.insecure !== undefined ? { insecure: v.insecure as boolean } : {}) };
 }
 
 export function parseConfig(text: string): RungConfig {
@@ -155,11 +181,30 @@ export function parseConfig(text: string): RungConfig {
   if (!Array.isArray(devices) || !devices.every((d) => typeof d === "string" && d)) fail("devices must be a list of names");
   const ro = (raw.readOnly ?? {}) as Record<string, unknown>;
   for (const k of ["failsafe", "knowHow", "system", "graph"]) if (ro[k] === false) fail(`readOnly.${k} cannot be disabled in this version`);
-  const live = raw.live as { webapi?: { url?: unknown; user?: unknown; insecure?: unknown; password?: unknown } } | undefined;
-  if (live?.webapi) {
-    if ("password" in live.webapi) fail("live.webapi.password must not be stored in rung.toml; use the RUNG_WEBAPI_PASSWORD environment variable");
-    if (typeof live.webapi.url !== "string" || !/^https?:\/\//.test(live.webapi.url)) fail("live.webapi.url must be an http(s) URL");
-    if (typeof live.webapi.user !== "string" || !live.webapi.user) fail("live.webapi.user is required");
+  let live: RungConfig["live"];
+  if (raw.live !== undefined) {
+    const v = table(raw.live, "live");
+    if ("password" in v) fail("live.password must not be stored in rung.toml");
+    const targets: Record<string, LivePlcConfig> = {};
+    if (v.plc !== undefined) for (const [name, entry] of Object.entries(table(v.plc, "live.plc"))) {
+      const p = table(entry, `live.plc.${name}`);
+      if ("password" in p) fail(`live.plc.${name}.password must not be stored in rung.toml; use RUNG_PLC_PASSWORD`);
+      if (p.transport !== "s7commplus" && p.transport !== "webapi") fail(`live.plc.${name}.transport must be s7commplus or webapi`);
+      if (typeof p.address !== "string" || !isIPv4(p.address)) fail(`live.plc.${name}.address must be a canonical IPv4 literal`);
+      if (p.allow_writes !== undefined && typeof p.allow_writes !== "boolean") fail(`live.plc.${name}.allow_writes must be true or false`);
+      if (p.certificate_sha256 !== undefined && (typeof p.certificate_sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(p.certificate_sha256))) fail(`live.plc.${name}.certificate_sha256 must be a SHA-256 fingerprint`);
+      if (p.user !== undefined && (typeof p.user !== "string" || !p.user)) fail(`live.plc.${name}.user must be a nonempty string`);
+      const webapi = p.webapi === undefined ? undefined : parseWebApi(p.webapi, `live.plc.${name}.webapi`);
+      if (webapi && new URL(webapi.url).hostname !== p.address) fail(`live.plc.${name}.webapi must bind to the same PLC address`);
+      if (p.transport === "webapi" && !webapi) fail(`live.plc.${name}.webapi is required`);
+      targets[name] = { transport: p.transport, address: p.address, allowWrites: p.allow_writes === true,
+        ...(p.certificate_sha256 ? { certificateSha256: (p.certificate_sha256 as string).toUpperCase() } : {}),
+        ...(p.user ? { user: p.user as string } : {}), ...(webapi ? { webapi } : {}) };
+    }
+    const webapi = v.webapi === undefined ? undefined : parseWebApi(v.webapi, "live.webapi");
+    const boundDevices = new Set([...devices as string[], ...Object.keys(plc), ...Object.keys(targets)]);
+    if (webapi && boundDevices.size > 1) fail("live.webapi must be bound per PLC in a multi-PLC workspace (live.plc.<device>.webapi)");
+    live = { ...(webapi ? { webapi } : {}), ...(v.plc !== undefined ? { plc: targets } : {}) };
   }
   return {
     ...base,
@@ -169,7 +214,7 @@ export function parseConfig(text: string): RungConfig {
     tia,
     plc,
     download,
-    ...(live?.webapi ? { live: { webapi: { url: live.webapi.url as string, user: live.webapi.user as string, ...(live.webapi.insecure === true ? { insecure: true } : {}) } } } : {}),
+    ...(live ? { live } : {}),
   };
 }
 
@@ -200,7 +245,14 @@ export function formatConfig(c: RungConfig): string {
             ),
           }
         : {}),
-      ...(c.live ? { live: c.live } : {}),
+      ...(c.live ? { live: {
+        ...(c.live.webapi ? { webapi: c.live.webapi } : {}),
+        ...(c.live.plc ? { plc: Object.fromEntries(Object.entries(c.live.plc).map(([name, p]) => [name, {
+          transport: p.transport, address: p.address, allow_writes: p.allowWrites,
+          ...(p.certificateSha256 ? { certificate_sha256: p.certificateSha256 } : {}),
+          ...(p.user ? { user: p.user } : {}), ...(p.webapi ? { webapi: p.webapi } : {}),
+        }])) } : {}),
+      } } : {}),
     }) +
     "\n"
   );

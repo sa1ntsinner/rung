@@ -12,7 +12,7 @@ import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChec
 import { OwnerClient, cachedXref, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, assignmentList, baseText, interfaceImpact, nearest, diagnostics as parseDiagnostics, uriOf, workspaceTests } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
-import { WebApiClient, plainHttpRefusal } from "@rung/live";
+import { WebApiClient, plainHttpRefusal, type OnlineReadResult, type OnlineStateResult, type OnlineAlarmResult } from "@rung/live";
 import { explainStatic, runTests } from "@rung/sim";
 import type { CompareOutcome, ConnectionTarget, XRefEntry } from "@rung/bridge-client";
 import { handover } from "./handover.js";
@@ -21,6 +21,7 @@ export interface McpContext {
   root: string;
   /** Environment for secrets such as RUNG_WEBAPI_PASSWORD (defaults to process.env). */
   env?: Record<string, string | undefined>;
+  liveFactory?: (options: { device?: string; transport?: string }) => Promise<{ readFrame?(names: string[]): Promise<OnlineReadResult>; read?(names: string[]): Promise<unknown>; state?(): Promise<OnlineStateResult>; alarms?(lcid: number): Promise<OnlineAlarmResult>; close(): Promise<void> }>;
   /** Starts a bridge for one-off operations when no `rung watch` owner is running. */
   bridgeFactory?: () => Promise<
     SyncBridge & { close(): Promise<void>; deleteObject?(a: string, e: string, o: string): Promise<unknown>; compare?(device: string, target?: ConnectionTarget): Promise<CompareOutcome>; xref?(address: string): Promise<XRefEntry[]> }
@@ -539,11 +540,20 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_live_read",
-    { description: "Read current values from the running PLC (S7-1500 Web API, read-only). Needs [live.webapi] in rung.toml and RUNG_WEBAPI_PASSWORD. Use TIA names, e.g. \"Fx_Global\".Counter.", inputSchema: { names: z.array(z.string()).min(1).max(100) } },
-    async ({ names }) => {
+    { description: "Read current values from the selected PLC through the shared read-only backend, with target and observation provenance. Use TIA names, e.g. \"Fx_Global\".Counter. Pass device in a multi-PLC workspace.", inputSchema: { names: z.array(z.string()).min(1).max(100), device: z.string().optional(), transport: z.enum(["s7commplus", "webapi"]).optional() } },
+    async ({ names, device, transport }) => {
       const none = noWorkspace();
       if (none) return none;
+      if (ctx.liveFactory) {
+        let reader: Awaited<ReturnType<NonNullable<McpContext["liveFactory"]>>> | undefined;
+        try {
+          reader = await ctx.liveFactory({ ...(device ? { device } : {}), ...(transport ? { transport } : {}) });
+          return json(reader.readFrame ? await reader.readFrame(names) : await reader.read!(names));
+        } catch (e) { return fail(`PLC read failed: ${(e as Error).message}`); }
+        finally { await reader?.close(); }
+      }
       const config = await loadConfig(ctx.root);
+      if (device || transport === "s7commplus" || Object.keys(config.live?.plc ?? {}).length) return fail("Start this server with rung mcp to use the configured shared PLC backend.");
       const w = config.live?.webapi;
       const env = ctx.env ?? process.env;
       const password = env.RUNG_WEBAPI_PASSWORD;
@@ -561,6 +571,22 @@ export function createMcpServer(ctx: McpContext): McpServer {
       }
     },
   );
+
+  for (const kind of ["state", "alarms"] as const) server.registerTool(`rung_live_${kind}`, {
+    description: kind === "state" ? "Read the selected PLC's CPU mode, cycle and memory with identity and target provenance."
+      : "Read active PLC alarms, preserving raw IDs, CPU timestamps, receive timestamps and text language provenance. No alarm acknowledgement is exposed.",
+    inputSchema: { device: z.string().optional(), transport: z.enum(["s7commplus", "webapi"]).optional(), lcid: z.number().int().min(1).max(65535).optional() },
+  }, async ({ device, transport, lcid }) => {
+    const none = noWorkspace(); if (none) return none;
+    if (!ctx.liveFactory) return fail("Start with rung mcp for shared PLC diagnostics.");
+    let reader: Awaited<ReturnType<NonNullable<McpContext["liveFactory"]>>> | undefined;
+    try {
+      reader = await ctx.liveFactory({ ...(device ? { device } : {}), ...(transport ? { transport } : {}) });
+      if (kind === "state") return reader.state ? json(await reader.state()) : fail("CPU diagnostics unavailable for this transport.");
+      return reader.alarms ? json(await reader.alarms(lcid ?? 1033)) : fail("Alarms unavailable for this transport.");
+    } catch (error) { return fail(`PLC ${kind} unavailable: ${(error as Error).message}`); }
+    finally { await reader?.close(); }
+  });
 
   server.registerTool(
     "rung_test",

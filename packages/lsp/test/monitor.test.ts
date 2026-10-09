@@ -33,6 +33,24 @@ const start = async (server: Awaited<ReturnType<typeof monitorServer>>) => {
 };
 
 describe("monitoring through LSP", () => {
+  it("refreshes pushed snapshots without polling and disposes the subscription", async () => {
+    const f = fake();
+    let push!: (frame: MonitorValues) => void;
+    const unsubscribe = vi.fn();
+    f.provider.open = async () => ({ read: f.read, close: f.close, subscribe: (cb: (frame: MonitorValues) => void) => { push = cb; return unsubscribe; } });
+    const s = await boot(f.provider);
+    await start(s);
+    push({ values: { count: 0, flag: true }, errors: {}, display: { count: "0.0" } });
+    await until(() => s.refreshes.length > 0);
+    expect((await s.hints())[0]!.label).toBe("count = 0.0");
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(f.read).not.toHaveBeenCalled();
+    await s.execute((await s.actions())[0]!);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(f.close).toHaveBeenCalledTimes(1);
+    push({ values: { count: 99 }, errors: {} });
+    expect(await s.hints()).toEqual([]);
+  });
   it("is off for an editor that monitors itself (rung's VS Code extension)", async () => {
     const f = fake();
     const s = await monitorServer(f.provider, { initializationOptions: { monitor: false } });

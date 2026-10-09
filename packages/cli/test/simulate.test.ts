@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebApiClient } from "@rung/live";
@@ -45,6 +49,41 @@ function workspace() {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("rung simulate (virtual S7-1500)", () => {
+  it("the bundled CLI finds the installed native host without TIA or a PLC connection", async (ctx) => {
+    const hostDir = fileURLToPath(new URL("../../../bridge/src/Rung.Online/bin/Release/net10.0/", import.meta.url));
+    if (!existsSync(join(hostDir, "rung-online.exe"))) return ctx.skip();
+    const dir = workspace(), home = mkdtempSync(join(tmpdir(), "rung-native-bundle-test-")), bundle = join(home, "rung.cjs");
+    await build({ entryPoints: [fileURLToPath(new URL("../src/bin.ts", import.meta.url))], outfile: bundle,
+      bundle: true, platform: "node", format: "cjs", target: "node22", define: { "import.meta.url": "undefined" }, logLevel: "silent" });
+    cpSync(hostDir, join(home, "bridge"), { recursive: true });
+    writeFileSync(join(dir, "rung.toml"), 'format = 1\ndevices = ["PLC_1"]\n[project]\npath = "fixture.ap20"\ntiaVersion = "V20"\n[live.plc.PLC_1]\ntransport = "s7commplus"\naddress = "192.168.250.1"\n');
+    try {
+      await expect(promisify(execFile)(process.execPath, [bundle, "live", "read", "DB.X", "--json"], {
+        cwd: dir, env: { ...process.env, RUNG_HOME: undefined, RUNG_ONLINE_HOST: undefined }, windowsHide: true, timeout: 15000,
+      })).rejects.toMatchObject({ stderr: expect.stringContaining("CERTIFICATE_UNTRUSTED") });
+    } finally {
+      const owner = join(dir, ".rung", "live-owner.json");
+      if (existsSync(owner)) process.kill(JSON.parse(readFileSync(owner, "utf8")).pid);
+    }
+  });
+  it("the bundled CLI starts its own live broker and reads the simulator", async () => {
+    const dir = workspace(), bundle = join(mkdtempSync(join(tmpdir(), "rung-bundle-test-")), "rung.cjs");
+    await build({ entryPoints: [fileURLToPath(new URL("../src/bin.ts", import.meta.url))], outfile: bundle,
+      bundle: true, platform: "node", format: "cjs", target: "node22", define: { "import.meta.url": "undefined" }, logLevel: "silent" });
+    const plc = await startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 });
+    writeFileSync(join(dir, "rung.toml"), `format = 1\ndevices = ["PLC_1"]\n[project]\npath = "fixture.ap20"\ntiaVersion = "V20"\n[live.webapi]\nurl = "${plc.url}"\nuser = "any"\n`);
+    try {
+      const result = await promisify(execFile)(process.execPath, [bundle, "live", "read", '"Plant".speed', "--json"], {
+        cwd: dir, env: { ...process.env, RUNG_HOME: undefined, RUNG_WEBAPI_PASSWORD: "x" }, windowsHide: true, timeout: 15000,
+      });
+      expect(JSON.parse(result.stdout)).toMatchObject({ scope: { device: "PLC_1", transport: "webapi" }, items: [{ name: '"Plant".speed', value: 10 }] });
+      expect(result.stderr).toBe("");
+    } finally {
+      await plc.close();
+      const owner = join(dir, ".rung", "live-owner.json");
+      if (existsSync(owner)) process.kill(JSON.parse(readFileSync(owner, "utf8")).pid);
+    }
+  });
   it("runs the cyclic OB and serves changing values over the Web API", async () => {
     const plc = await startVirtualPlc(workspace(), { host: "127.0.0.1", port: 0, cycleMs: 5 });
     try {

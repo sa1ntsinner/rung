@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V19" />
+  <SW.WatchAndForceTables.PlcWatchTable ID="0">
+    <AttributeList>
+      <Name>Fx_Watch</Name>
+    </AttributeList>
+    <ObjectList>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="1" CompositionName="Entries">
+        <AttributeList>
+          <Address>%M0.0</Address>
+          <DisplayFormat>Bool</DisplayFormat>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="2" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="3" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 1</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="4" CompositionName="Entries">
+        <AttributeList>
+          <Address>%MW2</Address>
+          <DisplayFormat>Hex</DisplayFormat>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="5" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="6" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 2</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="7" CompositionName="Entries">
+        <AttributeList>
+          <Address>%ID0</Address>
+          <DisplayFormat>Hex</DisplayFormat>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="8" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="9" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 3</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="A" CompositionName="Entries">
+        <AttributeList>
+          <Address>%QB4</Address>
+          <DisplayFormat>Hex</DisplayFormat>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="B" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="C" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 4</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="D" CompositionName="Entries">
+        <AttributeList>
+          <DisplayFormat>DEC_signed</DisplayFormat>
+          <ModifyValue>17</ModifyValue>
+          <Name>"Fx_Global".Count</Name>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="E" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="F" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 5</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="10" CompositionName="Entries">
+        <AttributeList>
+          <DisplayFormat>Bool</DisplayFormat>
+          <Name>"Fx_Global".Ready</Name>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="11" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="12" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 6</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+      <SW.WatchAndForceTables.PlcWatchTableEntry ID="13" CompositionName="Entries">
+        <AttributeList>
+          <DisplayFormat>DEC_signed</DisplayFormat>
+          <Name>"Fx_Global".Count</Name>
+        </AttributeList>
+        <ObjectList>
+          <MultilingualText ID="14" CompositionName="Comment">
+            <ObjectList>
+              <MultilingualTextItem ID="15" CompositionName="Items">
+                <AttributeList>
+                  <Culture>en-US</Culture>
+                  <Text>Fixture row 7</Text>
+                </AttributeList>
+              </MultilingualTextItem>
+            </ObjectList>
+          </MultilingualText>
+        </ObjectList>
+      </SW.WatchAndForceTables.PlcWatchTableEntry>
+    </ObjectList>
+  </SW.WatchAndForceTables.PlcWatchTable>
+</Document>

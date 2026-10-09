@@ -1,19 +1,32 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung live: read-only values of a running PLC: an S7-1500 through its Web API, CODESYS through rung's CODESYS bridge.
 import { WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
-import { WebApiClient, plainHttpRefusal } from "@rung/live";
+import { WebApiClient, plainHttpRefusal, loadWatchTable, watchTableVariables, type LiveFrame, type OnlineReadResult, type OnlineStateResult } from "@rung/live";
+import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, relative, resolve, sep } from "node:path";
-import { WorkspaceIndex, uriOf, type MonitorValues } from "@rung/lsp";
+import { basename, dirname, relative, resolve, sep } from "node:path";
+import { WorkspaceIndex, uriOf, parseAbsolute, type MonitorValues } from "@rung/lsp";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
 import { OwnerClient } from "@rung/sync";
 import { monitorPlan, monitorPlanIec, type MonitorPlan } from "./monitor.js";
+import { onlineHost, trustLiveCertificate } from "./liveTrust.js";
+import { brokerReader, liveSelection, type BackendOptions } from "./liveServer.js";
+import type { MutationAction, MutationEvidence } from "@rung/live";
+import type { OnlinePreparedWrite } from "@rung/bridge-client";
+import type { OnlineAlarmResult } from "@rung/bridge-client";
+import { createInterface } from "node:readline/promises";
+import { frontendConfirmation } from "./liveMutation.js";
 
-export async function webApiFor(dir: string, env: Io["env"]): Promise<WebApiClient> {
+export async function webApiFor(dir: string, env: Io["env"], opts: BackendOptions = {}): Promise<WebApiClient> {
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
-  const w = config.live?.webapi;
+  let w = config.live?.webapi;
+  if (Object.keys(config.live?.plc ?? {}).length) {
+    const selected = await liveSelection(ws, opts);
+    if (selected.transport !== "webapi") throw new WorkspaceError("CONFIG_INVALID", "Diagnostic buffer requires an explicit Web API fallback (--transport webapi)");
+    w = selected.target.webapi;
+  }
   if (!w) throw new WorkspaceError("CONFIG_INVALID", 'no [live.webapi] in rung.toml (url = "https://<plc-ip>", user = "<web server user>")');
   const password = env.RUNG_WEBAPI_PASSWORD;
   if (!password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user (it is never stored in rung.toml)");
@@ -23,15 +36,70 @@ export async function webApiFor(dir: string, env: Io["env"]): Promise<WebApiClie
 }
 
 export interface LiveOptions {
+  device?: string;
+  transport?: string;
   file?: string;
+  table?: string;
   instance?: string;
   json?: boolean;
   intervalMs?: number;
   /** --interval as typed, for the message when it is no number. */
   intervalText?: string;
+  confirmStdin?: boolean;
+  parentStdio?: boolean;
+  lcid?: number;
+  stream?: boolean;
 }
 
 export async function cmdLive(dir: string, sub: string | undefined, args: string[], io: Io, opts: LiveOptions = {}): Promise<number> {
+  if (opts.parentStdio) {
+    if (!opts.json || !(sub === "watch" || sub === "alarms" && opts.stream)) throw new WorkspaceError("BAD_ARGUMENT", "--parent-stdio requires a read-only JSON watch or alarm stream");
+    const input = process.stdin;
+    let stop!: () => void;
+    const ended = new Promise<void>(resolve => { stop = resolve; });
+    input.once("end", stop); process.once("SIGINT", stop);
+    if (input.readableEnded) stop(); else input.resume();
+    try { return await cmdLive(dir, sub, args, { ...io, stopSignal: io.stopSignal ? Promise.race([io.stopSignal, ended]) : ended }, { ...opts, parentStdio: false }); }
+    finally { input.off("end", stop); process.off("SIGINT", stop); input.pause(); }
+  }
+  try {
+  if (sub === "trust") return trustLiveCertificate(dir, io, opts.device);
+  if (sub === "state" || sub === "alarms") {
+    if (args.length || opts.file || opts.table) throw new WorkspaceError("BAD_ARGUMENT", "State and alarms require a PLC device, not variable arguments");
+    const reader = await brokerReader(await findWorkspace(dir), io.env, opts);
+    let lease: { close(): Promise<void> } | undefined;
+    try {
+      if (sub === "state") {
+        const result = await reader.state!();
+        io.stdout(opts.json ? JSON.stringify(result) + "\n" : `${result.scope.device} · ${result.scope.address} · ${result.identity.plcName}\n${result.state.mode}${result.state.cycleMs == null ? "" : ` · ${result.state.cycleMs} ms`}\n${result.state.memory?.map(m => `${m.name}: ${m.usedBytes}/${m.totalBytes} bytes`).join("\n") ?? "Memory unavailable"}\n`);
+      } else {
+        const print = (frame: OnlineAlarmResult) => io.stdout(opts.json ? JSON.stringify(frame) + "\n" : `${frame.scope.device} · ${frame.scope.address} · ${frame.connectionState ?? "connected"}\n${frame.alarms.map(a => `${a.active ? "ACTIVE" : "CLEARED"} ${a.id} · ${a.cpuTimestamp ?? "CPU time unavailable"} · ${a.text.replace(/[\x00-\x1f\x7f]/g, " ")}`).join("\n")}\n`);
+        if (opts.stream) { lease = await reader.subscribeAlarms!(opts.lcid ?? 1033, print); await (io.stopSignal ?? new Promise<void>(r => process.once("SIGINT", r))); }
+        else print(await reader.alarms!(opts.lcid ?? 1033));
+      }
+      return 0;
+    } finally { try { await lease?.close(); } finally { await reader.close(); } }
+  }
+  if (sub === "modify" || sub === "run" || sub === "stop") {
+    if (!opts.confirmStdin && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "PLC mutation requires an interactive confirmation");
+    if (sub === "modify" ? args.length !== 2 : args.length !== 0) throw new WorkspaceError("BAD_ARGUMENT", "Use live modify <name> <SCL-literal>, live run or live stop");
+    const ws = await findWorkspace(dir);
+    const selected = await liveSelection(ws, opts);
+    const reader = await brokerReader(ws, io.env, opts);
+    let operation: OnlinePreparedWrite | undefined;
+    const rl = io.prompt || opts.confirmStdin ? undefined : createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      operation = await reader.prepare!({ action: sub, ...(sub === "modify" ? { name: args[0]!, literal: args[1]! } : {}) });
+      io.stdout(opts.confirmStdin ? JSON.stringify({ prepared: operation }) + "\n" : operation.preview.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "") + "\n");
+      const question = `To confirm this PLC operation, type ${selected.device}: `;
+      const confirmed = opts.confirmStdin ? await frontendConfirmation(process.stdin, operation)
+        : await (io.prompt ? io.prompt(question) : rl!.question(question)) === selected.device;
+      if (!confirmed) { await reader.cancel!(operation.operationId); io.stderr("PLC operation cancelled\n"); return 1; }
+      const result = await reader.commit!(operation.operationId, operation.preview, true);
+      io.stdout(opts.json ? JSON.stringify(result) + "\n" : `PLC operation ${result.outcome}\n`);
+      return result.outcome === "acknowledged" ? 0 : 2;
+    } finally { rl?.close(); if (operation) await reader.cancel!(operation.operationId).catch(() => {}); await reader.close(); }
+  }
   if (sub !== "read" && sub !== "diag" && sub !== "watch") {
     io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live watch "<DB>".<member> ... | rung live diag\n');
     return 1;
@@ -39,6 +107,10 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
   // not a number would read the PLC without any pause between reads
   if (opts.intervalMs !== undefined && !Number.isFinite(opts.intervalMs))
     throw new WorkspaceError("BAD_ARGUMENT", `--interval is a number of milliseconds (--interval 500); got ${opts.intervalText ?? opts.intervalMs}`);
+  if (opts.table) {
+    if (sub !== "watch" || opts.file || args.length) throw new WorkspaceError("BAD_ARGUMENT", "--table requires live watch without --file or variable arguments");
+    return watchTableFile(dir, io, opts);
+  }
   if (sub === "watch") {
     const ws = await findWorkspace(dir);
     if ((await loadConfig(ws)).project.tiaVersion === "CODESYS") {
@@ -49,10 +121,40 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
   // the plan comes first: a block that cannot be monitored needs no PLC connection to say so
   // rung live watch "DB".x Tag …: pinned values, read together every interval (the editor's Live Values)
   const plan = sub === "watch" ? (!opts.file && args.length ? { block: "pinned values", vars: Object.fromEntries(args.map((a) => [a, a])) } as MonitorPlan : await watchPlan(dir, io, opts)) : undefined;
-  const client = await webApiFor(dir, io.env);
+  const ws = await findWorkspace(dir);
+  if (sub !== "diag") {
+    const reader = await brokerReader(ws, io.env, opts);
+    try {
+      if (plan) return await watchValues(reader.read, plan, io, opts, reader);
+      if (!args.length) throw new WorkspaceError("BAD_ARGUMENT", "Name at least one variable");
+      const frame = await reader.readFrame!(args);
+      if (opts.json) io.stdout(JSON.stringify(frame) + "\n");
+      else for (const row of frame.items) io.stdout(`${row.name}  ${row.error ? "ERROR " + row.error : row.display ?? JSON.stringify(row.value)}\n`);
+      return frame.items.some((r) => r.error) ? 2 : 0;
+    } catch (error) { io.stderr(`rung live ${opts.transport ?? "configured transport"}: ${liveError(error)}\n`); return 1; }
+    finally { await reader.close(); }
+  }
+  const selected = await liveSelection(ws, opts);
+  if (selected.transport === "s7commplus") {
+    const reader = await brokerReader(ws, io.env, opts);
+    try {
+      const cpu = await reader.state!();
+      let diagnosticBuffer: { provenance: string; available: boolean; entries?: unknown; reason?: string } = { provenance: "Web API diagnostic buffer", available: false, reason: "Configure the selected PLC's Web API fallback and credentials to read its diagnostic buffer" };
+      if (selected.target.webapi && io.env.RUNG_WEBAPI_PASSWORD) {
+        const fallback = await webApiFor(ws, io.env, { device: selected.device, transport: "webapi" });
+        try { diagnosticBuffer = { provenance: "Web API diagnostic buffer", available: true, entries: await fallback.diagnosticBuffer() }; }
+        catch { diagnosticBuffer.reason = "The selected PLC's Web API diagnostic buffer is unavailable"; }
+        finally { await fallback.logout().catch(() => {}); }
+      }
+      io.stdout(JSON.stringify({ scope: cpu.scope, cpu, diagnosticBuffer }, null, 2) + "\n");
+      return 0;
+    } finally { await reader.close(); }
+  }
+  await liveSelection(ws, { ...opts, transport: "webapi" });
+  const client = await webApiFor(dir, io.env, opts);
   try {
     if (plan) return await watchValues((names) => client.read(names), plan, io, opts);
-    return await liveRun(client, sub, args, io);
+    return await liveRun(client, sub, args, io, opts.json);
   } catch (e) {
     // network and PLC errors are expected here (wrong address, PLC off, wrong password): one clear line, no stack
     io.stderr(`rung live: ${liveError(e)}\n`);
@@ -60,6 +162,46 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
   } finally {
     await client.logout().catch(() => undefined);
   }
+  } catch (error) {
+    if (opts.json && error instanceof WorkspaceError && error.code === "NO_INSTANCE") io.stdout(JSON.stringify({ error: { code: error.code, message: error.message, details: error.details } }) + "\n");
+    throw error;
+  }
+}
+
+async function watchTableFile(dir: string, io: Io, opts: LiveOptions): Promise<number> {
+  const ws = await findWorkspace(dir), file = resolve(io.cwd, opts.table!);
+  const rel = relative(ws, file).split(sep).join("/");
+  const device = /^plc\/([^/]+)\/watch\/[^/]+\.xml$/i.exec(rel)?.[1];
+  if (!device || opts.device && device !== opts.device) throw new WorkspaceError("BAD_ARGUMENT", "--table must name a mirrored watch table of the selected PLC");
+  const stop = io.stopSignal ?? new Promise<void>(r => process.once("SIGINT", r));
+  let stopped = false, changed!: () => void;
+  void stop.then(() => { stopped = true; changed?.(); });
+  const host = await onlineHost(io.env);
+  let watcher: ReturnType<typeof watch> | undefined;
+  let editTimer: ReturnType<typeof setTimeout> | undefined;
+  let reader: LiveReader | undefined;
+  try {
+    watcher = watch(dirname(file), (_event, name) => {
+      if (name && name.toString() !== basename(file)) return;
+      if (editTimer) clearTimeout(editTimer);
+      editTimer = setTimeout(() => changed?.(), 100);
+    });
+    while (!stopped) {
+      const edited = new Promise<void>(r => { changed = r; });
+      const table = await loadWatchTable(host, await readFile(file, "utf8"));
+      const config = await loadConfig(ws);
+      const native = (opts.transport ?? config.live?.plc?.[device]?.transport) === "s7commplus";
+      const absoluteRows = Object.fromEntries(table.rows.flatMap(row => {
+        const address = parseAbsolute(row.name?.trim() || row.address || "");
+        return native && address && ["I", "Q", "M"].includes(address.area) && !address.peripheral && address.bits <= 32 ? [[row.key, address.address]] : [];
+      }));
+      const plan: MonitorPlan = { block: table.name, kind: "watchtable", table, lines: {}, ...watchTableVariables(table, absoluteRows) };
+      reader ??= await brokerReader(ws, io.env, { ...opts, device, file: rel });
+      await watchValues(reader.read, plan, { ...io, stopSignal: Promise.race([stop, edited]) }, opts, reader);
+      if (!stopped) await Promise.race([stop, edited]);
+    }
+    return 0;
+  } finally { watcher?.close(); if (editTimer) clearTimeout(editTimer); try { await reader?.close(); } finally { await host.close(); } }
 }
 
 async function watchPlan(dir: string, io: Io, opts: LiveOptions): Promise<MonitorPlan> {
@@ -74,7 +216,7 @@ async function watchPlan(dir: string, io: Io, opts: LiveOptions): Promise<Monito
 }
 
 /** Reads the plan's variables every interval until stopped. */
-export type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; error?: string }[]>;
+export type Reader = (names: string[]) => Promise<{ name: string; value?: unknown; error?: string; display?: string }[]>;
 
 /**
  * CODESYS: the values come from the application CODESYS runs, through rung's CODESYS bridge. While rung watch runs
@@ -97,7 +239,15 @@ async function watchCodesys(ws: string, io: Io, opts: LiveOptions): Promise<numb
 }
 
 export interface LiveReader {
+  alarms?(lcid: number): Promise<OnlineAlarmResult>;
+  subscribeAlarms?(lcid: number, callback: (frame: OnlineAlarmResult) => void): Promise<{ close(): Promise<void> }>;
+  prepare?(action: MutationAction): Promise<OnlinePreparedWrite>;
+  commit?(operationId: string, preview: string, confirmed: boolean): Promise<MutationEvidence>;
+  cancel?(operationId: string): Promise<unknown>;
   read: Reader;
+  readFrame?(names: string[]): Promise<OnlineReadResult>;
+  subscribe?(labels: Record<string, string>, cycleMs: number, onFrame: (frame: LiveFrame) => void): Promise<{ close(): Promise<void> }>;
+  state?(): Promise<OnlineStateResult>;
   close(): Promise<void>;
 }
 
@@ -106,8 +256,7 @@ export async function liveReader(uri: string, io: Io, dir?: string, fileLabel = 
   const ws = dir ?? await findWorkspace(dirname(file));
   const config = await loadConfig(ws);
   if (config.project.tiaVersion !== "CODESYS") {
-    const client = await webApiFor(ws, io.env);
-    return { read: (names) => client.read(names), close: () => client.logout().catch(() => undefined) };
+    return brokerReader(ws, io.env, { file: relative(ws, file).split(sep).join("/") });
   }
   const hit = pathToAddress(relative(ws, file).split(sep).join("/"));
   if (!hit) throw new WorkspaceError("BAD_ARGUMENT", fileLabel + " is not a mirrored object of this workspace");
@@ -129,20 +278,36 @@ export async function readMonitorValues(read: Reader, plan: Pick<MonitorPlan, "v
   const rows = await read(labels.map((label) => plan.vars[label]!));
   const values: Record<string, unknown> = {};
   const errors: Record<string, string> = {};
+  const display: Record<string, string> = {};
   rows.forEach((row, i) => (row.error ? (errors[labels[i]!] = row.error) : (values[labels[i]!] = row.value)));
-  return { values, errors };
+  rows.forEach((row, i) => { if (row.display !== undefined) display[labels[i]!] = row.display; });
+  return { values, errors, ...(Object.keys(display).length ? { display } : {}) };
 }
 
-async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOptions): Promise<number> {
-  const labels = Object.keys(plan.vars);
+async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOptions, reader?: LiveReader): Promise<number> {
+  const labels = plan.table?.rows.map(row => row.key) ?? [...new Set([...Object.keys(plan.vars), ...Object.keys(plan.errors ?? {})])];
+  const labelText = (key: string) => { const row = plan.table?.rows.find(r => r.key === key); return row ? `${key} ${row.name || row.address || "(empty)"}` : key; };
   if (opts.json) io.stdout(JSON.stringify({ plan }) + "\n");
   else io.stdout(`rung live watch: ${plan.block}${plan.instance ? ` through ${plan.instance}` : ""}, ${labels.length} values (Ctrl+C to stop)\n`);
-  if (!labels.length) return 0;
+  if (!Object.keys(plan.vars).length) {
+    if (!opts.json) for (const label of labels) io.stdout(`  ${labelText(label)}  ERROR ${plan.errors?.[label]}\n`);
+    return 0;
+  }
   let stopped = false;
   // Ctrl+C in a terminal; an editor ends it by killing the process
   const stop = io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r()));
   void stop.then(() => (stopped = true));
   const interval = Math.max(100, opts.intervalMs ?? 500);
+  if (reader?.subscribe) {
+    const lease = await reader.subscribe(plan.vars, interval, (frame) => {
+      if (stopped) return;
+      frame = { ...frame, errors: { ...plan.errors, ...frame.errors } };
+      if (opts.json) io.stdout(JSON.stringify(frame) + "\n");
+      else io.stdout(labels.map((l) => `  ${labelText(l).padEnd(32)} ${l in frame.errors ? "ERROR " + frame.errors[l] : frame.display?.[l] ?? JSON.stringify(frame.values[l])}`).join("\n") + "\n\n");
+    });
+    try { await stop; } finally { await lease.close(); }
+    return 0;
+  }
   while (!stopped) {
     // a read that fails (PLC off, network gone) is told for every value, and the loop goes on: it comes back
     let values: Record<string, unknown> = {};
@@ -152,14 +317,15 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
     } catch (e) {
       errors = Object.fromEntries(labels.map((l) => [l, liveError(e)]));
     }
+    errors = { ...plan.errors, ...errors };
     if (opts.json) io.stdout(JSON.stringify({ at: Date.now(), values, ...(Object.keys(errors).length ? { errors } : {}) }) + "\n");
-    else io.stdout(labels.map((l) => `  ${l.padEnd(32)} ${l in errors ? `ERROR ${errors[l]}` : JSON.stringify(values[l])}`).join("\n") + "\n\n");
+    else io.stdout(labels.map((l) => `  ${labelText(l).padEnd(32)} ${l in errors ? `ERROR ${errors[l]}` : JSON.stringify(values[l])}`).join("\n") + "\n\n");
     await Promise.race([stop, new Promise((r) => setTimeout(r, interval))]);
   }
   return 0;
 }
 
-async function liveRun(client: WebApiClient, sub: string, args: string[], io: Io): Promise<number> {
+async function liveRun(client: WebApiClient, sub: string, args: string[], io: Io, json = false): Promise<number> {
   {
     if (sub === "read") {
       if (!args.length) {
@@ -167,10 +333,11 @@ async function liveRun(client: WebApiClient, sub: string, args: string[], io: Io
         return 1;
       }
       const rows = await client.read(args);
-      for (const r of rows) io.stdout(r.error ? `${r.name}  ERROR ${r.error}\n` : `${r.name}  ${JSON.stringify(r.value)}\n`);
+      if (json) io.stdout(JSON.stringify(rows) + "\n");
+      else for (const r of rows) io.stdout(r.error ? `${r.name}  ERROR ${r.error}\n` : `${r.name}  ${JSON.stringify(r.value)}\n`);
       return rows.some((r) => r.error) ? 2 : 0;
     }
-    io.stdout(JSON.stringify(await client.diagnosticBuffer(), null, 2) + "\n");
+    io.stdout(JSON.stringify({ provenance: "Web API diagnostic buffer", entries: await client.diagnosticBuffer() }, null, 2) + "\n");
     return 0;
   }
 }

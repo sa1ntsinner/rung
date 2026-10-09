@@ -4,7 +4,7 @@ export { doctor, summarize, type DoctorRow, type DoctorBridge, type DoctorSummar
 export { mergeText, mergeBundle, mergeSource, SOURCE_FORMS, type MergeResult, type BundleMerge } from "./merge.js";
 export { recordBackup, recordCompile, syncOnce, syncQuick, confirmDelete, resolveConflict, restoreFile, type SyncReport, type SyncOptions, type SyncBridge, type Diagnostic, type Refusal } from "./sync.js";
 export { dryState, unifiedDiff, type Plan, type PlanEntry } from "./plan.js";
-export { OwnerServer, OwnerClient, OwnerError, OWNER_PROTOCOL, type OwnerInfo, type OwnerHandler } from "./owner.js";
+export { OwnerServer, OwnerClient, OwnerError, OWNER_PROTOCOL, type OwnerInfo, type OwnerHandler, type OwnerOptions } from "./owner.js";
 export { Watcher, type WatcherOptions, type ClosableBridge } from "./watch.js";
 export { writeModelViews, writeTagViews, toView, parseTagRows, VIEW_HEADER, type ViewsReport } from "./views.js";
 export * from "./compile-lines.js";

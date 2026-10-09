@@ -165,18 +165,27 @@ export class DeclarationsSession implements vscode.Disposable {
     const on = !!mon?.monitoring && mon.monitoring.toString() === this.host.uri() && !!mon.plan && !!this.model;
     if (!on && !this.monitored) return;
     this.monitored = on;
-    const values = on ? rowValues(this.model!.sections, mon!.plan!, mon!.values, mon!.errors) : {};
-    if (this.ready) void this.webview.postMessage({ v: 1, kind: "values", on, values, ...(on && mon!.plan!.instance ? { instance: mon!.plan!.instance } : {}) } satisfies HostToView);
+    const values = on ? rowValues(this.model!.sections, mon!.plan!, mon!.values, mon!.errors, mon!.display) : {};
+    const scope = on ? mon!.scope : undefined;
+    if (this.ready) void this.webview.postMessage({ v: 1, kind: "values", on, values, ...(on && mon!.plan!.instance ? { instance: mon!.plan!.instance } : {}), ...(scope ? { target: `${scope.device} · ${scope.transport} · ${scope.address}` } : {}), ...(on && mon!.state ? { state: mon!.state } : {}) } satisfies HostToView);
   }
 
   /** What the view was last told about monitored values (tests). */
   get monitoredValues(): Record<string, string> | undefined {
     const mon = this.deps.monitor;
-    return mon?.plan && this.model && mon.monitoring?.toString() === this.host.uri() ? rowValues(this.model.sections, mon.plan, mon.values, mon.errors) : undefined;
+    return mon?.plan && this.model && mon.monitoring?.toString() === this.host.uri() ? rowValues(this.model.sections, mon.plan, mon.values, mon.errors, mon.display) : undefined;
   }
 
   private async handle(m: ViewToHost) {
     switch (m.kind) {
+      case "modify": {
+        const document = this.document(), mon = this.deps.monitor;
+        const row = this.model && findRow(this.model, m.rowId);
+        if (!document || document.isDirty || document.version !== m.version || this.host.uri() !== m.uri || !row || row.kind !== "plain" || mon?.monitoring?.toString() !== m.uri || !mon.plan || mon.state !== "live") return;
+        const name = rowValues(this.model!.sections, mon.plan, {}, {}, mon.plan.vars)[m.rowId];
+        if (name) await vscode.commands.executeCommand("rung.live.modify", name, undefined, mon.scope?.device);
+        return;
+      }
       case "monitor": {
         const uri = this.host.uri();
         if (uri) await vscode.commands.executeCommand("rung.monitor.toggle", vscode.Uri.parse(uri));
