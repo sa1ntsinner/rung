@@ -32,7 +32,7 @@ import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
 import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdRestore, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
-import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
+import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdSession, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
 import { startDebugAdapter } from "./debug.js";
@@ -57,7 +57,7 @@ Usage:
   rung setup [dir] [--dry-run] [-y] [--agents claude,codex,...] [--skills all|a,b] [--editors vscode,zed] [--scope project|global]
              [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
-  rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
+  rung check [--host <ssh-destination>] [--json]  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
   rung xref <file|address> [--json] [--fresh]
                                        TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
@@ -98,17 +98,21 @@ Usage:
 
 PLC:
   rung compile [dir] [--file <f>]... [--hw] [--plc <name>]   compile in TIA Portal; errors point at file lines
-  rung online [dir] [--off|--state] [--plc <name>]          go online / offline, or show the online state
-  rung compare [dir] [--json] [--plc <name>]                 the project against the PLC (read-only); exit 2 if they differ
+  rung online [dir] [--off|--state] [--plc <name>] [--trust-certificate]  go online / offline, or show the online state
+  rung compare [dir] [--json] [--plc <name>] [--trust-certificate]       the project against the PLC (read-only); exit 2 if they differ
   rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
   rung connect [dir] --use <PG/PC interface> [--mode <mode>] [--number <n>] [--target <interface>]
                                        save a connection you choose (rung interfaces lists them)
+  rung connect [dir] --address <ip> [--plc <name>]          V21: online address in rung.toml; V19/V20: project address in network.yaml
+  rung connect [dir] --address <ip> --project-address      use the address in the project (all TIA versions)
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
   rung upload [dir] --ip <address> [--use <PG/PC interface>]  the PLC as a new station of the project (the PLC is only read)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
                                        download to the PLC; asks you to type the PLC name first, and
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
-  rung open <file> [--dir <ws>]        open the block's editor in the TIA Portal window
+  rung open <file> [--save] [--dir <ws>]  open the object's editor in a TIA Portal window
+  rung session [dir] [--json]           inspect the existing TIA Portal without opening one
+  rung session [dir] --release [--save] close the project in rung's background TIA Portal (stops watch)
   rung simulate [dir] [--address 127.0.0.2] [--port 8080] [--cycle 10] [--block <FB/FC>]
                                        a virtual S7-1500: runs the SCL program and answers the Web API (for rung live)
   rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
@@ -190,7 +194,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
         ...(codesys ? { closeTimeoutMs: 30_000 } : {}),
         // opening the project in a TIA Portal without window: minutes on a cold start, as for every other command
         firstRequestTimeoutMs: 300_000,
-        onSlowStart: () => io.stderr("rung: waiting for TIA Portal: opening the project without a window can take a minute or two\n"),
+        onSlowStart: () => io.stderr("rung: waiting for TIA Portal: starting it and opening the project can take a minute or two\n"),
       });
   try {
     let info = await client.projectInfo();
@@ -359,7 +363,7 @@ function initHint(code: string, project: boolean): string | undefined {
 /** Options and positionals (after the command) each command takes: anything else is a typo worth stopping for. */
 export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
-  check: { options: ["json"], positionals: 0 },
+  check: { options: ["host", "json"], positionals: 0 },
   format: { options: ["check"], positionals: 1 },
   xref: { options: ["json", "fresh"], positionals: 1 },
   why: { options: ["instance", "json"], positionals: 2 },
@@ -385,12 +389,13 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   debug: { options: ["stdio"], positionals: 0 },
   doctor: { options: ["fixture"], positionals: 1 },
   compile: { options: ["file", "hw", "plc"], positionals: 1 },
-  online: { options: ["off", "state", "plc"], positionals: 1 },
-  compare: { options: ["json", "plc"], positionals: 1 },
-  connect: { options: ["pick", "json", "plc", "use", "mode", "number", "target"], positionals: 1 },
+  online: { options: ["off", "state", "plc", "trust-certificate"], positionals: 1 },
+  compare: { options: ["json", "plc", "trust-certificate"], positionals: 1 },
+  connect: { options: ["pick", "json", "plc", "use", "mode", "number", "target", "address", "project-address"], positionals: 1 },
   interfaces: { options: ["scan", "plc"], positionals: 1 },
   download: { options: ["hw", "no-hw", "no-sw", "all-blocks", "allow", "no-start", "yes", "plc"], positionals: 1 },
-  open: { options: ["dir"], positionals: 1 },
+  open: { options: ["dir", "save"], positionals: 1 },
+  session: { options: ["release", "save", "json"], positionals: 1 },
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
   "codesys-bridge": { options: ["project"], positionals: 0 },
   assignments: { options: ["json"], positionals: 1 },
@@ -437,6 +442,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         rebind: { type: "boolean" },
         check: { type: "boolean" },
       fresh: { type: "boolean" },
+      save: { type: "boolean" },
+        release: { type: "boolean" },
         force: { type: "boolean" },
         verbose: { type: "boolean" },
         fixture: { type: "boolean" },
@@ -462,6 +469,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         plc: { type: "string" },
         file: { type: "string", multiple: true },
         off: { type: "boolean" },
+        "trust-certificate": { type: "boolean" },
         state: { type: "boolean" },
         scan: { type: "boolean" },
         grant: { type: "boolean" },
@@ -473,6 +481,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "dry-run": { type: "boolean" },
         pick: { type: "boolean" },
         address: { type: "string" },
+        "project-address": { type: "boolean" },
         port: { type: "string" },
         cycle: { type: "string" },
         block: { type: "string" },
@@ -537,6 +546,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "session":
+        return await cmdSession(dir, v, io);
       case "test": {
         // TwinCAT / plain IEC ST folders have no rung.toml: the given folder is the workspace.
         const ws = await findWorkspace(dir).catch(() => dir);
@@ -708,10 +719,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdDownload(dir, v, io);
       case "open":
         if (!target) {
-          io.stderr("rung: usage: rung open <file> [--dir <workspace>]\n");
+          io.stderr("rung: usage: rung open <file> [--save] [--dir <workspace>]\n");
           return 1;
         }
-        return await cmdOpen(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io);
+        return await cmdOpen(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io, !!v.save);
       case "init":
         return await cmdInit(dir, v, io);
       case "codesys-bridge":

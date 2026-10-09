@@ -3,6 +3,7 @@
 import { join } from "node:path";
 import * as vscode from "vscode";
 import { Args, parseOnlineState } from "../core/args";
+import { initCommand } from "./init";
 import { parseNoTarget } from "../core/connect";
 import { noTestsHint } from "../core/testItems";
 import type { Lsp } from "../lsp";
@@ -49,14 +50,14 @@ const DOCS = "https://github.com/sa1ntsinner/rung/blob/main/docs/editors/README.
 function needsWorkspace(ws: RungWorkspace): boolean {
   if (ws.hasConfig) return true;
   void vscode.window
-    .showWarningMessage("This folder is not a rung workspace (no rung.toml).", "Initialize…")
+    .showWarningMessage("This folder is not a rung workspace (no rung.toml).", "Open TIA Project…")
     .then((p) => p && vscode.commands.executeCommand("rung.init"));
   return false;
 }
 
 export function registerCommands(context: vscode.ExtensionContext, s: Services): void {
   const { ws, cli, out, watch, online, problems } = s;
-  const connector = new Connector(ws, cli, out);
+  const connector = new Connector(ws, cli, out, context.secrets);
   const reg = (id: string, fn: (...args: unknown[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   const inWs =
     (fn: (...args: unknown[]) => unknown) =>
@@ -194,12 +195,41 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     inWs(async (arg) => {
       const d = await deviceTarget(ws, arg, mode === "online" ? "Go online" : "Go offline");
       if (!d) return;
+      let env = mode === "online" ? await connector.passwordEnv(d) : {};
+      let trustCertificate = false;
+      let tlsRetried = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         online.set(d, { ...online.get(d), checking: true });
-        const r = await cli.capture(mode === "online" ? Args.online(d) : Args.offline(d), {
+        const args = mode === "online" ? Args.online(d) : Args.offline(d);
+        if (trustCertificate) args.push("--trust-certificate");
+        const r = await cli.capture(args, {
           progress: mode === "online" ? (ws.config?.plc[d] ? `rung: going online with ${d}…` : `rung: looking for ${d} on the network and going online…`) : `rung: going offline from ${d}…`,
           cancellable: true,
+          env,
         });
+        if (mode === "online" && !r.error && r.code !== null && r.code !== 0 && /TLS_UNTRUSTED/.test(r.output) && !tlsRetried) {
+          online.set(d, { checking: false, error: RungCli.summary(r.output), at: Date.now() });
+          const pick = await vscode.window.showWarningMessage(
+            `${d} shows a certificate TIA Portal does not trust.`,
+            { modal: true, detail: `${r.output.trim()}\n\nTrust the certificate TIA Portal shows for this connection? This decision is not remembered.` },
+            "Trust for This Connection",
+          );
+          if (pick !== "Trust for This Connection") return;
+          tlsRetried = trustCertificate = true;
+          attempt--; // the single certificate retry is in addition to connection/password retries
+          continue;
+        }
+        if (mode === "online" && !r.error && r.code !== 0 && /PASSWORD_REQUIRED/.test(r.output)) {
+          online.set(d, { ...online.get(d), checking: false });
+          if (attempt === 2) {
+            void showFailure(out, `${d} is not online`, r.output);
+            return;
+          }
+          const next = await connector.askPassword(d, r.output);
+          if (!next) return;
+          env = next;
+          continue;
+        }
         const st = parseOnlineState(r.output);
         const noTarget = parseNoTarget(r.output);
         const error = noTarget?.kind === "notFound" ? "not found on the network" : noTarget ? "no connection chosen" : RungCli.summary(r.output);
@@ -213,14 +243,24 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
           return;
         }
         if (mode === "online" && noTarget) {
+          if (attempt === 2) {
+            void showFailure(out, `${d} is not online`, r.output);
+            return;
+          }
           if (!(await connector.choose(d, noTarget))) return;
+          trustCertificate = tlsRetried = false;
           continue;
         }
         if (mode === "online" && st) {
+          if (attempt === 2) {
+            void showFailure(out, `${d} is not online`, r.output);
+            return;
+          }
           // rung reached TIA Portal, but the PLC did not come online (e.g. NotReachable): offer another connection
           const pick = await vscode.window.showErrorMessage(`${d} is not online (${st.state}).`, "Choose connection…", "Show output");
           if (pick === "Show output") out.show();
           if (pick !== "Choose connection…" || !(await connector.choose(d))) return;
+          trustCertificate = tlsRetried = false;
           continue;
         }
         void showFailure(out, mode === "online" ? `${d} is not online` : `Going offline failed`, r.output);
@@ -253,17 +293,38 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.rename", inWs((arg) => renameCommand(ws, cli, out, arg)));
 
   // --- TIA Portal / conflicts
+  reg("rung.session.release", inWs(async () => {
+    const progress = "rung: releasing the project from background TIA Portal…";
+    let r = await cli.capture(["session", "--release"], { progress });
+    if (!r.error && r.code !== 0 && /PROJECT_UNSAVED/.test(r.output)) {
+      const save = "Save and Release";
+      const pick = await vscode.window.showWarningMessage("The project has unsaved changes in rung's background TIA Portal. Save them before closing the project?", { modal: true }, save);
+      if (pick !== save) return;
+      r = await cli.capture(["session", "--release", "--save"], { progress });
+    }
+    if (r.error || r.code === 0) return;
+    void showFailure(out, "Could not release the project", r.output);
+  }));
   reg(
     "rung.openInTia",
     inWs(async (arg) => {
       const t = await fileTarget(ws, arg, undefined, "a mirrored block file");
       if (!t) return;
-      const r = await cli.capture(Args.open(t.rel), { progress: `rung: opening ${t.name ?? t.rel} in TIA Portal…` });
+      // with no TIA Portal window on the project, rung opens one (and moves the project out of its background TIA Portal)
+      const progress = `rung: opening ${t.name ?? t.rel} in TIA Portal (a new TIA Portal window takes about a minute)…`;
+      let r = await cli.capture(Args.open(t.rel), { progress });
+      if (!r.error && r.code !== 0 && /PROJECT_UNSAVED/.test(r.output)) {
+        const save = "Save and Open";
+        const pick = await vscode.window.showWarningMessage(
+          `The project has unsaved changes in rung's background TIA Portal. Opening ${t.name ?? t.rel} in a TIA Portal window closes it there first.`,
+          { modal: true },
+          save,
+        );
+        if (pick !== save) return;
+        r = await cli.capture(Args.open(t.rel, true), { progress });
+      }
       if (r.error || r.code === 0) return;
-      // rung open never starts a TIA Portal without window (it has no editors): it says so at once
-      if (/NO_TIA_WINDOW|without (a )?user interface/i.test(r.output))
-        void vscode.window.showWarningMessage(`No TIA Portal window has this project open, so TIA Portal cannot show ${t.name ?? t.rel}. Open the project in TIA Portal first.`);
-      else void showFailure(out, "Could not open it in TIA Portal", r.output);
+      void showFailure(out, "Could not open it in TIA Portal", r.output);
     }),
   );
   const merge = registerMerge(context, ws, cli);
@@ -312,7 +373,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.projectView.groupByKind", () => vscode.workspace.getConfiguration("rung").update("projectView.grouping", "kind", vscode.ConfigurationTarget.Workspace));
   reg("rung.projectView.groupByFolder", () => vscode.workspace.getConfiguration("rung").update("projectView.grouping", "folder", vscode.ConfigurationTarget.Workspace));
   reg("rung.restartServer", () => s.lsp.restart());
-  reg("rung.init", () => initCommand(ws, cli));
+  reg("rung.init", () => initCommand(ws, cli, context));
   reg("rung.openDocs", () => vscode.env.openExternal(vscode.Uri.parse(DOCS)));
   reg("rung.quickPick", () => quickPick(ws, watch));
 }
@@ -327,31 +388,6 @@ async function showFailure(out: Output, title: string, output: string): Promise<
   if (pick) out.show();
 }
 
-async function initCommand(ws: RungWorkspace, cli: RungCli): Promise<void> {
-  if (!ws.root) {
-    const pick = await vscode.window.showWarningMessage("Open the folder that should hold the rung workspace first.", "Open Folder…");
-    if (pick) await vscode.commands.executeCommand("vscode.openFolder");
-    return;
-  }
-  if (ws.hasConfig) {
-    const pick = await vscode.window.showInformationMessage("This folder already has a rung.toml.", "Open rung.toml");
-    if (pick) await vscode.commands.executeCommand("rung.openConfig");
-    return;
-  }
-  const files = await vscode.window.showOpenDialog({
-    title: "TIA Portal project to mirror into this folder",
-    openLabel: "Initialize rung workspace",
-    canSelectMany: false,
-    filters: { "TIA Portal project": ["ap20", "ap21"] },
-  });
-  const project = files?.[0]?.fsPath;
-  if (!project) return;
-  const r = await cli.run(Args.init(project));
-  await ws.reload();
-  if (r.code !== 0 || !ws.hasConfig) return;
-  const pick = await vscode.window.showInformationMessage("rung workspace created. Pull the project from TIA Portal now?", "Pull", "Later");
-  if (pick === "Pull") await cli.run(["pull"]);
-}
 
 interface ActionItem extends vscode.QuickPickItem {
   command?: string;
@@ -385,6 +421,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     a("plug", "Go online", "rung.goOnline", "O"),
     a("debug-disconnect", "Go offline", "rung.goOffline", "F"),
     a("pulse", "Online state", "rung.onlineState"),
+    a("close", "Release the Project (close rung's background TIA Portal)", "rung.session.release"),
     a("link", "Connect…", "rung.connect", "C", "find the PLC on the network and choose the connection"),
     a("radio-tower", "Interfaces…", "rung.interfaces", "I"),
     a("diff-multiple", "Compare with PLC", "rung.compare", "M", "what on the PLC differs from the project"),

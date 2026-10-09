@@ -31,6 +31,19 @@ describe("the save loop as the editor shows it", () => {
     expect(a.entries[0]).toMatchObject({ path: "plc/PLC_1/blocks/FB_Batch.scl", kind: "import", ms: 1500, errors: 0, label: "FB_Batch sent to TIA Portal, compiled clean" });
   });
 
+  it("says while TIA Portal starts, in the background or with its window, and never takes the wait for a stuck dialog", () => {
+    let now = 0;
+    const a = new Activity(() => now);
+    a.event("connected", {});
+    a.event("phase", { phase: "starting-tia", detail: "background" });
+    expect(statusPhrase(a, on, now).text).toBe("$(sync~spin) rung · starting TIA Portal");
+    now = 60_000; // a cold start takes long: still starting, not "a dialog may be open"
+    expect(statusPhrase(a, on, now).text).toBe("$(sync~spin) rung · starting TIA Portal");
+    a.event("phase", { phase: "starting-tia", detail: "window" });
+    expect(statusPhrase(a, on, now).text).toBe("$(sync~spin) rung · opening a TIA Portal window");
+    a.event("phase", { phase: "tia-started" });
+    expect(statusPhrase(a, on, now).text).toBe("$(sync~spin) rung · connecting to TIA Portal");
+  });
   it("compile errors, refusals, conflicts and writes off outrank a quiet state", () => {
     const a = new Activity(() => 0);
     a.event("report", report({ imported: 1, changes: [{ path: "plc/PLC_1/blocks/FB_A.scl", action: "import" }], diagnostics: [err("plc/PLC_1/blocks/FB_A.scl", "COMPILE", "x", 12), err("plc/PLC_1/blocks/FB_A.scl", "COMPILE"), { ...err("plc/PLC_1/blocks/FB_A.scl", "COMPILE"), severity: "warning" }] }));

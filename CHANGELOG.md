@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+**TIA Portal without window**
+- *Open TIA Project…* in VS Code checks the local PC or another Windows PC over ssh, mirrors the project and starts watch. Watch starts with a trusted folder by default (`rung.watch.autoStart`). A keeper reuses one background TIA Portal for the project's commands and editors (10 min idle, `RUNG_KEEPER_IDLE_S`); *Open in TIA Portal* moves the project into a window, with *Save and Open* for unsaved changes. `rung session` inspects it without starting TIA Portal; `rung session --release` stops watch and releases the background project. The PLC picker remembers its last choice. `rung connect --address` edits `network.yaml` for V19/V20; V21 uses an online address with the project unchanged. PLC passwords and users come from the CLI environment or VS Code's secret storage. Untrusted TLS certificates require consent for that connection, never remembered. V21 Openness setup writes its `AllowList`. See [Going online](docs/online.md) and the [measurements](docs/evidence.md#tia-portal-without-window-measured).
+
 **Debugging and testing**
 - Debug a test case (*Debug Test* in the test explorer): breakpoints in SCL blocks, with conditions; step over, into and out of calls (out of the tested block: on to its next cycle); **step back** and reverse continue; the block's variables and data blocks, values set while stopped (checked like a test's `set:`), expressions in the Debug Console, values next to the code. A failing case stops where its failed expectation's values are, or at the statement that raised an error. `rung debug` is the Debug Adapter Protocol server behind it, for nvim-dap and other editors.
 - **Why?** while stopped: the statement that last wrote a value (found by where the value lives, so an instance DB and `#x` inside the FB are the same), the values its operands had just before it ran, each explained in turn, and the IF or CASE branch that made it run.

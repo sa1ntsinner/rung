@@ -42,6 +42,8 @@ const USER_SETTINGS = {
   "terminal.integrated.confirmOnExit": "never",
   "terminal.integrated.confirmOnKill": "never",
   "rung.output.verbosity": "verbose",
+  // the suites start watch themselves where they test it (it starts on its own in a real workspace)
+  "rung.watch.autoStart": false,
 };
 
 async function runSuite(name: string, folder: string, base: string, env: Record<string, string>): Promise<boolean> {

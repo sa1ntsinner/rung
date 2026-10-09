@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung setup openness: registers the bridge in the TIA Portal Openness whitelist.
 // TIA remembers an allowed Openness client by file name + SHA-256 + write time under
-// HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist. A bridge that is
+// HKLM\SOFTWARE\Siemens\Automation\Openness\<version>\Whitelist up to V20 and under ...\Openness\AllowList from V21
+// on (whitelistKey). A bridge that is
 // not in the list makes TIA ask "Openness access"; a TIA Portal without user interface cannot ask and hangs.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -17,10 +18,21 @@ const run = promisify(execFile);
 
 export type WhitelistStatus = "ok" | "missing" | "stale" | "unknown";
 
+/**
+ * The registry key TIA Portal reads for this client. V21 keeps one AllowList for all versions and does not read
+ * 21.0\Whitelist (seen on V21: a client listed only there still gets the "Openness access" prompt, which a TIA Portal
+ * without window cannot show, so it hangs).
+ */
+export function whitelistKey(version: string, exe: string): string {
+  const major = Number(version.split(".")[0]);
+  const root = major >= 21 ? "AllowList" : `${version}\\Whitelist`;
+  return `HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\${root}\\${basename(exe)}\\Entry`;
+}
+
 /** `version` is the whitelist's (20.0); by default the one of the bridge's own TIA Portal (rung-bridge-v21.exe: 21.0). */
 export async function whitelistStatus(exe: string, version = `${/rung-bridge-v(\d\d)\.exe$/i.exec(basename(exe))?.[1] ?? "20"}.0`): Promise<WhitelistStatus> {
   if (process.platform !== "win32" || !existsSync(exe)) return "unknown";
-  const key = `HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\${version}\\Whitelist\\${basename(exe)}\\Entry`;
+  const key = whitelistKey(version, exe);
   // reg export writes UTF-16: a path outside ASCII (C:\Users\Jörg\…) survives, unlike reg query's console code page
   const tmp = join(tmpdir(), `rung-whitelist-${process.pid}-${Date.now()}.reg`);
   let out: string;

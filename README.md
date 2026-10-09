@@ -67,13 +67,15 @@ One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `netw
 ## Quick start
 
 ```sh
-rung init --project D:\TIA\Line3.ap20   # link this folder to a project open in TIA Portal
+rung init --project D:\TIA\Line3.ap20   # link this folder to a TIA Portal project
 rung pull                               # blocks, types and tag tables as text
 rung writes on                          # when you want your edits to go to TIA Portal
 rung watch                              # keep both sides in sync
 ```
 
 Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md) covers the setup, including the Openness group your Windows user has to be in.
+
+[Going online](docs/online.md): find the PLC, choose another address, supply a password and check a TLS certificate.
 
 ## Works with
 
@@ -84,6 +86,8 @@ Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md
 | TwinCAT 3 sources | files already | ✓ | ✓ |
 
 **Editors** VS Code and Zed extensions, a Neovim plugin · **Agents** Claude Code, Codex, Cursor, Gemini CLI (`rung setup`) · **Runs on** Windows; Linux and macOS through a Windows PC [over ssh](docs/remote.md) · **TIA Portal** V19, V20 and V21.
+
+rung works through your own licensed TIA Portal and does not replace it or its licence. Without TIA Portal you still get the language server, the simulator and `rung test`.
 
 ## Careful by default
 

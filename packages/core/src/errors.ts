@@ -23,14 +23,15 @@ export type WorkspaceErrorCode =
   /** an FB to monitor has no single instance DB: the person names the instance */
   | "NO_INSTANCE"
   | "BRIDGE_UNREACHABLE"
+  | "CHECK_UNREACHABLE"
   | "NOT_A_WORKSPACE"
   | "READ_ONLY"
   /** this copy of the workspace was not given the right to write into its project (rung writes on) */
   | "WRITES_OFF"
   | "IN_USE"
   | "NOT_DELETABLE"
-  /** rung open: no TIA Portal with a window has the project open (one without a window has no editors) */
-  | "NO_TIA_WINDOW";
+  /** rung open: moving the project into a TIA Portal window would close it with unsaved changes (rung open --save) */
+  | "PROJECT_UNSAVED";
 
 export class WorkspaceError extends Error {
   override name = "WorkspaceError";

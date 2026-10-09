@@ -14,12 +14,44 @@ import { deviceTarget, fileTarget } from "./targets";
 export async function compareCommand(ws: RungWorkspace, cli: RungCli, out: Output, connector: Connector, changes: ChangesView, arg: unknown): Promise<void> {
   const d = await deviceTarget(ws, arg, "Compare with PLC");
   if (!d) return;
+  let env = await connector.passwordEnv(d);
+  let trustCertificate = false;
+  let tlsRetried = false;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const r = await cli.capture(Args.compare(d), { progress: `rung: comparing ${d} with the PLC…`, cancellable: true });
+    const args = Args.compare(d);
+    if (trustCertificate) args.push("--trust-certificate");
+    const r = await cli.capture(args, { progress: `rung: comparing ${d} with the PLC…`, cancellable: true, env });
     if (r.error || r.code === null) return;
+    if (r.code !== 0 && /TLS_UNTRUSTED/.test(r.output) && !tlsRetried) {
+      const pick = await vscode.window.showWarningMessage(
+        `${d} shows a certificate TIA Portal does not trust.`,
+        { modal: true, detail: `${r.output.trim()}\n\nTrust the certificate TIA Portal shows for this connection? This decision is not remembered.` },
+        "Trust for This Connection",
+      );
+      if (pick !== "Trust for This Connection") return;
+      tlsRetried = trustCertificate = true;
+      attempt--; // the single certificate retry is in addition to connection/password retries
+      continue;
+    }
+    if (r.code !== 0 && /PASSWORD_REQUIRED/.test(r.output)) {
+      if (attempt === 2) {
+        const pick = await vscode.window.showErrorMessage(`Comparing ${d} failed: ${RungCli.summary(r.output)}`, "Show output");
+        if (pick) out.show();
+        return;
+      }
+      const next = await connector.askPassword(d, r.output);
+      if (!next) return;
+      env = next;
+      continue;
+    }
     const noTarget = parseNoTarget(r.output);
     if (noTarget) {
+      if (attempt === 2) {
+        void vscode.window.showErrorMessage(`Comparing ${d} failed: ${RungCli.summary(r.output)}`);
+        return;
+      }
       if (!(await connector.choose(d, noTarget))) return;
+      trustCertificate = tlsRetried = false;
       continue;
     }
     const result = parseCompare(r.output);

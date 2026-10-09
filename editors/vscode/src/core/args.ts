@@ -78,13 +78,14 @@ export function describeDownload(o: DownloadOptions, toml: DownloadDefaults, con
   const lines = [
     `Downloads: ${what}`,
     `Connection: ${via}`,
+    ...(conn?.address ? [`Destination IP: ${conn.address}`] : []),
     `Compile first: ${e.compileFirst ? "yes" : "no"}`,
     `Start the CPU afterwards: ${e.startAfter ? "yes, if this download stopped it" : "no"}`,
     `Questions answered "yes": ${allow}`,
     "",
     "This changes the program running on the machine. Only continue if it is safe to do so.",
   ];
-  return { message: `Download to ${o.device}?`, detail: lines.join("\n") };
+  return { message: `Download to ${o.device}${conn?.address ? ` at ${conn.address}` : ""}?`, detail: lines.join("\n") };
 }
 
 export interface RefusedQuestion {
@@ -193,9 +194,9 @@ export const Args = {
   offline: (device?: string) => ["online", "--off", ...(device ? ["--plc", device] : [])],
   onlineState: (device?: string) => ["online", "--state", ...(device ? ["--plc", device] : [])],
   interfaces: (device?: string, scan = true) => ["interfaces", ...(scan ? ["--scan"] : []), ...(device ? ["--plc", device] : [])],
-  open: (file: string) => ["open", file],
+  open: (file: string, save = false) => ["open", file, ...(save ? ["--save"] : [])],
   resolve: (file: string, mode: "ours" | "theirs") => ["resolve", file.replace(/\.(conflict|tia)$/, ""), `--${mode}`],
-  init: (project: string) => ["init", "--project", project],
+  init: (project: string, dir?: string) => ["init", ...(dir ? [dir] : []), "--project", project],
   compare: (device?: string) => ["compare", "--json", ...(device ? ["--plc", device] : [])],
   rename: (file: string, newName: string) => ["rename", file, newName],
 } as const;

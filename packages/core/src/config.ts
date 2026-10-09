@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { readFile } from "node:fs/promises";
+import { isIPv4 } from "node:net";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { writeFileAtomic } from "./atomic.js";
@@ -53,6 +54,7 @@ export interface RungConfig {
 }
 
 export interface PlcConnection {
+  address?: string;
   mode: string;
   pcInterface: string;
   pcInterfaceNumber: number;
@@ -130,7 +132,8 @@ export function parseConfig(text: string): RungConfig {
     const n = v.pc_interface_number ?? 1;
     if (typeof n !== "number" || !Number.isInteger(n) || n < 1) fail(`plc.${name}.pc_interface_number must be a positive integer`);
     if (v.target_interface !== undefined && typeof v.target_interface !== "string") fail(`plc.${name}.target_interface must be a string`);
-    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}) };
+    if (v.address !== undefined && (typeof v.address !== "string" || !isIPv4(v.address))) fail(`plc.${name}.address must be an IPv4 address`);
+    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}), ...(typeof v.address === "string" ? { address: v.address } : {}) };
   }
   const rawDl = (raw.download ?? {}) as Record<string, unknown>;
   const download: DownloadSettings = {
@@ -193,7 +196,7 @@ export function formatConfig(c: RungConfig): string {
       ...(Object.keys(c.plc).length
         ? {
             plc: Object.fromEntries(
-              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.targetInterface ? { target_interface: v.targetInterface } : {}) }]),
+              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.targetInterface ? { target_interface: v.targetInterface } : {}), ...(v.address ? { address: v.address } : {}) }]),
             ),
           }
         : {}),

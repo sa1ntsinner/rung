@@ -10,6 +10,10 @@ const argv = process.argv.slice(2);
 const line = argv[argv.length - 1];
 if (process.env.FAKE_SSH_LOG) appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify(argv) + "\n");
 const words = line.split(" ");
+if (line === "rung check --json") {
+  process.stdout.write(process.env.FAKE_CHECK_JSON ?? "[]\n");
+  process.exit(0);
+}
 if (/["%&|^<>]/.test(line) || words.length !== 4 || words[0] !== "rung" || words[1] !== "bridge" || words[2] !== "--args" || !/^[A-Za-z0-9_-]+$/.test(words[3])) {
   process.stderr.write(`fake ssh: unexpected command ${line}\n`);
   process.exit(127);

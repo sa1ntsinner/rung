@@ -2,8 +2,15 @@
 // `rung connect` for editors: the JSON of `rung connect --json`, the NO_TARGET errors of `rung online` /
 // `rung download`, and the arguments that save a chosen connection. No vscode import.
 import type { PlcConnection } from "./rungToml";
+import { isAbsolute, resolve, win32 } from "node:path";
+
+export function plcPasswordKey(root: string | undefined, projectPath: string | undefined, bridgeHost: string | undefined, device: string): string {
+  const project = projectPath && !bridgeHost && !isAbsolute(projectPath) && !win32.isAbsolute(projectPath) ? resolve(root ?? "", projectPath) : projectPath ?? root ?? "";
+  return `rung.plc.password:${project}|${bridgeHost ?? ""}|${device}`;
+}
 
 export interface ConnectTarget {
+  address?: string;
   mode: string;
   pcInterface: string;
   pcInterfaceNumber?: number;
@@ -15,6 +22,8 @@ export interface ConnectChoice {
   label: string;
   reason: "address-match" | "simulation" | "reachable" | string;
   found?: { name?: string; address?: string; deviceSeries?: string };
+  /** It answers at an address the project does not give the PLC: TIA Portal goes online only at the project's. */
+  addressChange?: { interface: string; from: string; to: string };
 }
 
 export interface ConnectReport {
@@ -73,6 +82,11 @@ export function parseNoTarget(output: string): NoTarget | undefined {
   if (/was not found on the network/.test(message)) return { kind: "notFound", message };
   if (/rung connect --pick/.test(message)) return { kind: "choose", message };
   return { kind: "other", message };
+}
+
+/** `rung connect --address …`: the address the PLC answers at goes into its network.yaml. */
+export function connectAddressArgs(device: string, ip: string): string[] {
+  return ["connect", "--address", ip, "--plc", device];
 }
 
 /** `rung connect --use …` saving `t` as [plc.<device>]. */

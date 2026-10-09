@@ -4,6 +4,7 @@
 import { parse } from "smol-toml";
 
 export interface PlcConnection {
+  address?: string;
   mode: string;
   pcInterface: string;
   pcInterfaceNumber: number;
@@ -54,7 +55,7 @@ export function parseRungToml(text: string): RungToml {
     const t = table(v);
     if (typeof t.mode !== "string" || typeof t.pc_interface !== "string") continue;
     const n = typeof t.pc_interface_number === "number" ? t.pc_interface_number : 1;
-    plc[name] = { mode: t.mode, pcInterface: t.pc_interface, pcInterfaceNumber: n, ...(typeof t.target_interface === "string" ? { targetInterface: t.target_interface } : {}) };
+    plc[name] = { mode: t.mode, pcInterface: t.pc_interface, pcInterfaceNumber: n, ...(typeof t.target_interface === "string" ? { targetInterface: t.target_interface } : {}), ...(typeof t.address === "string" ? { address: t.address } : {}) };
   }
   const out: RungToml = {
     devices: Array.isArray(raw.devices) ? raw.devices.filter((d): d is string => typeof d === "string" && !!d) : [],
@@ -123,6 +124,7 @@ export function formatPlcSection(device: string, c: PlcConnection): string {
     `pc_interface = ${tomlString(c.pcInterface)}`,
     `pc_interface_number = ${c.pcInterfaceNumber}`,
     ...(c.targetInterface !== undefined ? [`target_interface = ${tomlString(c.targetInterface)}`] : []),
+    ...(c.address !== undefined ? [`address = ${tomlString(c.address)}`] : []),
   ].join("\n");
 }
 

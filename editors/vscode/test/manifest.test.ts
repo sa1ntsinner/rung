@@ -10,6 +10,10 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const commands = new Set<string>(pkg.contributes.commands.map((c: { command: string }) => c.command));
 
 describe("manifest", () => {
+  it("offers release in the PLC title menu", () => {
+    expect(commands.has("rung.session.release")).toBe(true);
+    expect(pkg.contributes.menus["view/title"].some((m: { command: string; when?: string }) => m.command === "rung.session.release" && m.when?.includes("rung.plc"))).toBe(true);
+  });
   it("the getting-started walkthrough runs existing commands and has its pages", () => {
     const w = pkg.contributes.walkthroughs.find((x: { id: string }) => x.id === "rung.getStarted");
     expect(w.steps.map((s: { id: string }) => s.id)).toEqual(["check", "project", "declarations", "usages", "test", "debug", "preview", "writes"]);

@@ -22,6 +22,10 @@ namespace Rung.Bridge.V20
         /// workspace) start a bridge that may download. Sync, pull, the MCP server and tools never ask for it.
         /// </summary>
         public bool AllowDownload;
+        /// <summary>Run as the keeper of the project (Keeper.cs) instead of serving requests.</summary>
+        public bool Keep;
+        /// <summary>When no TIA Portal has the project open, open it in a TIA Portal with window (rung open).</summary>
+        public bool OpenWindow;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -51,6 +55,12 @@ namespace Rung.Bridge.V20
                         break;
                     case "--allow-download":
                         a.AllowDownload = true;
+                        break;
+                    case "--keep":
+                        a.Keep = true;
+                        break;
+                    case "--open-window":
+                        a.OpenWindow = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);
@@ -92,6 +102,6 @@ namespace Rung.Bridge.V20
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        static int Run(BridgeArgs args) => Host.Run(args);
+        static int Run(BridgeArgs args) => args.Keep ? Keeper.Run(args) : Host.Run(args);
     }
 }

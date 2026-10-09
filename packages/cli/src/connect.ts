@@ -3,6 +3,7 @@
 // the project knows the CPU's addresses, the bridge lists what every PG/PC interface can reach, and the one
 // match is remembered in rung.toml. Several matches or none: rung explains and lets the user choose.
 import { spawnSync } from "node:child_process";
+import { isIPv4 } from "node:net";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WorkspaceError, writeFileAtomic, type RungConfig } from "@rung/core";
@@ -58,14 +59,45 @@ export function describe(c: Candidate): string {
   return `${c.found!.name || "device"} at ${c.found!.address}${c.found!.deviceSeries ? ` (${c.found!.deviceSeries})` : ""} via ${via}`;
 }
 
+const IPV4 = { test: (s: string) => isIPv4(s) };
+
+/**
+ * The PLC answered at an address the project does not give it. TIA Portal V19/V20 go online only at the project's
+ * address (measured: ApplyConfiguration with another address is refused as invalid), as TIA Portal's own dialog does,
+ * so the way there is the project's address: the interface in that subnet, else the first PROFINET one.
+ */
+export function addressChange(options: ConnectionOptions, found: string): { interface: string; from: string; to: string } | undefined {
+  if (!IPV4.test(found)) return undefined;
+  const pn = options.plcAddresses.filter((a) => IPV4.test(a.address));
+  if (!pn.length || pn.some((a) => a.address === found)) return undefined;
+  const net = (ip: string) => ip.split(".").slice(0, 3).join(".");
+  const same = pn.find((a) => net(a.address) === net(found)) ?? pn[0]!;
+  return { interface: same.interface, from: same.address, to: found };
+}
+
+/** network.yaml with one interface's ip changed; the rest of the file stays as it is. */
+export function withNetworkAddress(yaml: string, device: string, iface: string, ip: string): string {
+  const lines = yaml.split("\n");
+  const start = lines.findIndex((l) => l.trim() === `"${device} / ${iface}":`);
+  if (start < 0) throw new WorkspaceError("CONFIG_INVALID", `network.yaml has no "${device} / ${iface}"`);
+  for (let i = start + 1; i < lines.length && /^\s/.test(lines[i]!); i++)
+    if (/^\s+ip:/.test(lines[i]!)) {
+      lines[i] = lines[i]!.replace(/(ip:\s*)\S+/, `$1${ip}`);
+      return lines.join("\n");
+    }
+  throw new WorkspaceError("CONFIG_INVALID", `"${device} / ${iface}" in network.yaml has no ip`);
+}
+
 export function notFoundMessage(device: string, options: ConnectionOptions): string {
   const addrs = options.plcAddresses.filter((a) => /\d+\.\d+\.\d+\.\d+/.test(a.address));
   const adapters = options.modes.flatMap((m) => m.pcInterfaces.map((p) => p.name));
+  const failed = options.modes.flatMap((m) => m.pcInterfaces.filter((p) => p.scanError).map((p) => `${p.name} could not be scanned: ${p.scanError}`));
   const seen = reachable(options);
   return [
     `${device} was not found on the network.`,
     addrs.length ? `The project gives it ${addrs.map((a) => `${a.address} (${a.interface})`).join(", ")}.` : "The project gives it no IP address.",
     adapters.length ? `rung looked on: ${adapters.join(", ")}.` : "TIA Portal offers no PG/PC interface on this PC.",
+    ...failed,
     seen.length ? `Found there instead: ${seen.map(describe).join("; ")}. Choose one with: rung connect --pick` : "No Siemens device answered.",
     addrs[0] ? `Check the cable and that this PC has an address in the PLC's subnet (for ${addrs[0].address}, e.g. ${addrs[0].address.replace(/\.\d+$/, ".100")}/24).` : "Check the cable and the PLC's address in the project.",
     // TIA Portal lists the PLCSIM interface only when it started after PLCSIM: every TIA Portal on the PC, not only rung's
@@ -96,6 +128,7 @@ export async function saveTarget(ws: string, device: string, t: ConnectionTarget
     `pc_interface = ${JSON.stringify(t.pcInterface)}`,
     `pc_interface_number = ${t.pcInterfaceNumber ?? 1}`,
     ...(t.targetInterface ? [`target_interface = ${JSON.stringify(t.targetInterface)}`] : []),
+    ...(t.address ? [`address = ${JSON.stringify(t.address)}`] : []),
     "",
   ].join("\n");
   const lines = text.split(/\r?\n/);
@@ -115,7 +148,7 @@ export async function saveTarget(ws: string, device: string, t: ConnectionTarget
 
 export function targetOf(config: RungConfig, device: string): ConnectionTarget | undefined {
   const c = config.plc[device];
-  return c ? { mode: c.mode, pcInterface: c.pcInterface, pcInterfaceNumber: c.pcInterfaceNumber, ...(c.targetInterface ? { targetInterface: c.targetInterface } : {}) } : undefined;
+  return c ? { mode: c.mode, pcInterface: c.pcInterface, pcInterfaceNumber: c.pcInterfaceNumber, ...(c.targetInterface ? { targetInterface: c.targetInterface } : {}), ...(c.address ? { address: c.address } : {}) } : undefined;
 }
 
 export class NoTargetError extends WorkspaceError {

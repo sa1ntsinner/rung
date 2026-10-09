@@ -31,6 +31,11 @@ describe("downloadArgs", () => {
 });
 
 describe("effectiveDownload / describeDownload", () => {
+  it("names the selected destination IP before confirming", () => {
+    const d = describeDownload(base, DOWNLOAD_DEFAULTS, { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, targetInterface: "1 X1", address: "10.0.0.7" });
+    expect(d.message).toContain("10.0.0.7");
+    expect(d.detail).toContain("10.0.0.7");
+  });
   it("applies rung.toml defaults like the CLI", () => {
     const toml = { ...DOWNLOAD_DEFAULTS, hardware: true, startAfter: false, allow: ["reinit-db"] };
     expect(effectiveDownload(base, toml)).toMatchObject({ hardware: true, onlyChanges: true, startAfter: false, allow: ["reinit-db"] });
@@ -124,5 +129,12 @@ describe("parseCheck", () => {
     const json = '[{"id":"tia","group":"plc","name":"TIA Portal (STEP 7)","status":"ok","detail":"V20"},{"id":"whitelist","group":"plc","name":"rung bridge in the Openness whitelist","status":"warn","fix":"rung setup openness"}]';
     expect(parseCheck(`checking…\n${json}\n`)?.map((i) => `${i.id}:${i.status}`)).toEqual(["tia:ok", "whitelist:warn"]);
     expect(parseCheck("rung: NOT_A_WORKSPACE: x")).toBeUndefined();
+  });
+});
+
+describe("Args.open", () => {
+  it("adds --save only when the project may be saved to move into a TIA Portal window", () => {
+    expect(Args.open("plc/PLC_1/blocks/Fx.scl")).toEqual(["open", "plc/PLC_1/blocks/Fx.scl"]);
+    expect(Args.open("plc/PLC_1/blocks/Fx.scl", true)).toEqual(["open", "plc/PLC_1/blocks/Fx.scl", "--save"]);
   });
 });
