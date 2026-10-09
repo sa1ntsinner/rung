@@ -5,7 +5,8 @@
 // (aligned after the bracket), a CASE label on its own line. Formatted that way, a file comes back from TIA Portal
 // as it went in. Only code (after BEGIN) is formatted; declarations are TIA Portal's own already.
 // Safe: the result must have the same tokens in the same order (comments included), or nothing is changed.
-// Rules observed on TIA Portal V19 and V20 exports.
+// Rules observed on TIA Portal V19 and V20 exports. TIA Portal V21 keeps SCL code as it was typed: there
+// formatting is only a matter of style, a round trip changes nothing either way.
 import { CONVERSION, STANDARD_BY_NAME } from "./catalog.js";
 import { lex, type Token } from "./lexer.js";
 

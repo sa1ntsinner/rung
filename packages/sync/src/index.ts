@@ -10,3 +10,4 @@ export { writeModelViews, writeTagViews, toView, parseTagRows, VIEW_HEADER, type
 export * from "./compile-lines.js";
 export { localStatus } from "./objects.js";
 export { renameObject, mentions, type RenameReport, type RenameBridge } from "./rename.js";
+export { cachedXref } from "./xref-cache.js";

@@ -47,7 +47,7 @@ beforeAll(async () => {
 describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_list", "rung_live_read", "rung_rename", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test", "rung_xref"]);
+    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_impact", "rung_list", "rung_live_read", "rung_rename", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test", "rung_why", "rung_xref"]);
     expect(client.getInstructions()).toMatch(/Never download to a PLC/);
   });
 
@@ -70,6 +70,28 @@ describe("rung mcp", () => {
     const impact = await call("rung_graph", { query: "impact", name: "Fx_Global" });
     expect((impact.data as { name: string }[]).map((x) => x.name).sort()).toEqual(["Fx_Motor", "Main"]);
     expect((await call("rung_graph", { query: "callers", name: "Nope" })).isError).toBe(true);
+  });
+
+  it("tells what an interface change breaks against the version TIA Portal has", async () => {
+    const file = join(root, "plc", "PLC_1", "blocks", "Fx_Motor.scl");
+    const was = readFileSync(file, "utf8");
+    try {
+      expect((await call("rung_impact", { path: "plc/PLC_1/blocks/Fx_Motor.scl" })).data).toMatchObject({ block: "Fx_Motor", changes: [] });
+      writeFileSync(file, was.replace("Start : Bool;", "Go : Bool;"));
+      const r = await call("rung_impact", { path: "plc/PLC_1/blocks/Fx_Motor.scl" });
+      expect(r.data).toMatchObject({ block: "Fx_Motor", kind: "FB", reinit: true, changes: [{ kind: "renamed", name: "Start", to: "Go" }] });
+      expect((await call("rung_impact", { path: "plc/PLC_1/blocks/Nope.scl" })).isError).toBe(true);
+    } finally {
+      writeFileSync(file, was);
+    }
+  });
+
+  it("explains from the code who writes a value and under which conditions", async () => {
+    const r = await call("rung_why", { path: "plc/PLC_1/blocks/Fx_Motor.scl", name: '"Fx_Global".Counter' });
+    expect(r.isError).toBe(false);
+    const writes = (r.data as { children: { kind: string; text: string }[] }).children.filter((c) => c.kind === "write").map((c) => c.text);
+    expect(writes).toEqual(['"Fx_Global".Counter := "Fx_Global".Counter + 1;']);
+    expect((await call("rung_why", { path: "plc/PLC_1/blocks/Nope.scl", name: "x" })).isError).toBe(true);
   });
 
   it("returns source diagnostics per file", async () => {

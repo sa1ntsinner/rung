@@ -1377,6 +1377,29 @@ namespace Rung.Bridge.V20
             return list;
         }
 
+        // ---------------------------------------------------------------- identity
+
+        /// <summary>
+        /// The ObjectIdentifierProvider's id of each object the last listing found: the same after a rename in TIA
+        /// Portal, so the client moves the file instead of deleting one and creating another. V19 has no such service.
+        /// </summary>
+        public IReadOnlyDictionary<string, string> Identify(string[] addresses)
+        {
+            Alive();
+            var ids = new Dictionary<string, string>(StringComparer.Ordinal);
+#if !TIA_V19
+            var provider = _project.GetService<ObjectIdentifierProvider>();
+            if (provider == null) return ids;
+            foreach (var a in addresses ?? new string[0])
+            {
+                if (!_index.TryGetValue(a, out var r) || !(r.Obj is IEngineeringObject o)) continue;
+                try { ids[a] = provider.GetIdentifier(o); }
+                catch (EngineeringException) { }
+            }
+#endif
+            return ids;
+        }
+
         // ---------------------------------------------------------------- delete
 
         /// <summary>

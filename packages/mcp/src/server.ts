@@ -9,11 +9,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
 import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChecks, StateStore, type ObjectState, type Probes } from "@rung/core";
-import { OwnerClient, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
-import { WorkspaceIndex, assignmentList, nearest, diagnostics as parseDiagnostics, uriOf } from "@rung/lsp";
+import { OwnerClient, cachedXref, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
+import { WorkspaceIndex, assignmentList, baseText, interfaceImpact, nearest, diagnostics as parseDiagnostics, uriOf, workspaceTests } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient, plainHttpRefusal } from "@rung/live";
-import { runTests } from "@rung/sim";
+import { explainStatic, runTests } from "@rung/sim";
 import type { CompareOutcome, ConnectionTarget, XRefEntry } from "@rung/bridge-client";
 import { handover } from "./handover.js";
 
@@ -41,7 +41,7 @@ export const SAFETY_RULES = `rung safety rules for agents
 2. Never edit read-only objects: *.protected.yaml (know-how protected), failsafe (F_*) blocks, system blocks, GRAPH blocks. rung refuses to import them.
 3. Never download to a PLC, never run rung download or change a PLC's operating mode. Prepare the download with rung_download_request; the person downloads after reviewing the change (rung download asks them to type the PLC name).
 4. Resolve conflicts only with rung_resolve (keep the file, take TIA's version, or save a merged file first).
-5. Run rung_find_usages before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected.
+5. Run rung_find_usages before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected. After the change, rung_impact tells what breaks against the version TIA Portal has; fix it before the sync.
 6. After a sync, read rung_diagnostics; compile errors come from TIA Portal itself.`;
 
 /** state.json read without taking the writer lock (safe while rung watch runs). */
@@ -354,6 +354,44 @@ export function createMcpServer(ctx: McpContext): McpServer {
   });
 
   server.registerTool(
+    "rung_why",
+    { description: "Why a variable of a block has its value, from the code: every statement of the block that writes it, the IF/CASE branch each stands in, and the operands those read, a few levels deep (no PLC values; rung why <file> <name> adds them on a running PLC).", inputSchema: { path: z.string().describe("workspace file of the block, e.g. plc/PLC_1/blocks/FB_Motor.scl"), name: z.string().describe("the variable, e.g. Running or #Running"), depth: z.number().int().min(1).max(6).optional() } },
+    async ({ path, name, depth }) => {
+      const none = noWorkspace();
+      if (none) return none;
+      const { index } = await model();
+      const uri = uriOf(isAbsolute(path) ? path : join(ctx.root, path));
+      const now = await readFile(fileURLToPath(uri), "utf8").catch(() => undefined);
+      if (now === undefined) return fail(`${path} does not exist`);
+      index.set(uri, now, 0);
+      try {
+        return json(explainStatic(index, uri, name, () => undefined, depth ?? 3));
+      } catch (e) {
+        return fail((e as Error).message);
+      }
+    },
+  );
+
+  server.registerTool(
+    "rung_impact",
+    { description: "What the interface change of a block file breaks against the version TIA Portal has (the last synced one): parameters and statics that went, came, were renamed or retyped; calls that pass a parameter that went or leave out one an FC now wants; instance DBs TIA Portal reinitialises on download (multi-instances too); unit tests naming what went. Read-only, from the files.", inputSchema: { path: z.string().describe("workspace file of an FB, FC or PLC data type, e.g. plc/PLC_1/blocks/FB_Motor.scl") } },
+    async ({ path }) => {
+      const none = noWorkspace();
+      if (none) return none;
+      const { index } = await model();
+      const uri = uriOf(isAbsolute(path) ? path : join(ctx.root, path));
+      const before = await baseText(ctx.root, uri);
+      if (before === undefined) return fail(`${path} is not in TIA Portal yet (never synced): nothing uses it there`);
+      // the file as the agent just wrote it (the model may be up to 2 s old)
+      const now = await readFile(fileURLToPath(uri), "utf8").catch(() => undefined);
+      if (now === undefined) return fail(`${path} does not exist`);
+      index.set(uri, now, 0);
+      const r = interfaceImpact(index, uri, before, await workspaceTests(ctx.root));
+      return r ? json(r) : fail(`${path} holds no FB, FC or PLC data type`);
+    },
+  );
+
+  server.registerTool(
     "rung_graph",
     { description: "Dependency queries over the code graph: callers, callees, impact (transitive dependants) or path (from name to `to`).", inputSchema: { query: z.enum(["callers", "callees", "impact", "path"]), name: z.string(), to: z.string().optional() } },
     async ({ query, name, to }) => {
@@ -553,15 +591,24 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const address = /^[a-z]+:/i.test(rel) && !/^[a-z]:\//i.test(rel) ? rel : (states.find((s) => s.path === rel) ?? states.find((s) => s.address.toLowerCase().endsWith("/" + bare)))?.address;
       if (!address) return fail(`${object} is not a mirrored object (give its file under plc/ or its address, as rung_list shows them)`);
       const relation: Record<string, string> = { UsedBy: "used by", TypeInstance: "used by", Defines: "used by", GroupMember: "used by", Uses: "uses", InstanceType: "uses", DefinedBy: "uses", MemberGroup: "uses", Assigns: "uses", OverlapsWith: "overlaps" };
-      const owner = await OwnerClient.connect(ctx.root);
+      let owner: OwnerClient | undefined;
       let b: Awaited<ReturnType<NonNullable<typeof ctx.bridgeFactory>>> | undefined;
       try {
-        if (!owner) b = await ctx.bridgeFactory?.().catch(() => undefined);
-        if (!owner && !b) return fail("No rung watch is running and no bridge could start (TIA Portal and its Openness are needed for the cross-reference).");
-        if (!owner && !b!.xref) return fail("This bridge has no cross-reference.");
-        const entries: XRefEntry[] = owner ? await owner.request<XRefEntry[]>("xref", { address }) : await b!.xref!(address);
+        // TIA Portal is asked only when the kept answer is older than what is mirrored now
+        const ask = async (): Promise<XRefEntry[]> => {
+          owner = (await OwnerClient.connect(ctx.root)) ?? undefined;
+          if (owner) return owner.request<XRefEntry[]>("xref", { address });
+          b = await ctx.bridgeFactory?.().catch(() => undefined);
+          if (!b) throw new Error("No rung watch is running and no bridge could start (TIA Portal and its Openness are needed for the cross-reference).");
+          if (!b.xref) throw new Error("This bridge has no cross-reference.");
+          return b.xref(address);
+        };
+        const r = await cachedXref(ctx.root, address, ask).catch((e: Error) => e);
+        if (r instanceof Error) return fail(r.message);
+        const { entries, at } = r;
         return json({
           address,
+          ...(at ? { cachedAt: new Date(at).toISOString(), note: "TIA Portal's earlier answer: nothing mirrored changed since (HMI screens are not mirrored)" } : {}),
           rows: entries.map((e) => ({ relation: relation[e.referenceType] ?? "related", name: e.targetName, type: e.targetType, access: e.access, ...(e.location ? { location: e.location } : {}), ...(e.target ? { file: states.find((s) => s.address === e.target)?.path } : {}) })),
         });
       } finally {

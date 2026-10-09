@@ -45,6 +45,8 @@ args = ["mcp"]
 | `rung_compile` | compile objects (addresses or file paths) in TIA Portal |
 | `rung_explain` | an object's file, interface, status and users |
 | `rung_find_usages`, `rung_graph` | usages, callers/callees, impact, dependency paths |
+| `rung_why` | why a variable has its value, from the code: the statements that write it, their branches and operands |
+| `rung_impact` | what an interface change breaks against the version TIA Portal has: calls, instance DBs reinitialised on download, tests |
 | `rung_xref` | TIA Portal's own cross-reference of an object: who uses it, HMI screens and alarms included (read-only) |
 | `rung_assignments` | the assignment list: inputs, outputs, bit memory, timers and counters in use, overlaps |
 | `rung_diff` | file vs. last synced TIA version |

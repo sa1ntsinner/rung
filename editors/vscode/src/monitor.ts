@@ -59,6 +59,9 @@ export class Monitor implements vscode.Disposable {
   get values(): Record<string, unknown> {
     return this.session?.values ?? {};
   }
+  get errors(): Record<string, string> {
+    return this.session?.errors ?? {};
+  }
   get reads(): number {
     return this.session?.reads ?? 0;
   }
@@ -150,7 +153,9 @@ export class Monitor implements vscode.Disposable {
         s.errors = m.errors ?? {};
         s.reads++;
       }
-      if (this.session === s) this.render();
+      if (this.session !== s) return;
+      this.render();
+      this.changed.fire(); // the declarations table shows each read too
     } catch {
       /* a partial or foreign line */
     }

@@ -136,6 +136,12 @@
           "icon": "$(pulse)"
         },
         {
+          "id": "rung.whyLive",
+          "name": "Why?",
+          "when": "rung.workspace && rung.why.shown",
+          "icon": "$(question)"
+        },
+        {
           "id": "rung.environment",
           "name": "Environment",
           "icon": "media/rung.svg",
@@ -584,10 +590,22 @@
         "category": "rung"
       },
       {
+        "command": "rung.why.copy",
+        "title": "Copy as Markdown",
+        "category": "rung",
+        "icon": "$(copy)"
+      },
+      {
         "command": "rung.xref",
         "title": "Cross-Reference in TIA Portal",
         "category": "rung",
         "icon": "$(references)"
+      },
+      {
+        "command": "rung.impact",
+        "title": "Interface Impact (before sync)",
+        "category": "rung",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "rung.live.add",
@@ -608,6 +626,29 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "rung.live.format",
+        "title": "Display Format…",
+        "category": "rung"
+      },
+      {
+        "command": "rung.live.bookmark",
+        "title": "Bookmark in the Recording",
+        "category": "rung",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "rung.live.export",
+        "title": "Export Recording as CSV",
+        "category": "rung",
+        "icon": "$(export)"
+      },
+      {
+        "command": "rung.live.exportTest",
+        "title": "Export Recording as Test…",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "rung.live.pause",
         "title": "Pause Live Values",
         "category": "rung",
@@ -618,6 +659,12 @@
         "title": "Resume Live Values",
         "category": "rung",
         "icon": "$(play)"
+      },
+      {
+        "command": "rung.compareBehaviour",
+        "title": "Compare Behaviour With…",
+        "category": "rung",
+        "icon": "$(git-compare)"
       }
     ],
     "menus": {
@@ -792,7 +839,7 @@
         },
         {
           "command": "rung.why",
-          "when": "inDebugMode && debugType == rung"
+          "when": "rung.workspace"
         },
         {
           "command": "rung.why.open",
@@ -800,6 +847,10 @@
         },
         {
           "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl"
+        },
+        {
+          "command": "rung.impact",
           "when": "rung.workspace && editorLangId == scl"
         },
         {
@@ -811,14 +862,27 @@
           "when": "false"
         },
         {
+          "command": "rung.live.format",
+          "when": "false"
+        },
+        {
           "command": "rung.live.resume",
           "when": "false"
+        },
+        {
+          "command": "rung.compareBehaviour",
+          "when": "rung.workspace"
         }
       ],
       "view/title": [
         {
           "command": "rung.env.refresh",
           "when": "view == rung.environment",
+          "group": "navigation@1"
+        },
+        {
+          "command": "rung.why.copy",
+          "when": "(view == rung.why || view == rung.whyLive) && rung.why.shown",
           "group": "navigation@1"
         },
         {
@@ -955,6 +1019,31 @@
           "command": "rung.live.clear",
           "when": "view == rung.live",
           "group": "navigation@3"
+        },
+        {
+          "command": "rung.live.bookmark",
+          "when": "view == rung.live",
+          "group": "navigation@4"
+        },
+        {
+          "command": "rung.live.export",
+          "when": "view == rung.live",
+          "group": "navigation@5"
+        },
+        {
+          "command": "rung.live.exportTest",
+          "when": "view == rung.live",
+          "group": "navigation@6"
+        },
+        {
+          "command": "rung.compareBehaviour",
+          "when": "view == rung.changes",
+          "group": "2_behaviour"
+        },
+        {
+          "command": "rung.why",
+          "when": "view == rung.whyLive",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -1109,9 +1198,19 @@
           "group": "2_inspect@3"
         },
         {
+          "command": "rung.impact",
+          "when": "view == rung.project && viewItem =~ /rung\\.object/",
+          "group": "2_inspect@4"
+        },
+        {
           "command": "rung.live.remove",
           "when": "view == rung.live && viewItem == rung.liveValue",
           "group": "inline"
+        },
+        {
+          "command": "rung.live.format",
+          "when": "view == rung.live && viewItem == rung.liveValue",
+          "group": "1_format"
         }
       ],
       "editor/title": [
@@ -1194,11 +1293,16 @@
         },
         {
           "command": "rung.why",
-          "when": "inDebugMode && debugType == rung && editorLangId == scl",
+          "when": "rung.workspace && editorLangId == scl",
           "group": "rung@1"
         },
         {
           "command": "rung.xref",
+          "when": "rung.workspace && editorLangId == scl",
+          "group": "rung@3"
+        },
+        {
+          "command": "rung.impact",
           "when": "rung.workspace && editorLangId == scl",
           "group": "rung@3"
         },

@@ -346,5 +346,13 @@ describe("rung xref", () => {
     expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl", "--json"])).toBe(0);
     const j = JSON.parse(t.out.join("")) as { rows: { relation: string; name: string; path?: string }[] };
     expect(j.rows.map((r) => [r.relation, r.name])).toEqual([["used by", "Main"], ["used by", "Screen_1"], ["uses", "LIMIT [V1.0]"]]);
+    // kept while nothing mirrored changed: TIA Portal is not asked again, unless --fresh
+    t.patch({ xref: {} });
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl"])).toBe(0);
+    expect(t.out.join("")).toMatch(/used by:\n  Main[\s\S]*\(TIA Portal's answer of .*: nothing mirrored changed since/);
+    t.out.length = 0;
+    expect(await t.run(["xref", "plc/PLC_1/blocks/Fx_Motor.scl", "--fresh"])).toBe(0);
+    expect(t.out.join("")).toBe("TIA Portal knows no cross references of plc:PLC_1/blocks/Fx_Motor\n");
   });
 });

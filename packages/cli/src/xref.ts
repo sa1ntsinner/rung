@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung xref <file or address>: TIA Portal's own cross-reference of an object: who uses it and what it uses, also
 // what rung's files cannot show (HMI screens and alarms, technology objects, hardware). Read only: through the
-// running rung watch when there is one, else a bridge of its own.
+// running rung watch when there is one, else a bridge of its own; an answer is kept while nothing mirrored changed.
 import { relative } from "node:path";
 import { loadConfig } from "@rung/core";
 import type { XRefEntry } from "@rung/bridge-client";
-import { OwnerClient } from "@rung/sync";
+import { OwnerClient, cachedXref } from "@rung/sync";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
 import { addressOf } from "./twoway.js";
 
@@ -53,25 +53,26 @@ export async function xrefOf(ws: string, address: string, io: Io): Promise<XRefE
   }
 }
 
-export async function cmdXref(target: string | undefined, json: boolean, io: Io): Promise<number> {
+export async function cmdXref(target: string | undefined, json: boolean, io: Io, fresh = false): Promise<number> {
   if (!target) {
-    io.stderr("rung: usage: rung xref <file or address> [--json]\n");
+    io.stderr("rung: usage: rung xref <file or address> [--json] [--fresh]\n");
     return 1;
   }
   const ws = await findWorkspace(io.cwd);
   const address = await addressOf(ws, target, io.cwd);
-  const entries = await xrefOf(ws, address, io);
+  const { entries, at } = await cachedXref(ws, address, () => xrefOf(ws, address, io), { fresh });
+  const kept = at ? `TIA Portal's answer of ${new Date(at).toLocaleString(undefined, { hour12: false })}: nothing mirrored changed since (HMI screens are not mirrored; --fresh asks again)` : undefined;
   const state = await loadPaths(ws);
   const rows = entries.map((e) => {
     const where = e.target ? state.get(e.target) : undefined;
     return { relation: RELATION[e.referenceType] ?? "related", name: e.targetName, type: e.targetType, ...(where ? { path: where } : {}), access: e.access, ...(e.location ? { location: e.location } : {}), source: e.sourceName } as XRefRow & { source: string };
   });
   if (json) {
-    io.stdout(JSON.stringify({ address, rows }, null, 2) + "\n");
+    io.stdout(JSON.stringify({ address, rows, ...(at ? { cachedAt: new Date(at).toISOString() } : {}) }, null, 2) + "\n");
     return 0;
   }
   if (!rows.length) {
-    io.stdout(`TIA Portal knows no cross references of ${address}\n`);
+    io.stdout(`TIA Portal knows no cross references of ${address}\n${kept ? `(${kept})\n` : ""}`);
     return 0;
   }
   io.stdout(`${address} in TIA Portal's cross-reference:\n`);
@@ -82,6 +83,7 @@ export async function cmdXref(target: string | undefined, json: boolean, io: Io)
     io.stdout(`${rel}:\n`);
     for (const r of group) io.stdout(`  ${r.name.padEnd(width)}  ${r.access.padEnd(11)} ${r.type}${r.location ? `  ${r.location}` : ""}${r.path ? `  (${relative(io.cwd, `${ws}/${r.path}`) || r.path})` : ""}\n`);
   }
+  if (kept) io.stdout(`(${kept})\n`);
   return 0;
 }
 

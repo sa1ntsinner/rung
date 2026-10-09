@@ -81,8 +81,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   lsp = new Lsp(ws, cli, out);
   context.subscriptions.push(out, ws, terminals, cli, watch, online, problems, lsp);
   registerDebug(context, ws, cli);
-  const why = new WhyView();
-  const live = new LiveView(ws, cli, context.workspaceState);
+  const why = new WhyView(ws, cli);
+  const live = new LiveView(ws, cli, context.workspaceState, lsp);
   context.subscriptions.push(why, live);
 
   await ws.start(context.workspaceState);
@@ -138,7 +138,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const lens = new BlockCodeLens(ws);
   context.subscriptions.push(project, plc, environment, decorations, statusBar, activityView, changes, lens);
   context.subscriptions.push(
-    DeclarationsPanel.register(context, { lsp, ws }),
+    DeclarationsPanel.register(context, { lsp, ws, monitor }),
     UdtTableEditor.register(context, { lsp, ws }),
     TestTableEditor.register(context, { lsp, ws, tests: () => testsRef }),
     vscode.commands.registerCommand("rung.test.openTable", (uri?: vscode.Uri) => {
@@ -150,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
       if (target) return vscode.commands.executeCommand("vscode.openWith", target, UDT_TABLE);
     }),
     vscode.commands.registerCommand("rung.declarations.open", (uri?: vscode.Uri, position?: vscode.Position) =>
-      DeclarationsPanel.show(context, { lsp: lsp!, ws }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
+      DeclarationsPanel.show(context, { lsp: lsp!, ws, monitor }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),
     ),
   );
   context.subscriptions.push(

@@ -122,7 +122,11 @@ async function main(): Promise<void> {
       else {
         const answering = answeringDevices(folder);
         if (answering) console.log(`devices answer on the network (${answering}): the "no PLC" tests are skipped`);
-        ok = (await runSuite("tia", folder, base, answering ? { RUNG_E2E_ANSWERING: answering } : {})) && ok;
+        // the extension's own rung runs a copy of the bridge from a fresh profile's storage, at a path TIA Portal's
+        // Openness whitelist cannot know: the built bridge (registered with rung setup openness) answers instead
+        const bridge = join(repo, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48", "rung-bridge-v20.exe");
+        const env: Record<string, string> = { ...(answering ? { RUNG_E2E_ANSWERING: answering } : {}), ...(existsSync(bridge) ? { RUNG_BRIDGE: bridge } : {}) };
+        ok = (await runSuite("tia", folder, base, env)) && ok;
       }
     }
   } finally {

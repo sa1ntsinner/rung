@@ -103,6 +103,44 @@ if wait("language server on the test file", function() return require("rung.lsp"
   check("recorded case passes", done and done.files[1].cases[1].passed, done)
 end
 
+-- why? outside the debugger: the code's writers (no live values here)
+vim.cmd("edit blocks/FB_Conveyor.scl")
+local tree
+require("rung.why").ask("Motor", function(t) tree = t or false end)
+vim.wait(30000, function() return tree ~= nil end, 50)
+check("why outside the debugger", tree and tree.kind == "value" and tree.text == "#Motor" and #tree.children > 0, tree)
+local md = tree and require("rung.why").markdown(tree) or ""
+check("why as markdown", md:find("^%- %*%*`#Motor`%*%* = `") ~= nil and md:find("\n  %- ← `.-` %(blocks/FB_Conveyor%.scl:%d+%)") ~= nil, md)
+
+-- interface impact of an unsaved rename against the version "TIA Portal has" (a base written here)
+local scl = table.concat(vim.fn.readfile(ws .. "/blocks/FB_Conveyor.scl", "b"), "\n")
+local hash = vim.fn.sha256(scl)
+vim.fn.mkdir(ws .. "/.rung/base/" .. hash:sub(1, 2), "p")
+vim.fn.writefile(vim.split(scl, "\n"), ws .. "/.rung/base/" .. hash:sub(1, 2) .. "/" .. hash, "b")
+vim.fn.writefile({ vim.json.encode({ objects = { a = { address = "PLC_1/FB_Conveyor", path = "blocks/FB_Conveyor.scl", files = { { path = "blocks/FB_Conveyor.scl", role = "primary", hash = hash } } } } }) }, ws .. "/.rung/state.json")
+local conv = vim.api.nvim_get_current_buf()
+local row = vim.iter(ipairs(vim.api.nvim_buf_get_lines(conv, 0, -1, false))):find(function(_, l) return l:match("^%s*Start%s*:") end)
+vim.api.nvim_buf_set_lines(conv, row - 1, row, false, { (vim.api.nvim_buf_get_lines(conv, row - 1, row, false)[1]:gsub("Start", "Go", 1)) })
+local imp
+wait("impact", function()
+  imp = require("rung.impact").show(conv)
+  return imp and #imp.changes > 0
+end, 30000)
+check("impact of a rename", imp and imp.changes[1].kind == "renamed" and imp.changes[1].to == "Go", imp)
+check("tests that name it", imp and vim.iter(imp.tests):any(function(t) return #t.problems > 0 end), imp and imp.tests)
+check("impact quickfix", vim.fn.getqflist({ title = 0 }).title == "rung impact: FB_Conveyor")
+vim.cmd("cclose | silent! edit!")
+
+-- the statusline part: nothing without rung.toml, then conflicts and sync errors from .rung/
+local status = require("rung.status")
+check("status outside a workspace", status.compute(vim.fn.tempname()) == "")
+vim.fn.writefile({}, ws .. "/rung.toml")
+vim.fn.writefile({ vim.json.encode({ objects = { a = { status = "conflicted" }, b = { status = "synced" } } }) }, ws .. "/.rung/state.json")
+vim.fn.writefile({ vim.json.encode({ items = { { severity = "error" }, { severity = "error" }, { severity = "warning" } } }) }, ws .. "/.rung/diagnostics.json")
+vim.fn.writefile({ vim.json.encode({ pid = vim.fn.getpid() }) }, ws .. "/.rung/owner.json")
+check("status", status.compute(ws) == "rung ● watch · 1 conflict · 2 errors", status.compute(ws))
+vim.fn.delete(ws .. "/rung.toml")
+
 -- the debugger's configuration
 local conf = require("rung.dap").configuration("x.test.yaml", 2)
 check("dap configuration", conf.type == "rung" and conf.case == 2 and conf.stopOnEntry)

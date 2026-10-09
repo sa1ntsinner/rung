@@ -25,8 +25,9 @@ export async function crossReference(ws: RungWorkspace, cli: RungCli, arg?: unkn
   }
   const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Asking TIA Portal for the cross-reference…" }, () => cli.capture(["xref", uri.fsPath, "--json"], { quiet: true }));
   let rows: Row[];
+  let cachedAt: string | undefined;
   try {
-    rows = (JSON.parse(r.output) as { rows: Row[] }).rows;
+    ({ rows, cachedAt } = JSON.parse(r.output) as { rows: Row[]; cachedAt?: string });
   } catch {
     void vscode.window.showErrorMessage(`rung xref: ${RungCli.summary(r.output) || "TIA Portal did not answer"}`);
     return undefined;
@@ -44,7 +45,7 @@ export async function crossReference(ws: RungWorkspace, cli: RungCli, arg?: unkn
     items.push({ label: TITLE[rel], kind: vscode.QuickPickItemKind.Separator });
     for (const row of group) items.push({ row, label: row.name, description: `${row.access} · ${row.type}`, ...(row.location ? { detail: row.location } : {}), ...(row.path ? { iconPath: new vscode.ThemeIcon("go-to-file") } : {}) });
   }
-  const pick = await vscode.window.showQuickPick(items, { title: `${name} in TIA Portal's cross-reference`, placeHolder: "Pick one to open its file (when rung mirrors it)", matchOnDescription: true, matchOnDetail: true });
+  const pick = await vscode.window.showQuickPick(items, { title: `${name} in TIA Portal's cross-reference${cachedAt ? ` (its answer of ${new Date(cachedAt).toLocaleTimeString()}; nothing mirrored changed since)` : ""}`, placeHolder: "Pick one to open its file (when rung mirrors it)", matchOnDescription: true, matchOnDetail: true });
   if (pick?.row?.path) await vscode.window.showTextDocument(vscode.Uri.file(join(ws.root, pick.row.path)));
   return rows;
 }

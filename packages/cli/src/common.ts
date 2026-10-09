@@ -27,6 +27,8 @@ export const HINTS: Record<string, string> = {
   AMBIGUOUS_PORTAL: "Several TIA Portal instances match. Close the extra ones or pass --project.",
   NOT_A_WORKSPACE: "rung init binds a folder to a TIA Portal project; in a clone of a workspace, rung pull is enough.",
   STATE_LOCKED: "Another rung process is using this workspace (is rung watch running?).",
+  ONLINE_FAILED:
+    "TIA Portal could not go online with the connection it has for this PLC ([plc.<name>] in rung.toml, or the one configured in TIA Portal). Check that the PLC is on and on that network; rung interfaces --scan shows what TIA Portal can reach, rung connect --pick chooses another connection.",
   READ_ONLY: "rung writes into TIA Portal only when writes are on (rung writes on); know-how protected, fail-safe, system and GRAPH blocks and instances of library types it never changes.",
 };
 
@@ -169,7 +171,7 @@ export async function findWorkspace(start: string): Promise<string> {
 
 /** Warnings that describe how an object is mirrored, not a problem: they are printed but do not make the exit code 2. */
 // states the person chose or knows (writes off, a block TIA has not compiled): reported, never a failed run
-const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT", "WRITE_BACK_DROPPED", "WRITES_OFF", "IMPORT_MANUAL"]);
+const NOTICES = new Set(["UNSUPPORTED_UNIT", "SD_FALLBACK", "TAGS_XML_FALLBACK", "INCONSISTENT", "WRITE_BACK_DROPPED", "WRITES_OFF", "IMPORT_MANUAL", "RENAMED_IN_TIA"]);
 export const isNotice = (code: string) => NOTICES.has(code);
 
 export function printWarnings(io: Io, warnings: readonly { address: string; path?: string; code: string; message?: string }[]) {

@@ -7,6 +7,8 @@ import * as vscode from "vscode";
 import type { Lsp } from "../lsp";
 import { isViewToHost, type DeclModel, type DeclOp, type DeclRow, type HostToView, type PasteResult, type ViewContext, type ViewToHost } from "../protocol/declarations";
 import type { RungWorkspace } from "../workspace";
+import type { Monitor } from "../monitor";
+import { rowValues } from "../core/monitorText";
 import { STALE, checkPlan, type Rng, type ServerPlan } from "./edits";
 
 export function findRow(model: DeclModel, id: string): DeclRow | undefined {
@@ -56,11 +58,13 @@ export class DeclarationsSession implements vscode.Disposable {
   /** the last message sent to the view */
   private last: HostToView | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
+  /** the view shows monitored values (so it hears when they stop) */
+  private monitored = false;
   private readonly subs: vscode.Disposable[] = [];
 
   constructor(
     private readonly webview: vscode.Webview,
-    private readonly deps: { lsp: Lsp; ws: RungWorkspace },
+    private readonly deps: { lsp: Lsp; ws: RungWorkspace; monitor?: Monitor },
     private readonly host: SessionHost,
   ) {
     this.subs.push(
@@ -74,6 +78,7 @@ export class DeclarationsSession implements vscode.Disposable {
         if (d.uri.toString() === this.host.uri()) this.scheduleRefresh(0);
       }),
     );
+    if (deps.monitor) this.subs.push(deps.monitor.onDidChange(() => this.postValues()));
   }
 
   /** The model the view shows. */
@@ -145,6 +150,8 @@ export class DeclarationsSession implements vscode.Disposable {
     this.model = model;
     this.host.title(model.block.name);
     this.post({ v: 1, kind: "model", model, context: this.context(doc) });
+    // values of this block, or (another block now) none: a table that showed values hears they are gone
+    this.postValues();
     if (model.editable && this.typesFor !== target) {
       this.typesFor = target;
       const t = await this.deps.lsp.request<{ elementary: string[]; types: { name: string; kind: string }[] }>("rung/typeNames", { textDocument: { uri: target } }).catch(() => undefined);
@@ -152,8 +159,29 @@ export class DeclarationsSession implements vscode.Disposable {
     }
   }
 
+  /** The values monitoring read for this block, row by row (TIA Portal's Monitor value column); none when it stops. */
+  private postValues(): void {
+    const mon = this.deps.monitor;
+    const on = !!mon?.monitoring && mon.monitoring.toString() === this.host.uri() && !!mon.plan && !!this.model;
+    if (!on && !this.monitored) return;
+    this.monitored = on;
+    const values = on ? rowValues(this.model!.sections, mon!.plan!, mon!.values, mon!.errors) : {};
+    if (this.ready) void this.webview.postMessage({ v: 1, kind: "values", on, values, ...(on && mon!.plan!.instance ? { instance: mon!.plan!.instance } : {}) } satisfies HostToView);
+  }
+
+  /** What the view was last told about monitored values (tests). */
+  get monitoredValues(): Record<string, string> | undefined {
+    const mon = this.deps.monitor;
+    return mon?.plan && this.model && mon.monitoring?.toString() === this.host.uri() ? rowValues(this.model.sections, mon.plan, mon.values, mon.errors) : undefined;
+  }
+
   private async handle(m: ViewToHost) {
     switch (m.kind) {
+      case "monitor": {
+        const uri = this.host.uri();
+        if (uri) await vscode.commands.executeCommand("rung.monitor.toggle", vscode.Uri.parse(uri));
+        break;
+      }
       case "ready":
         this.ready = true;
         this.typesFor = undefined;

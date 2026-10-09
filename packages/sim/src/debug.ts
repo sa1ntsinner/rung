@@ -37,7 +37,8 @@ export interface WhyNode {
   kind: "value" | "write" | "condition" | "note";
   text: string;
   value?: string;
-  at?: { uri: string; line: number; time: number };
+  /** where it is written; `time` in the debugger (the cycle), none for values read now from a PLC */
+  at?: { uri: string; line: number; time?: number };
   children: WhyNode[];
 }
 
@@ -652,7 +653,7 @@ export class DebugSession {
 }
 
 /** The variables an expression reads (call arguments too), as written. */
-function* refsOf(e: Expr): Generator<LRef> {
+export function* refsOf(e: Expr): Generator<LRef> {
   if (e.k === "ref") yield e.ref;
   else if (e.k === "un") yield* refsOf(e.e);
   else if (e.k === "bin") {
@@ -662,7 +663,7 @@ function* refsOf(e: Expr): Generator<LRef> {
 }
 
 /** A reference as SCL writes it: #a.b[1], "DB".x. */
-function refText(r: LRef): string {
+export function refText(r: LRef): string {
   const root = r.root.kind === "local" ? `#${r.root.name}` : r.root.kind === "global" ? `"${r.root.name}"` : r.root.name;
   return root + r.path.map((p) => ("member" in p ? `.${p.member}` : "index" in p ? `[${p.index.map((x) => (x.k === "lit" ? String(x.value) : x.k === "ref" ? refText(x.ref) : "…")).join(",")}]` : "slice" in p ? `.%${p.slice}${p.n}` : "^")).join("");
 }

@@ -16,3 +16,7 @@ languages = ["SCL", "Structured Text"]
 repository = "https://github.com/sa1ntsinner/rung"
 rev = "e5d5bdcc3b8b921f9ef18321a3950beb0ea5cb76"
 path = "grammars/tree-sitter-scl"
+
+# test cases on rung's offline simulator: breakpoints in SCL, stepping (also back), variables
+[debug_adapters.rung]
+schema_path = "debug_adapter_schemas/rung.json"

@@ -8,17 +8,34 @@ M.ns = vim.api.nvim_create_namespace("rung.tests")
 
 --- The cases of a test buffer as written: { line (0-based), name }.
 function M.cases(buf)
-  local out, inside = {}, false
-  for i, l in ipairs(vim.api.nvim_buf_get_lines(buf or 0, 0, -1, false)) do
+  return M.cases_of(vim.api.nvim_buf_get_lines(buf or 0, 0, -1, false))
+end
+
+--- The cases in a test file's lines: { line (0-based, its dash), name }, in file order, whatever key comes first.
+function M.cases_of(lines)
+  local out, inside, dash, current = {}, false, nil, nil
+  local unquote = function(s) return (s:gsub("^[\"']", ""):gsub("[\"']$", "")) end
+  for i, l in ipairs(lines) do
     if l:match("^cases:") then
-      inside = true
+      inside, dash, current = true, nil, nil
     elseif l:match("^%S") then
       inside = false
     elseif inside then
-      local name = l:match("^%s*%-%s+name:%s*(.-)%s*$") or l:match("^%s*%-%s*{%s*name:%s*([^,}]+)")
-      if name then table.insert(out, { line = i - 1, name = (name:gsub("^[\"']", ""):gsub("[\"']$", "")) }) end
+      local indent, rest = l:match("^(%s*)%-%s*(.*)$")
+      if indent and (dash == nil or #indent == dash) then
+        -- a case: an item of the cases list (steps are items deeper in)
+        dash = #indent
+        current = { line = i - 1 }
+        table.insert(out, current)
+        local name = rest:match("^name:%s*(.-)%s*$") or rest:match("^{.-%f[%w]name:%s*([^,}]+)")
+        if name then current.name = unquote(vim.trim(name)) end
+      elseif current and not current.name then
+        local pad, name = l:match("^(%s+)name:%s*(.-)%s*$")
+        if name and #pad == dash + 2 then current.name = unquote(name) end
+      end
     end
   end
+  for n, c in ipairs(out) do c.name = c.name or ("case " .. n) end
   return out
 end
 

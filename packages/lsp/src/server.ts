@@ -38,6 +38,7 @@ import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions } from "./actions.js";
 import { testFilesOf, testKeyEdits } from "./testkeys.js";
+import { baseText, interfaceImpact, workspaceTests } from "./impact.js";
 import { testSkeleton } from "./testSkeleton.js";
 import { newObject, type NewObjectRequest } from "./newObject.js";
 import { escapeSegment, unescapeSegment } from "@rung/core";
@@ -407,6 +408,13 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const plan = planDeclarationEdit(doc.text, declarationModel(p.textDocument.uri, live, doc.text, doc.parsed, offset), p.op);
     if (!plan.ok) return plan;
     return { ok: true, version: plan.version, edits: plan.edits.map((e) => ({ range: range(p.textDocument.uri, e.start, e.end), old: e.old, newText: e.text })) };
+  });
+  // what the interface in the editor (saved or not) breaks against the version TIA Portal has
+  connection.onRequest("rung/impact", async (p: { textDocument: { uri: string } }) => {
+    if (!root) return { reason: "No rung workspace is open." };
+    const before = await baseText(root, p.textDocument.uri);
+    if (before === undefined) return { reason: "This block is not in TIA Portal yet (never synced): nothing uses it there." };
+    return interfaceImpact(index, p.textDocument.uri, before, await workspaceTests(root)) ?? { reason: "The file holds no FB, FC or PLC data type." };
   });
   connection.onRequest("rung/usages", (p: { textDocument: { uri: string }; position: { line: number; character: number } }) => {
     const r = usagesAt(index, p.textDocument.uri, offsetOf(p.textDocument.uri, p.position));

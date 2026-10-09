@@ -39,6 +39,8 @@ import { startDebugAdapter } from "./debug.js";
 import { cmdFormat } from "./format.js";
 import { behaviourAgainst } from "./behaviour.js";
 import { cmdXref } from "./xref.js";
+import { cmdWhy } from "./why.js";
+import { cmdImpact } from "./impact.js";
 import { cmdCheck } from "./check.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
@@ -56,7 +58,11 @@ Usage:
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--json]                  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
-  rung xref <file|address> [--json]    TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
+  rung xref <file|address> [--json] [--fresh]
+                                       TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
+                                       (kept while nothing mirrored changed; --fresh asks TIA Portal again)
+  rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
+  rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
                                        a new project from a running PLC (TIA's "Upload device as new station")
@@ -351,7 +357,9 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["json"], positionals: 0 },
   format: { options: ["check"], positionals: 1 },
-  xref: { options: ["json"], positionals: 1 },
+  xref: { options: ["json", "fresh"], positionals: 1 },
+  why: { options: ["instance", "json"], positionals: 2 },
+  impact: { options: ["json"], positionals: 1 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
@@ -423,6 +431,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         device: { type: "string", multiple: true },
         rebind: { type: "boolean" },
         check: { type: "boolean" },
+      fresh: { type: "boolean" },
         force: { type: "boolean" },
         verbose: { type: "boolean" },
         fixture: { type: "boolean" },
@@ -661,8 +670,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await new Promise<void>((r) => process.stdin.once("end", () => r())); // until the agent closes stdin
         return 0;
       }
+      case "why":
+        return await cmdWhy(target, positionals[2], { instance: v.instance as string | undefined, json: !!v.json }, io);
+      case "impact":
+        return await cmdImpact(target, !!v.json, io);
       case "xref":
-        return await cmdXref(target, !!v.json, io);
+        return await cmdXref(target, !!v.json, io, !!v.fresh);
       case "format":
         return await cmdFormat(dir, !!v.check, io);
       case "check":

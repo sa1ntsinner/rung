@@ -102,7 +102,9 @@ export type HostToView =
   /** the answer to an edit: ok (the document changed) or why not; `edit` names a row to edit next (a new row's name) */
   | { v: 1; kind: "result"; req: number; ok: boolean; reason?: string; edit?: { rowId: string; column: "name" } }
   | { v: 1; kind: "pastePreview"; req: number; result: PasteResult }
-  | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] };
+  | { v: 1; kind: "types"; elementary: string[]; types: { name: string; kind: string }[] }
+  /** monitoring this block (a DB, an FB through its instance): each row's value as TIA Portal's Monitor value column */
+  | { v: 1; kind: "values"; on: boolean; values: Record<string, string>; instance?: string };
 
 export type OpenTarget = "name" | "type" | "start" | "comment";
 
@@ -121,7 +123,9 @@ export type ViewToHost =
   | { v: 1; kind: "delete"; req: number; uri: string; version: number; rowId: string }
   | { v: 1; kind: "paste"; req: number; uri: string; text: string }
   | { v: 1; kind: "undo" }
-  | { v: 1; kind: "redo" };
+  | { v: 1; kind: "redo" }
+  /** start or stop monitoring the block the table shows */
+  | { v: 1; kind: "monitor" };
 
 const TARGETS: ReadonlySet<string> = new Set<OpenTarget>(["name", "type", "start", "comment"]);
 /** the attributes the table sets: a key from the view is never text written into the file */
@@ -167,6 +171,7 @@ export function isViewToHost(x: unknown): x is ViewToHost {
     case "openText":
     case "undo":
     case "redo":
+    case "monitor":
       return true;
     case "edit":
       return num(m.req) && str(m.uri) && num(m.version) && isOp(m.op);

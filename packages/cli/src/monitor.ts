@@ -20,6 +20,8 @@ export interface MonitorPlan {
 const ELEMENTARY =
   /^(BOOL|BYTE|WORD|DWORD|LWORD|SINT|INT|DINT|LINT|USINT|UINT|UDINT|ULINT|REAL|LREAL|TIME|LTIME|S5TIME|DATE|TIME_OF_DAY|TOD|LTIME_OF_DAY|LTOD|DATE_AND_TIME|DT|LDT|CHAR|WCHAR|STRING|WSTRING)(\s*\[.*\])?$/i;
 const elementary = (m: Pick<Member, "type" | "isArray"> | undefined) => !!m && !m.isArray && ELEMENTARY.test(m.type.trim());
+/** How many elements of a declared array monitoring reads: the first ones, a page. */
+const ARRAY_PAGE = 16;
 
 /** A member name as the Web API wants it: plain, or in quotes when it has other characters. */
 const seg = (n: string) => (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(n) ? n : `"${n}"`);
@@ -60,7 +62,23 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
   // declarations: an FB's inputs, outputs and statics through the instance, a DB's members
   if (block.kind === "FB" || (block.kind === "DB" && !block.dbOf)) {
     const base = block.kind === "FB" ? inst! : quoted(block.name);
-    for (const v of block.vars) if (readable(v) && elementary(v)) add(v.start, v.name, `${base}.${seg(v.name)}`);
+    // members of a STRUCT declared here too, each on its own line, labelled with its path (Motor.Speed)
+    const walk = (vars: VarDecl[], label: string, path: string) => {
+      for (const v of vars) {
+        if (!readable(v)) continue;
+        const l = label ? `${label}.${v.name}` : v.name;
+        if (v.members?.length && !v.isArray) walk(v.members, l, `${path}.${seg(v.name)}`);
+        else if (elementary(v)) add(v.start, l, `${path}.${seg(v.name)}`);
+        else if (v.isArray) {
+          // an array of an elementary type: its first elements (a page), each read like a member
+          const a = /^Array\s*\[\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\]\s*of\s+(.+)$/i.exec(v.type.trim());
+          if (!a || !ELEMENTARY.test(a[3]!.trim())) continue;
+          const lo = Number(a[1]);
+          for (let i = lo; i <= Math.min(Number(a[2]), lo + ARRAY_PAGE - 1); i++) add(v.start, `${l}[${i}]`, `${path}.${seg(v.name)}[${i}]`);
+        }
+      }
+    };
+    walk(block.vars, "", base);
   } else if (block.kind === "DB" && block.dbOf) {
     // an instance or typed DB declares nothing itself: its values go on the line that names the FB or UDT
     const at = Math.max(block.start, doc.text.indexOf(`"${block.dbOf}"`, block.start));
