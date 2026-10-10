@@ -112,6 +112,8 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.status", inWs(() => cli.run(["status"])));
   reg("rung.views", inWs(() => cli.run(["views"])));
   reg("rung.watch.start", inWs(() => watch.start()));
+  // a virtual S7-1500 running the program: Monitor, Live Values and rung live read it while it runs
+  reg("rung.simulate", inWs(() => cli.run(["simulate"], { terminal: "rung simulate", icon: "vm-running" })));
   reg("rung.watch.stop", () => watch.stop());
   reg("rung.watch.toggle", inWs(() => watch.toggle()));
   reg("rung.watch.show", () => watch.show());
@@ -431,6 +433,7 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     a("plug", "Go online", "rung.goOnline", "O"),
     a("debug-disconnect", "Go offline", "rung.goOffline", "F"),
     a("pulse", "Online state", "rung.onlineState"),
+    a("vm-running", "Simulate the PLC", "rung.simulate", undefined, "a virtual S7-1500 running the program, for Monitor and Live Values"),
     a("close", "Release the Project (close rung's background TIA Portal)", "rung.session.release"),
     a("link", "Connect…", "rung.connect", "C", "find the PLC on the network and choose the connection"),
     a("radio-tower", "Interfaces…", "rung.interfaces", "I"),

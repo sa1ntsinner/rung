@@ -4,6 +4,8 @@
 // values, so rung live, the MCP live tools and editor features can be tried without hardware.
 // It is not a PLCSIM: TIA Portal cannot go online to it or download into it.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WorkspaceIndex } from "@rung/lsp";
 import { Simulator, parseBody, type Instance, type Value } from "@rung/sim";
@@ -162,12 +164,29 @@ export async function cmdSimulate(dir: string, v: Record<string, unknown>, io: I
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new WorkspaceError("BAD_ARGUMENT", `--port is a TCP port (0 to 65535), not ${String(v.port)}`);
   const cycleMs = Math.max(1, cycle);
   const plc = await startVirtualPlc(ws, { host, port, cycleMs, ...(v.block ? { block: String(v.block) } : {}), log: (s) => io.stderr(`rung simulate: ${s}`) });
+  // rung live and the editor find the running simulator here when rung.toml names no PLC to read
+  const marker = join(ws, ".rung", "simulate.json");
+  await mkdir(join(ws, ".rung"), { recursive: true });
+  await writeFile(marker, JSON.stringify({ url: plc.url, pid: process.pid }) + "\n");
   io.stdout(
     `rung simulate: virtual PLC at ${plc.url} (cycle ${cycleMs} ms)\n` +
-      `Use it from rung live by adding to rung.toml:\n\n[live.webapi]\nurl = "${plc.url}"\nuser = "any"\n\nand any RUNG_WEBAPI_PASSWORD. Ctrl+C to stop.\n`,
+      `rung live and the editor's monitoring read it while it runs, unless rung.toml names a PLC under [live]. Ctrl+C to stop.\n`,
   );
   await (io.stopSignal ?? new Promise<void>((r) => process.once("SIGINT", () => r())));
+  await rm(marker, { force: true });
   await plc.close();
   io.stdout(`rung simulate: stopped after ${plc.cycles()} cycles\n`);
   return 0;
+}
+
+/** The simulator `rung simulate` runs for this workspace now, if any (its marker, and its process still there). */
+export async function runningSimulator(root: string): Promise<{ url: string } | undefined> {
+  try {
+    const m = JSON.parse(await readFile(join(root, ".rung", "simulate.json"), "utf8")) as { url?: unknown; pid?: unknown };
+    if (typeof m.url !== "string" || typeof m.pid !== "number") return undefined;
+    process.kill(m.pid, 0); // throws when the process is gone (a simulator killed without Ctrl+C)
+    return { url: m.url };
+  } catch {
+    return undefined;
+  }
 }

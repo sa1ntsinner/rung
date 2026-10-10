@@ -513,6 +513,12 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.simulate",
+        "title": "Simulate PLC (Virtual S7-1500)",
+        "category": "rung",
+        "icon": "$(vm-running)"
+      },
+      {
         "command": "rung.ladder.open",
         "title": "Show as Ladder",
         "category": "rung",

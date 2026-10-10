@@ -96,7 +96,7 @@ The right is kept in `.rung/`, never in git, and names the project: a colleague 
 ## 5. Test without a PLC
 
 - `rung test` runs YAML unit tests for SCL, LAD, FBD and STL blocks on rung's offline simulator and writes JUnit for CI ([testing](testing.md)).
-- `rung simulate` runs the program cyclically as a virtual S7-1500 that answers the Web API, so `rung live read '"DB".x'` and the agent tools can watch values change. TIA Portal cannot go online to it; for that, use S7-PLCSIM.
+- `rung simulate` (in VS Code: **rung: Simulate PLC**) runs the program cyclically as a virtual S7-1500 that answers the Web API. While it runs, `rung live read '"DB".x'`, Live Values, the ladder view's *Monitor* and the agent tools read it without any `[live]` setting or password (a `[live]` section in `rung.toml` takes precedence), and *Modify Current PLC Value* sets an input in it straight away. TIA Portal cannot go online to it; for that, use S7-PLCSIM.
 
 ## 6. Online, compare, download
 

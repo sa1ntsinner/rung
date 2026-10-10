@@ -12,13 +12,16 @@ import type { Io } from "./common.js";
 import type { LiveReader } from "./live.js";
 import { rungCommand } from "./paths.js";
 import { liveMutations } from "./liveMutation.js";
+import { runningSimulator } from "./simulate.js";
 
 export interface BackendOptions { device?: string; file?: string; transport?: string }
 export async function liveSelection(root: string, options: BackendOptions) {
   const config = await loadConfig(root);
   if (!Object.keys(config.live?.plc ?? {}).length) {
-    const w = config.live?.webapi;
-    if (!w) throw new WorkspaceError("CONFIG_INVALID", 'no [live.webapi] in rung.toml or [live.plc.<device>] live target');
+    // no PLC named: the workspace's own rung simulate, while it runs (any user and password)
+    const sim = config.live?.webapi ? undefined : await runningSimulator(root);
+    const w = config.live?.webapi ?? (sim ? { url: sim.url, user: "any" } : undefined);
+    if (!w) throw new WorkspaceError("CONFIG_INVALID", 'no [live.webapi] in rung.toml or [live.plc.<device>] live target, and no rung simulate running');
     const devices = [...new Set([...config.devices, ...Object.keys(config.plc), ...(await readdir(resolve(root, "plc")).catch(() => []))])];
     if (devices.length > 1) throw new WorkspaceError("CONFIG_INVALID", "Legacy [live.webapi] is ambiguous; configure [live.plc.<device>] for each PLC");
     const device = devices[0] ?? options.device;
@@ -46,6 +49,8 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
       catch (error) { await host.close(); throw error; }
     }
     const w = selected.target.webapi!;
+    // rung simulate takes any password: none is asked for it
+    if (!auth.password && (await runningSimulator(root))?.url === w.url) auth.password = "simulator";
     if (!auth.password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
     const refused = plainHttpRefusal(w.url, env);
     if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
@@ -134,6 +139,8 @@ function liveKey(selected: Awaited<ReturnType<typeof liveSelection>>, user?: str
 
 export async function brokerReader(root: string, env: Io["env"], options: BackendOptions): Promise<LiveReader> {
   const selected = await liveSelection(root, options); // refuse ambiguous scope before starting a process
+  // rung simulate takes any password: none is asked for it
+  if (selected.transport === "webapi" && !env.RUNG_WEBAPI_PASSWORD && (await runningSimulator(root))?.url === selected.target.webapi?.url) env = { ...env, RUNG_WEBAPI_PASSWORD: "simulator" };
   if (selected.transport === "webapi") {
     if (!env.RUNG_WEBAPI_PASSWORD) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
     const refused = plainHttpRefusal(selected.target.webapi!.url, env);

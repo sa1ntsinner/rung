@@ -11,6 +11,7 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
   name?: string, draft?: string, device?: string): Promise<void> {
   const connection = await access.select(device);
   if (!connection || !ws.root) return;
+  if (connection.simulator && action === "modify") return modifySimulator(connection.simulator, name, draft);
   if (connection.target.transport !== "s7commplus") { void vscode.window.showWarningMessage("PLC modification requires a configured s7commplus target."); return; }
   if (action === "modify") {
     name ??= await vscode.window.showInputBox({ title: "Modify current PLC value", prompt: "PLC symbolic name or verified absolute address" });
@@ -60,4 +61,37 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
 
 export function registerLiveCpuCommands(ws: RungWorkspace, cli: RungCli, access: LiveAccess): vscode.Disposable[] {
   return (["run", "stop"] as const).map(action => vscode.commands.registerCommand(`rung.live.${action}`, (item?: { device?: string }) => mutateLive(ws, cli, access, action, undefined, undefined, item?.device)));
+}
+
+/** "TRUE" → true, "37" → 37, "1.5" → 1.5; anything else as written (times, strings). */
+export function simulatorLiteral(text: string): unknown {
+  const t = text.trim();
+  if (/^true$/i.test(t)) return true;
+  if (/^false$/i.test(t)) return false;
+  if (/^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(t)) return Number(t);
+  return t;
+}
+
+/**
+ * rung simulate is the workspace's own virtual PLC: a value is written straight into it (its Web API), no confirmation
+ * pipe, no real plant behind it. Inputs set this way stand until the program or the next write changes them.
+ */
+async function modifySimulator(url: string, name?: string, draft?: string): Promise<void> {
+  name ??= await vscode.window.showInputBox({ title: "Set a value in the simulator", prompt: 'PLC tag or DB member, for example "Start_PB"' });
+  if (!name) return;
+  draft = await vscode.window.showInputBox({ title: `Set ${name} in the simulator`, prompt: "New value: TRUE, FALSE, a number or an SCL literal", value: draft ?? "" });
+  if (draft === undefined) return;
+  const rpc = async (body: unknown, token?: string) => {
+    const r = await fetch(`${url}/api/jsonrpc`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-auth-token": token } : {}) }, body: JSON.stringify(body) });
+    return (await r.json()) as { result?: unknown; error?: { message?: string } }[];
+  };
+  try {
+    const [login] = await rpc([{ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: "simulator" } }]);
+    const token = (login?.result as { token?: string } | undefined)?.token;
+    const [write] = await rpc([{ jsonrpc: "2.0", id: 2, method: "PlcProgram.Write", params: { var: name, value: simulatorLiteral(draft) } }], token);
+    if (write?.error) void vscode.window.showWarningMessage(`The simulator did not take ${name}: ${write.error.message ?? "refused"}`);
+    else void vscode.window.setStatusBarMessage(`$(vm-running) ${name} := ${draft} in the simulator`, 4000);
+  } catch (e) {
+    void vscode.window.showWarningMessage(`The simulator at ${url} did not answer: ${(e as Error).message}`);
+  }
 }
