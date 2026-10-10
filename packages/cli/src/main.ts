@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { cmdUpgrade, olderProjectHint } from "./upgrade.js";
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import { readFile, readdir, writeFile, appendFile } from "node:fs/promises";
@@ -150,6 +151,8 @@ PLC:
   rung simulate [dir] [--address 127.0.0.2] [--port 8080] [--cycle 10] [--block <FB/FC>]
                                        a virtual S7-1500: runs the SCL program and answers the Web API (for rung live)
   rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
+  rung upgrade <project.ap18> [--tia V20] [--timeout <min>]
+                                       a project of an older TIA Portal upgraded next to it (<folder>_V20; the original stays)
 
 Environment:
   RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
@@ -192,6 +195,8 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   if (v.project && /\.zap\d+$/i.test(String(v.project))) throw new WorkspaceError("BAD_ARGUMENT", "A .zap archive must be retrieved in TIA Portal first; then run rung init --project <retrieved .ap file>");
+  const older = v.project ? olderProjectHint(String(v.project)) : undefined;
+  if (older) throw new WorkspaceError("BAD_ARGUMENT", older);
   const cfgPath = join(dir, CONFIG_FILE);
   if ((await exists(cfgPath)) && !v.rebind) {
     const bound = await loadConfig(dir, { raw: true }).then((c) => c.project.path, () => undefined);
@@ -825,6 +830,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdOpen(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io, !!v.save);
       case "init":
         return await cmdInit(dir, v, io);
+      case "upgrade":
+        return await cmdUpgrade(target, v, io);
       case "codesys-bridge":
         return await cmdCodesysBridge(v, io);
       case "who":

@@ -26,6 +26,8 @@ namespace Rung.Bridge.V20
         public bool Keep;
         /// <summary>When no TIA Portal has the project open, open it in a TIA Portal with window (rung open).</summary>
         public bool OpenWindow;
+        /// <summary>Open --project with upgrade to this TIA Portal version, save it and print where it is (Upgrade.cs).</summary>
+        public bool Upgrade;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -61,6 +63,9 @@ namespace Rung.Bridge.V20
                         break;
                     case "--open-window":
                         a.OpenWindow = true;
+                        break;
+                    case "--upgrade":
+                        a.Upgrade = true;
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);
@@ -102,6 +107,6 @@ namespace Rung.Bridge.V20
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        static int Run(BridgeArgs args) => args.Keep ? Keeper.Run(args) : Host.Run(args);
+        static int Run(BridgeArgs args) => args.Upgrade ? Upgrade.Run(args) : args.Keep ? Keeper.Run(args) : Host.Run(args);
     }
 }
