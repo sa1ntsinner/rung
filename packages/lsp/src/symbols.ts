@@ -42,6 +42,23 @@ export function workspaceSymbols(index: WorkspaceIndex, query: string): FoundSym
   }));
 }
 
+/**
+ * The members one level below a path that starts at a DB or a tag: ["Line_DB"] lists its variables (an instance DB
+ * its FB's interface), ["Line_DB", "Pos"] those of Pos. `more`: the member has members of its own.
+ */
+export function pathMembers(index: WorkspaceIndex, path: string[]): { name: string; type: string; more: boolean }[] {
+  const root = index.global(path[0] ?? "");
+  let list = root?.tag ? index.membersOfType(root.tag.dataType.replace(/^"|"$/g, "")) : index.membersOfType(root?.name);
+  for (const seg of path.slice(1)) {
+    const m = list.find((x) => x.name.toUpperCase() === seg.toUpperCase());
+    if (!m) return [];
+    list = index.membersOf(m);
+  }
+  return list
+    .filter((m) => m.section !== "Method" && m.section !== "Action")
+    .map((m) => ({ name: m.name, type: m.type, more: !m.isArray && index.membersOf(m).length > 0 }));
+}
+
 /** A word starts at `at`: the name's start, after _ or another separator, or at a capital after a small letter or digit. */
 function wordAt(name: string, at: number): boolean {
   if (at < 0) return false;

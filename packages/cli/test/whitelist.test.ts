@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "vitest";
-import { entryStatus, whitelistKey } from "../src/setup.js";
+import { bridgesHere, entryStatus, whitelistKey } from "../src/setup.js";
 
 const entry = (path: string, hash = "B9R84T8U=") =>
   `HKEY_LOCAL_MACHINE\\SOFTWARE\\Siemens\\Automation\\Openness\\20.0\\Whitelist\\rung-bridge-v20.exe\\Entry\r\n    Path    REG_SZ    ${path}\r\n    DateModified    REG_SZ    2026/10/04 13:10:54.000\r\n    FileHash    REG_SZ    ${hash}\r\n`;
@@ -31,5 +31,12 @@ describe("where TIA Portal keeps its Openness allow list", () => {
     expect(whitelistKey("20.0", "C:\\b\\rung-bridge-v20.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\20.0\\Whitelist\\rung-bridge-v20.exe\\Entry");
     expect(whitelistKey("19.0", "C:\\b\\rung-bridge-v19.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\19.0\\Whitelist\\rung-bridge-v19.exe\\Entry");
     expect(whitelistKey("21.0", "C:\\b\\rung-bridge-v21.exe")).toBe("HKLM\\SOFTWARE\\Siemens\\Automation\\Openness\\AllowList\\rung-bridge-v21.exe\\Entry");
+  });
+});
+
+describe("the bridges rung checks and registers", () => {
+  it("is the one RUNG_BRIDGE names when it is set: the bridge sync and watch start", () => {
+    expect(bridgesHere({ RUNG_BRIDGE: "D:/dev/rung-bridge-v21.exe" })).toEqual([{ exe: "D:/dev/rung-bridge-v21.exe", version: "21.0" }]);
+    expect(bridgesHere({ RUNG_BRIDGE: "D:/dev/fake-bridge.exe" })).toEqual([{ exe: "D:/dev/fake-bridge.exe", version: "20.0" }]);
   });
 });

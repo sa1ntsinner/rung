@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { WorkspaceIndex } from "../src/workspace.js";
 import { foldingRanges } from "../src/folding.js";
-import { workspaceSymbols } from "../src/symbols.js";
+import { pathMembers, workspaceSymbols } from "../src/symbols.js";
 
 const folds = (uri: string, text: string) => {
   const index = new WorkspaceIndex();
@@ -123,5 +123,22 @@ describe("workspace symbols", () => {
     expect(performance.now() - t0).toBeLessThan(50);
     expect(found[0]!.name).toBe("Perf_Drive_12");
     expect(found).toHaveLength(111); // _12, _120 to _129, _1200 to _1299
+  });
+});
+
+describe("members for a pick list", () => {
+  it("lists one level below a DB, an instance DB, a struct member and a UDT-typed tag", () => {
+    const index = new WorkspaceIndex();
+    index.set("file:///w/plc/PLC_1/types/T_Point.udt", 'TYPE "T_Point"\nVERSION : 0.1\n   STRUCT\n      x : Real;\n      y : Real;\n   END_STRUCT;\nEND_TYPE\n', 1);
+    index.set("file:///w/plc/PLC_1/blocks/Line_DB.db", 'DATA_BLOCK "Line_DB"\nVERSION : 0.1\n   VAR\n      Speed : Int;\n      Pos : "T_Point";\n      Run : Bool;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n', 1);
+    index.set("file:///w/plc/PLC_1/blocks/FB_M.scl", 'FUNCTION_BLOCK "FB_M"\nVAR_INPUT\n   Start : Bool;\nEND_VAR\nVAR_TEMP\n   t : Int;\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n', 1);
+    index.set("file:///w/plc/PLC_1/blocks/M_DB.db", 'DATA_BLOCK "M_DB"\nVERSION : 0.1\n"FB_M"\nBEGIN\nEND_DATA_BLOCK\n', 1);
+    index.set("file:///w/plc/PLC_1/tags/Io.tags.st", 'VAR_GLOBAL\n    Home : "T_Point";\nEND_VAR\n', 1);
+    const names = (path: string[]) => pathMembers(index, path).map((m) => `${m.name}:${m.type}${m.more ? "+" : ""}`);
+    expect(names(["Line_DB"])).toEqual(["Speed:Int", "Pos:\"T_Point\"+", "Run:Bool"]);
+    expect(names(["line_db", "Pos"])).toEqual(["x:Real", "y:Real"]);
+    expect(names(["M_DB"])).toEqual(["Start:Bool"]);
+    expect(names(["Home"])).toEqual(["x:Real", "y:Real"]);
+    expect(names(["Line_DB", "Nope"])).toEqual([]);
   });
 });

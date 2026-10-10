@@ -41,9 +41,12 @@ public static class Symbols
         var canonical = Normalize(name);
         if (canonical.StartsWith('%')) {
             var aliases = catalog.Where(v => string.Equals(v.AbsoluteAddress, canonical, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
-            if (aliases.Length > 1) throw new RpcException(ErrorCodes.SymbolAmbiguous, "Absolute address matches multiple PLC symbols.");
+            if (aliases.Length > 1) throw new RpcException(ErrorCodes.SymbolAmbiguous, $"{canonical.ToUpperInvariant()} is the address of several PLC tags; read one of them by name.");
             if (aliases.Length == 1) return aliases[0];
-            throw new RpcException(ErrorCodes.UnsupportedObject, "Absolute address has no verified scalar mapping in the PLC catalog.");
+            // ponytail: I, Q and M are read through the PLC tag at that address; raw area access needs the protocol's area encoding
+            if (canonical.StartsWith("%DB", StringComparison.OrdinalIgnoreCase))
+                throw new RpcException(ErrorCodes.UnsupportedObject, $"{canonical.ToUpperInvariant()} is an offset in a DB: read the member by its name (\"Line_DB\".Speed).");
+            throw new RpcException(ErrorCodes.UnsupportedObject, $"No PLC tag is at {canonical.ToUpperInvariant()}: rung reads inputs, outputs and memory through their tags. Give the address a tag in a tag table (same address and width), download, and read it.");
         }
         var matches = catalog.Where(v => v.Name == canonical).Take(2).ToArray();
         if (matches.Length > 1) throw new RpcException(ErrorCodes.SymbolAmbiguous, "PLC symbol is ambiguous.");

@@ -72,6 +72,8 @@ function operandRefs(text: string, from: number, to: number): Ref[] {
   for (let m = re.exec(text); m && m.index < to; m = re.exec(text)) {
     const head = m[1]!;
     const start = m.index;
+    // wire#w1 names a wire; { S7_Language := "LAD" } pragmas and { … } templates hold no operands
+    if (text.slice(start - 4, start) === "wire" || text.lastIndexOf("{", start) > text.lastIndexOf("}", start)) continue;
     const nameStart = head.startsWith("#") ? start + 1 : start + 1;
     const name = head.startsWith("#") ? head.slice(1) : head.slice(1, -1);
     const members: Ref["members"] = [];

@@ -141,9 +141,34 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
   }
   private stopAlarms(): void { this.generation++; for (const child of this.alarmJobs.values()) stopLive(child); this.alarmJobs.clear(); }
 
+  /** What rung watch waits for when only a person can go on (Openness access); undefined while it works. */
+  private waiting: string | undefined;
+
+  /** rung watch's events: a refusal that waits for the person shows on its row, a pass clears it. */
+  listen(events: { onEvent: vscode.Event<{ event: string; params: unknown }> }): vscode.Disposable {
+    return events.onEvent(({ event, params }) => {
+      const p = params as { blocked?: boolean; code?: string; message?: string } | undefined;
+      const next = event === "error" && p?.blocked ? (p.code === "ACCESS_DENIED" ? "Openness access" : (p.message ?? "you")) : event === "report" || event === "connected" || event === "disconnected" ? undefined : this.waiting;
+      if (next !== this.waiting) {
+        this.waiting = next;
+        this.changed.fire(undefined);
+      }
+    });
+  }
+
   private watchItem(): PlcItem {
     const status = this.watch.status;
     const pid = this.ws.owner?.pid;
+    if (status === "running" && this.waiting) {
+      const it = new PlcItem({ type: "watch" }, "rung watch", vscode.TreeItemCollapsibleState.None);
+      it.id = "watch";
+      it.description = `waiting for ${this.waiting}`;
+      it.iconPath = new vscode.ThemeIcon("warning", new vscode.ThemeColor("list.warningForeground"));
+      it.contextValue = "rung.watch.running";
+      it.tooltip = this.waiting === "Openness access" ? "rung's bridge is not registered with TIA Portal Openness. Register it once (rung setup openness, asks for administrator rights); watch then goes on." : `rung watch waits for ${this.waiting}.`;
+      if (this.watch.owned) it.command = { command: "rung.watch.show", title: "Show watch terminal" };
+      return it;
+    }
     const text: Record<typeof status, string> = {
       running: this.watch.owned ? "running" : `running outside VS Code (pid ${pid})`,
       starting: "starting…",
@@ -181,7 +206,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
     const b = this.ws.lastBackup;
     if (w === "on" && b) {
       const at = new Date(b.at);
-      it.description = `on · archived ${at.toDateString() === new Date().toDateString() ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : at.toLocaleDateString()}`;
+      it.description = `on · backup ${at.toDateString() === new Date().toDateString() ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : at.toLocaleDateString([], { month: "short", day: "numeric" })}`;
       it.tooltip += `\n\nBefore its first write of each day rung has TIA Portal archive the project. Last: ${b.path} (TIA Portal's Project → Retrieve opens it).`;
     }
     return it;

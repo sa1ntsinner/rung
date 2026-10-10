@@ -5,7 +5,7 @@ import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, read
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, restoreFile, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics, nearest, uriOf } from "@rung/lsp";
 import { readFile } from "node:fs/promises";
-import { bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
+import { HINTS, bridgeFor, findWorkspace, importFlags, isNotice, openState, printWarnings, type Io } from "./common.js";
 
 export function validateTags(path: string, text: string) {
   const index = new WorkspaceIndex();
@@ -137,6 +137,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   // stands open changed, not every two seconds
   const standing = (r: SyncReport) =>
     JSON.stringify([r.conflicts, r.pendingDeletes, r.warnings.map((w) => [w.address, w.code, w.message]), r.diagnostics.map((d) => [d.path, d.code, d.line, d.message])]);
+  let connecting = true;
   let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
@@ -155,13 +156,24 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     onReport: (r) => {
       const now = standing(r);
       if (r.exported + r.imported + r.created + r.merged + r.removed || now !== shown) printReport(io, r);
+      // the first pass (and the first after an error) says it reached TIA Portal, even when it had nothing to do
+      else if (connecting) io.stdout(`rung watch: connected to TIA Portal; files and TIA Portal agree (${r.unchanged} objects)\n`);
+      connecting = false;
       shown = now;
       server?.emit("report", r);
       server?.emit("diagnostics", { items: r.diagnostics });
     },
     onError: (e, wait) => {
-      io.stderr(`rung watch: ${(e as { code?: string }).code ?? "ERROR"}: ${e.message} — retrying in ${Math.round(wait / 1000)} s\n`);
-      server?.emit("error", { message: e.message, retryInMs: wait });
+      connecting = true;
+      const code = (e as { code?: string }).code ?? "ERROR";
+      // a refusal only a person can lift: said once, with what to do; the watch waits for a sync asked for
+      if (wait < 0) {
+        io.stderr(`rung watch: ${code}: ${e.message}\nrung watch: waiting for you: ${HINTS[code] ?? "fix it, then run rung sync"}\n`);
+        server?.emit("error", { message: e.message, code, blocked: true });
+        return;
+      }
+      io.stderr(`rung watch: ${code}: ${e.message} — retrying in ${Math.round(wait / 1000)} s\n`);
+      server?.emit("error", { message: e.message, code, retryInMs: wait });
     },
     // editors show it while it happens (the language server turns it into progress)
     onPhase: (phase, detail) => server?.emit("phase", { phase, detail }),

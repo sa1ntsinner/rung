@@ -6,6 +6,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename, relative, resolve, sep } from "node:path";
 import * as vscode from "vscode";
+import { lastDot, splitPath } from "../core/operand";
 import { sparkline } from "../core/sparkline";
 import { Recorder, formatted, recordingAsTest, type Format, type Role } from "../core/recording";
 import { readError } from "../core/monitorText";
@@ -134,17 +135,77 @@ export class LiveView implements vscode.TreeDataProvider<string>, vscode.Disposa
   async add(name?: string): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     const selected = editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection).trim() : undefined;
-    const typed =
-      name ??
-      (await vscode.window.showInputBox({
-        title: "Pin a value from the PLC",
-        prompt: 'A PLC tag or a DB member, as TIA Portal writes it: "Line_DB".Speed, "Start_PB"',
-        value: selected ?? "",
-        validateInput: (v) => (/^#/.test(v.trim()) ? "A block's local (#name) lives in an instance: write it through its DB, \"Motor_DB\".name" : undefined),
-      }));
+    const typed = name ?? (await this.pick(selected ?? ""));
     const n = typed?.trim();
     if (!n || this.names.includes(n)) return;
     this.set([...this.names, n]);
+  }
+
+  /**
+   * Tags and DBs of the workspace to pick from, then a DB's members level by level ("Line_DB". lists them);
+   * anything typed can be pinned as it is.
+   */
+  private pick(initial: string): Promise<string | undefined> {
+    type Item = vscode.QuickPickItem & { value: string; more?: boolean };
+    const qp = vscode.window.createQuickPick<Item>();
+    qp.title = "Pin a value from the PLC";
+    qp.placeholder = 'A PLC tag or a DB member, as TIA Portal writes it: "Line_DB".Speed, "Start_PB"';
+    qp.matchOnDescription = true;
+    qp.value = initial;
+    let listed: Item[] = [];
+    let asked = "";
+    const local = "a block's local lives in an instance: write it through its DB, \"Motor_DB\".name";
+    const show = () => {
+      const v = qp.value.trim();
+      // "Line_DB". is not finished: its members are the choice, not the text
+      const own: Item[] = v && !v.endsWith(".") && !listed.some((i) => i.value === v) ? [{ label: v, value: v, description: v.startsWith("#") ? local : "pin as typed", alwaysShow: true }] : [];
+      qp.items = [...listed, ...own];
+    };
+    const load = async () => {
+      const v = qp.value.trim();
+      const dot = lastDot(v);
+      const key = dot < 0 ? "" : v.slice(0, dot);
+      if (key === asked && listed.length) return show();
+      asked = key;
+      qp.busy = true;
+      try {
+        if (dot < 0) {
+          const found = (await vscode.commands.executeCommand<vscode.SymbolInformation[]>("vscode.executeWorkspaceSymbolProvider", "")) ?? [];
+          listed = found
+            .filter((s) => s.kind === vscode.SymbolKind.Variable || s.kind === vscode.SymbolKind.Module)
+            .map((s) => ({ label: `"${s.name}"`, value: `"${s.name}"`, description: [s.kind === vscode.SymbolKind.Module ? "DB" : "tag", s.containerName].filter(Boolean).join(" · "), more: s.kind === vscode.SymbolKind.Module }));
+        } else {
+          const path = splitPath(key);
+          const members = (await this.lsp?.request<{ name: string; type: string; more: boolean }[]>("rung/members", { path }).catch(() => undefined)) ?? [];
+          listed = members.map((m) => ({ label: `${key}.${m.name}`, value: `${key}.${m.name}`, description: m.type, more: m.more }));
+        }
+      } finally {
+        qp.busy = false;
+      }
+      if (qp.value.trim().slice(0, Math.max(0, lastDot(qp.value.trim()))) === key || dot < 0) show();
+    };
+    return new Promise((done) => {
+      qp.onDidChangeValue(() => void load());
+      qp.onDidAccept(() => {
+        const it = qp.selectedItems[0];
+        const v = it?.value ?? qp.value.trim();
+        if (!v || v.startsWith("#")) return;
+        // a DB or a structure: go one level down instead of pinning it whole
+        if (it?.more) {
+          qp.value = `${v}.`;
+          void load();
+          return;
+        }
+        done(v);
+        qp.hide();
+      });
+      qp.onDidHide(() => {
+        done(undefined);
+        qp.dispose();
+      });
+      qp.show();
+      void load();
+    });
   }
 
   /** Decimal, hex or binary for a pinned integer, as TIA Portal's display formats. */

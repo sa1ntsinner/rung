@@ -35,6 +35,13 @@ describe("LAD in SIMATIC SD text", () => {
     expect(pump.slice(start.start, start.end)).toBe("Start");
   });
 
+  it("does not take wire names or the language pragma for operands", () => {
+    const names = parseSd(pump).blocks[0]!.refs.map((r) => r.name);
+    expect(names).not.toContain("powerrail");
+    expect(names.filter((n) => /^w\d+$/.test(n))).toEqual([]);
+    expect(names).not.toContain("LAD");
+  });
+
   it("translates rungs, branches, timers, comparisons and set/reset coils to SCL", () => {
     const body = pump.slice(pump.indexOf("    {\n      S7_Language"), pump.lastIndexOf("END_FUNCTION_BLOCK"));
     expect(translateLad(body)).toEqual({

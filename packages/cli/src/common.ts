@@ -37,7 +37,7 @@ export interface Io {
 
 export const HINTS: Record<string, string> = {
   ACCESS_DENIED:
-    'Your Windows user must be in the local group "Siemens TIA Openness" (run as admin: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in) and you must accept the Openness access dialog in TIA Portal.',
+    'Register rung with TIA Portal Openness once: rung setup openness (it asks for administrator rights). If that is done, your Windows user must be in the local group "Siemens TIA Openness" (as admin: net localgroup "Siemens TIA Openness" %USERNAME% /add, then sign out and in).',
   TIA_NOT_RUNNING: "Start TIA Portal and open the project first.",
   TIMEOUT:
     "TIA Portal did not answer. It may be waiting for an \"Openness access\" confirmation (look at the TIA Portal window; a TIA Portal without window cannot show it). Register the bridge once with: rung setup openness",

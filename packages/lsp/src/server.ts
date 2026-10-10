@@ -49,7 +49,7 @@ import { keyProblem, keyProblems, testSymbols, valueProblem } from "./testSymbol
 /** a rung test file: kept as text for the test table, never read as SCL */
 const TEST_FILE = /\.test\.ya?ml$/i;
 import { foldingRanges } from "./folding.js";
-import { workspaceSymbols, type FoundSymbol } from "./symbols.js";
+import { pathMembers, workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information, hint: DiagnosticSeverity.Hint } as const;
@@ -399,6 +399,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     return { ...skeleton, existing: root ? await testFilesOf(root, model.block.name, device) : [] };
   });
   // rows pasted into a declaration table, read for a preview (nothing is written)
+  // the Live Values pick list: what can follow "DB".a. (read-only, from the index)
+  connection.onRequest("rung/members", (p: { path?: unknown }) => (Array.isArray(p?.path) ? pathMembers(index, p.path.map(String)) : []));
   connection.onRequest("rung/declarationPaste", (p: { text: string }) => parsePastedRows(typeof p?.text === "string" ? p.text : ""));
   // a declaration table's edit: the text edits for one operation, against the version the table showed
   connection.onRequest("rung/declarationEdit", (p: { textDocument: { uri: string; version: number }; position?: { line: number; character: number }; op: DeclOp }) => {

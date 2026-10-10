@@ -70,8 +70,12 @@ function scriptPath(env: Record<string, string | undefined>): string | undefined
 export const WHITELIST_HINT =
   "TIA Portal does not know this rung bridge yet, so it will ask \"Openness access\" (and a TIA Portal without window hangs). Run: rung setup openness";
 
-/** The bridges to register: one per TIA Portal installed here whose bridge came with rung (V20 when none is found). */
-function bridgesHere(env: Record<string, string | undefined>): { exe: string; version: string }[] {
+/**
+ * The bridges to register: the one RUNG_BRIDGE names (the bridge sync and watch start then), else one per TIA Portal
+ * installed here whose bridge came with rung (V20 when none is found).
+ */
+export function bridgesHere(env: Record<string, string | undefined>): { exe: string; version: string }[] {
+  if (env.RUNG_BRIDGE) return [{ exe: env.RUNG_BRIDGE, version: `${/rung-bridge-v(\d\d)\.exe$/i.exec(basename(env.RUNG_BRIDGE))?.[1] ?? "20"}.0` }];
   const programs = env.ProgramFiles ?? "C:\\Program Files";
   const found = (["V19", "V20", "V21"] as const)
     .map((tia) => ({ tia, exe: bridgeExecutable(env, tia) }))

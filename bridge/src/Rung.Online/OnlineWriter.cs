@@ -59,9 +59,10 @@ internal static class OnlineWriter
                         if (observed.Items.Count == 1 && observed.Items[0].IsSuccess && tag.Quality == PlcTagQC.TAG_QUALITY_GOOD)
                             completed = completed with { Observation = new { at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), scope, items = new[] { PlcValues.Read(tag) with { Name = operation.Action.Name! } } } };
                     } else {
-                        var observed = await client.GetCpuStateAsync(token);
+                        var want = operation.Action.Action == "run" ? S7CommPlusCpuOperatingState.Run : S7CommPlusCpuOperatingState.Stop;
+                        var observed = await CpuSettle.WaitAsync(async () => (await client.GetCpuStateAsync(token)).OperatingState, want, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(250), token);
                         completed = completed with { Observation = new { at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), scope,
-                            identity = new OnlineIdentity(binding.Cpu, binding.Firmware ?? "", binding.Serial, binding.PlcName), state = new OnlineCpuState(observed.OperatingState.ToString()) } };
+                            identity = new OnlineIdentity(binding.Cpu, binding.Firmware ?? "", binding.Serial, binding.PlcName), state = new OnlineCpuState(observed.ToString()) } };
                     }
                 } catch { /* Keep the acknowledgement even when observation is unavailable. */ }
             }

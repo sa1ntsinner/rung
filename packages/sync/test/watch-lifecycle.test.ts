@@ -120,3 +120,25 @@ it("a pass that failed on a TIA Portal that went away does not hold the next try
   // idle polling waits twice the last pass; a pass that hung on a dead TIA Portal must not make the reconnect wait
   assert.equal(w.lastPassMs, 0);
 });
+it("an Openness access refusal waits for the person instead of retrying every few seconds", async () => {
+  const { root, config, state } = await fixture();
+  let made = 0;
+  const errors: number[] = [];
+  const w = new Watcher(root, state, {
+    config,
+    bridgeFactory: async () => {
+      made++;
+      throw new BridgeError("ACCESS_DENIED", "Openness registration is missing");
+    },
+    onError: (_e, wait) => errors.push(wait),
+    now: () => 10_000_000 + made * 60_000, // well past any backoff
+  });
+  assert.equal(await w.syncNow(), null);
+  assert.equal(await w.syncNow(), null);
+  assert.equal(await w.syncNow(), null);
+  assert.equal(made, 1); // asked once, then waits
+  assert.deepEqual(errors, [-1]); // told once, without a retry time
+  assert.equal(w.blocked?.message, "Openness registration is missing");
+  await w.syncNow(true); // the person fixed it and asked again
+  assert.equal(made, 2);
+});

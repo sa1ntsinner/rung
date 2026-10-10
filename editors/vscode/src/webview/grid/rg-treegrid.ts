@@ -5,7 +5,7 @@
 // own DOM so VS Code's theme and codicons apply as they are.
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { styleProps } from "./style-props";
-import type { GridColumn, GridRow, GridSection } from "./types";
+import { columnsMinWidth, columnsTemplate, type GridColumn, type GridRow, type GridSection } from "./types";
 
 /** how a cell edits: text in an input, a flip of a Boolean, or not at all */
 export type CellEdit = "text" | "toggle" | false;
@@ -320,12 +320,12 @@ export class RgTreegrid<R extends GridRow = GridRow> extends LitElement {
   }
 
   private template(): string {
-    return this.columns.map((c) => (c.width ? `${c.width}px` : "minmax(160px, 1fr)")).join(" ");
+    return columnsTemplate(this.columns);
   }
 
-  /** As wide as the panel, never narrower than its fixed columns: a free column (comments) takes the rest and ellipsizes. */
+  /** As wide as the panel; wide columns give way first, then it scrolls sideways. */
   private minWidth(): number {
-    return this.columns.reduce((n, c) => n + (c.width || 160), 0);
+    return columnsMinWidth(this.columns);
   }
 
   protected override render() {

@@ -119,18 +119,21 @@
         },
         {
           "id": "rung.changes",
+          "visibility": "collapsed",
           "name": "Changes",
           "icon": "media/rung.svg",
           "contextualTitle": "rung"
         },
         {
           "id": "rung.activity",
+          "visibility": "collapsed",
           "name": "Activity",
           "icon": "media/rung.svg",
           "contextualTitle": "rung"
         },
         {
           "id": "rung.live",
+          "visibility": "collapsed",
           "name": "Live Values",
           "when": "rung.workspace",
           "icon": "$(pulse)"
@@ -150,6 +153,7 @@
         },
         {
           "id": "rung.usages",
+          "visibility": "collapsed",
           "name": "Usages",
           "icon": "media/rung.svg",
           "contextualTitle": "rung"
@@ -215,7 +219,7 @@
       },
       {
         "view": "rung.live",
-        "contents": "Pin values from the PLC to watch them change side by side (read-only, through its Web API or rung simulate).\n[Pin a Value…](command:rung.live.add)"
+        "contents": "Pin values from the PLC to watch them change side by side (read-only, over S7CommPlus, the PLC's Web API or rung simulate).\n[Pin a Value…](command:rung.live.add)"
       }
     ],
     "commands": [

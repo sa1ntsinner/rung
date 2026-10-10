@@ -49,8 +49,9 @@
 
 .rg-toolbar {
   display: flex;
+  flex-wrap: wrap; /* a narrow editor group: the column presets go to a second line, not out of sight */
   align-items: center;
-  gap: var(--rg-s3);
+  gap: var(--rg-s2) var(--rg-s3);
   padding: 0 var(--rg-s4) var(--rg-s2);
 }
 .rg-filter {

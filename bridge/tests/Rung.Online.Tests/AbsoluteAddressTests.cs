@@ -43,4 +43,12 @@ public sealed class AbsoluteAddressTests
         Assert.Equal(ErrorCodes.SymbolAmbiguous, Assert.Throws<RpcException>(() => Symbols.Resolve("%I2.3", [symbol, symbol with { Name = "Other" }])).Code);
         Assert.Equal(ErrorCodes.UnsupportedObject, Assert.Throws<RpcException>(() => Symbols.Resolve("%DB1.DBW0", [symbol])).Code);
     }
+
+    [Fact]
+    public void SaysWhatToDoWhenNoTagIsAtTheAddress()
+    {
+        var refused = Assert.Throws<RpcException>(() => Symbols.Resolve("%mw100", [new OnlineSymbol("Input", 1, true, 0, AbsoluteAddress: "%I2.3")]));
+        Assert.Contains("No PLC tag is at %MW100", refused.Message);
+        Assert.Contains("tag table", refused.Message);
+    }
 }

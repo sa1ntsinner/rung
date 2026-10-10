@@ -129,6 +129,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   const events = new OwnerEvents(ws);
   const activity = new Activity();
   context.subscriptions.push(events, events.onEvent(({ event, params, at }) => activity.event(event, params, at)));
+  context.subscriptions.push(plc.listen(events));
+  // rung watch waits for the person after an Openness refusal: one notification with the fix, not a retry loop
+  let accessAsked = false;
+  context.subscriptions.push(
+    events.onEvent(({ event, params }) => {
+      const p = params as { blocked?: boolean; code?: string };
+      if (event !== "error" || !p?.blocked || p.code !== "ACCESS_DENIED" || accessAsked) return;
+      accessAsked = true;
+      void (async () => {
+        const register = "Register rung with Openness";
+        const pick = await vscode.window.showWarningMessage(
+          "rung cannot reach TIA Portal yet: its bridge is not registered with TIA Portal Openness.",
+          { detail: "Registering it once asks for administrator rights. If it is registered already, your Windows user must be in the group \"Siemens TIA Openness\"." },
+          register,
+          "Show Output",
+        );
+        if (pick === "Show Output") out.show();
+        if (pick === register) {
+          await cli.run(FIXES.whitelist!.args);
+          await cli.capture(["sync"], { quiet: true }); // the waiting watch tries again
+        }
+        accessAsked = false;
+      })();
+    }),
+  );
   const statusBar = new StatusBar(ws, watch, online, activity, events);
   const activityView = new ActivityView(ws, activity, events);
   const changes = new ChangesView(ws, cli, events);

@@ -36,6 +36,8 @@ type Now =
   | { kind: "compiling"; detail?: string; since: number }
   | { kind: "archiving"; since: number }
   | { kind: "retrying"; message: string; since: number }
+  /** refused until a person acts (Openness access): rung waits for them, not for TIA Portal */
+  | { kind: "blocked"; message: string; code: string; since: number }
   | undefined;
 
 const MAX = 200;
@@ -50,12 +52,12 @@ const NOT_REFUSALS = new Set(["COMPILE", "CONFLICT", "DELETE_PENDING"]);
 export const objectName = (path: string) => path.replace(/^.*[\\/]/, "").replace(/(\.(scl|db|udt|awl|st|xml|s7dcl|s7res|yaml|tags))+$/i, "");
 
 const WHAT: Record<Exclude<ActivityKind, "error" | "refused">, string> = {
-  import: "sent to TIA Portal",
-  create: "created in TIA Portal",
-  export: "updated from TIA Portal",
-  merge: "merged with TIA Portal's change",
-  remove: "removed: deleted in TIA Portal",
-  restore: "restored from TIA Portal",
+  import: "sent to TIA",
+  create: "created in TIA",
+  export: "updated from TIA",
+  merge: "merged with TIA's change",
+  remove: "removed: deleted in TIA",
+  restore: "restored from TIA",
 };
 
 const firstSentence = (s: string) => s.replace(/\s+/g, " ").replace(/^(.{0,140}?[.;:])\s.*$/, "$1").slice(0, 160);
@@ -104,8 +106,9 @@ export class Activity {
       else if (p.phase === "starting-tia") this.now = { kind: "starting", window: p.detail === "window", since: t };
       else if (p.phase === "tia-started") this.now = { kind: "connecting", since: t };
     } else if (event === "error") {
-      const message = (params as { message?: string }).message ?? "rung watch lost TIA Portal";
-      this.now = { kind: "retrying", message, since: this.now?.kind === "retrying" ? this.now.since : t };
+      const p = params as { message?: string; code?: string; blocked?: boolean };
+      const message = p.message ?? "rung watch lost TIA Portal";
+      this.now = p.blocked ? { kind: "blocked", message, code: p.code ?? "", since: t } : { kind: "retrying", message, since: this.now?.kind === "retrying" ? this.now.since : t };
       this.passStart = undefined;
       const top = this.entries[0];
       if (top?.kind === "error" && top.label === message) {
@@ -139,14 +142,14 @@ export class Activity {
     const changes = r.changes ?? [];
     const pass: ActivityEntry[] = [];
     if (changes.length > FOLD && changes.every((c) => c.action === "export" || c.action === "restore")) {
-      pass.push({ at: t, kind: "export", label: `${changes.length} objects updated from TIA Portal` });
+      pass.push({ at: t, kind: "export", label: `${changes.length} objects updated from TIA` });
     } else {
       for (const c of changes) {
         const toTia = c.action === "import" || c.action === "create";
         const mine = compileErrors.filter((d) => d.path === c.path);
         let label = `${this.name(c.path)} ${WHAT[c.action]}`;
-        if (toTia && mine.length) label += `, compile: ${mine.length} error${mine.length > 1 ? "s" : ""}`;
-        else if (toTia && r.compiled?.some((a) => a.endsWith("/" + objectName(c.path)))) label += ", compiled clean";
+        if (toTia && mine.length) label += ` · ${mine.length} compile error${mine.length > 1 ? "s" : ""}`;
+        else if (toTia && r.compiled?.some((a) => a.endsWith("/" + objectName(c.path)))) label += " · compiled";
         pass.push({
           at: t,
           kind: c.action,
@@ -200,13 +203,14 @@ export function statusPhrase(a: Activity, c: StatusContext, now = Date.now()): {
   if (!c.watching) return c.conflicts ? { ...conflict, text: `${conflict.text} · watch off` } : { text: "$(circle-slash) rung · watch off" };
   const n = a.now;
   // a cold start of TIA Portal takes minutes: that is no dialog
-  const stuck = n && n.kind !== "retrying" && n.kind !== "connecting" && n.kind !== "starting" && now - n.since > STUCK_MS;
+  const stuck = n && n.kind !== "retrying" && n.kind !== "blocked" && n.kind !== "connecting" && n.kind !== "starting" && now - n.since > STUCK_MS;
   if (stuck) return { text: "$(watch) rung · waiting for TIA Portal (a dialog may be open)", tone: "warning" };
   if (n?.kind === "connecting") return { text: "$(sync~spin) rung · connecting to TIA Portal" };
   if (n?.kind === "starting") return { text: n.window ? "$(sync~spin) rung · opening a TIA Portal window" : "$(sync~spin) rung · starting TIA Portal" };
   if (n?.kind === "sending") return { text: `$(sync~spin) rung · ${objectName(n.path)} → TIA` };
   if (n?.kind === "compiling") return { text: `$(sync~spin) rung · compiling${n.detail ? ` ${n.detail}` : ""} in TIA` };
   if (n?.kind === "archiving") return { text: "$(sync~spin) rung · archiving the project" };
+  if (n?.kind === "blocked") return { text: n.code === "ACCESS_DENIED" ? "$(shield) rung · Openness access needed" : "$(warning) rung · needs you", tone: "warning" };
   // without TIA Portal nothing else on this list is current
   if (n?.kind === "retrying") return { text: "$(debug-disconnect) rung · waiting for TIA Portal", tone: "warning" };
   if (c.conflicts) return conflict;

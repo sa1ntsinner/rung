@@ -121,7 +121,11 @@ export class Watcher {
    */
   syncNow(retry = false, quick = false): Promise<SyncReport | null> {
     if (this.stopped) return Promise.resolve(null);
-    if (retry) this.refused.clear();
+    if (retry) {
+      this.refused.clear();
+      this.blocked = null;
+      this.retryAt = 0;
+    }
     if (!quick) this.wantFull = true;
     if (this.queued) return this.queued;
     const prev = this.running ?? Promise.resolve(null);
@@ -178,8 +182,15 @@ export class Watcher {
     this.config = next;
   }
 
+  /**
+   * A refusal only a person can lift (Openness access: the bridge is not registered): the watch waits for them rather
+   * than asking TIA Portal again every few seconds. A sync asked for (rung sync, the editor's button) tries again.
+   */
+  blocked: Error | null = null;
+
   private async pass(): Promise<SyncReport | null> {
     const now = (this.opts.now ?? Date.now)();
+    if (this.blocked) return null;
     if (now < this.retryAt) return null;
     const full = this.wantFull;
     const files = [...this.dirty];
@@ -216,6 +227,13 @@ export class Watcher {
       if (!(e instanceof BridgeError) || ["BRIDGE_EXITED", "PORTAL_DISPOSED", "TIMEOUT", "TIA_NOT_RUNNING", "NO_PROJECT"].includes(e.code)) {
         await this.bridge?.close().catch(() => {});
         this.bridge = null;
+      }
+      if (e instanceof BridgeError && e.code === "ACCESS_DENIED") {
+        await this.bridge?.close().catch(() => {});
+        this.bridge = null;
+        this.blocked = err;
+        this.opts.onError?.(err, -1);
+        return null;
       }
       this.failures++;
       const wait = Math.min(1000 * 2 ** (this.failures - 1), this.opts.maxBackoffMs ?? 30_000);
