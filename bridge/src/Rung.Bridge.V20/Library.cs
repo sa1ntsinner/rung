@@ -61,8 +61,8 @@ namespace Rung.Bridge.V20
                     var obj = _index[entry.Address];
                     var binding = (entry.Kind == "block" || entry.Kind == "type")
                         ? ((Siemens.Engineering.IEngineeringServiceProvider)obj.Obj).GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion : null;
-                    // Native release changes engineering dates while preserving the exported LAD definition.
-                    var revision=contentTypeGuid!=null && binding?.TypeObject.Guid.ToString("D")==contentTypeGuid && obj.Obj is FB fb && fb.ProgrammingLanguage.ToString()=="LAD" && !fb.IsKnowHowProtected
+                    // Native release changes engineering dates while preserving the exported LAD/SCL definition.
+                    var revision=contentTypeGuid!=null && binding?.TypeObject.Guid.ToString("D")==contentTypeGuid && obj.Obj is PlcBlock fb && (fb is FB || fb is FC) && LibraryCode(fb.ProgrammingLanguage.ToString()) && !fb.IsKnowHowProtected
                         ? ContentRevision(file=> {
                             if(binding.State==LibraryTypeVersionState.InWork)fb.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None);
                             else binding.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None);
@@ -73,6 +73,8 @@ namespace Rung.Bridge.V20
                 }
             return new LibraryImportState { Libraries = Describe("libraries",4096), Hardware = Describe("hardware",4096), Objects = objects };
         }
+        /// <summary>The languages whose library definitions native import, release and export were seen to keep.</summary>
+        static bool LibraryCode(string language) => language == "LAD" || language == "SCL";
         LibraryTypeVersion ReleaseTarget(LibraryReleaseRequest request)
         {
             LibraryReleasePlan.Check(request);
@@ -81,9 +83,9 @@ namespace Rung.Bridge.V20
             if(!(version is CodeBlockLibraryTypeVersion) || type.Versions.Count!=1 || version.State!=LibraryTypeVersionState.InWork || version.Dependencies.Any() || version.Comment.Items.Count>1)
                 throw new RpcException(ErrorCodes.UnsupportedCapability,"Release initially supports one dependency-free InWork code-block version; edited multi-version test environments are unavailable");
             var instances=Plcs().SelectMany(plc=>version.FindInstances(plc)).ToArray();
-            if(instances.Length!=1 || !(instances[0].LibraryTypeInstance is FB block) || block.ProgrammingLanguage.ToString()!="LAD"
+            if(instances.Length!=1 || !(instances[0].LibraryTypeInstance is PlcBlock block) || !(block is FB || block is FC) || !LibraryCode(block.ProgrammingLanguage.ToString())
                 || block.IsKnowHowProtected || !string.IsNullOrEmpty(block.Namespace) || !Plcs().Any(plc=>plc.BlockGroup.Blocks.Any(b=>b.Equals(block))))
-                throw new RpcException(ErrorCodes.UnsupportedCapability,"Release requires one unprotected LAD FB test instance in a PLC root without namespace");
+                throw new RpcException(ErrorCodes.UnsupportedCapability,"Release requires one unprotected LAD/SCL FB or FC test instance in a PLC root without namespace");
             if(!block.IsConsistent)throw new RpcException(ErrorCodes.BadRequest,"Compile and test the library FB before release; inconsistent definitions cannot be verified");
             return version;
         }

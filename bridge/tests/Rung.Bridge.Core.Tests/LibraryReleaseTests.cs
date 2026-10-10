@@ -27,11 +27,33 @@ public class LibraryReleaseTests
         Assert.NotEqual(LibraryReleasePlan.DefinitionHash(original),LibraryReleasePlan.DefinitionHash(Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(wrapped).Replace("UId='1'","UId='2'"))));
         Assert.Throws<RpcException>(()=>LibraryReleasePlan.DefinitionHash(Encoding.UTF8.GetBytes("<!DOCTYPE Document [<!ENTITY x 'bad'>]>"+start+block+"</Document>")));
     }
+    [Fact] public void NativeDefinitionOfAnFcComparesLikeAnFbs() {
+        const string block="<SW.Blocks.FC ID='0'><AttributeList><Name>FC</Name></AttributeList><ObjectList><SW.Blocks.CompileUnit ID='1'><NetworkSource><Part UId='1'/></NetworkSource></SW.Blocks.CompileUnit></ObjectList></SW.Blocks.FC>";
+        const string start="<Document><Engineering version='V20'/>";
+        var original=Encoding.UTF8.GetBytes(start+block+"</Document>");
+        var wrapped=Encoding.UTF8.GetBytes(start+"<SW.Blocks.CodeBlockLibraryTypeVersion><ObjectList>"+block.Replace("ID='0'","ID='3' CompositionName='ContentObject'").Replace("ID='1'","ID='4'")+"</ObjectList></SW.Blocks.CodeBlockLibraryTypeVersion></Document>");
+        Assert.Equal(LibraryReleasePlan.DefinitionHash(original),LibraryReleasePlan.DefinitionHash(wrapped));
+    }
     [Fact] public void NativeReleaseReportsNewGuidAndOnlyNormalizesThatTypesBinding() {
         var state=State();var newGuid=Guid.NewGuid().ToString("D");
         state.Objects["FB"]="{\"libraryTypeGuid\":\""+Type+"\",\"libraryVersionGuid\":\""+Version+"\",\"revision\":\"same\"}";
         var result=LibraryReleasePlan.Apply(()=>state,Request(),LibraryImportPlan.Revision(state),()=>{state.Objects["FB"]=state.Objects["FB"].Replace(Version,newGuid);return newGuid;},work=>work());
         Assert.Equal(newGuid,result.VersionGuid);
+    }
+    [Fact] public void TiaUpdatingATypesConsistencyStatusOnCommitIsNoChange() {
+        // seen live: inside the transaction the released type still showed NonDefaultVersionInstantiation, after commit Consistent
+        LibraryImportState Make() {
+            var state=State();state.Libraries.Attributes["Status"]="NonDefaultVersionInstantiation";state.Libraries.Children["Types"][0].Attributes["Status"]="NonDefaultVersionInstantiation";
+            state.Objects["FB"]="{\"libraryTypeGuid\":\""+Type+"\",\"libraryVersionGuid\":\""+Version+"\",\"revision\":\"same\"}";return state;
+        }
+        var newGuid=Guid.NewGuid().ToString("D");var state=Make();
+        void Commit(Action work){work();state.Libraries.Attributes["Status"]="Consistent";state.Libraries.Children["Types"][0].Attributes["Status"]="Consistent";}
+        var result=LibraryReleasePlan.Apply(()=>state,Request(),LibraryImportPlan.Revision(state),()=>{state.Objects["FB"]=state.Objects["FB"].Replace(Version,newGuid);return newGuid;},Commit);
+        Assert.Equal(newGuid,result.VersionGuid);
+        // anything else the commit changes still refuses
+        state=Make();
+        Assert.Throws<RpcException>(()=>LibraryReleasePlan.Apply(()=>state,Request(),LibraryImportPlan.Revision(state),()=>{state.Objects["FB"]=state.Objects["FB"].Replace(Version,newGuid);return newGuid;},
+            work=>{work();state.Libraries.Attributes["Author"]="other";}));
     }
     [Fact] public void ReleaseRpcRefusesMalformedAndDuplicateMetadataBeforeOpening() {
         var opened=false;var dispatcher=new RpcDispatcher(()=>{opened=true;return new FakeTiaSession();},new BridgeInfo("V20","test"));

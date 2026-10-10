@@ -55,6 +55,11 @@ The committed state must match the validated state. On error, native rollback is
 checked; restoration failures are reported explicitly. No guessed deletes or
 default values are used to recover a failed product import.
 
+Release takes one InWork version of an LAD or SCL FB or FC with its one test
+instance. TIA updates a type's consistency `Status` lazily, also after the commit;
+that derived status is not counted as a change. A block calling objects outside
+the library (an FC that is no type) is refused by TIA itself.
+
 The result reports the actual type/version GUID, `InWork` 0.0.1, FB address and
 new engineering revision. Save follows the existing `sync.save` policy and is
 reported by `saved` with any save warning. There is no automatic release, instance
