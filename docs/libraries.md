@@ -55,8 +55,15 @@ The committed state must match the validated state. On error, native rollback is
 checked; restoration failures are reported explicitly. No guessed deletes or
 default values are used to recover a failed product import.
 
-Release takes one InWork version of an LAD or SCL FB or FC with its one test
-instance. TIA updates a type's consistency `Status` lazily, also after the commit;
+A package may also hold a PLC data type (UDT); it imports into the PLC data
+types. A version that uses other library types lists them in `DependsOn` (type
+name, released version GUID and number); import refuses until the target
+project's library holds each of them at that released version, so import the
+data type package first. TIA records the dependencies when the new version is
+released, and export lists them again.
+
+Release takes one InWork version of an LAD or SCL FB or FC, or of a data type,
+with its one test instance; what it uses must be released already. TIA updates a type's consistency `Status` lazily, also after the commit;
 that derived status is not counted as a change. A block calling objects outside
 the library (an FC that is no type) is refused by TIA itself.
 

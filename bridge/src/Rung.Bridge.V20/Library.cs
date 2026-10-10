@@ -46,8 +46,19 @@ namespace Rung.Bridge.V20
                 || string.Equals(t.Name, package.TypeName, StringComparison.OrdinalIgnoreCase)
                 || t.Versions.Any(v => v.Guid.ToString("D") == package.SourceVersionGuid)))
                 throw new RpcException(ErrorCodes.BadRequest, "Project library type/name/version identity already exists");
-            if (LibraryTargetBlocks(plc.BlockGroup).Any(b => string.Equals(b.Name, package.TypeName, StringComparison.OrdinalIgnoreCase)))
-                throw new RpcException(ErrorCodes.BadRequest, "Library test block name already exists in the selected PLC; no existing block will be renamed");
+            if (LibraryTargetBlocks(plc.BlockGroup).Any(b => string.Equals(b.Name, package.TypeName, StringComparison.OrdinalIgnoreCase))
+                || LibraryTargetTypes(plc.TypeGroup).Any(t => string.Equals(t.Name, package.TypeName, StringComparison.OrdinalIgnoreCase)))
+                throw new RpcException(ErrorCodes.BadRequest, "Library test block or data type name already exists in the selected PLC; no existing object will be renamed");
+            // what the version uses must already be in this project's library, released at the very version the package names
+            foreach (var use in package.Dependencies)
+                if (!ProjectTypes(_project.ProjectLibrary.TypeFolder).Any(t => t.Name == use.TypeName && t.Versions.Any(v => v.Guid.ToString("D") == use.VersionGuid
+                        && v.VersionNumber.ToString() == use.VersionNumber && v.State == LibraryTypeVersionState.Committed)))
+                    throw new RpcException(ErrorCodes.BadRequest, $"The package uses {use.TypeName} {use.VersionNumber}, which this project's library does not hold: import that package first");
+        }
+        static IEnumerable<Siemens.Engineering.SW.Types.PlcType> LibraryTargetTypes(Siemens.Engineering.SW.Types.PlcTypeGroup group)
+        {
+            foreach (var type in group.Types) yield return type;
+            foreach (var child in group.Groups) foreach (var type in LibraryTargetTypes(child)) yield return type;
         }
         LibraryImportState LibraryState() => LibraryReadState(null);
         LibraryImportState LibraryReadState(string contentTypeGuid,bool instantiated=false)
@@ -61,10 +72,16 @@ namespace Rung.Bridge.V20
                     var obj = _index[entry.Address];
                     var binding = (entry.Kind == "block" || entry.Kind == "type")
                         ? ((Siemens.Engineering.IEngineeringServiceProvider)obj.Obj).GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion : null;
-                    // Native release changes engineering dates while preserving the exported LAD/SCL definition.
-                    var revision=contentTypeGuid!=null && binding?.TypeObject.Guid.ToString("D")==contentTypeGuid && obj.Obj is PlcBlock fb && (fb is FB || fb is FC) && LibraryCode(fb.ProgrammingLanguage.ToString()) && !fb.IsKnowHowProtected
+                    // Native release changes engineering dates while preserving the exported LAD/SCL or data-type definition.
+                    Action<FileInfo> content = contentTypeGuid == null || binding?.TypeObject.Guid.ToString("D") != contentTypeGuid ? null
+                        : obj.Obj is PlcBlock fb && (fb is FB || fb is FC) && LibraryCode(fb.ProgrammingLanguage.ToString()) && !fb.IsKnowHowProtected
+                            ? file => fb.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None)
+                        : obj.Obj is Siemens.Engineering.SW.Types.PlcType data
+                            ? file => data.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None)
+                        : (Action<FileInfo>)null;
+                    var revision=content!=null
                         ? ContentRevision(file=> {
-                            if(binding.State==LibraryTypeVersionState.InWork)fb.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None);
+                            if(binding.State==LibraryTypeVersionState.InWork)content(file);
                             else binding.Export(file,Siemens.Engineering.ExportOptions.WithDefaults,Siemens.Engineering.DocumentInfoOptions.None);
                         },64,bytes=>LibraryReleasePlan.DefinitionHash(bytes,instantiated)) : Revision(obj);
                     objects.Add(entry.Address,JsonSerializer.Serialize(new { entry.Kind, entry.Language, entry.BlockType, entry.Number, entry.Namespace, entry.Unit,
@@ -80,9 +97,19 @@ namespace Rung.Bridge.V20
             LibraryReleasePlan.Check(request);
             var type=ProjectTypes(_project.ProjectLibrary.TypeFolder).SingleOrDefault(t=>t.Guid.ToString("D")==request.TypeGuid);
             var version=type?.Versions.SingleOrDefault(v=>v.Guid.ToString("D")==request.VersionGuid);
-            if(!(version is CodeBlockLibraryTypeVersion) || type.Versions.Count!=1 || version.State!=LibraryTypeVersionState.InWork || version.Dependencies.Any() || version.Comment.Items.Count>1)
-                throw new RpcException(ErrorCodes.UnsupportedCapability,"Release initially supports one dependency-free InWork code-block version; edited multi-version test environments are unavailable");
+            var udt=version?.GetType().Name=="PlcTypeLibraryTypeVersion";
+            // what it uses must be released already: TIA releases nothing else on the way
+            if(!(version is CodeBlockLibraryTypeVersion || udt) || type.Versions.Count!=1 || version.State!=LibraryTypeVersionState.InWork
+                || version.Dependencies.Any(d=>d.State!=LibraryTypeVersionState.Committed) || version.Comment.Items.Count>1)
+                throw new RpcException(ErrorCodes.UnsupportedCapability,"Release supports one InWork code-block or data-type version whose dependencies are released; edited multi-version test environments are unavailable");
             var instances=Plcs().SelectMany(plc=>version.FindInstances(plc)).ToArray();
+            if(udt) {
+                if(instances.Length!=1 || !(instances[0].LibraryTypeInstance is Siemens.Engineering.SW.Types.PlcType data) || !string.IsNullOrEmpty(data.Namespace)
+                    || !Plcs().Any(plc=>plc.TypeGroup.Types.Any(t=>t.Equals(data))))
+                    throw new RpcException(ErrorCodes.UnsupportedCapability,"Release requires one data-type test instance in a PLC root without namespace");
+                if(!data.IsConsistent)throw new RpcException(ErrorCodes.BadRequest,"Compile the library data type before release; inconsistent definitions cannot be verified");
+                return version;
+            }
             if(instances.Length!=1 || !(instances[0].LibraryTypeInstance is PlcBlock block) || !(block is FB || block is FC) || !LibraryCode(block.ProgrammingLanguage.ToString())
                 || block.IsKnowHowProtected || !string.IsNullOrEmpty(block.Namespace) || !Plcs().Any(plc=>plc.BlockGroup.Blocks.Any(b=>b.Equals(block))))
                 throw new RpcException(ErrorCodes.UnsupportedCapability,"Release requires one unprotected LAD/SCL FB or FC test instance in a PLC root without namespace");
@@ -117,7 +144,7 @@ namespace Rung.Bridge.V20
                         version.Release(CreateOrReleaseDependenciesMode.DoNotAutomaticallyCreateOrReleaseDependencies,Version.Parse(request.VersionNumber),request.Author,request.Comment);
                         if(version.State!=LibraryTypeVersionState.Committed || version.VersionNumber.ToString()!=request.VersionNumber || version.Author!=request.Author
                             || version.Comment.Items.Count>1 || (version.Comment.Items.Count==0 ? request.Comment.Length!=0 : version.Comment.Items.Single().Text!=request.Comment)
-                            || version.TypeObject.Guid.ToString("D")!=request.TypeGuid || version.TypeObject.Versions.Count!=1 || version.Dependencies.Any())throw new RpcException(ErrorCodes.ImportFailed,"Native release differs: "+JsonSerializer.Serialize(new { guid=version.Guid.ToString("D"),state=version.State.ToString(),number=version.VersionNumber.ToString(),author=version.Author,dependencies=version.Dependencies.Count() },RpcWire.Json));
+                            || version.TypeObject.Guid.ToString("D")!=request.TypeGuid || version.TypeObject.Versions.Count!=1 || version.Dependencies.Any(d=>d.State!=LibraryTypeVersionState.Committed))throw new RpcException(ErrorCodes.ImportFailed,"Native release differs: "+JsonSerializer.Serialize(new { guid=version.Guid.ToString("D"),state=version.State.ToString(),number=version.VersionNumber.ToString(),author=version.Author,dependencies=version.Dependencies.Count() },RpcWire.Json));
                         return version.Guid.ToString("D");
                     },work=>{using(var tx=access.Transaction(_project,"rung library release "+operationId)){work();tx.CommitOnDispose();}});
                 } finally { _inImport=false;_index.Clear();_libraryTypes.Clear(); }
@@ -145,12 +172,24 @@ namespace Rung.Bridge.V20
                 LibraryImportResult result;
                 try {
                     result = LibraryImportPlan.Apply(LibraryState,package,expectedRevision,() => {
-                        var transfer = _project.ProjectLibrary.TypeFolder.Types.CreateFromDocuments(new DirectoryInfo(dir),stem,plc.BlockGroup,LibraryImportOptions.None);
+                        var udt = package.BlockType == "UDT";
+                        var transfer = _project.ProjectLibrary.TypeFolder.Types.CreateFromDocuments(new DirectoryInfo(dir),stem,udt ? plc.TypeGroup : (Siemens.Engineering.IEngineeringObject)plc.BlockGroup,LibraryImportOptions.None);
                         var type = transfer.CreatedType;
-                        if (transfer.TransferResultState != TransferResultState.Success || !(type is CodeBlockLibraryType) || type.Name != package.TypeName || type.Versions.Count != 1)
-                            throw new RpcException(ErrorCodes.ImportFailed,"TIA did not create the expected code-block library type");
-                        var version = type.Versions.Single(); var block = plc.BlockGroup.Blocks.Find(package.TypeName);
-                        if (!(version is CodeBlockLibraryTypeVersion) || version.Dependencies.Any() || !(package.BlockType == "FB" ? block is FB : block is FC)
+                        if (transfer.TransferResultState != TransferResultState.Success || !(udt ? type?.GetType().Name == "PlcTypeLibraryType" : type is CodeBlockLibraryType) || type.Name != package.TypeName || type.Versions.Count != 1)
+                            throw new RpcException(ErrorCodes.ImportFailed,"TIA did not create the expected library type");
+                        var version = type.Versions.Single();
+                        // seen live: the new InWork version lists no dependencies yet; TIA sets them when it is released
+                        if (version.Dependencies.Any(d => !package.Dependencies.Any(u => u.VersionGuid == d.Guid.ToString("D"))))
+                            throw new RpcException(ErrorCodes.ImportFailed,"Native import dependencies differ from the package's");
+                        if (udt) {
+                            var data = plc.TypeGroup.Types.Find(package.TypeName);
+                            if (data == null || data.GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion?.Guid != version.Guid || version.FindInstances(plc).Count() != 1)
+                                throw new RpcException(ErrorCodes.ImportFailed,"Native import test data type or binding differs");
+                            return new LibraryImportResult { TypeGuid = type.Guid.ToString("D"),VersionGuid = version.Guid.ToString("D"),
+                                VersionNumber = version.VersionNumber.ToString(),State = version.State.ToString(),Address = Addr(plc.Name,"type",new List<string>(),data.Name,null) };
+                        }
+                        var block = plc.BlockGroup.Blocks.Find(package.TypeName);
+                        if (!(version is CodeBlockLibraryTypeVersion) || !(package.BlockType == "FB" ? block is FB : block is FC)
                             || block.ProgrammingLanguage.ToString() != package.Language || block.IsKnowHowProtected || !string.IsNullOrEmpty(block.Namespace)
                             || block.GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion?.Guid != version.Guid
                             || version.FindInstances(plc).Count() != 1)
@@ -176,8 +215,9 @@ namespace Rung.Bridge.V20
             {
                 var type = ProjectTypes(_project.ProjectLibrary.TypeFolder).SingleOrDefault(t => t.Guid.ToString("D") == typeGuid);
                 var version = type?.Versions.SingleOrDefault(v => v.Guid.ToString("D") == versionGuid);
-                if (!(version is CodeBlockLibraryTypeVersion) || version.State != LibraryTypeVersionState.Committed || !version.IsDefault || version.Dependencies.Any())
-                    throw new RpcException(ErrorCodes.BadRequest, "A released default dependency-free project code-block library version is required");
+                if (!(version is CodeBlockLibraryTypeVersion || version?.GetType().Name == "PlcTypeLibraryTypeVersion") || version.State != LibraryTypeVersionState.Committed || !version.IsDefault
+                    || version.Dependencies.Any(d => d.State != LibraryTypeVersionState.Committed))
+                    throw new RpcException(ErrorCodes.BadRequest, "A released default code-block or data-type library version whose dependencies are released is required");
                 const string format = "SimaticMLWithExportOptionsNone";
                 if (!type.GetSupportedExportFormats().Contains(format))
                     throw new RpcException(ErrorCodes.UnsupportedCapability, "Native library XML export is unavailable");

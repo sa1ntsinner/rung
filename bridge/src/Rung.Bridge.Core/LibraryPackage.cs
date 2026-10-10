@@ -20,11 +20,14 @@ namespace Rung.Bridge.Core
         public string Revision;
         public bool NativeImportValidated; // Preview does not invoke the native importer.
     }
+    public sealed class LibraryDependency { public string TypeName, VersionGuid, VersionNumber; }
     public sealed class LibraryPackage
     {
         public string TypeName, TypeGuid, SourceVersionGuid, VersionNumber, Revision;
         /// <summary>The library block: FB or FC, and its language (LAD, SCL).</summary>
         public string BlockType, Language;
+        /// <summary>The released type versions this one uses, which the target project library must already hold.</summary>
+        public LibraryDependency[] Dependencies = new LibraryDependency[0];
         static RpcException Invalid(string why) => new RpcException(ErrorCodes.BadRequest, "Invalid native library package: " + why);
         public static LibraryPackage Check(IReadOnlyDictionary<string, byte[]> files, string stem, bool forImport = false)
         {
@@ -76,11 +79,23 @@ namespace Rung.Bridge.Core
                     if (version.GetProperty("Author").ValueKind != JsonValueKind.String || version.GetProperty("MinimumTargetDeviceVersion").GetString() != "") throw Invalid("unsupported version attributes");
                     Comments(version.GetProperty("Comment"));
                     var dependencies = version.GetProperty("DependsOn");
-                    if (dependencies.ValueKind != JsonValueKind.Array || dependencies.GetArrayLength() != 0) throw Invalid("dependencies require independent native proof");
+                    if (dependencies.ValueKind != JsonValueKind.Array || dependencies.GetArrayLength() > 16) throw Invalid("unsupported dependency list");
+                    var uses = new List<LibraryDependency>();
+                    foreach (var dependency in dependencies.EnumerateArray())
+                    {
+                        // seen live: {TypeName, Guid (the dependency's released version), VersionNumber, IsDefault}
+                        Fields(dependency, "TypeName", "Guid", "VersionNumber", "IsDefault");
+                        var name = dependency.GetProperty("TypeName").GetString(); var at = dependency.GetProperty("VersionNumber").GetString();
+                        if (string.IsNullOrEmpty(name) || name.Length > 128 || name.Any(char.IsControl) || dependency.GetProperty("IsDefault").ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                            || !Version.TryParse(at, out var v) || v.Build < 0 || v.Revision != -1 || v.ToString() != at) throw Invalid("invalid dependency");
+                        var use = new LibraryDependency { TypeName = name, VersionGuid = GuidText(dependency), VersionNumber = at };
+                        if (uses.Any(u => u.VersionGuid == use.VersionGuid || u.TypeName == use.TypeName)) throw Invalid("duplicate dependency");
+                        uses.Add(use);
+                    }
                     using (var stream = new MemoryStream(files[stem + ".xml"]))
                     using (var reader = XmlReader.Create(stream, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 4 * 1024 * 1024 }))
                     {
-                        var xml = XDocument.Load(reader); var blocks = xml.Root?.Elements().Where(e => e.Name == "SW.Blocks.FB" || e.Name == "SW.Blocks.FC").ToArray();
+                        var xml = XDocument.Load(reader); var blocks = xml.Root?.Elements().Where(e => e.Name == "SW.Blocks.FB" || e.Name == "SW.Blocks.FC" || e.Name == "SW.Types.PlcStruct").ToArray();
                         var engineering = xml.Root?.Elements("Engineering").ToArray();
                         if (xml.Root?.Name != "Document" || blocks == null || blocks.Length != 1 || engineering == null || engineering.Length != 1 || (string)engineering[0].Attribute("version") != "V20") throw Invalid("unsupported native XML domain/version");
                         if (xml.Root.Elements().Any(e => e != blocks[0] && e != engineering[0] && e.Name != "DocumentInfo") || xml.Root.Elements("DocumentInfo").Count() > 1)
@@ -92,12 +107,12 @@ namespace Rung.Bridge.Core
                             var attributes = blocks[0].Elements("AttributeList").ToArray();
                             // seen live: TIA creates LAD and SCL FB/FC types from these documents
                             if (attributes.Length != 1
-                                || attributes[0].Elements("ProgrammingLanguage").Count() != 1 || !new[] { "LAD", "SCL" }.Contains(attributes[0].Element("ProgrammingLanguage")?.Value)
+                                || blocks[0].Name != "SW.Types.PlcStruct" && (attributes[0].Elements("ProgrammingLanguage").Count() != 1 || !new[] { "LAD", "SCL" }.Contains(attributes[0].Element("ProgrammingLanguage")?.Value))
                                 || attributes[0].Elements("Namespace").Any(n => !string.IsNullOrEmpty(n.Value))
                                 || attributes[0].Elements("IsKnowHowProtected").Any(n => n.Value != "false"))
                                 throw Invalid("native import is validated only for unprotected LAD/SCL FBs and FCs without a namespace");
                         }
-                        return new LibraryPackage { TypeName = names[0].Value, BlockType = blocks[0].Name.LocalName.Substring("SW.Blocks.".Length), Language = blocks[0].Element("AttributeList")?.Element("ProgrammingLanguage")?.Value, TypeGuid = GuidText(type), SourceVersionGuid = GuidText(version), VersionNumber = number,
+                        return new LibraryPackage { TypeName = names[0].Value, BlockType = blocks[0].Name == "SW.Types.PlcStruct" ? "UDT" : blocks[0].Name.LocalName.Substring("SW.Blocks.".Length), Dependencies = uses.ToArray(), Language = blocks[0].Element("AttributeList")?.Element("ProgrammingLanguage")?.Value, TypeGuid = GuidText(type), SourceVersionGuid = GuidText(version), VersionNumber = number,
                             Revision = Bundle.Hash(new[] { new ExportFile { Role = "xml", Sha256 = actual }, new ExportFile { Role = "libinfo", Sha256 = Bundle.Sha256(metadata) } }) };
                     }
                 }

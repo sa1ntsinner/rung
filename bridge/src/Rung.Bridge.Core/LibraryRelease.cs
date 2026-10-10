@@ -24,13 +24,13 @@ namespace Rung.Bridge.Core
                 var doc=new XmlDocument { PreserveWhitespace=true,XmlResolver=null };
                 using(var stream=new MemoryStream(bytes))using(var reader=XmlReader.Create(stream,new XmlReaderSettings { DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,MaxCharactersInDocument=4*1048576 }))doc.Load(reader);
                 if(doc.DocumentElement?.Name!="Document"||doc.SelectSingleNode("/Document/Engineering/@version")?.Value!="V20")throw new XmlException("Expected native V20 document");
-                var blocks=doc.SelectNodes("/Document/SW.Blocks.FB | /Document/SW.Blocks.FC | /Document/SW.Blocks.CodeBlockLibraryTypeVersion/ObjectList/*[(self::SW.Blocks.FB or self::SW.Blocks.FC) and @CompositionName='ContentObject']");
-                if(blocks.Count!=1)throw new XmlException("Expected exactly one native FB or FC definition");
+                var blocks=doc.SelectNodes("/Document/*[self::SW.Blocks.FB or self::SW.Blocks.FC or self::SW.Types.PlcStruct] | /Document/*/ObjectList/*[(self::SW.Blocks.FB or self::SW.Blocks.FC or self::SW.Types.PlcStruct) and @CompositionName='ContentObject']");
+                if(blocks.Count!=1)throw new XmlException("Expected exactly one native FB, FC or data-type definition");
                 var block=(XmlElement)blocks[0];block.RemoveAttribute("CompositionName");
                 if(instantiated)foreach(XmlNode identity in block.SelectNodes("AttributeList/Name | AttributeList/Number | AttributeList/AutoNumber"))identity.ParentNode.RemoveChild(identity);
                 void Normalize(XmlElement element) {
                     if(element.HasAttribute("ID")) {
-                        if(element.Name!="SW.Blocks.FB"&&element.Name!="SW.Blocks.FC"&&element.Name!="SW.Blocks.CompileUnit"&&element.Name!="MultilingualText"&&element.Name!="MultilingualTextItem")throw new XmlException("Unproved native ID node");
+                        if(element.Name!="SW.Blocks.FB"&&element.Name!="SW.Blocks.FC"&&element.Name!="SW.Types.PlcStruct"&&element.Name!="SW.Blocks.CompileUnit"&&element.Name!="MultilingualText"&&element.Name!="MultilingualTextItem")throw new XmlException("Unproved native ID node");
                         element.RemoveAttribute("ID");
                     }
                     if(element.HasAttribute("RefId"))throw new XmlException("Unproved native object reference");
@@ -118,7 +118,7 @@ namespace Rung.Bridge.Core
             var before=read();var revision=LibraryImportPlan.Revision(before);
             if(revision!=expectedRevision)throw new RpcException(ErrorCodes.StaleRevision,"Project changed since the library release preview");
             var outside=OutsideType(before,request.TypeGuid);string validated=null,releasedGuid=null;LibraryImportState inside=null;
-            void Verify(LibraryImportState state) { if(OutsideType(state,request.TypeGuid,request.VersionGuid,releasedGuid)!=outside)throw new RpcException(ErrorCodes.ImportFailed,"Release changed unreviewed project objects"); }
+            void Verify(LibraryImportState state) { if(OutsideType(state,request.TypeGuid,request.VersionGuid,releasedGuid)!=outside)throw new RpcException(ErrorCodes.ImportFailed,"Release changed unreviewed project objects: "+Difference(before,state)); }
             try {
                 transaction(()=>{releasedGuid=release();if(!Guid.TryParseExact(releasedGuid,"D",out var id)||id==Guid.Empty)throw new RpcException(ErrorCodes.ImportFailed,"Release returned an invalid native version identity");var actual=read();Verify(actual);validated=Stable(actual);inside=actual;});
                 var after=read();Verify(after);var current=LibraryImportPlan.Revision(after);

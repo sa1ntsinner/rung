@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
@@ -107,6 +108,28 @@ public class LibraryPackageTests
         var hash=Convert.ToBase64String(HexBytes(Bundle.Sha256(files["type.xml"])));
         files["type.libinfo"]=Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(files["type.libinfo"]).Replace(oldHash,hash));
         Assert.Throws<RpcException>(()=>LibraryPackage.Check(files,"type",true));
+    }
+    static Dictionary<string,byte[]> WithMeta(Dictionary<string,byte[]> files,string from,string to){files["type.libinfo"]=Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(files["type.libinfo"]).Replace(from,to));return files;}
+    [Fact] public void DependenciesOnReleasedTypeVersionsAreListedAndMalformedOnesRefuse()
+    {
+        // as TIA exports an FB type whose interface uses a UDT type (seen live, V20)
+        const string dep="{\"TypeName\":\"RungUdtType\",\"Guid\":\"1857fbe8-487f-46eb-85fc-9bd385bfb8c1\",\"VersionNumber\":\"1.0.0\",\"IsDefault\":true}";
+        var package=LibraryPackage.Check(WithMeta(Package(),"\"DependsOn\":[]","\"DependsOn\":["+dep+"]"),"type",true);
+        var d=Assert.Single(package.Dependencies);
+        Assert.Equal(("RungUdtType","1857fbe8-487f-46eb-85fc-9bd385bfb8c1","1.0.0"),(d.TypeName,d.VersionGuid,d.VersionNumber));
+        Assert.Throws<RpcException>(()=>LibraryPackage.Check(WithMeta(Package(),"\"DependsOn\":[]","\"DependsOn\":["+dep.Replace("\"IsDefault\":true","\"IsDefault\":true,\"Extra\":1")+"]"),"type",true));
+        Assert.Throws<RpcException>(()=>LibraryPackage.Check(WithMeta(Package(),"\"DependsOn\":[]","\"DependsOn\":["+dep.Replace("1.0.0","1.0")+"]"),"type",true));
+        Assert.Throws<RpcException>(()=>LibraryPackage.Check(WithMeta(Package(),"\"DependsOn\":[]","\"DependsOn\":["+dep+","+dep+"]"),"type",true));
+        Assert.Empty(LibraryPackage.Check(Package(),"type",true).Dependencies);
+    }
+    [Fact] public void ImportAcceptsAUdtTypePackage()
+    {
+        var files=Package();var oldHash=Convert.ToBase64String(HexBytes(Bundle.Sha256(files["type.xml"])));
+        files["type.xml"]=new UTF8Encoding(true).GetPreamble().Concat(Encoding.UTF8.GetBytes("<Document><Engineering version=\"V20\"/><SW.Types.PlcStruct ID=\"0\"><AttributeList><Name>RungUdtType</Name></AttributeList></SW.Types.PlcStruct></Document>")).ToArray();
+        var hash=Convert.ToBase64String(HexBytes(Bundle.Sha256(files["type.xml"])));
+        files["type.libinfo"]=Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(files["type.libinfo"]).Replace(oldHash,hash));
+        var package=LibraryPackage.Check(files,"type",true);
+        Assert.Equal(("RungUdtType","UDT"),(package.TypeName,package.BlockType));
     }
     [Fact] public void ImportAcceptsSclAndLadFunctionBlocksAndFunctions()
     {
