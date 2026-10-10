@@ -62,8 +62,14 @@ export function bridgeExecutable(env: Record<string, string | undefined>, tia: T
     root && join(root, "bridge", name),
     devPath(`../../../bridge/src/Rung.Bridge.${tia}/bin/Release/net48/${name}`),
   ].filter((p): p is string => !!p);
-  return candidates.find((p) => existsSync(p)) ?? candidates[0] ?? name;
+  return driveUpper(candidates.find((p) => existsSync(p)) ?? candidates[0] ?? name);
 }
+
+/**
+ * C:\ for c:\: VS Code hands its paths over with a lower-case drive letter, and TIA Portal's Openness whitelist compares
+ * the bridge's path with the registered one by case, so a bridge started as c:\... asks "Openness access" again.
+ */
+export const driveUpper = (p: string) => p.replace(/^([a-z]):/, (_, d: string) => `${d.toUpperCase()}:`);
 
 export function agentsTemplatePath(env: Record<string, string | undefined> = process.env): string | undefined {
   const root = installRoot(env);

@@ -79,6 +79,9 @@ async function bridgeOnce(to: TiaVersion, args: string[], minutes: number, io: I
     // a TIA Portal without window that waits on a dialog never answers: stop the bridge and exactly its TIA Portal
     const timer = setTimeout(() => {
       timedOut = true;
+      // the bridge and the TIA Portal it started (its child, also before it could say its process id): a TIA Portal
+      // left behind keeps the bridge's pipes open and this command waiting
+      if (process.platform === "win32" && child.pid) try { execFileSync("taskkill", ["/T", "/F", "/PID", String(child.pid)], { stdio: "ignore", windowsHide: true }); } catch { /* gone already */ }
       child.kill();
       if (tiaPid) try { process.kill(tiaPid); } catch { /* gone already */ }
     }, minutes * 60_000);
