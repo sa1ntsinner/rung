@@ -19,6 +19,17 @@ namespace Rung.Bridge.Core
         IReadOnlyList<ObjectEntry> ListObjects(string device, IReadOnlyDictionary<string, KnownRevision> known = null);
         /// <param name="form">A TextForm or "auto" (FormPolicy).</param>
         ExportResult Export(string address, string form, string targetDir);
+        IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir);
+        LibraryImportPreview PreviewLibrary(LibraryPackage package, string device);
+        LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request);
+        LibraryUpdatePreview PreviewLibraryUpdate(LibraryUpdateRequest request);
+        ArtifactExport ExportProjectArtifact(string kind,string device,string name);
+        SafetyObservation ObserveSafety(string device);
+        ArtifactPreview PreviewProjectArtifact(string kind,string device,string name,byte[] bytes);
+        ArtifactResult ImportProjectArtifact(string kind,string device,string name,byte[] bytes,string expectedRevision,string operationId);
+        LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId);
+        LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request, string expectedRevision, string operationId);
+        LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId);
         /// <summary>Guarded import. expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>
         ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId);
         /// <summary>Compiles the given objects (or the whole PLC when addresses is empty) and flattens the messages.</summary>
@@ -31,6 +42,8 @@ namespace Rung.Bridge.Core
         IReadOnlyDictionary<string, string> Identify(string[] addresses);
         /// <summary>Read-only attribute/composition tree for a scope: hardware, hmi, techobjects or libraries.</summary>
         DescribeNode Describe(string scope, int maxNodes);
+        HardwarePreview PreviewHardware(HardwarePatch patch);
+        HardwarePreview ApplyHardware(HardwarePatch patch, string operationId);
         /// <summary>Compiles the hardware configuration of the PLC device (and its software).</summary>
         IReadOnlyList<CompileMessage> CompileHardware(string device);
         /// <summary>action: state | online | offline. Uses the target when given, else the one TIA has configured.</summary>

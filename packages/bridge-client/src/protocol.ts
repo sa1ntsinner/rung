@@ -208,6 +208,7 @@ export interface DescribeNode {
   type: string;
   name?: string;
   attributes: Record<string, string>;
+  attributeInfo?: Record<string, { access: string; type?: string }>;
   children: Record<string, DescribeNode[]>;
   truncated?: boolean;
 }

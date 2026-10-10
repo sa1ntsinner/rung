@@ -724,7 +724,7 @@ namespace Rung.Bridge.V20
         /// A revision from the exported bytes, for objects without dates or fingerprints (watch tables): an import
         /// then notices a change made in TIA Portal meanwhile.
         /// </summary>
-        static string ContentRevision(Action<FileInfo> export)
+        static string ContentRevision(Action<FileInfo> export, int hashLength = 16, Func<byte[], string> contentHash = null)
         {
             var dir = Path.Combine(Path.GetTempPath(), "rung-rev-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
@@ -732,7 +732,8 @@ namespace Rung.Bridge.V20
             {
                 var f = new FileInfo(Path.Combine(dir, "obj.xml"));
                 export(f);
-                return "xh:" + Bundle.Sha256(File.ReadAllBytes(f.FullName)).Substring(0, 16);
+                var bytes=File.ReadAllBytes(f.FullName);
+                return "xh:" + (contentHash==null ? Bundle.Sha256(bytes) : contentHash(bytes)).Substring(0, hashLength);
             }
             finally
             {
@@ -1344,20 +1345,28 @@ namespace Rung.Bridge.V20
             if (obj == null || count >= budget || depth > 12) return null;
             count++;
             var node = new DescribeNode { Type = obj.GetType().Name, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+            if (obj is HardwareObject || obj is Siemens.Engineering.HW.Node)
+                node.AttributeInfo = new SortedDictionary<string, DescribeAttributeInfo>(StringComparer.Ordinal);
             try
             {
                 foreach (var info in obj.GetAttributeInfos())
                 {
+                    var metadata = new DescribeAttributeInfo { Access = info.AccessMode.ToString() };
+                    if (node.AttributeInfo != null) node.AttributeInfo[info.Name] = metadata;
                     if (info.AccessMode == EngineeringAttributeAccessMode.Write) continue;
                     try
                     {
-                        var s = Scalar(obj.GetAttribute(info.Name));
+                        var value = obj.GetAttribute(info.Name);
+                        metadata.Type = value?.GetType().FullName;
+                        var s = Scalar(value);
                         if (s != null) node.Attributes[info.Name] = s;
                     }
                     catch (Exception) { /* some attributes throw depending on configuration */ }
                 }
             }
             catch (EngineeringException) { }
+            if (obj is LibraryType libraryType) node.Attributes["Guid"] = libraryType.Guid.ToString("D");
+            if (obj is LibraryTypeVersion libraryVersion) node.Attributes["Guid"] = libraryVersion.Guid.ToString("D");
             // a library type version has no name: its version number is one
             node.Name = nameOverride ?? (node.Attributes.TryGetValue("Name", out var n) ? n : node.Attributes.TryGetValue("VersionNumber", out var vn) ? vn : null);
             try

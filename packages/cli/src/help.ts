@@ -7,6 +7,8 @@ const EXAMPLES: Record<string, string> = {
   resolve: "resolve plc/PLC_1/blocks/Line/FB_Motor.scl --merged", restore: "restore plc/PLC_1/blocks/Line/FB_Motor.scl", "confirm-delete": "confirm-delete plc/PLC_1/blocks/FC_Old.scl",
   rename: "rename plc/PLC_1/blocks/Line/FB_Motor.scl FB_Drive", test: "test --filter Motor", live: "live read Start_PB",
   views: "views --offline", agents: "agents", mcp: "mcp", lsp: "lsp --stdio", doctor: "doctor --fixture",
+  hardware: "hardware --file hardware.patch.yaml --json",
+  library: "library --file Type.libinfo --json",
   compile: "compile --file plc/PLC_1/blocks/Line/FB_Motor.scl", online: "online --state", compare: "compare --json",
   connect: "connect --pick", interfaces: "interfaces --scan", download: "download --plc PLC_1", open: "open plc/PLC_1/blocks/Line/FB_Motor.scl",
   simulate: "simulate --block FB_Conveyor", "codesys-bridge": "codesys-bridge --project Line.project", assignments: "assignments --json",
@@ -24,6 +26,7 @@ const VALUES: Record<string, string> = {
   why: "member",
 };
 const DETAIL: Record<string, string> = {
+  "hardware.apply": "apply allowlisted offline hardware changes under revision and transaction guards; no PLC download",
   capture: "replay complete pre-cycle state and compare observed results from a historical JSON capture; stays offline",
   why: "explain the last captured write using recorded operands and controls; no live connection",
   lcid: "alarm text language (Windows LCID; default 1033), with explicit fallback provenance",

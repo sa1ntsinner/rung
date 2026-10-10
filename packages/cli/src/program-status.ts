@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { open } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isContained } from "@rung/core";
 import { deviceOfUri, WorkspaceIndex } from "@rung/lsp";
 import { reconstructCycle, reconstructionWhy, type CycleCapture } from "@rung/sim";
-import { findWorkspace, type Io } from "./common.js";
+import { findWorkspace, readBoundedText, type Io } from "./common.js";
 import { whyLines } from "./why.js";
 
 /** Historical replay only: never opens an engineering/live connection. */
@@ -21,18 +20,7 @@ export async function cmdProgramStatus(target: string | undefined, opts: { captu
     const instance = index.global(opts.instance.replace(/^"|"$/g, ""), uri);
     if (!block || instance?.kind !== "DB" || instance.block?.dbOf?.toUpperCase() !== block.name.toUpperCase())
       throw new Error("Selected instance DB does not belong to this block");
-    const handle = await open(resolve(io.cwd, opts.capture), "r");
-    let capture: CycleCapture;
-    try {
-      const bytes = Buffer.alloc(1_048_577); let length = 0;
-      while (length < bytes.length) {
-        const read = await handle.read(bytes, length, bytes.length - length, null);
-        if (!read.bytesRead) break;
-        length += read.bytesRead;
-      }
-      if (length > 1_048_576) throw new Error("Capture size limit exceeded (1 MiB)");
-      capture = JSON.parse(bytes.subarray(0, length).toString("utf8")) as CycleCapture;
-    } finally { await handle.close(); }
+    const capture = JSON.parse(await readBoundedText(resolve(io.cwd, opts.capture), "Capture")) as CycleCapture;
     const scope = { plc, instance: `"${instance.name}"`, epoch: capture?.scope?.epoch };
     const replay = reconstructCycle(index, uri, capture, scope);
     const result = { ...replay, freshness: "capture-only" as const, ...(opts.why ? { why: reconstructionWhy(replay, opts.why) } : {}) };

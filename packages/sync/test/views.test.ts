@@ -28,6 +28,13 @@ const hw: DescribeNode = {
 };
 
 describe("views", () => {
+  it("preserves hardware attribute access and runtime types without treating them as values", () => {
+    const node = { type: "DeviceItem", name: "CPU", attributes: { Name: "CPU", PositionNumber: "1" }, children: {},
+      attributeInfo: { PositionNumber: { access: "Read", type: "System.Int32" }, Name: { access: "ReadWrite", type: "System.String" },
+        Secret: { access: "Write" }, Unavailable: { access: "Read" } } } as DescribeNode;
+    expect(toView(node)).toEqual({ type: "DeviceItem", name: "CPU", attributes: { PositionNumber: "1" },
+      attributeInfo: node.attributeInfo });
+  });
   it("writes hardware views per device and subnet, and prunes stale files", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-views-"));
     mkdirSync(join(root, "views", "hardware"), { recursive: true });

@@ -1,10 +1,28 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { access } from "node:fs/promises";
+import { access, open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { bridgeExecutable, tiaOf, type TiaVersion } from "./paths.js";
 import { codesysBridgeCommand } from "./codesys.js";
 import { CONFIG_FILE, StateStore, WorkspaceError, type RungConfig } from "@rung/core";
 import { BridgeClient, type BridgeEvent } from "@rung/bridge-client";
+
+/** One bounded handle read, including files that grow after opening. */
+export async function readBoundedText(file: string, label: string): Promise<string> {
+  return (await readBoundedBytes(file, label)).toString("utf8");
+}
+export async function readBoundedBytes(file: string, label: string, limit = 1_048_576): Promise<Buffer> {
+  const handle = await open(file, "r");
+  try {
+    const bytes = Buffer.alloc(limit + 1); let length = 0;
+    while (length < bytes.length) {
+      const read = await handle.read(bytes, length, bytes.length - length, null);
+      if (!read.bytesRead) break;
+      length += read.bytesRead;
+    }
+    if (length > limit) throw new Error(`${label} size limit exceeded (${limit / 1_048_576} MiB)`);
+    return bytes.subarray(0, length);
+  } finally { await handle.close(); }
+}
 
 export interface Io {
   cwd: string;

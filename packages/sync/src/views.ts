@@ -17,6 +17,8 @@ export function toView(n: DescribeNode): ViewNode {
   if (n.name) out.name = n.name;
   const attrs = Object.fromEntries(Object.entries(n.attributes ?? {}).filter(([k]) => k !== "Name").sort(([a], [b]) => (a < b ? -1 : 1)));
   if (Object.keys(attrs).length) out.attributes = attrs;
+  if (n.attributeInfo && Object.keys(n.attributeInfo).length)
+    out.attributeInfo = Object.fromEntries(Object.entries(n.attributeInfo).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
   for (const [k, list] of Object.entries(n.children ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) out[k] = list.map(toView);
   return out;
 }

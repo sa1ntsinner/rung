@@ -10,6 +10,23 @@ using Rung.Bridge.Core.Protocol;
 
 public sealed class FakeTiaSession : ITiaSession
 {
+    public Func<string, string, string, IReadOnlyDictionary<string, byte[]>> LibraryExport;
+    public Func<LibraryPackage,string,string,string,string,string,LibraryImportResult> LibraryImport;
+    public LibraryImportResult ImportLibrary(LibraryPackage package,string device,string dir,string stem,string revision,string operationId) => LibraryImport(package,device,dir,stem,revision,operationId);
+    public LibraryImportPreview PreviewLibrary(LibraryPackage package, string device) => new LibraryImportPreview { Package = package, Device = device };
+    public LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request) => new LibraryReleasePreview { Request=request,Revision=new string('a',64) };
+    public LibraryUpdatePreview PreviewLibraryUpdate(LibraryUpdateRequest request) => new LibraryUpdatePreview{Request=request,Revision=new string('a',64)};
+    public ArtifactExport ExportProjectArtifact(string kind,string device,string name)=>new ArtifactExport{Revision=new string('a',64),ContentBase64="YWJj"};
+    public SafetyObservation ObserveSafety(string device)=>new SafetyObservation{Device=device,Status="unavailable",Reason="Non-F fixture"};
+    public ArtifactPreview PreviewProjectArtifact(string kind,string device,string name,byte[] bytes)=>new ArtifactPreview{Revision=new string('a',64)};
+    public ArtifactResult ImportProjectArtifact(string kind,string device,string name,byte[] bytes,string expectedRevision,string operationId)=>new ArtifactResult{Revision=expectedRevision};
+    public LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId)=>new LibraryImportResult{TypeGuid=request.TypeGuid,VersionGuid=request.VersionGuid};
+    public LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request,string expectedRevision,string operationId) => new LibraryImportResult { TypeGuid=request.TypeGuid,VersionGuid=request.VersionGuid,State="Committed" };
+    public IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir) => LibraryExport(typeGuid, versionGuid, targetDir);
+    public DescribeNode HardwareTree;
+    public string LastHardwareMethod;
+    public HardwarePreview PreviewHardware(HardwarePatch patch) { LastHardwareMethod = "hardware.preview"; return HardwarePlan.Preview(Describe("hardware", 4096), patch); }
+    public HardwarePreview ApplyHardware(HardwarePatch patch, string operationId) { LastHardwareMethod = "hardware.apply"; return HardwarePlan.Preview(Describe("hardware", 4096), patch); }
     public bool SessionWindow, SessionModified, SessionSaveAfterImport, SessionClosed, SessionSaved;
     public bool SessionKeeper = true;
     public SessionState GetSessionState() => new SessionState { ProjectPath = GetProjectInfo().Path, TiaPid = 42, Mode = SessionWindow ? "ui" : "headless", HeldBy = SessionKeeper ? "keeper" : "other", AttachedSessions = 1 };
@@ -113,7 +130,7 @@ public sealed class FakeTiaSession : ITiaSession
     public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses) =>
         new[] { new CompileMessage { Address = addresses.Length > 0 ? addresses[0] : null, Severity = "error", Path = "PLC_1/Fx_Broken", Description = "Tag #Missing not defined" } };
 
-    public DescribeNode Describe(string scope, int maxNodes) => new DescribeNode
+    public DescribeNode Describe(string scope, int maxNodes) => HardwareTree ?? new DescribeNode
     {
         Type = "Project", Name = "RungFixture",
         Attributes = new SortedDictionary<string, string>(),

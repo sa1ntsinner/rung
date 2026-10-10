@@ -26,6 +26,9 @@ import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
+import { cmdHardware } from "./hardware.js";
+import { cmdLibrary } from "./library.js";
+import { cmdProjectArtifact,cmdSafety } from "./project-artifact.js";
 import { brokerReader, startLiveServer } from "./liveServer.js";
 import { agentsTemplatePath, bridgeExecutable, tiaOf, tiaOfProject, type TiaVersion } from "./paths.js";
 import { Coverage, runTests, toJUnit } from "@rung/sim";
@@ -103,6 +106,7 @@ Usage:
   rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
   rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the project library, software units and SimaticML tag tables
+  rung hardware [dir] [--file <patch.yaml|json>] [--apply] [--json]  hardware snapshot, preview or guarded annotation apply
   rung agents [dir]                    regenerate the project summary in AGENTS.md
   rung mcp [dir]                       MCP server for AI agents (Claude Code, Codex, Cursor)
   rung lsp [--stdio]                   language server for editors (VS Code, Zed, Neovim)
@@ -111,6 +115,17 @@ Usage:
 
 PLC:
   rung compile [dir] [--file <f>]... [--hw] [--plc <name>]   compile in TIA Portal; errors point at file lines
+  rung library [dir] [--json]                             list native library types and version GUIDs
+  rung library [dir] --file <type.libinfo> [--json]         inspect native V20 library metadata and raw XML hash
+  rung library [dir] --file <type.libinfo> --preview [--device <plc>] [--json]
+  rung library [dir] --file <type.libinfo> --apply --expected-revision <sha256> --expected-package-revision <sha256> [--device <plc>] [--json]
+  rung library [dir] --type-guid <uuid> --version-guid <uuid> --export <new-dir> [--json]
+  rung library [dir] --release --type-guid <uuid> --version-guid <uuid> --number <version> --author <name> --comment <text> (--preview | --apply --expected-revision <sha256>) [--json]
+  rung library [dir] --update --type-guid <uuid> --version-guid <default-uuid> --device <plc> (--preview | --apply --expected-revision <sha256>) [--json]
+  rung alarms [dir] --device <plc> (--export <new.xlsx> | --file <edited.xlsx> --preview) [--json]
+  rung safety [dir] --device <plc> [--json]                 read-only offline safety service observation
+  rung technology [dir] --device <plc> --name <object> (--export <new.xml> | --file <edited.xml> --preview) [--json]
+  rung alarms|technology [dir] --device <plc> [--name <object>] --file <artifact> --apply --expected-revision <sha256> --expected-artifact-revision <sha256> [--json]
   rung online [dir] [--off|--state] [--plc <name>] [--trust-certificate]  go online / offline, or show the online state
   rung compare [dir] [--json] [--plc <name>] [--trust-certificate]       the project against the PLC (read-only); exit 2 if they differ
   rung connect [dir] [--pick] [--json] [--plc <name>]       find the PLC on the network and remember it
@@ -411,6 +426,11 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   download: { options: ["hw", "no-hw", "no-sw", "all-blocks", "allow", "no-start", "yes", "plc"], positionals: 1 },
   open: { options: ["dir", "save"], positionals: 1 },
   session: { options: ["release", "save", "json"], positionals: 1 },
+  hardware: { options: ["file", "apply", "json","expected-artifact-revision"], positionals: 1 },
+  library: { options: ["file", "json", "type-guid", "version-guid", "export", "preview", "device", "apply", "expected-revision", "expected-package-revision", "release", "update", "number", "author", "comment"], positionals: 1 },
+  alarms:{options:["device","export","file","preview","apply","expected-revision","expected-artifact-revision","json"],positionals:1},
+  safety:{options:["device","json"],positionals:1},
+  technology:{options:["device","name","export","file","preview","apply","expected-revision","expected-artifact-revision","json"],positionals:1},
   simulate: { options: ["address", "port", "cycle", "block"], positionals: 1 },
   "codesys-bridge": { options: ["project"], positionals: 0 },
   assignments: { options: ["json"], positionals: 1 },
@@ -459,6 +479,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
       fresh: { type: "boolean" },
       save: { type: "boolean" },
         release: { type: "boolean" },
+        update: { type: "boolean" },
+        name: { type:"string" },
+        "expected-artifact-revision":{type:"string"},
         force: { type: "boolean" },
         verbose: { type: "boolean" },
         fixture: { type: "boolean" },
@@ -520,6 +543,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
         host: { type: "string" },
         writes: { type: "boolean" },
         preview: { type: "boolean" },
+        apply: { type: "boolean" },
+        "type-guid": { type: "string" },
+        "version-guid": { type: "string" },
+        "expected-revision": { type: "string" },
+        "expected-package-revision": { type: "string" },
+        export: { type: "string" },
+        author: { type: "string" },
+        comment: { type: "string" },
       },
     });
   } catch (e) {
@@ -569,6 +600,23 @@ export async function main(argv: string[], io: Io): Promise<number> {
   const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "hardware":
+        return await cmdHardware(dir, v.file as string[] | undefined, !!v.json, io, !!v.apply,v["expected-artifact-revision"]);
+      case "safety":
+        if(v.device?.length!==1)throw new WorkspaceError("BAD_ARGUMENT","Safety observation requires one --device");
+        return await cmdSafety(dir,v.device[0]!,io,!!v.json);
+      case "alarms":
+      case "technology":
+        if(v.device?.length!==1)throw new WorkspaceError("BAD_ARGUMENT","Native artifacts require exactly one --device");
+        return await cmdProjectArtifact(cmd,dir,io,{device:v.device[0],name:v.name,exportPath:v.export,files:v.file as string[]|undefined,preview:!!v.preview,apply:!!v.apply,expectedRevision:v["expected-revision"],expectedArtifactRevision:v["expected-artifact-revision"],json:!!v.json});
+      case "library":
+        if ((v.device?.length ?? 0) > 1) throw new WorkspaceError("BAD_ARGUMENT", "Library import preview accepts one --device");
+        return await cmdLibrary(dir, v.file as string[] | undefined, !!v.json, io, {
+          typeGuid: v["type-guid"], versionGuid: v["version-guid"], exportDir: v.export,
+          preview: !!v.preview, device: v.device?.[0],
+          apply: !!v.apply, expectedRevision: v["expected-revision"], expectedPackageRevision: v["expected-package-revision"],
+          release: !!v.release, update: !!v.update, number: v.number, author: v.author, comment: v.comment,
+        });
       case "live-server": {
         await startLiveServer(dir, io.env);
         return 0;

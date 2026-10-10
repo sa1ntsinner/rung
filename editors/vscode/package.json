@@ -348,6 +348,8 @@
         "title": "Write Read-Only Views (Hardware, HMI, Tags)",
         "category": "rung"
       },
+      {"command":"rung.projectAssets","title":"Project Assets: Preview, Export and Safety","category":"rung"},
+      {"command":"rung.projectAssets.apply","title":"Project Assets: Review and Apply","category":"rung"},
       {
         "command": "rung.compileFile",
         "title": "Compile This File",

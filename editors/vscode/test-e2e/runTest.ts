@@ -143,6 +143,11 @@ async function main(): Promise<void> {
         ok = (await runSuite("tia", folder, base, env)) && ok;
       }
     }
+    if(suites.includes("assets")){
+      const folder=process.env.RUNG_E2E_ASSET_WS,evidence=process.env.RUNG_E2E_ASSET_EVIDENCE;
+      if(process.platform!=="win32"||!folder||!evidence||!existsSync(join(folder,"rung.toml"))||!existsSync(evidence))throw new Error("assets suite requires an explicitly prepared offline fixture workspace and evidence");
+      ok=(await runSuite("assets",folder,base,{RUNG_BRIDGE:join(repo,"bridge/src/Rung.Bridge.V20/bin/Release/net48/rung-bridge-v20.exe"),RUNG_E2E_ASSET_EVIDENCE:evidence}))&&ok;
+    }
   } finally {
     if (process.env.RUNG_E2E_KEEP) console.log(`kept ${base}`);
     else

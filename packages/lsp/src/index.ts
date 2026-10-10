@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 export * from "./lexer.js";
+export { hardwarePatchText } from "./hardware.js";
 export * from "./parser.js";
 export * from "./catalog.js";
 export * from "./workspace.js";

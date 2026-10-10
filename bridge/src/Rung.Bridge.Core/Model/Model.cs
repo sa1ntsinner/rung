@@ -108,8 +108,15 @@ namespace Rung.Bridge.Core.Model
         public string Type;
         public string Name;
         public System.Collections.Generic.SortedDictionary<string, string> Attributes;
+        public System.Collections.Generic.SortedDictionary<string, DescribeAttributeInfo> AttributeInfo;
         public System.Collections.Generic.SortedDictionary<string, System.Collections.Generic.List<DescribeNode>> Children;
         public bool? Truncated;
+    }
+
+    public sealed class DescribeAttributeInfo
+    {
+        public string Access;
+        public string Type; // runtime type of a successfully read value; absent for write-only/unavailable values
     }
 
     public sealed class FormCapabilities

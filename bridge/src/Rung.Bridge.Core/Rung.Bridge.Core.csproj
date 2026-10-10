@@ -5,6 +5,7 @@
     <RootNamespace>Rung.Bridge.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System.IO.Compression" Condition="'$(TargetFramework)' == 'net48'" />
     <PackageReference Include="System.Text.Json" Version="9.0.9" Condition="'$(TargetFramework)' == 'net48'" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" Condition="'$(TargetFramework)' == 'net48'" />
   </ItemGroup>

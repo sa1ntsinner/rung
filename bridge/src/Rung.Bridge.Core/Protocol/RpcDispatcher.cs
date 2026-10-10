@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 using System;
+using System.Linq;
 using System.IO;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -138,6 +139,102 @@ namespace Rung.Bridge.Core.Protocol
                     return new { address = Session.Rename(Str(p, "address"), Str(p, "newName"), Str(p, "expectedTiaRevision"), Str(p, "operationId")) };
                 case "model.describe":
                     return Session.Describe(Str(p, "scope"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("maxNodes", out var mn) && mn.ValueKind == JsonValueKind.Number ? mn.GetInt32() : 20000);
+                case "safety.observe":
+                    LibraryParams(p,"device");var safetyDevice=Str(p,"device");if(safetyDevice.Length>128||safetyDevice.Any(char.IsControl))throw new RpcException(ErrorCodes.BadRequest,"Invalid safety PLC name");return Session.ObserveSafety(safetyDevice);
+                case "artifact.export":
+                case "artifact.preview":
+                case "artifact.import":
+                    {
+                        LibraryParams(p,method=="artifact.export"?new[]{"kind","device","name"}:method=="artifact.preview"?new[]{"kind","device","name","contentBase64"}:new[]{"kind","device","name","contentBase64","expectedRevision","expectedArtifactRevision","operationId"});
+                        var artifactKind=Str(p,"kind");var artifactDevice=Str(p,"device");var artifactName=artifactKind=="technology"?Str(p,"name"):null;
+                        if((artifactKind!="alarms"&&artifactKind!="technology")||string.IsNullOrWhiteSpace(artifactDevice)||artifactDevice.Length>128||artifactDevice.Any(char.IsControl)||(artifactKind=="alarms"?p.TryGetProperty("name",out _):string.IsNullOrWhiteSpace(artifactName)||artifactName.Length>128||artifactName.Any(char.IsControl)))throw new RpcException(ErrorCodes.BadRequest,"Artifact requires alarms or technology, explicit PLC and technology object name");
+                        if(method=="artifact.export")return Session.ExportProjectArtifact(artifactKind,artifactDevice,artifactName);
+                        var encoded=Str(p,"contentBase64");if(encoded==null||encoded.Length>5592408)throw new RpcException(ErrorCodes.BadRequest,"Missing/oversized artifact");byte[] artifactBytes;
+                        try{artifactBytes=Convert.FromBase64String(encoded);}catch(FormatException){throw new RpcException(ErrorCodes.BadRequest,"Invalid artifact base64");}
+                        if(artifactBytes.Length==0||artifactBytes.Length>4*1048576||Convert.ToBase64String(artifactBytes)!=encoded)throw new RpcException(ErrorCodes.BadRequest,"Missing/oversized/noncanonical artifact");
+                        if(method=="artifact.preview")return Session.PreviewProjectArtifact(artifactKind,artifactDevice,artifactName,artifactBytes);
+                        var artifactRevision=Str(p,"expectedRevision");LibraryImportPlan.CheckRevision(artifactRevision);var artifactHash=Str(p,"expectedArtifactRevision");LibraryImportPlan.CheckRevision(artifactHash);if(Bundle.Sha256(artifactBytes)!=artifactHash)throw new RpcException(ErrorCodes.StaleRevision,"Artifact differs from preview");
+                        if(!Guid.TryParseExact(Str(p,"operationId"),"D",out var artifactId)||artifactId==Guid.Empty)throw new RpcException(ErrorCodes.BadRequest,"Artifact operationId must be a UUID");
+                        return Session.ImportProjectArtifact(artifactKind,artifactDevice,artifactName,artifactBytes,artifactRevision,artifactId.ToString("D"));
+                    }
+                case "hardware.snapshot":
+                    var hardware = Session.Describe("hardware", 4096);
+                    return new { version = 1, revision = HardwarePlan.Revision(hardware), tree = hardware };
+                case "library.inspect":
+                    LibraryParams(p,"stem","files");
+                    return LibraryPackage.Check(LibraryFiles(p), Str(p, "stem"));
+                case "library.preview":
+                case "library.import":
+                    LibraryParams(p,method == "library.preview" ? new[] { "stem","files","device" }
+                        : new[] { "stem","files","device","expectedRevision","expectedPackageRevision","operationId" });
+                    var libraryFiles = LibraryFiles(p); var libraryStem = Str(p, "stem");
+                    var libraryPackage = LibraryPackage.Check(libraryFiles, libraryStem, true);
+                    var libraryDevice = Str(p, "device");
+                    if (string.IsNullOrEmpty(libraryDevice) || libraryDevice.Length > 128)
+                        throw new RpcException(ErrorCodes.BadRequest, "Library import preview requires a PLC name");
+                    if (method == "library.preview") return Session.PreviewLibrary(libraryPackage, libraryDevice);
+                    var libraryRevision = Str(p,"expectedRevision"); var packageRevision = Str(p,"expectedPackageRevision");
+                    LibraryImportPlan.CheckRevision(libraryRevision); LibraryImportPlan.CheckRevision(packageRevision);
+                    if (packageRevision != libraryPackage.Revision) throw new RpcException(ErrorCodes.StaleRevision,"Library package differs from the preview");
+                    var libraryOperation = Str(p,"operationId");
+                    if (!Guid.TryParseExact(libraryOperation,"D",out var importId) || importId == Guid.Empty)
+                        throw new RpcException(ErrorCodes.BadRequest,"Library operationId must be a UUID");
+                    return InTempDir(dir => {
+                        foreach (var file in libraryFiles) File.WriteAllBytes(Path.Combine(dir,file.Key),file.Value);
+                        return Session.ImportLibrary(libraryPackage,libraryDevice,dir,libraryStem,libraryRevision,importId.ToString("D"));
+                    });
+                case "library.export":
+                    LibraryParams(p,"typeGuid","versionGuid");
+                    var typeGuid = Str(p, "typeGuid"); var versionGuid = Str(p, "versionGuid");
+                    if (!Guid.TryParseExact(typeGuid, "D", out var typeId) || typeId == Guid.Empty
+                        || !Guid.TryParseExact(versionGuid, "D", out var versionId) || versionId == Guid.Empty)
+                        throw new RpcException(ErrorCodes.BadRequest, "Library export requires type and version UUIDs");
+                    return InTempDir(dir => {
+                        var files = Session.ExportLibrary(typeId.ToString("D"), versionId.ToString("D"), dir);
+                        var metadata = LibraryPackage.Check(files, "type");
+                        if (metadata.TypeGuid != typeId.ToString("D") || metadata.SourceVersionGuid != versionId.ToString("D"))
+                            throw new RpcException(ErrorCodes.BadRequest, "Native export identity differs from the requested library version");
+                        return new { metadata, files = new[] {
+                            new { name = "type.xml", contentBase64 = Convert.ToBase64String(files["type.xml"]) },
+                            new { name = "type.libinfo", contentBase64 = Convert.ToBase64String(files["type.libinfo"]) } } };
+                    });
+                case "library.release.preview":
+                case "library.update.preview":
+                case "library.update":
+                    if(method.StartsWith("library.update",StringComparison.Ordinal)){
+                        LibraryParams(p,method=="library.update.preview"?new[]{"typeGuid","versionGuid","device"}:new[]{"typeGuid","versionGuid","device","expectedRevision","operationId"});
+                        var updateRequest=new LibraryUpdateRequest{TypeGuid=Str(p,"typeGuid"),VersionGuid=Str(p,"versionGuid"),Device=Str(p,"device")};LibraryUpdatePlan.Check(updateRequest);
+                        updateRequest.TypeGuid=Guid.Parse(updateRequest.TypeGuid).ToString("D");updateRequest.VersionGuid=Guid.Parse(updateRequest.VersionGuid).ToString("D");
+                        if(method=="library.update.preview")return Session.PreviewLibraryUpdate(updateRequest);
+                        var updateRevision=Str(p,"expectedRevision");LibraryImportPlan.CheckRevision(updateRevision);
+                        if(!Guid.TryParseExact(Str(p,"operationId"),"D",out var updateId)||updateId==Guid.Empty)throw new RpcException(ErrorCodes.BadRequest,"Library operationId must be a UUID");
+                        return Session.UpdateLibrary(updateRequest,updateRevision,updateId.ToString("D"));
+                    }
+                    goto case "library.release";
+                case "library.release":
+                    LibraryParams(p,method=="library.release.preview" ? new[] {"typeGuid","versionGuid","versionNumber","author","comment"}
+                        : new[] {"typeGuid","versionGuid","versionNumber","author","comment","expectedRevision","operationId"});
+                    var releaseRequest=new LibraryReleaseRequest { TypeGuid=Str(p,"typeGuid"),VersionGuid=Str(p,"versionGuid"),VersionNumber=Str(p,"versionNumber"),Author=Str(p,"author"),Comment=Str(p,"comment") };
+                    LibraryReleasePlan.Check(releaseRequest);
+                    releaseRequest.TypeGuid=Guid.Parse(releaseRequest.TypeGuid).ToString("D");releaseRequest.VersionGuid=Guid.Parse(releaseRequest.VersionGuid).ToString("D");
+                    if(method=="library.release.preview")return Session.PreviewLibraryRelease(releaseRequest);
+                    var releaseRevision=Str(p,"expectedRevision");LibraryImportPlan.CheckRevision(releaseRevision);
+                    if(!Guid.TryParseExact(Str(p,"operationId"),"D",out var releaseId)||releaseId==Guid.Empty)throw new RpcException(ErrorCodes.BadRequest,"Library operationId must be a UUID");
+                    return Session.ReleaseLibrary(releaseRequest,releaseRevision,releaseId.ToString("D"));
+                case "hardware.preview":
+                case "hardware.apply":
+                    var patchText = Str(p, "patchText");
+                    if (patchText == null || patchText.Length > 1048576)
+                        throw new RpcException(ErrorCodes.BadRequest, "Hardware preview requires a patch");
+                    JsonDocument patch;
+                    try { patch = JsonDocument.Parse(patchText); }
+                    catch (JsonException) { throw new RpcException(ErrorCodes.BadRequest, "Malformed hardware patch JSON"); }
+                    using (patch)
+                    {
+                        var parsedPatch = HardwarePlan.Parse(patch.RootElement);
+                        return method == "hardware.apply" ? Session.ApplyHardware(parsedPatch, Str(p, "operationId"))
+                            : Session.PreviewHardware(parsedPatch);
+                    }
                 case "objects.identify":
                     return Session.Identify(StrArray(p, "addresses"));
                 case "xref.get":
@@ -186,6 +283,32 @@ namespace Rung.Bridge.Core.Protocol
         }
 
         /// <summary>The result's files as text, named instead of located.</summary>
+        static void LibraryParams(JsonElement p, params string[] allowed)
+        {
+            if (p.ValueKind != JsonValueKind.Object) throw new RpcException(ErrorCodes.BadRequest,"Library parameters must be an object");
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var field in p.EnumerateObject())
+                if (Array.IndexOf(allowed,field.Name) < 0 || !seen.Add(field.Name))
+                    throw new RpcException(ErrorCodes.BadRequest,"Unknown or duplicate library parameter: " + field.Name);
+        }
+        static IReadOnlyDictionary<string, byte[]> LibraryFiles(JsonElement p)
+        {
+            if (p.ValueKind != JsonValueKind.Object || !p.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Array || files.GetArrayLength() != 2)
+                throw new RpcException(ErrorCodes.BadRequest, "Library package requires two native files");
+            var result = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in files.EnumerateArray())
+            {
+                if (file.ValueKind != JsonValueKind.Object) throw new RpcException(ErrorCodes.BadRequest, "Invalid library file");
+                var fields = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var field in file.EnumerateObject())
+                    if ((field.Name != "name" && field.Name != "contentBase64") || !fields.Add(field.Name)) throw new RpcException(ErrorCodes.BadRequest, "Unknown or duplicate library file field");
+                var name = Str(file, "name"); var content = Str(file, "contentBase64");
+                if (name.Length > 128 || content.Length > 5592408 || result.ContainsKey(name)) throw new RpcException(ErrorCodes.BadRequest, "Invalid or oversized library file");
+                try { result.Add(name, Convert.FromBase64String(content)); }
+                catch (FormatException) { throw new RpcException(ErrorCodes.BadRequest, "Malformed library file base64"); }
+            }
+            return result;
+        }
         static ExportResult Inline(ExportResult r)
         {
             foreach (var f in r.Files ?? new ExportFile[0])

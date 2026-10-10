@@ -31,6 +31,7 @@ import type { ChangesView } from "../views/changesView";
 import type { PlanEntry } from "../core/preview";
 import { registerMerge } from "./merge";
 import { deviceTarget, fileTarget } from "./targets";
+import {projectAssets,type ProjectAssetsOptions} from "./projectAssets";
 
 export interface Services {
   ws: RungWorkspace;
@@ -63,6 +64,9 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     (fn: (...args: unknown[]) => unknown) =>
     (...args: unknown[]) =>
       needsWorkspace(ws) ? fn(...args) : undefined;
+
+  reg("rung.projectAssets",inWs((options?:unknown)=>projectAssets(s,(options&&typeof options==="object"?options:{}) as ProjectAssetsOptions)));
+  reg("rung.projectAssets.apply",inWs(()=>projectAssets(s,{apply:true})));
 
   // --- sync
   /** After pull / sync: point at new conflicts (the terminal has the details). */
