@@ -35,6 +35,15 @@ describe("views", () => {
     expect(toView(node)).toEqual({ type: "DeviceItem", name: "CPU", attributes: { PositionNumber: "1" },
       attributeInfo: node.attributeInfo });
   });
+  it("writes a Basic/Comfort panel's tag tables and screens as TIA Portal exports them, next to its view", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-views-"));
+    const panel: DescribeNode = { type: "Project", name: "P", attributes: {}, children: { HmiPanels: [{ type: "HmiTarget", name: "HMI_1", attributes: {}, children: {} }] } };
+    const r = await writeModelViews(root, { describe: async () => panel, hmiExport: async (device: string) => ({ items: [
+      { kind: "tags", folders: [], name: "Default tag table", xml: `<Document device="${device}"/>` },
+      { kind: "screens", folders: ["Plant/Line"], name: "Main Overview", xml: "<Document/>" } ] }) }, ["hmi"]);
+    expect(r.written.sort()).toEqual(["views/hmi/HMI_1.yaml", "views/hmi/HMI_1/screens/Plant%2FLine/Main Overview.xml", "views/hmi/HMI_1/tags/Default tag table.xml"]);
+    expect(readFileSync(join(root, "views", "hmi", "HMI_1", "tags", "Default tag table.xml"), "utf8")).toBe('<Document device="HMI_1"/>');
+  });
   it("writes hardware views per device and subnet, and prunes stale files", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-views-"));
     mkdirSync(join(root, "views", "hardware"), { recursive: true });

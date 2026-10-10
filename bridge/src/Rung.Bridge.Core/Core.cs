@@ -25,6 +25,8 @@ namespace Rung.Bridge.Core
         LibraryUpdatePreview PreviewLibraryUpdate(LibraryUpdateRequest request);
         ArtifactExport ExportProjectArtifact(string kind,string device,string name);
         SafetyObservation ObserveSafety(string device);
+        /// <summary>A Basic/Comfort panel's tag tables, screens, templates and text lists as TIA Portal exports them (read-only).</summary>
+        IReadOnlyList<HmiArtifact> ExportHmi(string device);
         ArtifactPreview PreviewProjectArtifact(string kind,string device,string name,byte[] bytes);
         ArtifactResult ImportProjectArtifact(string kind,string device,string name,byte[] bytes,string expectedRevision,string operationId);
         LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId);

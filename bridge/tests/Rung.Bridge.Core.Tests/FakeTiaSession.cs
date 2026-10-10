@@ -17,6 +17,7 @@ public sealed class FakeTiaSession : ITiaSession
     public LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request) => new LibraryReleasePreview { Request=request,Revision=new string('a',64) };
     public LibraryUpdatePreview PreviewLibraryUpdate(LibraryUpdateRequest request) => new LibraryUpdatePreview{Request=request,Revision=new string('a',64)};
     public ArtifactExport ExportProjectArtifact(string kind,string device,string name)=>new ArtifactExport{Revision=new string('a',64),ContentBase64="YWJj"};
+    public IReadOnlyList<HmiArtifact> ExportHmi(string device) => new[] { new HmiArtifact { Kind = "tags", Folders = new string[0], Name = "Default tag table", Xml = "<?xml version=\"1.0\"?><Document/>" } };
     public SafetyObservation ObserveSafety(string device)=>new SafetyObservation{Device=device,Status="unavailable",Reason="Non-F fixture"};
     public ArtifactPreview PreviewProjectArtifact(string kind,string device,string name,byte[] bytes)=>new ArtifactPreview{Revision=new string('a',64)};
     public ArtifactResult ImportProjectArtifact(string kind,string device,string name,byte[] bytes,string expectedRevision,string operationId)=>new ArtifactResult{Revision=expectedRevision};

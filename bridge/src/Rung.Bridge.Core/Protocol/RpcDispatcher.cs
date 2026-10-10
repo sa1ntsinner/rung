@@ -141,6 +141,12 @@ namespace Rung.Bridge.Core.Protocol
                     return new { address = Session.Rename(Str(p, "address"), Str(p, "newName"), Str(p, "expectedTiaRevision"), Str(p, "operationId")) };
                 case "model.describe":
                     return Session.Describe(Str(p, "scope"), p.ValueKind == JsonValueKind.Object && p.TryGetProperty("maxNodes", out var mn) && mn.ValueKind == JsonValueKind.Number ? mn.GetInt32() : 20000);
+                case "hmi.export":
+                    {
+                        var hmiDevice = Str(p, "device");
+                        if (hmiDevice.Length == 0 || hmiDevice.Length > 128 || hmiDevice.Any(char.IsControl)) throw new RpcException(ErrorCodes.BadRequest, "Invalid HMI device name");
+                        return new { items = Session.ExportHmi(hmiDevice) };
+                    }
                 case "safety.observe":
                     LibraryParams(p,"device");var safetyDevice=Str(p,"device");if(safetyDevice.Length>128||safetyDevice.Any(char.IsControl))throw new RpcException(ErrorCodes.BadRequest,"Invalid safety PLC name");return Session.ObserveSafety(safetyDevice);
                 case "artifact.export":

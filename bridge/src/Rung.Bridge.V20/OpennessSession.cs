@@ -1260,6 +1260,7 @@ namespace Rung.Bridge.V20
                     foreach (var d in AllDevices())
                         foreach (var sw in SoftwareOf(d.DeviceItems))
                             if (sw is Siemens.Engineering.HmiUnified.HmiSoftware hmi) Add("HmiUnified", Node(hmi, allowed, 0, ref count, budget));
+                            else if (sw is Siemens.Engineering.Hmi.HmiTarget panel) Add("HmiPanels", PanelNode(panel, d.Name, ref count, budget));
                     break;
                 case "techobjects":
                     foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
@@ -1308,6 +1309,29 @@ namespace Rung.Bridge.V20
             }
             root.Truncated = count >= budget;
             return root;
+        }
+
+        static readonly string[] PanelCompositions = { "TagTables", "Tags", "Folders", "Screens", "TextLists", "GraphicLists", "Connections", "Cycles", "ScreenTemplates", "VBScripts" };
+
+        /// <summary>A Basic or Comfort panel (HmiTarget): its folders are properties, walked like a library's.</summary>
+        static DescribeNode PanelNode(Siemens.Engineering.Hmi.HmiTarget panel, string device, ref int count, int budget)
+        {
+            var node = new DescribeNode { Type = "HmiTarget", Name = device, Attributes = new SortedDictionary<string, string>(StringComparer.Ordinal), Children = new SortedDictionary<string, List<DescribeNode>>(StringComparer.Ordinal) };
+            count++;
+            void Folder(string key, IEngineeringObject folder, ref int c)
+            {
+                if (folder == null) return;
+                var child = Node(folder, PanelCompositions, 1, ref c, budget, key);
+                if (child != null) node.Children[key] = new List<DescribeNode> { child };
+            }
+            Folder("Tags", panel.TagFolder, ref count);
+            Folder("Screens", panel.ScreenFolder, ref count);
+            Folder("Templates", panel.ScreenTemplateFolder, ref count);
+            Folder("Scripts", panel.VBScriptFolder, ref count);
+            // text and graphic lists, connections and cycles are compositions of the panel itself
+            var rest = Node(panel, new[] { "TextLists", "GraphicLists", "Connections", "Cycles" }, 1, ref count, budget, "Lists and communication");
+            if (rest != null) node.Children["Panel"] = new List<DescribeNode> { rest };
+            return node;
         }
 
         // the type and master copy folders are properties of a library, not compositions

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Read-only YAML views of what has no editable text form in TIA Portal: hardware, HMI Unified,
+// Read-only YAML views of what has no editable text form in TIA Portal: hardware, HMI (Unified and Basic/Comfort panels),
 // technology objects, software units and their relations (from the Openness object model) and tag tables (from the
 // mirrored XML).
 import { readdir, readFile, rm } from "node:fs/promises";
@@ -29,7 +29,7 @@ export interface ViewsReport {
 }
 
 /** Writes views/<scope>/<object>.yaml (one file per top-level object) and prunes stale files of that scope. */
-export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "describe">, scopes: ("hardware" | "hmi" | "techobjects" | "libraries" | "units")[] = ["hardware", "hmi", "techobjects", "libraries", "units"]): Promise<ViewsReport> {
+export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "describe"> & Partial<Pick<BridgeClient, "hmiExport">>, scopes: ("hardware" | "hmi" | "techobjects" | "libraries" | "units")[] = ["hardware", "hmi", "techobjects", "libraries", "units"]): Promise<ViewsReport> {
   const report: ViewsReport = { written: [], truncated: [] };
   for (const scope of scopes) {
     const tree = await bridge.describe(scope);
@@ -41,10 +41,19 @@ export async function writeModelViews(root: string, bridge: Pick<BridgeClient, "
       // in git they would differ from one engineer to the next
       if (group === "GlobalLibraries") continue;
       for (const node of list) {
-        const file = join(dir, group === "Devices" || group === "HmiUnified" || group === "Plcs" || group === "ProjectLibrary" || group === "LibraryManagers" ? "" : group, `${escapeSegment(node.name ?? node.type)}.yaml`);
+        const file = join(dir, group === "Devices" || group === "HmiUnified" || group === "HmiPanels" || group === "Plcs" || group === "ProjectLibrary" || group === "LibraryManagers" ? "" : group, `${escapeSegment(node.name ?? node.type)}.yaml`);
         await writeFileAtomic(file, toYaml(toView(node), VIEW_HEADER));
         keep.add(file);
         report.written.push(relative(root, file).split(sep).join("/"));
+        // a Basic/Comfort panel: its tag tables, screens, templates and text lists as TIA Portal exports them
+        if (group === "HmiPanels" && node.name && bridge.hmiExport) {
+          for (const item of (await bridge.hmiExport(node.name)).items) {
+            const xml = join(dir, escapeSegment(node.name), item.kind, ...item.folders.map(escapeSegment), `${escapeSegment(item.name)}.xml`);
+            await writeFileAtomic(xml, item.xml);
+            keep.add(xml);
+            report.written.push(relative(root, xml).split(sep).join("/"));
+          }
+        }
       }
     }
     await prune(dir, keep);

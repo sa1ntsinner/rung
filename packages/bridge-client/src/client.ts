@@ -246,6 +246,11 @@ export class BridgeClient {
     return this.request("model.describe", { scope, maxNodes }) as Promise<DescribeNode>;
   }
 
+  /** A Basic/Comfort panel's tag tables, screens, templates and text lists as TIA Portal exports them (read-only). */
+  hmiExport(device: string): Promise<{ items: { kind: string; folders: string[]; name: string; xml: string }[] }> {
+    return this.request("hmi.export", { device }, 600_000) as Promise<{ items: { kind: string; folders: string[]; name: string; xml: string }[] }>;
+  }
+
   /** TIA Portal's lasting identity of listed objects (V20 and later; kept through a rename there). */
   identify(addresses: string[]): Promise<Record<string, string>> {
     return this.request("objects.identify", { addresses }) as Promise<Record<string, string>>;

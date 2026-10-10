@@ -115,7 +115,7 @@ In VS Code, the PLC picker puts the last PLC you chose first the next time; it s
 
 - `rung init --from-plc <ip> --project <new .ap20>`: no project file, only a running PLC? rung makes a new project from it (TIA's upload device as new station) and binds the folder to it ([downloads](downloads.md#uploading-from-a-plc)).
 - `rung assignments`: TIA Portal's assignment list, every input, output, bit memory, timer and counter address in use with its tag and where the code uses it, and overlapping accesses (exit 2 when two cross).
-- `rung views`: read-only YAML views of hardware, HMI device inventory, technology objects, the project library and the software units with their relations. HMI screens, tags and alarms are not editable in Rung; see the [capability map](capabilities.md).
+- `rung views`: read-only YAML views of hardware, HMI, technology objects, the project library and the software units with their relations; a Basic/Comfort panel's tag tables, screens, templates and text lists also as TIA Portal's XML (`views/hmi/<panel>/`). HMI objects are not editable in Rung; see the [capability map](capabilities.md).
 - `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. All over the S7-1500 Web API, read-only.
 - `rung agents`: refreshes the project summary in `AGENTS.md`.
 - `rung --help` lists every command; `rung sync --help` (or any command’s `--help`) shows its options and an example.
