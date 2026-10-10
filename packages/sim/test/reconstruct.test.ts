@@ -297,3 +297,20 @@ describe("globals a sample read", () => {
     expect(() => run('#Result := 1;', { '"Nope".x': 1 })).toThrow(/Nope/);
   });
 });
+
+describe("globals a sample's FB writes", () => {
+  const dbUri = "file:///w/plc/P/blocks/Line_DB.db";
+  const run = (body: string, reads: Record<string, unknown>) => {
+    const index = new WorkspaceIndex();
+    index.set(uri, `FUNCTION_BLOCK "Counter"\nVAR_OUTPUT\n  Result : Int;\nEND_VAR\nBEGIN\n${body}\nEND_FUNCTION_BLOCK`, 0);
+    index.set(dbUri, 'DATA_BLOCK "Line_DB"\nVERSION : 0.1\n   VAR\n      Speed : Int;\n      Target : Int;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK', 0);
+    const mem = { RESULT: 0 };
+    return reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
+      coherence: "subscription-sample", before: { mem, globals: {}, reads: reads as never }, observed: mem }, scope);
+  };
+  it("agrees when the replay writes the value the PLC holds, and shows a divergence when not", () => {
+    expect(run('"Line_DB".Target := "Line_DB".Speed * 2;', { '"Line_DB".Speed': 5, '"Line_DB".Target': 10 }).divergences).toEqual([]);
+    expect(run('"Line_DB".Target := "Line_DB".Speed * 2;', { '"Line_DB".Speed': 5, '"Line_DB".Target': 7 }).divergences)
+      .toEqual([{ path: '"Line_DB".Target', reconstructed: 10, observed: 7 }]);
+  });
+});

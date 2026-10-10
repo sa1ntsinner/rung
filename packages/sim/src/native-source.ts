@@ -61,7 +61,8 @@ export function verifyNativeBody(index: WorkspaceIndex, uri: string, nativeBody:
 
 /**
  * The DB members and tags an FB body reads by name, in reading order: what a sample reads next to the native capture.
- * Writes to globals, calls, indexed and whole-structure reads refuse: a sample cannot capture those by name yet.
+ * Members it writes are captured too, so the replay can be compared with them. Calls, indexed and whole-structure
+ * access refuse: a sample cannot capture those by name yet.
  */
 export function nativeGlobalReads(index: WorkspaceIndex, uri: string): string[] {
   const doc = index.docs.get(uri), block = doc?.parsed?.blocks[0];
@@ -73,7 +74,6 @@ export function nativeGlobalReads(index: WorkspaceIndex, uri: string): string[] 
     if (r.kind === "call" && !g) continue;
     if (r.kind === "call" || r.access === "call" || !g || (g.block && g.block.kind !== "DB") || (!g.block && !g.tag))
       throw new SimError(`"${r.name}": native external state or dependency source is unavailable`);
-    if (r.access === "write") throw new SimError(`"${r.name}": program status does not replay writes to globals yet`);
     if (r.members.some(m => !/^[A-Za-z_]\w*$/.test(m.name))) throw new SimError(`"${r.name}": quoted member names are not captured yet`);
     const path = `"${g.name}"` + r.members.map(m => `.${m.name}`).join("");
     if (doc.text[r.members.at(-1)?.end ?? r.end] === "[") throw new SimError(`${path}: indexed global reads are not captured by name yet`);

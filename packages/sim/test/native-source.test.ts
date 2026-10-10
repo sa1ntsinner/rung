@@ -76,7 +76,8 @@ it("lists the DB members and tags a body reads, and refuses what a sample cannot
   expect(nativeGlobalReads(ok, uri)).toEqual(['"Start_PB"', '"Line_DB".Speed', '"Line_DB".s.a']);
   expect(() => verifyNativeScalars(ok, uri, bindings)).not.toThrow();
   expect(nativeGlobalReads(make('#n := DINT_TO_INT(INT_TO_DINT(#n) + 1);'), uri)).toEqual([]);
-  expect(() => nativeGlobalReads(make('"Line_DB".Speed := #n;'), uri)).toThrow(/writes/i);
+  // a written member is captured too: the replay's value is compared with the PLC's
+  expect(nativeGlobalReads(make('"Line_DB".Speed := #n + "Line_DB".s.a;'), uri)).toEqual(['"Line_DB".Speed', '"Line_DB".s.a']);
   expect(() => nativeGlobalReads(make('#n := "Line_DB".arr[#n];'), uri)).toThrow(/index/i);
   expect(() => nativeGlobalReads(make('#n := "Line_DB".s;'), uri)).toThrow(/whole/i);
 });

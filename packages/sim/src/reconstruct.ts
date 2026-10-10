@@ -168,7 +168,7 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
     if (def === undefined || typeof def === "object" || typeof v !== typeof def || (typeof v === "number" && !Number.isFinite(v)))
       throw new SimError(`${path}: the captured value ${JSON.stringify(value)} does not fit its type`);
     readRoots.add(m[1]!.toUpperCase());
-    return { ref, v };
+    return { path, ref, v };
   });
   for (const root of readRoots) sim.uncaptured(root);
   for (const { ref, v } of placed) sim.write(ref as never, v as Value, null);
@@ -227,6 +227,11 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
     } else if (!Object.is(actual, expected)) divergences.push({ path, reconstructed: structuredClone(actual), observed: structuredClone(expected) });
   }
   compare(instance.mem, observed, "");
+  // the globals it captured stood still across the sample: a replay that leaves another value there disagrees with the PLC
+  for (const at of placed) {
+    const replayed = sim.read(at.ref as never, null);
+    if (!Object.is(replayed, at.v)) divergences.push({ path: at.path, reconstructed: structuredClone(replayed), observed: structuredClone(at.v as Value) });
+  }
   return { kind: "reconstructed" as const, exact: false as const, scope: { ...selected }, sourceRevision: capture.sourceRevision,
     coherence: capture.coherence, time: capture.time, trace, after: structuredClone(instance.mem), divergences };
 }
