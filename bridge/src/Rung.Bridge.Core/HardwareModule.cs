@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Rung.Bridge.Core.Model;
 using Rung.Bridge.Core.Protocol;
 
@@ -12,28 +13,32 @@ namespace Rung.Bridge.Core
         static void ValidateModule(HardwarePatch patch)
         {
             var m = patch.Module;
-            // ponytail: native proof covers this SM521 on Rail_0 slot 2; widen only with catalogue/rollback evidence.
+            // any catalogue module: TIA Portal itself says whether it plugs there (CanPlugNew, in the bridge), and the
+            // committed graph must differ from the snapshot by exactly that module, else it is rolled back
             if (patch.Version != 2 || patch.Changes != null || m == null || (m.Action != "create" && m.Action != "delete")
-                || m.TypeIdentifier != "OrderNumber:6ES7 521-1BH00-0AB0/V1.0" || m.Position != 2
-                || m.ParentPositions == null || m.ParentPositions.Length != 1 || m.ParentPositions[0] != 0
-                || m.ParentTypeIdentifier != "OrderNumber:6ES7 590-1***0-0AA0"
+                || m.TypeIdentifier == null || m.TypeIdentifier.Length > 256 || !Regex.IsMatch(m.TypeIdentifier, @"^(OrderNumber|GSD|System):[^\0\r\n]+$")
+                || m.Position < 0 || m.Position > 65535
+                || m.ParentPositions == null || m.ParentPositions.Length < 1 || m.ParentPositions.Length > 4 || m.ParentPositions.Any(p => p < 0 || p > 65535)
+                || string.IsNullOrEmpty(m.ParentTypeIdentifier) || m.ParentTypeIdentifier.Length > 256
                 || string.IsNullOrEmpty(m.Device) || m.Device.Length > 128 || m.Device.Contains('\0')
                 || string.IsNullOrEmpty(m.Name) || m.Name.Length > 64 || !m.Name.All(c => c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_')
                 || string.IsNullOrEmpty(patch.ExpectedRevision) || patch.ExpectedRevision.Length != 64)
                 throw Invalid("Unsupported hardware module patch");
         }
+        /// <summary>A rack's modules are items of the device next to the rack (their Container names it); deeper ones are items of their parent.</summary>
         static List<DescribeNode> ModuleItems(DescribeNode tree, HardwareModule m)
         {
-            var device = Find(tree, new HardwareChange { Device = m.Device, Positions = new int[0] });
-            if (device.Children == null || !device.Children.TryGetValue("DeviceItems", out var items)) throw Invalid("Missing module composition");
+            var owner = Find(tree, new HardwareChange { Device = m.Device, Positions = m.ParentPositions.Length == 1 ? new int[0] : m.ParentPositions });
+            if (owner.Children == null || !owner.Children.TryGetValue("DeviceItems", out var items)) throw Invalid("Missing module composition");
             return items;
         }
+        static string ParentName(DescribeNode tree, HardwareModule m) => Find(tree, new HardwareChange { Device = m.Device, Positions = m.ParentPositions }).Name;
         static bool At(DescribeNode node, int position) => node.Attributes != null && node.Attributes.TryGetValue("PositionNumber", out var value) && value == position.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        static void ModuleIdentity(DescribeNode node, HardwareModule m)
+        static void ModuleIdentity(DescribeNode node, HardwareModule m, string parent)
         {
             if (node.Name != m.Name || node.Attributes == null || !node.Attributes.TryGetValue("TypeIdentifier", out var type) || type != m.TypeIdentifier
                 || !node.Attributes.TryGetValue("IsBuiltIn", out var builtIn) || builtIn != "false"
-                || !node.Attributes.TryGetValue("Container", out var container) || container != "→ Rail_0") throw Invalid("Module identity or container differs");
+                || !node.Attributes.TryGetValue("Container", out var container) || container != "→ " + parent) throw Invalid("Module identity or container differs");
         }
         static HardwarePreview PreviewModule(DescribeNode tree, HardwarePatch patch, string revision)
         {
@@ -41,7 +46,7 @@ namespace Rung.Bridge.Core
             if (patch.ExpectedRevision != revision) throw new RpcException(ErrorCodes.StaleRevision, "Hardware changed since its snapshot");
             var m = patch.Module;
             var parent = Find(tree, new HardwareChange { Device = m.Device, Positions = m.ParentPositions });
-            if (parent.Name != "Rail_0" || parent.Attributes == null || !parent.Attributes.TryGetValue("TypeIdentifier", out var type) || type != m.ParentTypeIdentifier)
+            if (parent.Attributes == null || !parent.Attributes.TryGetValue("TypeIdentifier", out var type) || type != m.ParentTypeIdentifier)
                 throw Invalid("Module parent identity differs");
             var items = ModuleItems(tree, m); var matches = items.Where(i => At(i, m.Position)).ToArray();
             if (m.Action == "create")
@@ -51,7 +56,7 @@ namespace Rung.Bridge.Core
             else
             {
                 if (matches.Length != 1 || items.Count(i => i.Name == m.Name) != 1) throw Invalid("Module is missing or ambiguous");
-                ModuleIdentity(matches[0], m);
+                ModuleIdentity(matches[0], m, parent.Name);
             }
             return new HardwarePreview { Revision = revision, Module = m };
         }
@@ -72,7 +77,7 @@ namespace Rung.Bridge.Core
                     {
                         var items = ModuleItems(remainder, m); var created = items.Where(i => At(i, m.Position)).ToArray();
                         if (created.Length != 1 || items.Count(i => i.Name == m.Name) != 1) throw Invalid("Created module is missing or ambiguous");
-                        ModuleIdentity(created[0], m); items.Remove(created[0]);
+                        ModuleIdentity(created[0], m, ParentName(remainder, m)); items.Remove(created[0]);
                     }
                     if (Revision(remainder) != expectedRevision) throw new RpcException(ErrorCodes.ImportFailed, "Module operation changed unrelated hardware");
                 });

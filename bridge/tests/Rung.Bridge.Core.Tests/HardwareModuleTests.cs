@@ -29,8 +29,8 @@ public class HardwareModuleTests
         var dispatcher = new RpcDispatcher(() => { opened = true; return new FakeTiaSession(); }, new BridgeInfo("V20", "test"));
         var valid = JsonSerializer.Serialize(patch, RpcWire.Json);
         foreach (var bad in new[] { valid.Replace("\"version\":2", "\"version\":2,\"version\":2"),
-            valid.Replace("\"action\":\"create\"", "\"action\":\"move\""), valid.Replace(ModuleType, "Other"), valid.Replace("OrderNumber:6ES7 590-1***0-0AA0", "OtherRail"),
-            valid.Replace("\"position\":2", "\"position\":3"), valid.Replace("\"module\":", "\"changes\":[],\"module\":"),
+            valid.Replace("\"action\":\"create\"", "\"action\":\"move\""), valid.Replace(ModuleType, "Other"),
+            valid.Replace("\"position\":2", "\"position\":-1"), valid.Replace("\"module\":", "\"changes\":[],\"module\":"),
             valid.Replace("\"name\":\"New_DI\"", "\"name\":\"New_DI\",\"force\":true") })
         {
             var request = JsonSerializer.Serialize(new { id = 1, method = "hardware.preview", @params = new { patchText = bad } });
@@ -44,6 +44,15 @@ public class HardwareModuleTests
         patch = Patch(tree, "delete"); Assert.Throws<RpcException>(() => HardwarePlan.Preview(tree, patch));
         Items(tree)[2].Name = "New_DI"; Items(tree)[2].Attributes["IsBuiltIn"] = "true";
         Assert.Throws<RpcException>(() => HardwarePlan.Preview(tree, Patch(tree, "delete")));
+    }
+    [Fact] public void AnyCatalogueModuleInAFreeSlotAndAnyPluggedModuleCanBePreviewed()
+    {
+        var tree = Tree(); var patch = Patch(tree);
+        patch.Module.TypeIdentifier = "OrderNumber:6ES7 522-1BH01-0AB0/V1.1"; patch.Module.Position = 3; patch.Module.Name = "DQ_16";
+        Assert.Equal(patch.ExpectedRevision, HardwarePlan.Preview(tree, patch).Revision);
+        Items(tree).Add(Item("AI_8", 4, "OrderNumber:6ES7 531-7KF00-0AB0/V2.1"));
+        var delete = Patch(tree, "delete"); delete.Module.TypeIdentifier = "OrderNumber:6ES7 531-7KF00-0AB0/V2.1"; delete.Module.Position = 4; delete.Module.Name = "AI_8";
+        Assert.Equal(HardwarePlan.Revision(tree), HardwarePlan.Preview(tree, delete).Revision);
     }
     [Fact] public void NativeGeneratedSubtreeIsAcceptedOnlyWhenTheRemainingGraphMatches()
     {

@@ -56,11 +56,29 @@ Truncated/cyclic/oversized snapshots, duplicate changes and unknown patch fields
 are refused. Raw patch text reaches the host so duplicate JSON keys are refused
 there rather than silently discarded by the CLI.
 
-This first preview supports `Comment` and `Author` string annotations whose
-actual metadata says `ReadWrite` and `System.String`. Renames, identifiers,
-other fields are explicitly unsupported, even when
-TIA metadata alone reports write access. Snapshot access information is not an
-apply guarantee.
+A change may name any attribute the snapshot reports as `ReadWrite` with a text,
+`true`/`false`, whole-number or enumeration type (`Name`, `Comment`,
+`ClockMemoryByte`, `CycleMaximumCycleTime`, `TransmissionRateAndDuplex`, …); the
+value must be written as the snapshot shows it (an enumeration by its member name,
+`TP100MbpsFullDuplex`).
+What identifies the hardware (`TypeIdentifier`, `PositionNumber`, `IsBuiltIn`,
+`Container`, `OrderNumber`, `FirmwareVersion`) is not edited: modules are plugged
+instead. Other types (dates, certificates, lists) are refused for now.
+Snapshot access information is not an apply guarantee: the applied graph is.
+
+A network node of an interface is named by `node` next to the interface's
+`positions`: `{ device: PLC_1, positions: [1, 33024], node: X2, field: Address,
+before: 192.168.253.1, after: 192.168.253.2 }` changes that IP address. A built-in
+interface has no `typeIdentifier`; the change then names none.
+
+Turning a setting on can make TIA Portal show a dependent one: enabling
+`ClockMemoryByte` adds `ClockMemoryByteAddress`. An attribute whose name continues
+the changed one may appear or disappear with it; the result lists it under
+`related` ("added by TIA Portal"), and so does a change of which attributes of
+that item may be edited (a fixed port speed). Any other side effect is rolled
+back, and the error names it: TIA Portal changes some settings together (a fixed
+port speed switches `PortMonitoring` on), so to accept that, name the attribute in
+the patch too, with the value it gets.
 
 `rung hardware --file hardware.patch.json --apply --json` explicitly applies
 these annotations. It requires workspace writes to be on and `sync.import = auto`.
@@ -72,11 +90,10 @@ failure is reported as `RESTORATION FAILED`, never a successful apply.
 
 Apply follows `sync.save`: `after-import` saves the engineering project; `never`
 leaves it open with unsaved edits. The JSON result contains `saved`, and a failed
-save reports `SAVE_FAILED`. No PLC connection or download is involved. Rename
-and other settings remain unsupported.
+save reports `SAVE_FAILED`. No PLC connection or download is involved.
 
-A separate version 2 patch creates or deletes the proven SM521 module on
-`Rail_0`, position 2. It cannot mix module operations with annotations:
+A separate version 2 patch creates or deletes one module. It cannot mix module
+operations with annotations:
 
 ```yaml
 version: 2
@@ -91,8 +108,10 @@ module:
   name: RungStage4_DI
 ```
 
-Use the same `hardware --file ...` preview and explicit `--apply` commands.
-Other module identifiers, parent types/paths and positions refuse. Names accept
+Use the same `hardware --file ...` preview and explicit `--apply` commands. Any
+catalogue identifier (`OrderNumber:`, `GSD:`, `System:`) on any parent path of up to
+four positions is accepted when TIA Portal says it plugs there (`CanPlugNew`); the
+committed graph must differ from the snapshot by exactly that module. Names accept
 1–64 ASCII letters, digits or underscores. Preview checks the native
 `CanPlugNew` result; delete checks the exact native identity, logical container
 and `IsBuiltIn = false`. CPU and built-in children cannot be deleted here.

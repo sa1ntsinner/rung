@@ -6,6 +6,7 @@ using Rung.Bridge.Core;
 using Rung.Bridge.Core.Protocol;
 using Siemens.Engineering;
 using Siemens.Engineering.HW;
+using Siemens.Engineering.HW.Features;
 
 namespace Rung.Bridge.V20
 {
@@ -19,6 +20,15 @@ namespace Rung.Bridge.V20
             foreach (var position in positions) item = item.DeviceItems.Single(i => (int)i.GetAttribute("PositionNumber") == position);
             return item;
         }
+        /// <summary>The item at the change's slot, or the network node (X1) of that interface the change names.</summary>
+        IEngineeringObject ChangeTarget(HardwareChange change)
+        {
+            var item = HardwareTarget(change.Device, change.Positions);
+            if (change.Node == null) return item;
+            var network = (item as DeviceItem)?.GetService<NetworkInterface>() ?? throw new RpcException(ErrorCodes.BadRequest, "The item at that slot is no network interface");
+            return network.Nodes.Single(n => n.Name == change.Node);
+        }
+
         HardwareObject ModuleParent(HardwareModule m)
         {
             var parent = HardwareTarget(m.Device, m.ParentPositions);
@@ -26,9 +36,11 @@ namespace Rung.Bridge.V20
             {
                 if (!parent.CanPlugNew(m.TypeIdentifier, m.Name, m.Position)) throw new RpcException(ErrorCodes.BadRequest, "TIA refuses this module/name/slot");
             }
-            else CheckNativeModule((DeviceItem)HardwareTarget(m.Device, new[] { m.Position }), parent, m);
+            else CheckNativeModule((DeviceItem)HardwareTarget(m.Device, ModulePath(m)), parent, m);
             return parent;
         }
+        /// <summary>A rack's module is an item of the device (slot only); a deeper one sits under its parent's path.</summary>
+        static int[] ModulePath(HardwareModule m) => m.ParentPositions.Length == 1 ? new[] { m.Position } : m.ParentPositions.Concat(new[] { m.Position }).ToArray();
         static void CheckNativeModule(DeviceItem item, HardwareObject parent, HardwareModule m)
         {
             if (item.IsBuiltIn || !Equals(item.Container, parent) || item.Name != m.Name
@@ -63,10 +75,10 @@ namespace Rung.Bridge.V20
                         tx.CommitOnDispose();
                     }
                 };
-                var targets = new Dictionary<HardwareChange, HardwareObject>();
+                var targets = new Dictionary<HardwareChange, IEngineeringObject>();
                 foreach (var change in patch.Changes ?? new HardwareChange[0])
                 {
-                    targets.Add(change, HardwareTarget(change.Device, change.Positions));
+                    targets.Add(change, ChangeTarget(change));
                 }
                 var result = patch.Version == 2
                     ? HardwarePlan.ApplyModule(() => Describe("hardware", 4096), patch, () => {
@@ -78,12 +90,13 @@ namespace Rung.Bridge.V20
                         }
                         else
                         {
-                            var item = (DeviceItem)HardwareTarget(m.Device, new[] { m.Position });
+                            var item = (DeviceItem)HardwareTarget(m.Device, ModulePath(m));
                             CheckNativeModule(item, parent, m);
                             item.Delete();
                         }
                     }, transaction)
-                    : HardwarePlan.Apply(() => Describe("hardware", 4096), patch, (change, value) => targets[change].SetAttribute(change.Field, value), transaction);
+                    : HardwarePlan.Apply(() => Describe("hardware", 4096), patch,
+                        (change, value) => targets[change].SetAttribute(change.Field, HardwarePlan.As(targets[change].GetAttribute(change.Field), value)), transaction);
                 Receipts.Write(operationId, "hardware:" + _project.Path.FullName);
                 _index.Clear();
                 result.Saved = false;

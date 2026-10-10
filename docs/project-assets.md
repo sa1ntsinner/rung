@@ -64,8 +64,8 @@ No safety editing, PLC signature comparison or safety download is exposed.
 
 ## Hardware and libraries
 
-Hardware YAML/JSON snapshots support guarded Comment/Author edits, plus the
-proven SM521 V1.0 module on Rail_0 slot 2. Unsupported identifiers, locations and
-read-only attributes refuse. Existing network YAML remains separate.
+Hardware YAML/JSON snapshots support guarded edits of writable text, true/false
+and whole-number attributes, and creating or deleting catalogue modules where TIA
+Portal says they plug. Identity attributes and read-only ones refuse. Existing network YAML remains separate.
 See [libraries](libraries.md) for native package import, release and the bounded
 used-instance version update. Neither import nor release silently updates instances.

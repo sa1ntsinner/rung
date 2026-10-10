@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,9 @@ namespace Rung.Bridge.Core
     {
         public string Device;
         public int[] Positions;
+        /// <summary>A network node of the item at Positions (X1), by name: its IP address and the like.</summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string Node;
         public string TypeIdentifier;
         public string Field;
         public string Before;
@@ -40,6 +44,8 @@ namespace Rung.Bridge.Core
         public HardwareModule Module;
         public bool? Saved;
         public string[] Warnings;
+        /// <summary>Settings TIA Portal added or removed with a change (ClockMemoryByteAddress with ClockMemoryByte).</summary>
+        public string[] Related;
     }
 
     /// <summary>Pure hardware preflight. It never calls an engineering setter.</summary>
@@ -91,18 +97,27 @@ namespace Rung.Bridge.Core
             var before = read();
             var preview = Preview(before, patch);
             var expected = Copy(before);
-            foreach (var change in patch.Changes) Find(expected, change).Attributes[change.Field] = change.After;
+            foreach (var change in patch.Changes)
+            {
+                var node = Find(expected, change);
+                node.Attributes[change.Field] = change.After;
+                if (change.Field == "Name") node.Name = change.After; // a renamed item shows its new name as well
+            }
             var expectedRevision = Revision(expected);
+            var related = new List<string>();
             try
             {
                 transaction(() => {
                     foreach (var change in patch.Changes) set(change, change.After);
                     var actual = read();
-                    if (Revision(actual) != expectedRevision) throw new RpcException(ErrorCodes.ImportFailed, "Applied hardware differs from the requested graph: " + Unexpected(expected, actual));
+                    related = Related(expected, actual, patch);
+                    expectedRevision = Revision(expected);
+                    if (Revision(actual) != expectedRevision) throw new RpcException(ErrorCodes.ImportFailed, "Applied hardware differs from the requested graph: " + Unexpected(expected, actual)
+                        + " (TIA Portal changes some settings together: to accept it, name that attribute in the patch too, with the value it gets)");
                 });
                 var after = read();
                 if (Revision(after) != expectedRevision) throw new RpcException(ErrorCodes.ImportFailed, "Committed hardware differs from the requested graph");
-                return new HardwarePreview { Revision = expectedRevision, Changes = patch.Changes };
+                return new HardwarePreview { Revision = expectedRevision, Changes = patch.Changes, Related = related.Count > 0 ? related.ToArray() : null };
             }
             catch (Exception error)
             {
@@ -115,6 +130,40 @@ namespace Rung.Bridge.Core
                 catch (Exception restore) { throw new RpcException(ErrorCodes.ImportFailed, error.Message + "; RESTORATION FAILED: " + restore.Message); }
                 throw new RpcException(ErrorCodes.ImportFailed, error.Message + "; original hardware restored");
             }
+        }
+
+        /// <summary>
+        /// A setting TIA Portal shows or hides with what was changed (ClockMemoryByte → ClockMemoryByteAddress): the
+        /// expected graph takes it over from the actual one and the result names it. Anything else still differs.
+        /// </summary>
+        static List<string> Related(DescribeNode expected, DescribeNode actual, HardwarePatch patch)
+        {
+            var related = new List<string>();
+            foreach (var change in patch.Changes)
+            {
+                DescribeNode e, a;
+                try { e = Find(expected, change); a = Find(actual, change); } catch (RpcException) { continue; }
+                if (e.Attributes == null || a.Attributes == null) continue;
+                bool Dependent(string key) => key != change.Field && key.StartsWith(change.Field, StringComparison.Ordinal);
+                foreach (var key in a.Attributes.Keys.Where(k => Dependent(k) && !e.Attributes.ContainsKey(k)).ToArray())
+                {
+                    e.Attributes[key] = a.Attributes[key];
+                    if (a.AttributeInfo != null && a.AttributeInfo.TryGetValue(key, out var info)) { e.AttributeInfo = e.AttributeInfo ?? new SortedDictionary<string, DescribeAttributeInfo>(StringComparer.Ordinal); e.AttributeInfo[key] = info; }
+                    related.Add(change.Device + "/" + e.Name + "." + key + " = " + a.Attributes[key] + " (added by TIA Portal)");
+                }
+                foreach (var key in e.Attributes.Keys.Where(k => Dependent(k) && !a.Attributes.ContainsKey(k)).ToArray())
+                {
+                    e.Attributes.Remove(key); e.AttributeInfo?.Remove(key);
+                    related.Add(change.Device + "/" + e.Name + "." + key + " (removed by TIA Portal)");
+                }
+                // which of its attributes may be edited follows from the settings (a fixed port speed): metadata, not values
+                if (JsonSerializer.Serialize(e.AttributeInfo, RpcWire.Json) != JsonSerializer.Serialize(a.AttributeInfo, RpcWire.Json))
+                {
+                    e.AttributeInfo = a.AttributeInfo == null ? null : new SortedDictionary<string, DescribeAttributeInfo>(a.AttributeInfo, a.AttributeInfo.Comparer);
+                    related.Add(change.Device + "/" + e.Name + ": TIA Portal changed which settings can be edited");
+                }
+            }
+            return related;
         }
 
         static DescribeNode Find(DescribeNode tree, HardwareChange change)
@@ -133,6 +182,12 @@ namespace Rung.Bridge.Core
                 node = One(items.Where(i => i.Attributes != null && i.Attributes.TryGetValue("PositionNumber", out var p)
                     && int.TryParse(p, NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n == position));
             }
+            // a network node of an interface (X1: its IP address) by its name
+            if (change.Node != null)
+            {
+                if (node.Children == null || !node.Children.TryGetValue("NetworkNodes", out var nodes)) throw Invalid("The item at that slot has no network nodes");
+                node = One(nodes.Where(n => n.Name == change.Node));
+            }
             return node;
         }
         public static HardwarePatch Parse(JsonElement value)
@@ -150,7 +205,7 @@ namespace Rung.Bridge.Core
                 Fields(value, new[] { "version", "expectedRevision", "module" });
                 if (!value.TryGetProperty("module", out var module)) throw Invalid("Missing hardware module");
                 Fields(module, new[] { "action", "device", "parentPositions", "parentTypeIdentifier", "typeIdentifier", "position", "name" });
-                if (!module.TryGetProperty("parentPositions", out var path) || path.ValueKind != JsonValueKind.Array || path.GetArrayLength() != 1)
+                if (!module.TryGetProperty("parentPositions", out var path) || path.ValueKind != JsonValueKind.Array || path.GetArrayLength() < 1 || path.GetArrayLength() > 4)
                     throw Invalid("Unsupported module parent path");
                 HardwarePatch parsed;
                 try { parsed = JsonSerializer.Deserialize<HardwarePatch>(value.GetRawText(), RpcWire.Json); }
@@ -163,7 +218,7 @@ namespace Rung.Bridge.Core
                 throw Invalid("Invalid hardware changes");
             foreach (var change in changes.EnumerateArray())
             {
-                Fields(change, new[] { "device", "positions", "typeIdentifier", "field", "before", "after" });
+                Fields(change, new[] { "device", "positions", "node", "typeIdentifier", "field", "before", "after" });
                 if (change.TryGetProperty("positions", out var positions) && (positions.ValueKind != JsonValueKind.Array || positions.GetArrayLength() > 12))
                     throw Invalid("Invalid hardware positions");
             }
@@ -200,21 +255,67 @@ namespace Rung.Bridge.Core
             foreach (var change in patch.Changes)
             {
                 if (change == null || string.IsNullOrEmpty(change.Device) || change.Device.Length > 128 || change.Positions == null || change.Positions.Length > 12
-                    || change.Positions.Any(p => p < 0 || p > 32767) || string.IsNullOrEmpty(change.TypeIdentifier) || change.TypeIdentifier.Length > 256
+                    || change.Positions.Any(p => p < 0 || p > 65535) || change.TypeIdentifier?.Length == 0 || change.TypeIdentifier?.Length > 256
                     || change.Before == null || change.After == null || change.Before.Length > 1024 || change.After.Length > 1024
                     || change.Before.Contains('\0') || change.After.Contains('\0')) throw Invalid("Invalid hardware change");
-                // ponytail: only proven string annotations; rename/module creation require their own validated apply path.
-                if (change.Field != "Comment" && change.Field != "Author") throw Invalid("Unsupported hardware field " + change.Field);
-                var key = JsonSerializer.Serialize(new { change.Device, change.Positions, change.Field }, RpcWire.Json);
+                // what names the hardware (its type, slot, catalogue entry) is not edited here: modules are plugged instead
+                if (Identity.Contains(change.Field)) throw Invalid("Hardware field " + change.Field + " identifies the hardware and is not edited");
+                var key = JsonSerializer.Serialize(new { change.Device, change.Positions, change.Node, change.Field }, RpcWire.Json);
                 if (!seen.Add(key)) throw Invalid("Duplicate hardware change");
+                if (change.Node != null && (change.Node.Length == 0 || change.Node.Length > 64)) throw Invalid("Invalid network node name");
                 var node = Find(tree, change);
-                if (node.Attributes == null || !node.Attributes.TryGetValue("TypeIdentifier", out var type) || type != change.TypeIdentifier)
+                // the type identity is the item's: a network node has none of its own
+                var owner = change.Node == null ? node : Find(tree, new HardwareChange { Device = change.Device, Positions = change.Positions });
+                // a built-in interface has no type identifier of its own: then the change names none either
+                string type = null;
+                if (owner.Attributes == null || (owner.Attributes.TryGetValue("TypeIdentifier", out type) ? type != change.TypeIdentifier : change.TypeIdentifier != null))
                     throw Invalid("Hardware type identity differs");
                 if (!node.Attributes.TryGetValue(change.Field, out var before) || before != change.Before) throw Invalid("Hardware original value differs");
-                if (node.AttributeInfo == null || !node.AttributeInfo.TryGetValue(change.Field, out var info)
-                    || info?.Access != "ReadWrite" || info.Type != "System.String") throw Invalid("Hardware field is read-only or has an unsupported type");
+                if (node.AttributeInfo == null || !node.AttributeInfo.TryGetValue(change.Field, out var info) || info?.Access != "ReadWrite" || !Fits(info.Type, change.After))
+                    throw Invalid("Hardware field " + change.Field + " is read-only, of a type rung does not edit yet, or " + change.After + " does not fit it");
             }
             return new HardwarePreview { Revision = revision, Changes = patch.Changes };
+        }
+
+        static readonly HashSet<string> Identity = new HashSet<string>(StringComparer.Ordinal) { "TypeIdentifier", "PositionNumber", "IsBuiltIn", "Container", "OrderNumber", "FirmwareVersion" };
+        static readonly Dictionary<string, (decimal Min, decimal Max)> Integers = new Dictionary<string, (decimal, decimal)>(StringComparer.Ordinal) {
+            ["System.Byte"] = (0, byte.MaxValue), ["System.SByte"] = (sbyte.MinValue, sbyte.MaxValue), ["System.Int16"] = (short.MinValue, short.MaxValue),
+            ["System.UInt16"] = (0, ushort.MaxValue), ["System.Int32"] = (int.MinValue, int.MaxValue), ["System.UInt32"] = (0, uint.MaxValue),
+            ["System.Int64"] = (long.MinValue, long.MaxValue), ["System.UInt64"] = (0, ulong.MaxValue) };
+
+        /// <summary>The text a snapshot shows for a value of this type: strings, true/false, whole numbers in range.</summary>
+        static bool Fits(string type, string text)
+        {
+            if (type == "System.String") return true;
+            if (type == "System.Boolean") return text == "true" || text == "false";
+            // an enumeration of the engineering API (TransmissionRateAndDuplex): a member name; the bridge checks it against the type
+            if (type != null && type.StartsWith("Siemens.Engineering.", StringComparison.Ordinal)) return Regex.IsMatch(text, "^[A-Za-z_][A-Za-z0-9_]*$");
+            return type != null && Integers.TryGetValue(type, out var range) && decimal.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n)
+                && n == decimal.Truncate(n) && n >= range.Min && n <= range.Max && text == n.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>The text of a change as a value of the type the attribute holds now (Openness sets typed values).</summary>
+        public static object As(object current, string text)
+        {
+            try
+            {
+                switch (current)
+                {
+                    case string _: return text;
+                    case bool _ when text == "true" || text == "false": return text == "true";
+                    case byte _: return byte.Parse(text, CultureInfo.InvariantCulture);
+                    case sbyte _: return sbyte.Parse(text, CultureInfo.InvariantCulture);
+                    case short _: return short.Parse(text, CultureInfo.InvariantCulture);
+                    case ushort _: return ushort.Parse(text, CultureInfo.InvariantCulture);
+                    case int _: return int.Parse(text, CultureInfo.InvariantCulture);
+                    case uint _: return uint.Parse(text, CultureInfo.InvariantCulture);
+                    case long _: return long.Parse(text, CultureInfo.InvariantCulture);
+                    case ulong _: return ulong.Parse(text, CultureInfo.InvariantCulture);
+                    case Enum e when Regex.IsMatch(text, "^[A-Za-z_][A-Za-z0-9_]*$") && Enum.IsDefined(e.GetType(), text): return Enum.Parse(e.GetType(), text);
+                }
+            }
+            catch (Exception e) when (e is FormatException || e is OverflowException) { }
+            throw Invalid("The value " + text + " does not fit a " + (current?.GetType().Name ?? "missing") + " attribute");
         }
     }
 }
