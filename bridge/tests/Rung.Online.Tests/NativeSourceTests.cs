@@ -97,6 +97,18 @@ public sealed class NativeSourceTests
     }
 
     [Fact]
+    public void ListsTheUserFcsACodeBlockCalls()
+    {
+        // seen live: FB_ProveFc calls "FC_ProveAdd" (FC 5); its interface ident repeats the call hidden
+        var refs = "<?xml version='1.0' encoding='utf-8'?><IdentContainer><Ident Name='FC_ProveAdd' Scope='Global' RefId='3'><CrossRefInfo><XRefItem UId='143' Usage='Call' NetId='1' /></CrossRefInfo>"
+            + "<Access><FCBlock BlockNumber='5' BlockType='FC' Type='Block_FC' TypeName='FC_ProveAdd' /></Access></Ident>"
+            + "<Ident Name='_x0023_Count' Scope='Local' RefId='1'><CrossRefInfo><XRefItem UId='28' Usage='Write' NetId='1' /></CrossRefInfo><Access><InterfaceAccess AbsOffset='48' Type='Int' /></Access></Ident>"
+            + "<Ident Name='Fx_Global' Scope='Global' RefId='6'><CrossRefInfo><XRefItem UId='60' Usage='Read' NetId='1' /></CrossRefInfo><Access><DBBlock BlockNumber='2' /></Access></Ident></IdentContainer>";
+        Assert.Equal(new uint[] { 5 }, NativeSource.CalledFunctions([refs]));
+        Assert.Empty(NativeSource.CalledFunctions([]));
+    }
+
+    [Fact]
     public void FindsAMultiInstanceCallAndTheFbItCallsInTheCallersCode()
     {
         // as FB_ProveMath calls #inner (seen live, TIA Portal V20)

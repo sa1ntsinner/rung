@@ -333,4 +333,12 @@ describe("an instance a native sample holds by member path", () => {
     expect(() => run("#Total := #arr[2];", { TOTAL: 0 }, { TOTAL: 0 })).toThrow(/did not capture/i);
     expect(() => run("#Total := 1;", { TOTAL: 0 }, { TOTAL: 1 }, "  t : TON_TIME;\n")).toThrow(/Standard function block/i);
   });
+  it("runs a user FC inside the replay, its in/out writing back into the instance", () => {
+    const index = new WorkspaceIndex();
+    index.set(uri, 'FUNCTION_BLOCK "Counter"\nVAR_OUTPUT\n  Total : Int;\nEND_VAR\nVAR\n  n : Int;\n  sum : Int;\nEND_VAR\nBEGIN\n#Total := "Add"(a := #n, b := 1, total := #sum);\nEND_FUNCTION_BLOCK', 0);
+    index.set(uri.replace("Counter", "Add"), 'FUNCTION "Add" : Int\nVAR_INPUT\n  a : Int;\n  b : Int;\nEND_VAR\nVAR_IN_OUT\n  total : Int;\nEND_VAR\nVAR_TEMP\n  t : Int;\nEND_VAR\nBEGIN\n#t := #a * 2;\n#total := #total + #a;\n#Add := #t - #b;\nEND_FUNCTION', 0);
+    const r = reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
+      coherence: "subscription-sample", before: { mem: {}, globals: {}, paths: { N: 5, SUM: 10, TOTAL: 0 } as never }, observed: {}, observedPaths: { N: 5, SUM: 15, TOTAL: 9 } as never }, scope);
+    expect(r.divergences).toEqual([]);
+  });
 });

@@ -10,6 +10,8 @@ public sealed record NativeBody(string CompilationUnit, string Text);
 public sealed record NativeScalar(string Name, uint BitOffset, uint Bits, string Type);
 /// <summary>A local constant the compiled code uses, with the value it was compiled with.</summary>
 public sealed record NativeConstant(string Name, string Type, string Value);
+/// <summary>A user FC the captured code calls, as the PLC holds it.</summary>
+public sealed record NativeFunctionSource(string Name, NativeBody[] Bodies, NativeConstant[] Constants);
 public sealed record NativeRootCall(string Instance, uint Database, uint FunctionBlock, uint Sac, string CompilationUnit, string Element);
 
 /// <summary>Renders explicit SCL syntax only; unsupported native nodes are refused.</summary>
@@ -162,6 +164,16 @@ public static class NativeSource
         if (bindings.Count == 0) throw new NotSupportedException("No supported native scalar state.");
         pointer = instancePointer!.Value;
         return bindings.Values.OrderBy(b => b.BitOffset).ToArray();
+    }
+
+    /// <summary>The numbers of the FCs a block's code calls, from its cross references.</summary>
+    public static uint[] CalledFunctions(string[] references)
+    {
+        if (references.Length > 256 || references.Sum(r => (long)r.Length) > 1_048_576) throw new NotSupportedException("Native call references exceed limits.");
+        return references.SelectMany(r => Parse(r).Descendants().Where(e => e.Name.LocalName == "Ident"
+                && e.Descendants().Any(x => x.Name.LocalName == "XRefItem" && (string?)x.Attribute("Usage") == "Call")))
+            .SelectMany(i => i.Descendants().Where(e => e.Name.LocalName == "FCBlock").Select(e => (uint?)e.Attribute("BlockNumber") ?? throw new NotSupportedException("Missing FC number.")))
+            .Distinct().OrderBy(n => n).ToArray();
     }
 
     /// <summary>The local constants the body uses (#LIMIT), each with the immediate value the debug info shows for it.</summary>

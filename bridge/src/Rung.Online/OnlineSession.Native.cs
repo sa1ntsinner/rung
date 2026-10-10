@@ -37,6 +37,20 @@ internal sealed partial class OnlineDriver
         if (pointers.Count != 1) throw new NotSupportedException("Native instance members are addressed through more than one pointer.");
         var constants = source.BlockBody.SelectMany(body => NativeSource.Constants(source.FunctionalObjectDebugInfo, body))
             .GroupBy(c => c.Name).Select(g => g.Distinct().Count() == 1 ? g.First() : throw new NotSupportedException("Native constant #" + g.Key + " shows two values.")).ToArray();
+        // the user FCs the FB calls, directly or through other FCs: the replay runs them, so their code travels with the sample
+        var functions = new List<(NativeFunctionSource Source, uint RelationId, byte[] Signature)>();
+        var pending = new Queue<uint>(NativeSource.CalledFunctions(source.InternalReferences.ToArray()));
+        var seen = new HashSet<uint>();
+        while (pending.TryDequeue(out var number)) {
+            if (!seen.Add(number)) continue;
+            if (seen.Count > 64) throw new NotSupportedException("Too many FCs called for program status.");
+            var fc = blocks.Single(b => b.Type == S7CommPlusBlockType.FC && b.Number == number);
+            var content = await client.GetBlockContentAsync(fc.RelationId, token);
+            if (content.CodeModifiedTimestampBytes?.Length != 8) throw new NotSupportedException($"\"{fc.Name}\": native FC source is unavailable.");
+            var fcConstants = content.BlockBody.SelectMany(body => NativeSource.Constants(content.FunctionalObjectDebugInfo, body)).Distinct().ToArray();
+            functions.Add((new(fc.Name, content.BlockBody.Select(NativeSource.Render).ToArray(), fcConstants), fc.RelationId, content.CodeModifiedTimestampBytes));
+            foreach (var next in NativeSource.CalledFunctions(content.InternalReferences.ToArray())) pending.Enqueue(next);
+        }
         var guid = Guid.NewGuid().ToByteArray(); uint uid = 0;
         foreach (var part in new[] { 0, 4, 8, 12 }) uid ^= BitConverter.ToUInt32(guid, part);
         var plan = NativeCaptureEncoder.Build(selected.Number, pointers.Single(), source.CodeModifiedTimestampBytes, scalars, uid);
@@ -74,10 +88,10 @@ internal sealed partial class OnlineDriver
             || !currentCaller.CodeModifiedTimestampBytes.AsSpan().SequenceEqual(callerSource.CodeModifiedTimestampBytes)
             || !NativeSource.RootCallSites(currentCaller.FunctionalObjectDebugInfo, currentCaller.BlockBody.ToArray(), currentCaller.InternalReferences.ToArray(), path[0]).SequenceEqual(routes))
             throw new RpcException(ErrorCodes.UnsupportedObject, "Native source changed during capture.");
-        foreach (var link in chain)
+        foreach (var link in chain.Select(c => (c.RelationId, c.Signature)).Concat(functions.Select(f => (f.RelationId, f.Signature))))
             if (!(await client.GetBlockContentAsync(link.RelationId, token)).CodeModifiedTimestampBytes.AsSpan().SequenceEqual(link.Signature))
                 throw new RpcException(ErrorCodes.UnsupportedObject, "Native source changed during capture.");
-        lock (sync) return new(bodies, scalars, route!, Convert.ToBase64String(source.CodeModifiedTimestampBytes), samples.ToArray(), constants);
+        lock (sync) return new(bodies, scalars, route!, Convert.ToBase64String(source.CodeModifiedTimestampBytes), samples.ToArray(), constants, functions.Select(f => f.Source).ToArray());
     }
 }
 

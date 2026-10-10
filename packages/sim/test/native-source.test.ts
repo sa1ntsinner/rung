@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, it } from "vitest";
 import { WorkspaceIndex } from "@rung/lsp";
-import { nativeGlobalReads, verifyNativeBody, verifyNativeScalars } from "../src/native-source.js";
+import { nativeFunctions, nativeGlobalReads, verifyNativeBody, verifyNativeScalars } from "../src/native-source.js";
 
 const uri = "file:///fixture/plc/PLC_1/blocks/F.scl";
 function source(body: string) {
@@ -65,7 +65,7 @@ it("refuses external state and user calls without matching native dependency sou
     const index = new WorkspaceIndex();
     index.set(uri, `FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nBEGIN\n#n := ${expression};\nEND_FUNCTION_BLOCK`, 0);
     index.set(uri.replace('/F.scl', '/Other.scl'), 'FUNCTION "Other" : Int\nBEGIN\nOther := 1;\nEND_FUNCTION', 0);
-    expect(() => verifyNativeScalars(index, uri, bindings)).toThrow(/external|dependency/i);
+    expect(() => verifyNativeScalars(index, uri, bindings)).toThrow(/external|dependency|PLC code of this FC/i);
   }
   const local = new WorkspaceIndex();
   local.set(uri, 'FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nBEGIN\n#n := #n.%X3;\nEND_FUNCTION_BLOCK', 0);
@@ -99,4 +99,28 @@ it("accepts a structure member and an array element by path when the declaration
   expect(() => verifyNativeScalars(index, uri, [int("ARR[5]", 96)])).toThrow(/ARR\[5\]/);
   expect(() => verifyNativeScalars(index, uri, [int("S.Z", 96)])).toThrow(/S\.Z/);
   expect(() => verifyNativeScalars(index, uri, [int("S.B", 64)])).toThrow(/type/i);
+});
+
+it("verifies each user FC the FB calls against the PLC's own FC code, and reads the globals the FC reads", () => {
+  const bindings = [{ name: "N", bitOffset: 32, bits: 16, type: '{Scalar"33554437"Int}' }];
+  const fc = uri.replace("/F.scl", "/Add.scl"), inner = uri.replace("/F.scl", "/Inner.scl");
+  const index = new WorkspaceIndex();
+  index.set(uri, 'FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nBEGIN\n#n := "Add"(a := #n);\nEND_FUNCTION_BLOCK', 0);
+  index.set(fc, 'FUNCTION "Add" : Int\nVAR_INPUT\n a : Int;\nEND_VAR\nVAR CONSTANT\n STEP : Int := 2;\nEND_VAR\nBEGIN\n#Add := "Inner"(x := #a) + #STEP + "G".k;\nEND_FUNCTION', 0);
+  index.set(inner, 'FUNCTION "Inner" : Int\nVAR_INPUT\n x : Int;\nEND_VAR\nBEGIN\n#Inner := #x + 1;\nEND_FUNCTION', 0);
+  index.set(uri.replace("/F.scl", "/G.db"), 'DATA_BLOCK "G"\nVERSION : 0.1\n   VAR\n      k : Int;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK', 0);
+  expect(nativeFunctions(index, uri)).toEqual([fc, inner]);
+  // the FC's own global reads are captured next to the sample, like the FB's
+  expect(nativeGlobalReads(index, uri)).toEqual(['"G".k']);
+  const add = { name: "Add", bodies: ['#Add := "Inner"(x := #a) + #STEP + "G".k;'], constants: [{ name: "STEP", type: '{Scalar"33554437"Int}', value: "2" }] };
+  const innerNative = { name: "Inner", bodies: ["#Inner := #x + 1;"], constants: [] };
+  expect(() => verifyNativeScalars(index, uri, bindings, [], [add, innerNative])).not.toThrow();
+  // without the FC's PLC code, or with code that differs, or a constant compiled with another value: refused
+  expect(() => verifyNativeScalars(index, uri, bindings, [])).toThrow(/Add/);
+  expect(() => verifyNativeScalars(index, uri, bindings, [], [add])).toThrow(/Inner/);
+  expect(() => verifyNativeScalars(index, uri, bindings, [], [{ ...add, bodies: ['#Add := #a;'] }, innerNative])).toThrow(/Add.*differs|differs.*Add/);
+  expect(() => verifyNativeScalars(index, uri, bindings, [], [{ ...add, constants: [{ ...add.constants[0]!, value: "3" }] }, innerNative])).toThrow(/STEP/);
+  // an FC that calls itself back, or calls an FB, stays out of reach
+  index.set(inner, 'FUNCTION "Inner" : Int\nVAR_INPUT\n x : Int;\nEND_VAR\nBEGIN\n#Inner := "Add"(a := #x);\nEND_FUNCTION', 1);
+  expect(() => nativeFunctions(index, uri)).toThrow(/recurs/i);
 });

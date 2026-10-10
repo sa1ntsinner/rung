@@ -70,8 +70,11 @@ sample. DB members and tags the FB reads or writes are read right before and aft
 the sample; a value that moved in between refuses it, and what the FB writes is
 compared with the PLC's value. A local constant the code uses replays with its
 declared value only when the PLC shows it was compiled with that value (integer
-constants; a different value asks for a download). Standard FB instances (TON, CTU:
-their state is not in the sample), other constants, CPU clocks, calls of user blocks, instance DBs
+constants; a different value asks for a download). A user FC the FB calls, directly
+or through other FCs, runs inside the replay when its source is the code the PLC
+holds; the DB members and tags it reads are read next to the sample like the FB's.
+Standard FB instances (TON, CTU: their state is not in the sample), other constants,
+CPU clocks, calls of FBs other than multi-instances, recursive FCs, instance DBs
 called from inside an FB, other OBs and computed array indexes that the cycle reads
 are explicitly refused. Source revision, session scope/epoch, reader lifetime
 and dirty editor sources invalidate the result. Missing native support retains

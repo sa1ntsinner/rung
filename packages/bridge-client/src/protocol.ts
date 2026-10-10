@@ -70,6 +70,8 @@ export interface OnlineNativeCapture {
     scalars: { name: string; bitOffset: number; bits: number; type: string }[];
     /** Local constants the code uses, with the value the PLC compiled (absent from older hosts). */
     constants?: { name: string; type: string; value: string }[];
+    /** User FCs the code calls, directly or through other FCs, as the PLC holds them (absent from older hosts). */
+    functions?: { name: string; bodies: { compilationUnit: string; text: string }[]; constants: { name: string; type: string; value: string }[] }[];
     route: { instance: string; database: number; functionBlock: number; sac: number; compilationUnit: string; element: string };
     codeSignature: string;
     samples: { observedAt: number; sequence: number; state: { before: Record<string, number | boolean>; after: Record<string, number | boolean> } }[];
