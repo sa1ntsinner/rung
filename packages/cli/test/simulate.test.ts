@@ -101,6 +101,34 @@ describe("rung simulate (virtual S7-1500)", () => {
     }
   });
 
+  it("does not expose partial values after a failed cycle and recovers after a successful cycle", async () => {
+    const dir = workspace();
+    writeFileSync(join(dir, "plc", "PLC_1", "blocks", "Main.scl"), MAIN.replace('"Plant".cycles := "Plant".cycles + 1;', '"Plant".cycles := "Plant".cycles + 1;\n IF "Plant".setpoint > 0.0 THEN\n "MissingDependency"();\n END_IF;'));
+    const plc = await startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 });
+    const client = new WebApiClient({ url: plc.url, user: "any", password: "x" });
+    try {
+      const failed = await client.read(['"Plant".cycles', '"Plant".speed']);
+      expect(failed).toEqual([
+        expect.objectContaining({ error: expect.stringMatching(/Simulation cycle failed.*MissingDependency/i) }),
+        expect.objectContaining({ error: expect.stringMatching(/Simulation cycle failed.*MissingDependency/i) }),
+      ]);
+      expect(failed.every(row => row.value === undefined)).toBe(true);
+      expect(plc.cycles()).toBe(0);
+      const post = async (method: string, params: Record<string, unknown>, token?: string) =>
+        (await fetch(plc.url + "/api/jsonrpc", { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-auth-token": token } : {}) }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
+      const login = await post("Api.Login", { user: "any", password: "x" }) as { result: { token: string } };
+      await post("PlcProgram.Write", { var: '"Plant".setpoint', value: 0 }, login.result.token);
+      await sleep(50);
+      const recovered = await client.read(['"Plant".speed']);
+      expect(recovered).toEqual([expect.objectContaining({ value: 0 })]);
+      expect(recovered[0]!.error).toBeUndefined();
+      expect(plc.cycles()).toBeGreaterThan(0);
+    } finally {
+      await client.logout();
+      await plc.close();
+    }
+  });
+
   it("accepts writes (to drive inputs in a test) and rejects calls without a login", async () => {
     const plc = await startVirtualPlc(workspace(), { host: "127.0.0.1", port: 0, cycleMs: 5 });
     try {

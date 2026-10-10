@@ -30,6 +30,33 @@ function setup(answers: string[] = []) {
 }
 
 describe("rung session", () => {
+  it("older bridges refuse discard without saving or closing", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    t.env.FAKE_OLD_BRIDGE = "1";
+    t.patch({ sessionModified: true });
+    expect(await t.run(["session", "--release", "--discard"])).toBe(1);
+    expect(t.err.join("")).toContain("METHOD_NOT_FOUND");
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.sessionReleased).not.toBe(true);
+    expect(db.sessionSaved).not.toBe(true);
+  });
+  it("explicitly discards unsaved keeper changes even with auto-save enabled", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    expect(readFileSync(t.toml, "utf8")).toContain('save = "after-import"');
+    t.patch({ sessionModified: true });
+    expect(await t.run(["session", "--release", "--discard"])).toBe(0);
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(db.sessionReleased).toBe(true);
+    expect(db.sessionSaved).toBe(false);
+  });
+  it.each([["--discard"], ["--release", "--save", "--discard"]])("rejects invalid discard flags before connecting: %s", async (...flags) => {
+    const t = setup();
+    expect(await t.run(["session", ...flags])).toBe(1);
+    expect(t.err.join("")).toMatch(/--discard requires --release|--save and --discard/);
+    expect(JSON.parse(readFileSync(t.objects, "utf8")).startArgs).toBeUndefined();
+  });
   it("prints the custom download destination before asking for confirmation", async () => {
     const t = setup(["no"]);
     t.patch({ project: { name: "RungFixture", path: PROJECT.replace("ap20", "ap21"), tiaVersion: "V21", devices: ["PLC_1"], isLocalSession: false } });

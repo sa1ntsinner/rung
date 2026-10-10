@@ -27,7 +27,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportPreview PreviewLibrary(LibraryPackage package, string device)
         {
-#if TIA_V21
+#if TIA_V19 || TIA_V21
             throw new RpcException(ErrorCodes.UnsupportedCapability, "Native library packages are validated for V20 only");
 #else
             Alive();
@@ -89,7 +89,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request)
         {
-#if TIA_V21
+#if TIA_V19 || TIA_V21
             throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library release is validated for V20 only");
 #else
             Alive();using(var access=_portal.ExclusiveAccess("rung: library release preview")) {
@@ -101,7 +101,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request,string expectedRevision,string operationId)
         {
-#if TIA_V21
+#if TIA_V19 || TIA_V21
             throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library release is validated for V20 only");
 #else
             Alive();FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
@@ -127,7 +127,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId)
         {
-#if TIA_V21
+#if TIA_V19 || TIA_V21
             throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library packages are validated for V20 only");
 #else
             Alive();
@@ -166,7 +166,7 @@ namespace Rung.Bridge.V20
         }
         public IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir)
         {
-#if TIA_V21
+#if TIA_V19 || TIA_V21
             throw new RpcException(ErrorCodes.UnsupportedCapability, "Native library packages are validated for V20 only");
 #else
             Alive();

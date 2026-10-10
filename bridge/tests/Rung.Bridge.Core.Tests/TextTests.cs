@@ -31,6 +31,16 @@ public class TextNormalizerTests
 
 public class ProtectedYamlTests
 {
+    [Fact] public void KeepsOnlyPublicSystemInstanceType()
+    {
+        var e = new ObjectEntry { Address = "plc:P/blocks/Edge", Kind = "block", BlockType = "InstanceDB", IsSystem = true };
+        var y = ProtectedYaml.Render(e, "R_TRIG");
+        Assert.Contains("isSystem: true", y);
+        Assert.Contains("instanceOf: \"R_TRIG\"", y);
+        Assert.Contains("readOnly: true", y);
+        e.IsSystem = false;
+        Assert.DoesNotContain("instanceOf:", ProtectedYaml.Render(e, "SecretFB"));
+    }
     [Fact] public void RendersQuotedFields()
     {
         var y = ProtectedYaml.Render(new ObjectEntry { Address = "plc:P/blocks/A\"B", Kind = "block", BlockType = "FB", Number = 5, Language = "SCL" });

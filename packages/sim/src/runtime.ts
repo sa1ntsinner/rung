@@ -1117,7 +1117,8 @@ export class Simulator {
       if (last && "member" in last) {
         const base = this.read({ ...c.callee, path: c.callee.path.slice(0, -1) }, frame);
         const method = last.member.toUpperCase();
-        if (isInstance(base) && base.std && STANDARD_BY_NAME.get(base.__fb.toUpperCase())?.methods?.includes(method)) {
+        const std = isInstance(base) && base.std ? STANDARD_BY_NAME.get(base.__fb.toUpperCase()) : undefined;
+        if (isInstance(base) && base.std && (std?.methods?.includes(method) || (/^(TON|TOF|TP|CTU|CTD|CTUD)$/.test(method) && std?.name.replace(/_(L?TIME|[UD]?INT)$/i, "") === method))) {
           this.bindInputs(base.mem, null, c.args, frame);
           this.stdStep(base, method);
           this.bindOutputs(base.mem, null, c.args, frame);

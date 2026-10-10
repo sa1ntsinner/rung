@@ -80,9 +80,9 @@ describe("rung test runner", () => {
     expect(r.cases[0]).toMatchObject({ passed: false, error: "Strat does not exist (did you mean Start?)", errorStep: 2, errorLine: 6, line: 3 });
     // an error before any step (a block the tests cannot call) has no step
     const idx = index();
-    idx.set("file:///w/plc/P/blocks/Fx_Ob.scl", 'ORGANIZATION_BLOCK "Fx_Ob"\nBEGIN\nEND_ORGANIZATION_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Ob.scl", 'DATA_BLOCK "Fx_Ob"\nBEGIN\nEND_DATA_BLOCK\n', 0);
     const ob = await runTestFile(idx, "o.yaml", "block: Fx_Ob\ncases:\n  - name: case 4\n    steps:\n      - cycle: 1\n");
-    expect(ob.cases[0]!.error).toMatch(/tests call FBs, FCs or PROGRAMs/);
+    expect(ob.cases[0]!.error).toMatch(/tests call FBs, FCs, OB bodies or PROGRAMs/);
     expect(ob.cases[0]).not.toHaveProperty("errorStep");
     expect(toJUnit([r])).toContain('<error message="step 2: Strat does not exist (did you mean Start?)"/>');
   });

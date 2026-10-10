@@ -441,10 +441,12 @@ export async function cmdOpen(dir: string, file: string, io: Io, save = false): 
 
 /** Inspect or release an existing portal, through watch when it owns the workspace. */
 export async function cmdSession(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  const { config, link } = await workspace(dir, io, false, false);
   if (v.save && !v.release) throw new WorkspaceError("BAD_ARGUMENT", "--save requires --release");
+  if (v.discard && !v.release) throw new WorkspaceError("BAD_ARGUMENT", "--discard requires --release");
+  if (v.save && v.discard) throw new WorkspaceError("BAD_ARGUMENT", "--save and --discard cannot be used together");
+  const { config, link } = await workspace(dir, io, false, false);
   if (v.release) {
-    const r = await link.call("sessionRelease", { save: !!v.save }, (b) => b.releaseSession(!!v.save));
+    const r = await link.call(v.discard ? "sessionDiscard" : "sessionRelease", { save: !!v.save }, (b) => b.releaseSession(!!v.save, !!v.discard));
     io.stdout(v.json ? JSON.stringify(r) + "\n" : "released the project from rung's background TIA Portal\n");
   } else {
     const r = await link.call("sessionState", {}, (b) => b.sessionState()).catch((e: { code?: string }) => {

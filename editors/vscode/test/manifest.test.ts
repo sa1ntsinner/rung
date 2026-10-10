@@ -10,6 +10,10 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const commands = new Set<string>(pkg.contributes.commands.map((c: { command: string }) => c.command));
 
 describe("manifest", () => {
+  it("completes the computer check on readiness rather than a command click", () => {
+    const step = pkg.contributes.walkthroughs.find((w: { id: string }) => w.id === "rung.getStarted").steps.find((s: { id: string }) => s.id === "check");
+    expect(step.completionEvents).toEqual(["onContext:rung.tiaReady"]);
+  });
   it("offers release in the PLC title menu", () => {
     expect(commands.has("rung.session.release")).toBe(true);
     expect(pkg.contributes.menus["view/title"].some((m: { command: string; when?: string }) => m.command === "rung.session.release" && m.when?.includes("rung.plc"))).toBe(true);

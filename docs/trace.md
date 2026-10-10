@@ -1,6 +1,6 @@
 # Trace recording
 
-Record numeric and Boolean signals through the existing read-only PLC subscription:
+Record numeric and Boolean signals through a read-only S7CommPlus subscription. First configure the selected PLC and verify its certificate pin as described in [Going online](online.md#installed-release). The installed release includes the host. Web API and `rung simulate` do not support trace recording; use `rung live read` or `rung live watch` for those backends.
 
 ```sh
 rung trace record ProveOps_DB.a ProveOps_DB.sum --device PLC_1 --out capture.json --duration 30 --interval 100

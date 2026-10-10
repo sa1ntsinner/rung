@@ -22,6 +22,21 @@ V21 could go online at another address (`8318938`): a real V21 with PLCSIM reach
 
 The V21 TLS spike refused both the default `NonVerified` and explicit `NonTrusted` selections; `Trusted` connected. rung refuses an untrusted certificate unless consent is given for that connection (`a0a9195`, `a6cc192`). rung's PLCSIM path uses legacy communication and asks for no certificate, so these runs do not verify rung's TLS path on a real PLC. PLC password callbacks did not fire on the protected PLCSIM Advanced instance; password and user management still need a protected real S7-1500 check.
 
+## Online through S7CommPlus, measured
+
+Measured on 2026-10-10 against a PLCSIM Advanced 7.0 CPU 1516 (firmware 2.9) on this PC, over TLS 1.3 with the
+certificate pinned by its SHA-256:
+
+- 11 values read by name (BOOL, INT, REAL, STRING in a global DB, array elements of one and two dimensions, a
+  member of an array of structures, a multi-instance member, I and Q tags) equal the values the PLCSIM API reports.
+- The first value of a newly opened monitor arrives in 80–110 ms once the connection is up.
+- Modifying a BOOL, an INT, a REAL and a STRING each needs a confirmation that shows the PLC, its serial number, the
+  old value and the new one; the PLC reports the new value and the old one is restored afterwards.
+- STOP and RUN are confirmed the same way; the CPU's own alarms about the mode change arrive while it happens.
+- A trace of two signals sampled every 100 ms for 3 s holds 28 observations; it is not synchronous with the PLC cycle
+  and says so.
+- Absolute addresses of memory and process images (%MW, %ID, %QB) without a tag are not read: rung reports them as
+  unsupported instead of guessing an offset.
 ## Sync under interruption
 
 `tests/e2e/soak.e2e.test.ts` runs against a real TIA Portal V20: two people edit the same six blocks, one in the files and one in TIA Portal (a second Openness client), while `rung sync` runs and is killed at random moments, also in the middle of an import. After every step and at the end it checks:

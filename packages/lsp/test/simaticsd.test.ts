@@ -44,7 +44,7 @@ describe("LAD in SIMATIC SD text", () => {
         "// network 1",
         "#Run := (#Start OR #Run) AND (NOT #Stop) AND (NOT #Fault);",
         "// network 2",
-        "#StartDelay(IN := #Run, PT := T#3S);",
+        "#StartDelay.TON(IN := #Run, PT := T#3S);",
         "#Ready := #StartDelay.Q;",
         "// network 3",
         "#HighPressure := #Pressure > 6.5;",

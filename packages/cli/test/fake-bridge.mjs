@@ -71,10 +71,14 @@ rl.on("line", (line) => {
       if (process.env.FAKE_NO_PROJECT || db.sessionReleased) return reply({ projectPath: db.project.path, open: false, ...(db.closedKeeperPid ? { keeperPid: db.closedKeeperPid } : {}) });
       return reply({ projectPath: db.project.path, tiaPid: 42, mode: db.sessionMode ?? "headless", heldBy: db.sessionHeldBy ?? "keeper", keeperPid: 7, attachedSessions: 1 });
     case "session.release":
+    case "session.discard":
+      if (req.method === "session.discard" && process.env.FAKE_OLD_BRIDGE) return fail("METHOD_NOT_FOUND", "session.discard");
+      p.discard = req.method === "session.discard" || p.discard;
+      if (p.save && p.discard) return fail("BAD_REQUEST", "save and discard cannot be used together");
       if (db.sessionMode === "ui" || (db.sessionHeldBy ?? "keeper") !== "keeper") return fail("PROJECT_BUSY", "another program holds it");
       if ((db.sessionAttachedSessions ?? 1) > 2) return fail("PROJECT_IN_USE", "other bridges are still attached; stop their Watch sessions first");
-      if (db.sessionModified && !p.save && !argv.includes("--save-after-import")) return fail("PROJECT_UNSAVED", "unsaved changes");
-      db.sessionSaved = !!db.sessionModified;
+      if (db.sessionModified && !p.discard && !p.save && !argv.includes("--save-after-import")) return fail("PROJECT_UNSAVED", "unsaved changes");
+      db.sessionSaved = !!db.sessionModified && !p.discard;
       db.sessionReleased = true;
       save(db);
       return reply({ released: true });

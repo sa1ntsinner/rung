@@ -496,7 +496,8 @@ class Network {
       const v = this.input(uid, pin.toLowerCase());
       if (v !== undefined) params.push(`${pin} := ${v}`);
     }
-    this.lines.push(`${self}(${params.join(", ")});`);
+    const method = /^(TON|TOF|TP|CTU|CTD|CTUD)$/.test(P) ? `.${P}` : "";
+    this.lines.push(`${self}${method}(${params.join(", ")});`);
     const outs: Record<string, string> = {};
     for (const [key, node] of this.pins) {
       if (!key.startsWith(`${uid}:`)) continue;

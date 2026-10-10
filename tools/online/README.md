@@ -66,7 +66,6 @@ after two animation frames, checks ten warm reopenings and verifies that the
 broker PID is retained. Physical screen pixels are not sampled. Normal editor
 suites do not contact PLCSIM.
 
-Follow the ten hardware acceptance steps in `rung-notes/plans/item2-codex.md`.
 Keep raw observations, modes, epochs, alarm timestamps and resource measurements;
 record unavailable checks explicitly. Fixture downloads are separate operations.
 Offline tests do not establish hardware interoperability or performance.

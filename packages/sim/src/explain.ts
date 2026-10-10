@@ -62,6 +62,7 @@ export function explainStatic(index: WorkspaceIndex, uri: string, target: string
   const doc = index.docs.get(uri);
   const block = doc?.parsed?.blocks[0];
   if (!doc || !block) throw new Error("this file holds no block to explain");
+  if (block.xml || block.lad !== undefined || block.stl) throw new Error("Why supports SCL/ST source only; for LAD/FBD/STL/XML use rung who or rung xref to find writers");
   const sim = new Simulator(index);
   const stmts = sim.statementsOf(block);
   const parents = sim.parentsOf(block);

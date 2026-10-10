@@ -13,7 +13,7 @@ namespace Rung.Bridge.Core
     public interface ITiaSession
     {
         SessionState GetSessionState();
-        void ReleaseSession(bool save);
+        void ReleaseSession(bool save, bool discard = false);
         ProjectInfo GetProjectInfo();
         /// <param name="known">What the client knows from earlier listings (RevisionCache); may be null.</param>
         IReadOnlyList<ObjectEntry> ListObjects(string device, IReadOnlyDictionary<string, KnownRevision> known = null);

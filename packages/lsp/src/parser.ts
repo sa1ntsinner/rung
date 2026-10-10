@@ -2,6 +2,7 @@
 // Error-tolerant structural parser for Siemens SCL sources (.scl, .db, .udt, and the interface of .awl).
 // It builds what editor features need: blocks, interfaces, regions, references and structural diagnostics.
 import { lex, type LexError, type Token } from "./lexer.js";
+import { STANDARD_BY_NAME } from "./catalog.js";
 
 export type BlockKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "PRG" | "GVL";
 export type Section = "Input" | "Output" | "InOut" | "Static" | "Temp" | "Constant" | "Return" | "Member";
@@ -656,7 +657,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         if (peek().text === ";") next();
         continue;
       }
-      if (x.kind === "global" && h.kind === "DB") {
+      if (h.kind === "DB" && (x.kind === "global" || (x.kind === "ident" && STANDARD_BY_NAME.get(x.text.toUpperCase())?.kind === "functionBlock"))) {
         next();
         block.dbOf = unquote(x.text);
         continue;

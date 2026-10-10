@@ -704,7 +704,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     try {
       if (g.block.kind === "PRG") inst = sim.read({ root: { kind: "global", name: g.block.name }, path: [], start: 0 }, null) as Instance; // one shared PROGRAM instance
       else if (isFb) inst = sim.newInstance(g.block.name);
-      else if (g.block.kind !== "FC") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs or PROGRAMs`);
+      else if (g.block.kind !== "FC" && g.block.kind !== "OB") throw new SimError(`${blockName} is a ${g.block.kind}; tests call FBs, FCs, OB bodies or PROGRAMs`);
       for (const [si, step] of (c.steps ?? []).entries()) {
         current = si + 1;
         hooks.step?.(current);

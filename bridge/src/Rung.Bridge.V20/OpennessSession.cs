@@ -181,6 +181,8 @@ namespace Rung.Bridge.V20
                     chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath);
                 }
                 var proc = procs.First(p => p.Id == chosen.Pid);
+                OpennessWhitelist.Require(System.Reflection.Assembly.GetExecutingAssembly().Location, TiaVersion.Name.Substring(1) + ".0",
+                    (key, value) => Microsoft.Win32.Registry.GetValue(key, value, null) as string, proc.Mode == TiaPortalMode.WithUserInterface);
                 var portal = proc.Attach();
                 var project = portal.Projects.FirstOrDefault(p => args.ProjectPath == null || string.Equals(p.Path.FullName, Path.GetFullPath(args.ProjectPath), StringComparison.OrdinalIgnoreCase));
                 if (project == null)
@@ -435,9 +437,25 @@ namespace Rung.Bridge.V20
             foreach (PlcBlock b in group.Blocks) refs.Add(BlockRef(root, group, path, b));
             foreach (PlcBlockUserGroup g in group.Groups)
                 WalkBlocks(root, g, new List<string>(path) { g.Name }, refs);
+            if (group is PlcBlockSystemGroup system)
+                foreach (PlcSystemBlockGroup g in system.SystemBlockGroups)
+                    WalkSystemBlocks(root, g, new List<string>(path) { g.Name }, refs);
         }
 
-        ObjectRef BlockRef(SoftwareRoot root, PlcBlockGroup group, List<string> path, PlcBlock b)
+        void WalkSystemBlocks(SoftwareRoot root, PlcSystemBlockGroup group, List<string> path, List<ObjectRef> refs)
+        {
+            foreach (PlcBlock b in group.Blocks)
+            {
+                if (!(b is InstanceDB)) continue;
+                var r = BlockRef(root, group, path, b);
+                r.Entry.IsSystem = true;
+                refs.Add(r);
+            }
+            foreach (PlcSystemBlockGroup g in group.Groups)
+                WalkSystemBlocks(root, g, new List<string>(path) { g.Name }, refs);
+        }
+
+        ObjectRef BlockRef(SoftwareRoot root, object group, List<string> path, PlcBlock b)
         {
             var a = Attributes(b, BlockAttributes)
                 ?? new object[] { b.Name, b.Namespace, b.ProgrammingLanguage, b.Number, b.IsKnowHowProtected, b.IsConsistent, b.ModifiedDate, b.CodeModifiedDate, b.InterfaceModifiedDate };
@@ -682,6 +700,7 @@ namespace Rung.Bridge.V20
                 for (;;)
                 {
                     if (g is PlcBlockUserGroup bu) { groups.Insert(0, bu.Name); g = bu.Parent; }
+                    else if (g is PlcSystemBlockGroup sb) { groups.Insert(0, sb.Name); g = sb.Parent; }
                     else if (g is PlcTypeUserGroup tu) { groups.Insert(0, tu.Name); g = tu.Parent; }
                     else if (g is PlcTagTableUserGroup gu) { groups.Insert(0, gu.Name); g = gu.Parent; }
                     else if (g is PlcWatchAndForceTableUserGroup wu) { groups.Insert(0, wu.Name); g = wu.Parent; }
@@ -852,7 +871,7 @@ namespace Rung.Bridge.V20
                         return form;
                     }
                     case "protected.yaml":
-                        File.WriteAllText(primary.FullName, ProtectedYaml.Render(r.Entry), new UTF8Encoding(false));
+                        File.WriteAllText(primary.FullName, ProtectedYaml.Render(r.Entry, (r.Obj as InstanceDB)?.InstanceOfName), new UTF8Encoding(false));
                         return form;
                     case "yaml" when r.Entry.Kind == "hardware":
                         File.WriteAllText(primary.FullName, NetworkText(AddressFormat.Parse(r.Entry.Address).Device, NetworkNodes((DeviceItem)r.Obj)), new UTF8Encoding(false));
@@ -1599,7 +1618,7 @@ namespace Rung.Bridge.V20
                     }
                 }
             }
-            catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+            catch (EngineeringException e) { throw CompileFailure.Refused(e.Message); }
             return messages;
         }
 
@@ -1767,6 +1786,8 @@ namespace Rung.Bridge.V20
                 throw new RpcException(ErrorCodes.BadRequest, "A new project goes in a folder of its own name, like " + Path.Combine(file.DirectoryName ?? "", name, name + file.Extension));
             if (create && file.Directory.Exists && file.Directory.EnumerateFileSystemInfos().Any())
                 throw new RpcException(ErrorCodes.BadRequest, file.Directory.FullName + " is not empty; a new project needs a new folder");
+            OpennessWhitelist.Require(System.Reflection.Assembly.GetExecutingAssembly().Location, TiaVersion.Name.Substring(1) + ".0",
+                (key, value) => Microsoft.Win32.Registry.GetValue(key, value, null) as string);
         }
 
         static OpennessSession OpenHeadless(BridgeArgs args, Action<string, object> emit)

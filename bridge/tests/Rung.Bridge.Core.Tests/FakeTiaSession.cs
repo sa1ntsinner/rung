@@ -30,9 +30,9 @@ public sealed class FakeTiaSession : ITiaSession
     public bool SessionWindow, SessionModified, SessionSaveAfterImport, SessionClosed, SessionSaved;
     public bool SessionKeeper = true;
     public SessionState GetSessionState() => new SessionState { ProjectPath = GetProjectInfo().Path, TiaPid = 42, Mode = SessionWindow ? "ui" : "headless", HeldBy = SessionKeeper ? "keeper" : "other", AttachedSessions = 1 };
-    public void ReleaseSession(bool save)
+    public void ReleaseSession(bool save, bool discard = false)
     {
-        var step = SessionRelease.Decide(SessionWindow, SessionKeeper, SessionModified, save || SessionSaveAfterImport);
+        var step = SessionRelease.Decide(SessionWindow, SessionKeeper, SessionModified, save || SessionSaveAfterImport, discard: discard);
         if (step == WindowStep.Busy) throw new RpcException(ErrorCodes.ProjectBusy, "another program holds it");
         if (step == WindowStep.Unsaved) throw new RpcException(ErrorCodes.ProjectUnsaved, "unsaved changes");
         SessionSaved = step == WindowStep.SaveAndMove;

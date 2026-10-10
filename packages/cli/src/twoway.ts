@@ -219,6 +219,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       setTimeout(released, 0);
       return { released: true };
     },
+    sessionDiscard: async () => {
+      await watcher.stop(async () => { await tools().releaseSession(false, true); });
+      setTimeout(released, 0);
+      return { released: true };
+    },
     read: async (p) => tools().read(String(p.device), (p.expressions as string[]) ?? []),
     download: async (p) => {
       // rung download's own checks, applied here too: whatever else reaches the owner cannot skip them
@@ -436,7 +441,8 @@ export async function addressOf(ws: string, what: string, cwd: string): Promise<
     /* no state yet */
   }
   const rel = relative(ws, resolve(cwd, what)).split(sep).join("/");
-  const byPath = objects.find((o) => o.path === rel || o.address === what);
+  const workspaceRel = relative(ws, resolve(ws, what)).split(sep).join("/");
+  const byPath = objects.find((o) => o.path === rel || o.address === what) ?? objects.find((o) => o.path === workspaceRel);
   if (byPath) return byPath.address;
   const named = objects.filter((o) => parseAddress(o.address).name.toLowerCase() === what.replace(/^"|"$/g, "").toLowerCase());
   if (named.length === 1) return named[0]!.address;

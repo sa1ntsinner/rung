@@ -115,9 +115,11 @@ namespace Rung.Bridge.Core.Protocol
                 case "session.state":
                     return _session != null ? _session.GetSessionState() : SessionProbe != null ? SessionProbe() : throw new RpcException(ErrorCodes.UnsupportedCapability, "Session inspection is unavailable.");
                 case "session.release":
+                case "session.discard":
                     if (_released) throw new RpcException(ErrorCodes.PortalDisposed, "The project was already released.");
+                    if (Bool(p, "save") && (method == "session.discard" || Bool(p, "discard"))) throw new RpcException(ErrorCodes.BadRequest, "save and discard cannot be used together.");
                     if (_session == null) _session = (SessionAttach ?? _factory)();
-                    _session.ReleaseSession(Bool(p, "save"));
+                    _session.ReleaseSession(Bool(p, "save"), method == "session.discard" || Bool(p, "discard"));
                     _released = true; // requests already queued by other owner clients must never reopen TIA
                     _session = null;
                     return new { released = true };

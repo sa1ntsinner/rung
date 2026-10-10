@@ -67,14 +67,16 @@ namespace Rung.Bridge.Core
         static string Q(string s) => s == null ? "null" : "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
 
         /// <summary>Read-only stand-in for a know-how-protected object (body is not exportable without the password).</summary>
-        public static string Render(ObjectEntry e) =>
+        public static string Render(ObjectEntry e, string instanceOf = null) =>
             "# Know-how protected in TIA Portal. rung cannot read or change its body.\n" +
             "address: " + Q(e.Address) + "\n" +
             "kind: " + Q(e.Kind) + "\n" +
             "blockType: " + Q(e.BlockType) + "\n" +
             "number: " + (e.Number.HasValue ? e.Number.Value.ToString() : "null") + "\n" +
             "language: " + Q(e.Language) + "\n" +
-            "readOnly: true\n";
+            "readOnly: true\n" +
+            (e.IsSystem && e.BlockType == "InstanceDB" && !string.IsNullOrEmpty(instanceOf)
+                ? "isSystem: true\ninstanceOf: " + Q(instanceOf) + "\n" : "");
     }
 
     /// <summary>

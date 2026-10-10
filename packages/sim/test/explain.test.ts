@@ -43,4 +43,19 @@ describe("Why? from the values a PLC has now", () => {
     expect(show(explainStatic(idx, "file:///w/plc/P/blocks/Fx_Motor.scl", "#Start", value))).toEqual(["value: #Start = FALSE"]);
     expect(show(explainStatic(idx, "file:///w/plc/P/blocks/Fx_Motor.scl", '"Plant".Ready', value))[1]).toMatch(/note: not written in Fx_Motor/);
   });
+
+  it("refuses graphical XML rather than claiming that its output has no writer", () => {
+    const xml = readFileSync(fileURLToPath(new URL("../../lsp/test/vci/Program blocks/Lad/FB_Lad.xml", import.meta.url)), "utf8");
+    const uri = "file:///w/plc/P/blocks/FB_Lad.xml";
+    const index = new WorkspaceIndex();
+    index.set(uri, xml, 0);
+    expect(() => explainStatic(index, uri, "Running", () => undefined)).toThrow(/Why.*SCL\/ST.*who.*xref/);
+  });
+
+  it("refuses STL rather than treating an unanalysed body as no writes", () => {
+    const uri = "file:///w/plc/P/blocks/Main.awl";
+    const index = new WorkspaceIndex();
+    index.set(uri, 'ORGANIZATION_BLOCK "Main"\nBEGIN\n SET;\n = "Pump_1";\nEND_ORGANIZATION_BLOCK\n', 0);
+    expect(() => explainStatic(index, uri, '"Pump_1"', () => undefined)).toThrow(/Why.*SCL\/ST/);
+  });
 });

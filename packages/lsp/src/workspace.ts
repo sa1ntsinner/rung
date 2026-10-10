@@ -3,6 +3,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseDocument } from "yaml";
+import { parseAddress } from "@rung/core";
 import { LineIndex } from "./lexer.js";
 import { parse, type BlockModel, type ParsedDocument, type VarDecl } from "./parser.js";
 import { STANDARD_BY_NAME, SYSTEM_TYPES } from "./catalog.js";
@@ -149,6 +151,20 @@ export class WorkspaceIndex {
   set(uri: string, text: string, version: number): Doc {
     const doc: Doc = { uri, text, lines: new LineIndex(text), version };
     if (SOURCE.test(uri)) doc.parsed = parse(text, /\.awl$/i.test(uri) ? { dialect: "stl" } : {});
+    else if (/\.protected\.yaml$/i.test(uri)) {
+      // Public system-instance type only: protected bodies and user FBs stay opaque.
+      try {
+        if (text.length > 65536) throw new Error("metadata too large");
+        const yaml = parseDocument(text, { uniqueKeys: true });
+        if (yaml.errors.length) throw new Error("invalid metadata");
+        const m = yaml.toJS({ maxAliasCount: 0 });
+        const type = typeof m?.instanceOf === "string" ? STANDARD_BY_NAME.get(m.instanceOf.toUpperCase()) : undefined;
+        if (m?.kind === "block" && m.blockType === "InstanceDB" && m.isSystem === true && m.readOnly === true && type?.kind === "functionBlock") {
+          const address = parseAddress(m.address);
+          if (address.kind === "block") doc.parsed = { blocks: [{ kind: "DB", name: address.name, nameStart: 0, nameEnd: 0, start: 0, end: text.length, vars: [], regions: [], refs: [], dbOf: type.name }], diagnostics: [], tokens: [] };
+        }
+      } catch { /* malformed or unsupported metadata remains opaque */ }
+    }
     else if (SD.test(uri)) {
       // unreadable SD stays known by its file name, like other graphical objects
       const sd = parseSd(text);

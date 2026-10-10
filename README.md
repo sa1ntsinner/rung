@@ -17,7 +17,8 @@
   <a href="https://sa1ntsinner.github.io/rung/"><b>Website</b></a> ·
   <a href="https://sa1ntsinner.github.io/rung/#play">Try a test in your browser</a> ·
   <a href="docs/quickstart.md">Quickstart</a> ·
-  <a href="docs">Docs</a>
+  <a href="docs">Docs</a> ·
+  <a href="docs/capabilities.md">Capabilities and limits</a>
 </p>
 
 <p align="center">

@@ -4,6 +4,8 @@ import { randomUUID,createHash } from "node:crypto";
 import { loadConfig, WorkspaceError } from "@rung/core";
 import { hardwarePatchText } from "@rung/lsp";
 import { bridgeFor, findWorkspace, readBoundedBytes, type Io } from "./common.js";
+import type { DescribeNode } from "@rung/bridge-client";
+import { modelSummary } from "./modelSummary.js";
 
 /** Snapshot and preview stay read-only; --apply explicitly enables guarded offline imports. */
 export async function cmdHardware(dir: string, files: string[] | undefined, json: boolean, io: Io, apply = false,expectedArtifactRevision?:string): Promise<number> {
@@ -24,7 +26,10 @@ export async function cmdHardware(dir: string, files: string[] | undefined, json
   try {
     const result = await client.request(apply ? "hardware.apply" : patchText === undefined ? "hardware.snapshot" : "hardware.preview", patchText === undefined ? {} : { patchText, ...(apply ? { operationId: randomUUID() } : {}) });
     if (!json && patchText !== undefined) io.stdout(apply ? "Hardware changes applied; no PLC download.\n" : "Hardware preview only; no project changes applied.\n");
-    io.stdout(JSON.stringify(result, null, json ? undefined : 2) + "\n");
+    if (!json && patchText === undefined) {
+      const snapshot = result as { tree: DescribeNode; revision: string };
+      io.stdout(modelSummary(snapshot.tree, "Hardware", snapshot.revision));
+    } else io.stdout(JSON.stringify(result, null, json ? undefined : 2) + "\n");
     return 0;
   } finally { await client.close(); }
 }

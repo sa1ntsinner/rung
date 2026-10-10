@@ -80,7 +80,7 @@ rung uses legacy communication for the PLCSIM PG/PC interface and the Siemens PL
 
 `rung live` also supports a separate S7CommPlus host. This path requires secure PLC communication and a verified certificate pin; it never falls back to legacy communication. The Openness commands above use a different connection path. CLI, LSP and `rung mcp` share one workspace live broker, one read connection per selected PLC/backend, and one subscription to the union of consumers' symbols. Monitoring does not save, import, compile or download anything.
 
-In the fixture workspace's `rung.toml`, use the actual mirrored device name:
+In your workspace's `rung.toml`, use the actual mirrored device name:
 
 ```toml
 [live.plc.PLC_1]
@@ -89,10 +89,50 @@ address = "192.168.250.1"
 allow_writes = false
 ```
 
-Owner-side PowerShell commands for a source checkout (edit `$workspace`, `$device` and `$symbol` to match the already downloaded `RungProve` project):
+### Installed release
+
+The release includes the online host; no source checkout, .NET SDK or build command is needed. Run in the workspace and replace the device and symbol with yours:
 
 ```powershell
-$repo = 'C:\Users\smile\Documents\Projects\rung-codex'
+rung live trust --device PLC_1
+# Compare the displayed fingerprint with the PLC's certificate before accepting.
+# Only if the PLC requires credentials:
+$env:RUNG_PLC_USER = '<PLC user>'
+$env:RUNG_PLC_PASSWORD = '<PLC password>'
+rung live read '"Fx_Global".Counter' --device PLC_1 --transport s7commplus --json
+rung live watch '"Fx_Global".Counter' --device PLC_1 --transport s7commplus --interval 250 --json
+# After stopping watch:
+Remove-Item Env:RUNG_PLC_USER, Env:RUNG_PLC_PASSWORD -ErrorAction SilentlyContinue
+```
+
+For a PLC's Web API instead, configure its web server user and HTTPS address:
+
+```toml
+[live.plc.PLC_1]
+transport = "webapi"
+address = "192.168.250.1"
+allow_writes = false
+
+[live.plc.PLC_1.webapi]
+url = "https://192.168.250.1"
+user = "<web server user>"
+```
+
+```powershell
+$env:RUNG_WEBAPI_PASSWORD = '<web server password>'
+rung live read '"Fx_Global".Counter' --device PLC_1 --transport webapi --json
+rung live watch '"Fx_Global".Counter' --device PLC_1 --transport webapi --json
+Remove-Item Env:RUNG_WEBAPI_PASSWORD -ErrorAction SilentlyContinue
+```
+
+Web API reads and watches are supported, but `rung trace record` requires S7CommPlus. The address and URL must identify the same selected PLC. Passwords belong in environment variables, never in `rung.toml`.
+
+### Building from a source checkout
+
+These contributor commands build the host instead of using the installed release. Edit `$workspace`, `$device` and `$symbol` to match your local test project:
+
+```powershell
+$repo = 'C:\path\to\rung'
 $workspace = 'C:\path\to\RungProve-workspace'
 $device = 'PLC_1'
 $symbol = '"Fx_Global".Counter'
@@ -221,4 +261,4 @@ Offline host, mutation-policy and alarm-lifecycle checks do not prove PLC
 interoperability. Local-fixture reads, writes, alarm activation/clear, recovery and
 performance checks passed with a user-approved fixture certificate exception.
 The certificate was not independently verified against the engineering project.
-See [online-acceptance.md](online-acceptance.md) for measurements and limitations.
+See [evidence](evidence.md#online-through-s7commplus-measured) for measurements and limitations.

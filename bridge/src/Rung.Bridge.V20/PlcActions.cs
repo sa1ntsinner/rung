@@ -51,7 +51,7 @@ namespace Rung.Bridge.V20
             using (OfflineFor(device))
             {
                 try { Flatten(compiler.Compile().Messages, null, new Dictionary<string, string>(), messages); }
-                catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "compile failed: " + e.Message); }
+                catch (EngineeringException e) { throw CompileFailure.Refused(e.Message); }
             }
             return messages;
         }

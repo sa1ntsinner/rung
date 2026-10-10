@@ -60,9 +60,10 @@ If the project is not open, rung opens it in a TIA Portal without window (`[tia]
 rung session                  # existing TIA Portal, mode, holder and attached sessions; starts none
 rung session --release        # stops watch and closes the project held by rung's keeper
 rung session --release --save # save unsaved changes before releasing
+rung session --release --discard # lose unsaved TIA changes and close without saving
 ```
 
-Release refuses a TIA Portal window or a session held by another program. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
+Release refuses a TIA Portal window, a session held by another program, or a keeper with other clients still attached. `--discard` explicitly loses unsaved TIA changes, overrides save-after-import for this close, and cannot be combined with `--save`. It requires a bridge and watch owner that support discard; older versions refuse it. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
 
 ## 4. Work two-way
 
@@ -114,7 +115,7 @@ In VS Code, the PLC picker puts the last PLC you chose first the next time; it s
 
 - `rung init --from-plc <ip> --project <new .ap20>`: no project file, only a running PLC? rung makes a new project from it (TIA's upload device as new station) and binds the folder to it ([downloads](downloads.md#uploading-from-a-plc)).
 - `rung assignments`: TIA Portal's assignment list, every input, output, bit memory, timer and counter address in use with its tag and where the code uses it, and overlapping accesses (exit 2 when two cross).
-- `rung views`: read-only YAML views of hardware, HMI, technology objects, the project library and the software units with their relations.
+- `rung views`: read-only YAML views of hardware, HMI device inventory, technology objects, the project library and the software units with their relations. HMI screens, tags and alarms are not editable in Rung; see the [capability map](capabilities.md).
 - `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. All over the S7-1500 Web API, read-only.
 - `rung agents`: refreshes the project summary in `AGENTS.md`.
 - `rung --help` lists every command; `rung sync --help` (or any command’s `--help`) shows its options and an example.

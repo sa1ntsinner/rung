@@ -13,6 +13,7 @@ const EXAMPLES: Record<string, string> = {
   connect: "connect --pick", interfaces: "interfaces --scan", download: "download --plc PLC_1", open: "open plc/PLC_1/blocks/Line/FB_Motor.scl",
   simulate: "simulate --block FB_Conveyor", "codesys-bridge": "codesys-bridge --project Line.project", assignments: "assignments --json",
   who: `who '"Line_DB".PartsTotal'`, upload: "upload --ip 192.168.0.1",
+  xref: "xref plc:PLC_1/blocks/FB_Motor",
   bridge: "bridge --tia V20",
   "program-status": "program-status plc/PLC_1/blocks/Counter.scl --capture cycle.json --instance Counter_DB --json",
 };
@@ -33,7 +34,7 @@ const DETAIL: Record<string, string> = {
   stream: "keep observing complete alarm snapshots until Ctrl+C",
   "confirm-stdin": "editor flow: show a prepared operation and receive its exact human confirmation on private stdin",
   "parent-stdio": "editor read-only stream: release its subscription when the parent closes stdin",
-  release: "close the project only in rung's background keeper; stop watch on success", "session.save": "save unsaved changes before releasing the project",
+  release: "close the project only in rung's background keeper; stop watch on success", "session.save": "save unsaved changes before releasing the project", discard: "release without saving; unsaved TIA changes are lost (requires --release, excludes --save)",
   preview: "show the next sync without changing files or TIA Portal", json: "complete machine-readable report",
   filter: "a part of a test file's path or of a case's name (any letter case), or a block name",
   case: "exactly one case: its test file and its place among the file's cases, from 0 (tests/motor.test.yaml#2)", writes: "turn writes to TIA Portal on (rung writes off stops them)",

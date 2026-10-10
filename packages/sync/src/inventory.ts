@@ -115,7 +115,7 @@ export async function takeInventory(root: string, bridge: BridgeLike, state: Sta
         skipped.add(entry.address);
         continue;
       }
-      if (entry.isSystem) {
+      if (entry.isSystem && !(entry.kind === "block" && entry.blockType === "InstanceDB")) {
         w(entry.address, "UNSUPPORTED_OBJECT", "system blocks are not mirrored");
         skipped.add(entry.address);
         continue;

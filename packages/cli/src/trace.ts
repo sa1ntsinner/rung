@@ -33,7 +33,8 @@ export async function cmdTrace(dir:string,action:string|undefined,args:string[],
  if(!options.device||!options.out||!Number.isInteger(duration)||duration<1||duration>3600)throw new WorkspaceError("BAD_ARGUMENT","Trace requires --device, --out and duration 1–3600 seconds");
  let recorder:TraceRecorder;
  try{recorder=new TraceRecorder(args,interval,Date.now());}catch(error){throw new WorkspaceError("BAD_ARGUMENT",`${error instanceof Error?error.message:String(error)}; use 1–32 distinct signals and interval 100–60000 ms`);}
- const root=await findWorkspace(dir),selected=await liveSelection(root,{device:options.device,transport:"s7commplus"});
+ const root=await findWorkspace(dir),selected=await liveSelection(root,{device:options.device});
+ if(selected.transport!=="s7commplus")throw new WorkspaceError("BAD_ARGUMENT","Trace recording through Web API is not supported; use live read/watch, or configure an S7CommPlus target for trace record");
  const path=resolve(io.cwd,options.out),file=await open(path,"wx").catch(error=>{throw new WorkspaceError("BAD_ARGUMENT",`Cannot create new trace file ${path}: ${error.message}`);});
  let reader:LiveReader|undefined,lease:{close():Promise<void>}|undefined,closing:Promise<void>|undefined,timer:NodeJS.Timeout|undefined;
  let started=performance.now(),active=true,opening=false,stopped=false,failure:unknown,reason:TraceRecording["stopReason"]="duration";

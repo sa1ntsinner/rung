@@ -9,8 +9,6 @@ timestamps, including `1700000000100000123` nanoseconds since 1970.
 - CSV SHA256: `47A31EEBBDC9B1C61BAD42E21C8117F9AB69544F7DB6A0C40FA2DB02DC61F3B1`
 - Assembly: `Siemens.TechTrace.Editor.UserInterface.dll`, version `2000.0.9501.1`
 - Assembly SHA256: `A75AA896CC7224AB1F680F5D60C05D87E54F6156CB23D8647A68147749E41A32`
-- Generator/evidence: `.superpowers/sdd/item5-codex/native-csv-fixture.ps1`,
-  `native-csv-roundtrip-4.log` in the project workspace.
 
 First line: trace name, activation `yyyyMMdd_HHmmss_fff`, signal labels separated
 by semicolons. Native name escaping retains `$003B` for a semicolon. Sample rows:

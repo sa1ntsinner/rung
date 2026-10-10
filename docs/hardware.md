@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Hardware snapshot, preview and apply
 
+`rung hardware` shows a concise engineering summary of the returned snapshot: names, module identities, positions, firmware and addresses when available. `--json` keeps the full tree and revision for scripts and patch preparation. Summary limits and incomplete native snapshots are stated explicitly; the summary does not prove hardware compatibility.
+
 `rung views` already exports read-only hardware YAML, including device/module
 identity, positions, attributes and their access/runtime-type metadata. Existing
 `plc/<PLC>/hardware/network.yaml` remains the separate editable network workflow.

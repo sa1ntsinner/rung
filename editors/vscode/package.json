@@ -1768,7 +1768,7 @@
               "markdown": "media/walkthrough/check.md"
             },
             "completionEvents": [
-              "onCommand:rung.env.refresh"
+              "onContext:rung.tiaReady"
             ]
           },
           {

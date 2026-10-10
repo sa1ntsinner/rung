@@ -16,6 +16,8 @@ const KEYWORDS = new Set(
 const WORD_OPS = new Set(["AND", "OR", "XOR", "MOD"]);
 const BINARY = new Set([":=", "=>", "+", "-", "*", "/", "**", "=", "<>", "<", ">", "<=", ">=", "&"]);
 const END_OF_BODY = /^END_(FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)$/;
+// The lexer includes CR in a // token; it belongs to the line ending, not the comment.
+const commentText = (text: string) => text.startsWith("//") ? text.replace(/\r$/, "") : text;
 
 /** A standard instruction by name (conversions like INT_TO_REAL too): how TIA Portal writes it and its parameters. */
 const standard = (upper: string): { name: string; params: { name: string }[] } | undefined =>
@@ -64,7 +66,7 @@ function sameTokens(a: string, b: string): boolean {
   if (ta.length !== tb.length) return false;
   return ta.every((t, i) => {
     const u = tb[i]!;
-    return t.kind === u.kind && (t.kind === "ident" ? t.upper === u.upper : t.text === u.text);
+    return t.kind === u.kind && (t.kind === "ident" ? t.upper === u.upper : t.kind === "comment" ? commentText(t.text) === commentText(u.text) : t.text === u.text);
   });
 }
 
@@ -114,10 +116,10 @@ function formatBody(src: string, tokens: Token[], to: number): string[] | string
     const t = tokens[i]!;
     if (t.kind === "comment") {
       // after a statement on the same line it stays there; else on its own line
-      if (lines.length && lineOf(t.start) === lastLine) lines[lines.length - 1] += " " + t.text;
+      if (lines.length && lineOf(t.start) === lastLine) lines[lines.length - 1] += " " + commentText(t.text);
       else {
         blankLinesBefore(t);
-        push(t.text, level, t);
+        push(commentText(t.text), level, t);
       }
       i++;
       continue;

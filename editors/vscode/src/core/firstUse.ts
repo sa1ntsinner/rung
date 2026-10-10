@@ -14,6 +14,11 @@ export function validateRemoteProject(project: string): string | undefined {
 
 export type Preflight = { ok: true; whitelist?: true } | { ok: false; message: string };
 
+export function tiaReadiness(items: CheckItem[] | undefined): { ok: boolean; message: string } {
+  const missing = ["tia", "openness", "openness-group", "whitelist"].filter(id => items?.find(i => i.id === id)?.status !== "ok");
+  return missing.length ? { ok: false, message: `TIA sync needs: ${missing.map(id => items?.find(i => i.id === id)?.name ?? id).join(", ")}` } : { ok: true, message: "TIA sync ready" };
+}
+
 /**
  * Stops only for what no click in rung can fix (a missing TIA Portal version, the Openness group, which needs an
  * administrator and a new sign-in), before a TIA Portal starts and waits for minutes. No readable answer: go on.

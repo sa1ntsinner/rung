@@ -65,8 +65,9 @@ Usage:
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--host <ssh-destination>] [--json]  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
   rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
-  rung xref <file|address> [--json] [--fresh]
+  rung xref <file|plc:object-address> [--json] [--fresh]
                                        TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
+                                       a mirrored file or plc: object address, not a physical I/O address such as %Q0.0
                                        (kept while nothing mirrored changed; --fresh asks TIA Portal again)
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
@@ -145,7 +146,7 @@ PLC:
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
   rung open <file> [--save] [--dir <ws>]  open the object's editor in a TIA Portal window
   rung session [dir] [--json]           inspect the existing TIA Portal without opening one
-  rung session [dir] --release [--save] close the project in rung's background TIA Portal (stops watch)
+  rung session [dir] --release [--save | --discard] close rung's background TIA Portal (discard loses unsaved changes)
   rung simulate [dir] [--address 127.0.0.2] [--port 8080] [--cycle 10] [--block <FB/FC>]
                                        a virtual S7-1500: runs the SCL program and answers the Web API (for rung live)
   rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
@@ -190,6 +191,7 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 }
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  if (v.project && /\.zap\d+$/i.test(String(v.project))) throw new WorkspaceError("BAD_ARGUMENT", "A .zap archive must be retrieved in TIA Portal first; then run rung init --project <retrieved .ap file>");
   const cfgPath = join(dir, CONFIG_FILE);
   if ((await exists(cfgPath)) && !v.rebind) {
     const bound = await loadConfig(dir, { raw: true }).then((c) => c.project.path, () => undefined);
@@ -431,7 +433,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   interfaces: { options: ["scan", "plc"], positionals: 1 },
   download: { options: ["hw", "no-hw", "no-sw", "all-blocks", "allow", "no-start", "yes", "plc"], positionals: 1 },
   open: { options: ["dir", "save"], positionals: 1 },
-  session: { options: ["release", "save", "json"], positionals: 1 },
+  session: { options: ["release", "save", "discard", "json"], positionals: 1 },
   hardware: { options: ["file", "apply", "json","expected-artifact-revision"], positionals: 1 },
   library: { options: ["file", "json", "type-guid", "version-guid", "export", "preview", "device", "apply", "expected-revision", "expected-package-revision", "release", "update", "number", "author", "comment"], positionals: 1 },
   alarms:{options:["device","export","file","preview","apply","expected-revision","expected-artifact-revision","json"],positionals:1},
@@ -485,6 +487,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       fresh: { type: "boolean" },
       save: { type: "boolean" },
         release: { type: "boolean" },
+        discard: { type: "boolean" },
         update: { type: "boolean" },
         name: { type:"string" },
         "expected-artifact-revision":{type:"string"},

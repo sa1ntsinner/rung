@@ -7,6 +7,22 @@ using Xunit;
 
 public class ReviewRegressionTests
 {
+    [Fact] public void NativeCompileRefusalPreservesReasonAndPointsToTiaPermissions()
+    {
+        const string reason = "Permission to modify the safety program is missing either on F-CPU or on project level.";
+        var error = CompileFailure.Refused(reason);
+        Assert.Equal("TARGET_REFUSED", error.Code);
+        Assert.Contains(reason, error.Message);
+        Assert.Contains("TIA Portal", error.Message);
+        Assert.Contains("permissions", error.Message);
+    }
+    [Theory]
+    [InlineData(false, true, 2, WindowStep.Move)]
+    [InlineData(true, true, 2, WindowStep.Busy)]
+    [InlineData(false, false, 2, WindowStep.Busy)]
+    [InlineData(false, true, 3, WindowStep.InUse)]
+    public void DiscardNeverSavesOrOverridesOwnership(bool window, bool keeper, int attached, WindowStep expected) =>
+        Assert.Equal(expected, SessionRelease.Decide(window, keeper, true, true, attached, discard: true));
     sealed class Scope : IDisposable
     {
         readonly Action _end;

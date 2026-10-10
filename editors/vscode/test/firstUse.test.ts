@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
 import { Args, type CheckItem } from "../src/core/args";
-import { mirrorFolderFor, preflight, tiaVersionOf, validateRemoteProject } from "../src/core/firstUse";
+import { mirrorFolderFor, preflight, tiaReadiness, tiaVersionOf, validateRemoteProject } from "../src/core/firstUse";
 
 const item = (id: string, status: CheckItem["status"], detail?: string, fix?: string): CheckItem => ({ id, group: "plc", name: id, status, ...(detail ? { detail } : {}), ...(fix ? { fix } : {}) });
 const good = [item("tia", "ok", "V20, V21"), item("openness", "ok", "V20, V21"), item("openness-group", "ok"), item("whitelist", "ok")];
+
+it("completes TIA readiness only after every required check succeeds", () => {
+  expect(tiaReadiness(good)).toEqual({ ok: true, message: "TIA sync ready" });
+  expect(tiaReadiness([...good, item("codesys", "missing")]).ok).toBe(true);
+  expect(tiaReadiness(good.filter(i => i.id !== "whitelist"))).toMatchObject({ ok: false });
+  expect(tiaReadiness(good.map(i => i.id === "whitelist" ? { ...i, status: "warn" } : i))).toMatchObject({ ok: false, message: expect.stringContaining("whitelist") });
+  expect(tiaReadiness(undefined).ok).toBe(false);
+});
 
 describe("first use: Open TIA Project", () => {
   it("accepts literal Windows project paths with spaces and non-ASCII characters, only for supported versions", () => {

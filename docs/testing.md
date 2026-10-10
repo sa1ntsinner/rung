@@ -1,6 +1,8 @@
 # Unit tests for SCL, LAD, FBD and STL blocks (`rung test`)
 
-rung runs unit tests for SCL, LAD, FBD and STL function blocks and functions on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
+rung runs unit tests for SCL, LAD, FBD and STL function blocks, functions and OB bodies on an **offline simulator** — no PLC, no PLCSIM licence, works on Linux CI.
+
+For a cyclic OB, use `block: Main`: each explicit `cycle` calls its body, with fresh TEMP and persistent global DB/tag memory within that case. Set and expect globals with quoted names, for example `{ '"Plant".Run': true }`. Each case starts with fresh simulator memory. This tests the OB's logic; startup order, interrupt scheduling, hardware I/O updates and safety execution are not reproduced. Testing an OB body does not validate those PLC behaviours.
 
 ```
 rung test                       # all tests/**/*.test.yaml

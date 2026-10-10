@@ -91,6 +91,7 @@ export async function startVirtualPlc(root: string, opts: { host: string; port: 
       case "Plc.ReadOperatingMode":
         return ok(lastError ? "stop" : "run");
       case "PlcProgram.Read":
+        if (lastError) return err(-32000, `Simulation cycle failed: ${lastError}; values unavailable until a successful cycle`);
         try {
           const target = ref(String(r.params?.var ?? ""));
           if (target.root.kind === "global") sim.read({ root: target.root, path: [], start: 0 }, null); // materialise the DB

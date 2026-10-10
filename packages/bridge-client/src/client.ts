@@ -179,8 +179,9 @@ export class BridgeClient {
   sessionState(): Promise<SessionState> {
     return this.request("session.state", {}) as Promise<SessionState>;
   }
-  releaseSession(save = false): Promise<{ released: boolean }> {
-    return this.request("session.release", { save }) as Promise<{ released: boolean }>;
+  releaseSession(save = false, discard = false): Promise<{ released: boolean }> {
+    // Separate method prevents older bridges from silently saving an unknown discard flag.
+    return this.request(discard ? "session.discard" : "session.release", { save }) as Promise<{ released: boolean }>;
   }
   listObjects(device: string, known?: Record<string, KnownRevision>): Promise<ObjectEntry[]> {
     return this.request("objects.list", { device, ...(known && Object.keys(known).length ? { known } : {}) }) as Promise<ObjectEntry[]>;

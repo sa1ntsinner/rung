@@ -214,6 +214,17 @@ describe("pull", () => {
     expect(r.warnings).toContainEqual(expect.objectContaining({ code: "BAD_ADDRESS" }));
   });
 
+  it("keeps system instance DB dependencies in the mirror while forbidding edits", async () => {
+    const address = "plc:PLC_1/blocks/System blocks/R_TRIG_HighLevel";
+    const t = setup(b => b.add(address, { isSystem: true, blockType: "InstanceDB", language: "DB", form: "db", content: 'DATA_BLOCK "R_TRIG_HighLevel"\n"R_TRIG"\nBEGIN\nEND_DATA_BLOCK\n' }));
+    const result = await t.run();
+    expect(result.exported).toBe(1);
+    expect(result.warnings).toEqual([]);
+    expect(t.read("plc/PLC_1/blocks/System blocks/R_TRIG_HighLevel.db")).toContain('"R_TRIG"');
+    const state = await StateStore.open(t.root, t.binding);
+    try { expect(state.get(address)!.readOnly).toBe(true); } finally { await state.close(); }
+  });
+
   it("rejects entries whose namespace metadata contradicts the address", async () => {
     const t = setup((b) => b.add("plc:PLC_1/blocks/Fx~M", { namespace: "Other" }));
     const r = await t.run();

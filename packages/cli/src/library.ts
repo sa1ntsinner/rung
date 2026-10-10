@@ -4,6 +4,8 @@ import { mkdir, access, writeFile, unlink, rmdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { loadConfig, WorkspaceError } from "@rung/core";
 import { bridgeFor, findWorkspace, readBoundedBytes, type Io } from "./common.js";
+import type { DescribeNode } from "@rung/bridge-client";
+import { modelSummary } from "./modelSummary.js";
 
 /** Inspect the authoritative native manifest and raw documents without opening the engineering project. */
 export async function cmdLibrary(dir: string, files: string[] | undefined, json: boolean, io: Io,
@@ -64,7 +66,8 @@ export async function cmdLibrary(dir: string, files: string[] | undefined, json:
     const client = await bridgeFor(config, io);
     try {
       if (!destination) {
-        io.stdout(JSON.stringify(await client.request("model.describe", { scope: "libraries", maxNodes: 4096 }), null, json ? undefined : 2) + "\n"); return 0;
+        const tree = await client.request("model.describe", { scope: "libraries", maxNodes: 4096 }) as DescribeNode;
+        io.stdout(json ? JSON.stringify(tree) + "\n" : modelSummary(tree, "Libraries")); return 0;
       }
       const result = await client.request("library.export", {
         typeGuid: options.typeGuid, versionGuid: options.versionGuid,

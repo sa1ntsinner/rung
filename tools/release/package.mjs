@@ -9,18 +9,21 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageOnline, auditOnlineRelease } from "./online.mjs";
+import { installedTiaVersions, stageBridges } from "./bridges.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const out = join(root, "dist", "release");
 const version = JSON.parse(readFileSync(join(root, "packages", "cli", "package.json"), "utf8")).version;
 const stage = join(out, `rung-${version}-win-x64`);
 const run = (cmd, cwd = root) => execSync(cmd, { cwd, stdio: "inherit" });
+// V20 remains required; also build/package adapters for other installed Openness APIs.
+const tiaVersions = installedTiaVersions(process.env.ProgramFiles ?? "C:\\Program Files");
 
 if (!process.argv.includes("--skip-build")) {
   run("pnpm build");
   run(`"${process.execPath}" tools/release/bundle.mjs`);
   run(`"${process.execPath}" tools/release/sea.mjs`);
-  run("dotnet build bridge/src/Rung.Bridge.V20 -c Release");
+  for (const version of tiaVersions) run(`dotnet build bridge/src/Rung.Bridge.${version} -c Release`);
   run("dotnet publish bridge/src/Rung.Online -c Release -r win-x64 --self-contained true");
 }
 
@@ -29,8 +32,7 @@ mkdirSync(join(stage, "bridge"), { recursive: true });
 cpSync(join(out, "rung.exe"), join(stage, "rung.exe"));
 // the same CLI for any OS with Node.js 22+: CI runners on Linux run the language server checks and rung test with it
 cpSync(join(out, "rung.cjs"), join(stage, "rung.cjs"));
-const bridgeBin = join(root, "bridge", "src", "Rung.Bridge.V20", "bin", "Release", "net48");
-for (const f of readdirSync(bridgeBin)) if (!f.endsWith(".pdb")) cpSync(join(bridgeBin, f), join(stage, "bridge", f));
+stageBridges(root, stage, tiaVersions);
 stageOnline(root, stage, join(root, "bridge", "src", "Rung.Online", "bin", "Release", "net10.0", "win-x64", "publish"));
 // the CODESYS bridge is a script that runs inside CODESYS (rung codesys-bridge starts it)
 mkdirSync(join(stage, "bridge", "codesys"), { recursive: true });
@@ -76,7 +78,10 @@ for (const f of walk(inExt).sort()) digest.update(relative(inExt, f)).update(rea
 writeFileSync(join(inExt, "VERSION"), `${version}+${digest.digest("hex").slice(0, 12)}\n`);
 if (!process.argv.includes("--skip-build")) run("npm run package", join(root, "editors", "vscode"));
 const vsix = join(root, "editors", "vscode", "rung-scl.vsix");
-if (existsSync(vsix)) cpSync(vsix, join(stage, "editors", "rung-scl.vsix"));
+if (existsSync(vsix)) {
+  cpSync(vsix, join(stage, "editors", "rung-scl.vsix"));
+  cpSync(vsix, join(out, "rung-scl.vsix"));
+}
 
 // npm: @rung-plc/cli is the same folder without rung.exe and the editor packages, for Linux and macOS (the language
 // server, rung test, the bridge over ssh) and for CI. npm links bin entries straight to the file there, so it needs a #!.

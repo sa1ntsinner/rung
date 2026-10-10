@@ -8,7 +8,7 @@ import { main } from "../src/main.js";
 import { OwnerClient } from "@rung/sync";
 import { printReport, validateTags } from "../src/twoway.js";
 
-it("session uses the workspace owner and successful release stops watch", async () => {
+it.each(["save", "discard"])("session uses the workspace owner and successful %s stops watch", async (mode) => {
   const t = setup();
   await t.run(["init"]);
   await t.run(["pull"]);
@@ -34,11 +34,12 @@ it("session uses the workspace owner and successful release stops watch", async 
     writeFileSync(t.objects, JSON.stringify(db));
     expect(await t.run(["session", "--release"])).not.toBe(0);
     expect(existsSync(t.file(".rung", "owner.json"))).toBe(true);
-    expect(await t.run(["session", "--release", "--save"])).toBe(0);
+    expect(await t.run(["session", "--release", `--${mode}`])).toBe(0);
     await until(() => !existsSync(t.file(".rung", "owner.json")));
     const after = JSON.parse(readFileSync(t.objects, "utf8"));
     expect(after.starts).toBe(before);
     expect(after.sessionReleased).toBe(true);
+    expect(after.sessionSaved).toBe(mode === "save");
     expect(await watching).toBe(0);
   } finally { stop(); await watching; }
 });
@@ -69,6 +70,17 @@ const until = async (cond: () => boolean, ms = 15_000) => {
 };
 
 describe("two-way CLI", () => {
+  it("rename resolves a mirrored relative operand under explicit --dir from another cwd", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    await t.run(["pull"]);
+    await t.run(["writes", "on"]);
+    const other = mkdtempSync(join(tmpdir(), "rung-other-cwd-"));
+    expect(await t.run(["rename", "plc/PLC_1/blocks/Fx_Motor.scl", "Fx_Drive", "--dir", t.dir], { cwd: other }), t.err.join("")).toBe(0);
+    expect(existsSync(t.file("plc", "PLC_1", "blocks", "Fx_Drive.scl"))).toBe(true);
+    expect(existsSync(t.file(...motorFile))).toBe(false);
+  });
+
   it("status finds disk edits before sync, persists writes-off and refusal reasons, and clears them after sending", async () => {
     const t = setup();
     await t.run(["init"]);

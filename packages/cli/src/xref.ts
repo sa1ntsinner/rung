@@ -3,7 +3,7 @@
 // what rung's files cannot show (HMI screens and alarms, technology objects, hardware). Read only: through the
 // running rung watch when there is one, else a bridge of its own; an answer is kept while nothing mirrored changed.
 import { relative } from "node:path";
-import { loadConfig } from "@rung/core";
+import { loadConfig, WorkspaceError } from "@rung/core";
 import type { XRefEntry } from "@rung/bridge-client";
 import { OwnerClient, cachedXref } from "@rung/sync";
 import { bridgeFor, findWorkspace, type Io } from "./common.js";
@@ -55,9 +55,10 @@ export async function xrefOf(ws: string, address: string, io: Io): Promise<XRefE
 
 export async function cmdXref(target: string | undefined, json: boolean, io: Io, fresh = false): Promise<number> {
   if (!target) {
-    io.stderr("rung: usage: rung xref <file or address> [--json] [--fresh]\n");
+    io.stderr("rung: usage: rung xref <mirrored file or plc:object-address> [--json] [--fresh]\n");
     return 1;
   }
+  if (/^%[IQM](?:[XBWD])?\d+(?:\.\d+)?$/i.test(target)) throw new WorkspaceError("BAD_ARGUMENT", `${target} is a physical PLC address; rung xref needs a mirrored file or plc: object address. Find its tag name in the tag table, then use rung who <tag name> for readers/writers or rung xref <tag table file> for TIA references.`);
   const ws = await findWorkspace(io.cwd);
   const address = await addressOf(ws, target, io.cwd);
   const { entries, at } = await cachedXref(ws, address, () => xrefOf(ws, address, io), { fresh });

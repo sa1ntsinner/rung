@@ -107,8 +107,8 @@ namespace Rung.Bridge.Core
 
     public static class SessionRelease
     {
-        public static WindowStep Decide(bool hasWindow, bool keeperHolds, bool modified, bool saveAllowed, int attachedSessions = 2) =>
-            hasWindow || !keeperHolds ? WindowStep.Busy : attachedSessions > 2 ? WindowStep.InUse : WindowHandoff.Decide(false, keeperHolds, modified, saveAllowed);
+        public static WindowStep Decide(bool hasWindow, bool keeperHolds, bool modified, bool saveAllowed, int attachedSessions = 2, bool discard = false) =>
+            hasWindow || !keeperHolds ? WindowStep.Busy : attachedSessions > 2 ? WindowStep.InUse : discard ? WindowStep.Move : WindowHandoff.Decide(false, keeperHolds, modified, saveAllowed);
     }
 
     /// <summary>

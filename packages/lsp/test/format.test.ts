@@ -18,6 +18,16 @@ const tail = "END_FUNCTION_BLOCK\n";
 const block = (lines: string[]) => head + lines.join("\n") + "\n" + tail;
 
 describe("formatting as TIA Portal writes SCL", () => {
+  it.each(["LF", "CRLF", "mixed"])("formats new pump source with comments and %s line endings", (ending) => {
+    const lf = 'FUNCTION_BLOCK "FB_PumpExercise"\nVAR_INPUT\n Start : Bool;\n Stop : Bool;\n Permit : Bool;\nEND_VAR\nVAR_OUTPUT\n Run : Bool;\nEND_VAR\nBEGIN\n // Ordinary process control exercise; no safety function is implemented.\n IF #Stop OR NOT #Permit THEN\n #Run := FALSE;\n ELSIF #Start THEN\n #Run := TRUE;\n END_IF;\nEND_FUNCTION_BLOCK\n';
+    const source = ending === "CRLF" ? lf.replaceAll("\n", "\r\n") : ending === "mixed" ? lf.replace(/\n$/, "\r\n") : lf;
+    const formatted = formatScl(source);
+    expect(formatted).toBeDefined();
+    expect(formatted).toContain('IF #Stop OR NOT #Permit THEN');
+    expect(formatted).not.toContain("\r\r\n");
+    expect(formatScl(formatted!)).toBe(formatted);
+  });
+
   it("statements, calls, IF and CASE", () => {
     const typed = block([
       "\t#t(IN := #b, PT := T#1s);",

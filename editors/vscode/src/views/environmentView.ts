@@ -4,6 +4,7 @@
 import * as vscode from "vscode";
 import { onPath } from "../bundled";
 import { parseCheck, type CheckItem } from "../core/args";
+import { tiaReadiness } from "../core/firstUse";
 import { findExecutable } from "../core/exec";
 import { RungCli } from "../runner/cli";
 import { isFile } from "../workspace";
@@ -38,11 +39,15 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
 
   /** Runs rung check again (a click on refresh, or after a fix). */
   refresh(): Promise<void> {
+    if (!this.loading) void vscode.commands.executeCommand("setContext", "rung.tiaReady", false);
     this.loading ??= this.cli
       .capture(["check", "--json"], { quiet: true, timeoutMs: 120_000 })
       .then((r) => {
         this.items = parseCheck(r.output);
         this.error = this.items ? undefined : RungCli.summary(r.output) || "rung check gave no answer";
+        const readiness = tiaReadiness(r.error ? undefined : this.items);
+        this.view.message = this.error ?? readiness.message;
+        void vscode.commands.executeCommand("setContext", "rung.tiaReady", readiness.ok);
         // the extension's own rung works here; terminals and agents need it on PATH
         if (this.items && RungCli.bundled) {
           const ok = (!!RungCli.bundledBase && onPath(RungCli.bundledBase)) || !!findExecutable("rung", { platform: process.platform, env: process.env, isFile });
@@ -107,4 +112,3 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
     this.changed.dispose();
   }
 }
-

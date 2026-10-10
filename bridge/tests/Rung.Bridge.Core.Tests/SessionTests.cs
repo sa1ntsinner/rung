@@ -6,6 +6,27 @@ using Xunit;
 
 public class SessionTests
 {
+    [Fact] public void DiscardClosesWithoutSavingDespiteAutoSave()
+    {
+        var s = new FakeTiaSession { SessionModified = true, SessionSaveAfterImport = true };
+        var d = new RpcDispatcher(() => throw new System.Exception("must not open TIA"), new BridgeInfo("V20", "test"));
+        d.SessionAttach = () => s;
+        var r = JsonDocument.Parse(d.Handle("{\"id\":1,\"method\":\"session.discard\"}"));
+        Assert.True(r.RootElement.GetProperty("result").GetProperty("released").GetBoolean());
+        Assert.True(s.SessionClosed);
+        Assert.False(s.SessionSaved);
+        var later = JsonDocument.Parse(d.Handle("{\"id\":2,\"method\":\"project.info\"}"));
+        Assert.Equal("PORTAL_DISPOSED", later.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact] public void ConflictingDiscardSaveRefusesBeforeAttaching()
+    {
+        var attached = false;
+        var d = new RpcDispatcher(() => { attached = true; return new FakeTiaSession(); }, new BridgeInfo("V20", "test"));
+        var r = JsonDocument.Parse(d.Handle("{\"id\":1,\"method\":\"session.discard\",\"params\":{\"save\":true}}"));
+        Assert.Equal("BAD_REQUEST", r.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.False(attached);
+    }
     [Fact] public void ReleasedBridgeNeverReopensForQueuedRequests()
     {
         var starts = 0;

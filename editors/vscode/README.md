@@ -4,6 +4,10 @@ SCL editing and TIA Portal sync for [rung](https://github.com/sa1ntsinner/rung).
 
 ## What you get
 
+See the [capability map](https://github.com/sa1ntsinner/rung/blob/main/docs/capabilities.md) for supported workflows and limits, including HMI.
+
+The extension and CLI have independent version numbers. When reporting a problem, include the extension version from VS Code's Extensions view and `rung --version` from the terminal, together with the selected TIA version. A different CLI version number alone does not mean the extension is stale; check which CLI the extension selects in its settings and Output log.
+
 - **Language support** for `.scl`, `.db`, `.udt`, `.awl` (and TwinCAT / plain IEC ST files): highlighting, completion, hover, go to definition, references, rename of locals, outline, and diagnostics from the parser and from TIA Portal compiles.
 - **rung sidebar** (the ladder-rung icon in the activity bar):
   - *Project*: the mirrored objects from `.rung/state.json`, by PLC, kind and TIA folder (or by block type). Conflicts, local or TIA changes and read-only objects are marked. Click to open; right-click to compile, test, open in TIA Portal or resolve a conflict.

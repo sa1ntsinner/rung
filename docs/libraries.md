@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Native library packages
 
+`rung library` lists a concise inventory with native GUIDs, versions and states when available. `--json` returns the full native tree, including technical metadata. Preview, import, export, release and update results retain their detailed format.
+
 ```powershell
 rung library --json
 rung library --file Type.libinfo --json
