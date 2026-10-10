@@ -16,10 +16,13 @@ rung alarms --device PLC_1 --file alarms.xlsx --apply --expected-revision <proje
 ```
 
 Export creates a new file. Keep the complete native `TextList` and
-`TextListEntry` sheets, row order, identities, ranges and language headers.
-The initial scope changes existing Text and Comment cells only, in active
-project languages. Creating/deleting lists, changing ranges or activating
-languages is unavailable. Formulas, external links, rich strings, malformed
+`TextListEntry` sheets, identities, ranges and language headers. Text and
+Comment cells change in active project languages; new rows add lists (range
+`Decimal`) and entries of a list in the file, and the preview marks them
+`added`. A PLC without text lists starts from nothing: export a workbook from
+another project, or keep one, and its lists are created. Deleting lists or
+entries, changing a range or activating languages is unavailable. TIA's own
+row order after import does not count as a change. Formulas, external links, rich strings, malformed
 parts and oversized workbooks refuse before import. A missing provider or an
 empty native text-list service reports unavailable; no empty workbook is invented.
 TIA must return an entirely successful import result. The complete semantic

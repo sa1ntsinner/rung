@@ -51,10 +51,24 @@ namespace Rung.Bridge.Core {
     return result;
    }}catch(RpcException){throw;}catch(Exception error)when(error is InvalidDataException||error is XmlException||error is InvalidOperationException||error is ArgumentException){throw Bad("damaged/unsupported XLSX: "+error.Message);}
   }
-  public string Revision()=>Bundle.Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(this,RpcWire.Json)));
+  /// <summary>A PLC without text lists: nothing yet, in the columns of the workbook that creates the first lists.</summary>
+  public static AlarmWorkbook Empty(AlarmWorkbook proposed)=>new AlarmWorkbook{ListHeaders=proposed.ListHeaders,EntryHeaders=proposed.EntryHeaders,Lists=new string[0][],Entries=new string[0][]};
+  static string ListKey(string[] row)=>row[0];
+  static string EntryKey(string[] row)=>row[0]+"\n"+row[1]+"\n"+row[2];
+  // TIA exports rows in its own order: the same lists and entries are the same state
+  public string Revision()=>Bundle.Sha256(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new AlarmWorkbook{ListHeaders=ListHeaders,EntryHeaders=EntryHeaders,
+   Lists=Lists.OrderBy(ListKey,StringComparer.Ordinal).ToArray(),Entries=Entries.OrderBy(r=>r[0],StringComparer.Ordinal).ThenBy(r=>ulong.Parse(r[1],System.Globalization.CultureInfo.InvariantCulture)).ThenBy(r=>r[2],StringComparer.Ordinal).ToArray()},RpcWire.Json)));
+  /// <summary>Text and comment edits of existing rows, and new lists and entries; deleting rows or changing a range refuses.</summary>
   public static object[] Preview(AlarmWorkbook original,AlarmWorkbook proposed){var changes=new List<object>();
-   void Compare(string sheet,string[] aHeaders,string[] bHeaders,string[][] a,string[][] b,int identity){if(!aHeaders.SequenceEqual(bHeaders)||a.Length!=b.Length)throw Bad("headers/row set changed; export the complete existing lists");for(var row=0;row<a.Length;row++)for(var col=0;col<aHeaders.Length;col++){if(a[row][col]==b[row][col])continue;if(col<identity)throw Bad("list/entry identity/range changed");changes.Add(new{sheet,row=row+2,column=aHeaders[col],original=a[row][col],proposed=b[row][col]});}}
-   Compare("TextList",original.ListHeaders,proposed.ListHeaders,original.Lists,proposed.Lists,2);Compare("TextListEntry",original.EntryHeaders,proposed.EntryHeaders,original.Entries,proposed.Entries,3);return changes.ToArray();
+   void Compare(string sheet,string[] aHeaders,string[] bHeaders,string[][] a,string[][] b,int identity,Func<string[],string> key){
+    if(!aHeaders.SequenceEqual(bHeaders))throw Bad("headers changed; export the complete existing lists");
+    var proposedRows=new Dictionary<string,int>(StringComparer.Ordinal);for(var row=0;row<b.Length;row++)proposedRows[key(b[row])]=row;
+    foreach(var old in a){if(!proposedRows.TryGetValue(key(old),out var row))throw Bad("a list or entry was deleted or its identity/range changed; only additions and text edits apply");
+     for(var col=identity;col<aHeaders.Length;col++)if(old[col]!=b[row][col])changes.Add(new{sheet,row=row+2,column=aHeaders[col],original=old[col],proposed=b[row][col]});}
+    var existing=new HashSet<string>(a.Select(key),StringComparer.Ordinal);
+    for(var row=0;row<b.Length;row++)if(!existing.Contains(key(b[row]))){var values=new Dictionary<string,string>(StringComparer.Ordinal);for(var col=0;col<bHeaders.Length;col++)values[bHeaders[col]]=b[row][col];changes.Add(new{sheet,row=row+2,added=true,values});}
+   }
+   Compare("TextList",original.ListHeaders,proposed.ListHeaders,original.Lists,proposed.Lists,2,ListKey);Compare("TextListEntry",original.EntryHeaders,proposed.EntryHeaders,original.Entries,proposed.Entries,3,EntryKey);return changes.ToArray();
   }
  }
 }
