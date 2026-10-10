@@ -67,6 +67,15 @@ describe("the save loop as the editor shows it", () => {
     expect(statusPhrase(b, on, 0).text).toBe("$(check) rung · in sync");
   });
 
+  it("a compile error stands through quiet passes until a pass compiles that object again", () => {
+    const a = new Activity(() => 0);
+    a.event("report", report({ imported: 1, changes: [{ path: "plc/PLC_1/blocks/FB_A.scl", action: "import" }], diagnostics: [err("plc/PLC_1/blocks/FB_A.scl", "COMPILE", "x", 21)] }));
+    a.event("report", report({ unchanged: 108 }));
+    expect(statusPhrase(a, on, 0)).toMatchObject({ text: "$(error) rung · 1 compile error", tone: "error" });
+    a.event("report", report({ imported: 1, changes: [{ path: "plc/PLC_1/blocks/FB_A.scl", action: "import" }], compiled: ["PLC_1/FB_A"] }));
+    expect(statusPhrase(a, on, 0).text).toMatch(/^\$\(check\) rung · sent to TIA/);
+  });
+
   it("a save that is not sent says so once, and the bar keeps saying it until it goes", () => {
     const a = new Activity(() => 0);
     const refused = err("plc/PLC_1/blocks/FB_X.scl", "DEPENDENCY_BLOCKED", "Waiting for PLC_1/UDT_A, which could not be imported");
@@ -101,8 +110,8 @@ describe("the save loop as the editor shows it", () => {
     expect(a.entries.filter((e) => e.kind === "error")).toHaveLength(1);
     expect(a.entries[0]).toMatchObject({ label: "TIA Portal is not running", count: 5 });
     expect(statusPhrase(a, on, 0)).toMatchObject({ text: "$(debug-disconnect) rung · waiting for TIA Portal", tone: "warning" });
-    a.event("report", report());
-    expect(statusPhrase(a, on, 0).text).toBe("$(check) rung · in sync");
+    a.event("report", report()); // back, with the compile error still standing
+    expect(statusPhrase(a, on, 0).text).toBe("$(error) rung · 1 compile error");
   });
 
   it("connecting until the watch has a pass; a pass that hangs points at a dialog", () => {

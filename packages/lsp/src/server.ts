@@ -214,6 +214,17 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       const watched = index.layout === "rung" ? join(root, "plc") : root;
       fsWatcher = watch(watched, { recursive: true }, (_e, file) => {
         if (!file || /(^|[\\/])\./.test(String(file))) return;
+        // `rung init` in the open folder: from now on it is a rung workspace (system DBs, views and all)
+        if (index.layout !== "rung" && (String(file) === "rung.toml" || String(file) === "plc")) {
+          index.docs.clear();
+          void index.load(root!).then(() => {
+            for (const d of documents.all()) index.set(d.uri, d.getText(), d.version);
+            // every file published or waiting to be, again against the new index
+            for (const uri of new Set([...timers.keys(), ...documents.all().map((d) => d.uri)])) schedule(uri);
+          });
+          return;
+        }
+        if (index.layout === "rung" && watched === root && !/^plc[\\/]/i.test(String(file))) return;
         if (index.layout !== "rung" && !/\.(scl|db|udt|awl|st|xml|TcPOU|TcDUT|TcGVL|TcIO)$/i.test(String(file))) return;
         const uri = pathToFileURL(join(watched, String(file))).href;
         if (documents.get(uri)) return;

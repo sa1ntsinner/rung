@@ -176,7 +176,7 @@
       },
       {
         "view": "rung.project",
-        "contents": "This folder has no rung.toml. rung mirrors a TIA Portal project into text files here and keeps both in sync.\n[Open TIA Project…](command:rung.init)\n[Read the docs](command:rung.openDocs)",
+        "contents": "This folder has no rung.toml. rung mirrors a TIA Portal project into text files here and keeps both in sync ([how it works](command:rung.openDocs)).\n[Open TIA Project…](command:rung.init)",
         "when": "workbenchState != empty && !rung.workspace"
       },
       {
@@ -1153,19 +1153,24 @@
           "group": "inline"
         },
         {
+          "command": "rung.compilePlc",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "rung.download",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "group": "inline@2"
+        },
+        {
           "command": "rung.goOnline",
           "when": "view == rung.plc && viewItem == rung.plc",
-          "group": "inline@1"
+          "group": "inline@3"
         },
         {
           "command": "rung.goOffline",
           "when": "view == rung.plc && viewItem =~ /^rung\\.plc online$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "rung.onlineState",
-          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
-          "group": "inline@4"
+          "group": "inline@3"
         },
         {
           "command": "rung.goOnline",
@@ -1220,7 +1225,7 @@
         {
           "command": "rung.compare",
           "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
-          "group": "inline@2"
+          "group": "inline@4"
         },
         {
           "command": "rung.resolveMerge",

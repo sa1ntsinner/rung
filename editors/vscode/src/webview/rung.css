@@ -640,7 +640,7 @@
 }
 .rg-tests-body {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 0;
   border-top: 1px solid var(--rg-line);
 }

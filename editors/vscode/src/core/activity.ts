@@ -138,8 +138,9 @@ export class Activity {
     this.passStart = undefined;
     this.now = undefined;
     const compileErrors = r.diagnostics.filter((d) => d.severity === "error" && d.code === "COMPILE");
-    this.errors = compileErrors.length;
     const changes = r.changes ?? [];
+    // a pass that compiled nothing says nothing about the errors of the last compile: they stand
+    if (compileErrors.length || r.compiled?.length || changes.some((c) => c.action === "import" || c.action === "create")) this.errors = compileErrors.length;
     const pass: ActivityEntry[] = [];
     if (changes.length > FOLD && changes.every((c) => c.action === "export" || c.action === "restore")) {
       pass.push({ at: t, kind: "export", label: `${changes.length} objects updated from TIA` });

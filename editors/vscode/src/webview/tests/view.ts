@@ -398,7 +398,7 @@ export class RgTests extends LitElement {
         <span class="rg-spacer"></span>
         <span class="rg-add-step" role="group" aria-label="Add a step">
           <button class="rg-text-btn" data-action="add-set" @click=${() => add("set")}><span class="codicon codicon-add"></span>Set</button>
-          <button class="rg-text-btn" data-action="add-cycle" @click=${() => add("cycle")}>Run</button>
+          <button class="rg-text-btn" data-action="add-cycle" @click=${() => add("cycle")} title="Add a step that runs PLC cycles">Cycles</button>
           <button class="rg-text-btn" data-action="add-advance" @click=${() => add("advance")}>Advance</button>
           <button class="rg-text-btn" data-action="add-expect" @click=${() => add("expect")}>Expect</button>
         </span>

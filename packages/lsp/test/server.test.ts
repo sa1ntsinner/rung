@@ -271,3 +271,33 @@ describe("editor call features over LSP", () => {
     } finally { t.server.dispose(); t.client.dispose(); }
   });
 });
+
+describe("rung lsp in a folder that becomes a rung workspace", () => {
+  it("indexes what rung init and pull write, system instance DBs included", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-lsp-init-"));
+    const toServer = new PassThrough();
+    const toClient = new PassThrough();
+    const server = startServer(new StreamMessageReader(toServer), new StreamMessageWriter(toClient));
+    const client = createMessageConnection(new StreamMessageReader(toClient), new StreamMessageWriter(toServer));
+    const diags: { uri: string; diagnostics: { code?: string }[] }[] = [];
+    client.onNotification("textDocument/publishDiagnostics", (p) => diags.push(p));
+    client.listen();
+    try {
+      await client.sendRequest("initialize", { processId: null, rootUri: pathToFileURL(root).href, capabilities: {} });
+      await client.sendNotification("initialized", {});
+      await new Promise((r) => setTimeout(r, 500)); // the server watches the folder once initialized
+      writeFileSync(join(root, "rung.toml"), '[tia]\nproject = "x.ap20"\n');
+      const blocks = join(root, "plc", "PLC_1", "blocks");
+      mkdirSync(join(blocks, "System blocks"), { recursive: true });
+      writeFileSync(
+        join(blocks, "System blocks", "Edge.protected.yaml"),
+        'address: "plc:PLC_1/blocks/System blocks/Edge"\nkind: "block"\nblockType: "InstanceDB"\nreadOnly: true\nisSystem: true\ninstanceOf: "R_TRIG"\n',
+      );
+      const uri = pathToFileURL(join(blocks, "Fx_B.scl")).href;
+      writeFileSync(join(blocks, "Fx_B.scl"), 'FUNCTION_BLOCK "Fx_B"\nVAR\n   q : Bool;\nEND_VAR\nBEGIN\n   #q := "Edge".Q;\nEND_FUNCTION_BLOCK\n');
+      await until(() => diags.some((d) => d.uri === uri));
+      await new Promise((r) => setTimeout(r, 600));
+      expect(diags.filter((d) => d.uri === uri).at(-1)!.diagnostics.map((d) => d.code)).not.toContain("UNKNOWN_GLOBAL");
+    } finally { server.dispose(); client.dispose(); }
+  });
+});

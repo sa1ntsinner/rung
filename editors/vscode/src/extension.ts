@@ -188,7 +188,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     ),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("rung.env.refresh", () => environment.refresh()),
+    // the walkthrough's "Check this computer" too: the answer is the Environment view, so it opens
+    vscode.commands.registerCommand("rung.env.refresh", () => {
+      void vscode.commands.executeCommand("rung.environment.focus");
+      return environment.refresh();
+    }),
     vscode.commands.registerCommand("rung.installCommand", async () => {
       // terminals and agents start `rung` from PATH: the copy the extension keeps up to date goes there
       const dir = RungCli.bundledBase;
