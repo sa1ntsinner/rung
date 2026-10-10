@@ -73,7 +73,10 @@ declared value only when the PLC shows it was compiled with that value (integer
 constants; a different value asks for a download). A user FC the FB calls, directly
 or through other FCs, runs inside the replay when its source is the code the PLC
 holds; the DB members and tags it reads are read next to the sample like the FB's.
-Standard FB instances (TON, CTU: their state is not in the sample), other constants,
+A standard FB instance (TON, TOF, CTU, …) is not modelled: its hidden state (a
+timer's start time) is not in the sample, so its call takes the outputs the PLC
+holds after the cycle (Q, ET, CV the body reads), and the code around it replays;
+one called twice in a cycle is refused. Other constants,
 CPU clocks, calls of FBs other than multi-instances, recursive FCs, instance DBs
 called more than four calls below OB1, other OBs and computed array indexes that the cycle reads
 are explicitly refused. Source revision, session scope/epoch, reader lifetime

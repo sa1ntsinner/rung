@@ -14,7 +14,7 @@ export function verifyNativeScalars(index: WorkspaceIndex, uri: string, bindings
   if (!doc || !block || block.kind !== "FB" || !Array.isArray(bindings) || bindings.length > 100_000)
     throw new SimError("Invalid native scalar declarations");
   const widths: Record<string, number> = { BOOL: 1, SINT: 8, USINT: 8, BYTE: 8, INT: 16, UINT: 16, WORD: 16,
-    DINT: 32, UDINT: 32, DWORD: 32, REAL: 32, LINT: 64, ULINT: 64, LWORD: 64, LREAL: 64 };
+    DINT: 32, UDINT: 32, DWORD: 32, REAL: 32, LINT: 64, ULINT: 64, LWORD: 64, LREAL: 64, TIME: 32 };
   const expected = new Map(block.vars.filter(v => v.section !== "Temp" && v.section !== "Constant").map(v => [v.name.toUpperCase(), v]));
   verifyNativeCode(index, uri, constants);
   // a user FC runs inside the replay only when its source is the code the PLC holds

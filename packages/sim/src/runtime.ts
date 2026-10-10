@@ -282,6 +282,8 @@ export class Simulator {
   onExpression?: (e: Expr, f: Frame | null, value: Value) => void;
   /** Actual destination and stored value, after conversion; never resolve the reference again. */
   onWrite?: (obj: Struct | Value[], key: string | number, value: Value, frame: Frame | null) => void;
+  /** Reconstruction: a standard FB's step without its hidden state (a timer's start time), its outputs supplied instead. */
+  stdReplay?: (inst: Instance) => void;
   /** Reconstruction: a TEMP has no value from before the cycle; reading one nobody wrote yet on this path is refused. */
   guardTemps = false;
   /** Leaves that hold no known value: a TEMP before the cycle wrote it, or a global member a capture did not read. */
@@ -795,7 +797,8 @@ export class Simulator {
     if (p) return this.runProperty(p.inst, p.prop, "get");
     const { obj, key } = this.locate(ref, frame);
     const v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
-    const why = this.marked ? this.unset.get(obj)?.get(key) ?? this.unsetInside(v) : undefined;
+    // an FB instance is read to be called: its members refuse when the call reads them
+    const why = this.marked ? this.unset.get(obj)?.get(key) ?? (isInstance(v) ? undefined : this.unsetInside(v)) : undefined;
     if (why === "temp") throw new SimError(`#${ref.root.name} is read before this cycle wrote it: a temporary has no value from before the cycle`, frame?.block.name, ref.start);
     if (why) throw new SimError(`${ref.root.kind === "global" ? `"${ref.root.name}"` : ref.root.name}: a value this sample did not capture is read`, frame?.block.name, ref.start);
     return v;
@@ -851,6 +854,11 @@ export class Simulator {
   fill(container: Struct | Value[], key: string | number, value: Value): void {
     (container as Record<string | number, Value>)[key] = value;
     this.unset.get(container)?.delete(key);
+  }
+
+  /** This leaf holds no known value (again): reading it refuses. */
+  uncapturedAt(container: Struct | Value[], key: string | number): void {
+    this.mark(container, key, "uncaptured");
   }
 
   /** A capture holds some members of this global: every leaf counts as not captured until the capture writes it. */
@@ -1956,6 +1964,7 @@ export class Simulator {
 
   /** One step of a standard FB; `method` is the instruction called on IEC_TIMER/IEC_COUNTER data. */
   private stdStep(inst: Instance, method?: string, iec = false) {
+    if (this.stdReplay) return this.stdReplay(inst);
     const m = inst.mem;
     const s = inst.std!;
     const now = this.time;

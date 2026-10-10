@@ -47,6 +47,17 @@ public sealed class NativeCaptureEncoderTests
     }
 
     [Fact]
+    public void DecodesATimeAsSignedMilliseconds()
+    {
+        // a TON's ET read by the body (seen live: {Scalar"33554443"Time}, 32 bits)
+        var fields = new[] { new NativeCaptureField("before", "T.ET", "{Scalar\"33554443\"Time}", 0, 4, 8), new NativeCaptureField("after", "T.ET", "{Scalar\"33554443\"Time}", 4, 4, 9) };
+        var raw = new byte[16]; raw[8] = raw[9] = 15;
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(raw, 40); System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(raw.AsSpan(4), -5);
+        var state = NativeCaptureEncoder.Decode(new NativeCapturePlan(new(), 16, fields), raw);
+        Assert.Equal(40, state.Before["T.ET"]); Assert.Equal(-5, state.After["T.ET"]);
+    }
+
+    [Fact]
     public void RejectsInvalidMetadataBeforeLoadingInstalledSerializers()
     {
         Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(0, 4, new byte[8], [], 1));

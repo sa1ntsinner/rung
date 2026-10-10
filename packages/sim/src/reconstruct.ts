@@ -137,7 +137,22 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
   if (partial) {
     if (Object.keys(capture.before.mem).length || !plain(capture.before.paths) || !plain(capture.observedPaths)) throw new SimError("Missing pre-cycle state");
     for (const d of block.vars.filter(d => d.section !== "Temp" && d.section !== "Constant")) declaration(d, `instance.${d.name}`);
-    if (opaque(instance.mem)) throw new SimError("Standard function block instances (TON, CTU, …) keep state a native sample does not hold");
+    // a standard FB (TON, CTU) keeps hidden state the sample lacks: its call takes the outputs the PLC holds after the cycle
+    const std = stdInstances(instance.mem, "");
+    if (opaque(instance.mem, true)) throw new SimError("Stubbed or pointer instance state is not in a native sample");
+    const calls = new Map<Instance, number>();
+    sim.stdReplay = (inst) => {
+      const path = std.get(inst);
+      if (path === undefined) throw new SimError("A standard function block outside the instance keeps state a native sample does not hold");
+      calls.set(inst, (calls.get(inst) ?? 0) + 1);
+      if (calls.get(inst)! > 1) throw new SimError(`${path}: a standard function block called twice in one cycle has no single value after it`);
+      for (const key of Object.keys(inst.mem)) {
+        // the call just bound its inputs: known now
+        if (["IN", "PT", "R", "CU", "CD", "LD", "PV", "S", "S1", "R1", "CLK"].includes(key)) { sim.fill(inst.mem, key, inst.mem[key]!); continue; }
+        const after = Object.entries(capture.observedPaths!).find(([p]) => p.toUpperCase() === `${path}.${key}`);
+        if (after) sim.fill(inst.mem, key, after[1]); else sim.uncapturedAt(inst.mem, key);
+      }
+    };
     sim.uncapturedIn(instance.mem);
     for (const [path, value] of Object.entries(capture.before.paths!)) {
       const at = leafOf(instance.mem, path);
@@ -289,11 +304,25 @@ function leafOf(mem: Struct, path: string): { obj: Struct | Value[]; key: string
 }
 
 /** A standard FB instance (TON) or pointer anywhere in the state: what it keeps is not in a native sample. */
-function opaque(v: Value): boolean {
+function opaque(v: Value, exceptStd = false): boolean {
   if (!v || typeof v !== "object") return false;
-  if ("std" in v || "stub" in v || "__ptr" in v) return true;
+  if ("std" in v && !exceptStd || "stub" in v || "__ptr" in v) return true;
   const inner = "__fb" in v ? (v as Instance).mem : "__array" in v ? (v as ArrayValue).items : v;
-  return Object.values(inner as Record<string, Value>).some(opaque);
+  return Object.values(inner as Record<string, Value>).some(x => opaque(x, exceptStd));
+}
+
+/** The standard FB instances inside an instance, by member path (T, S.T, ARR[1]). */
+function stdInstances(mem: Struct, prefix: string): Map<Instance, string> {
+  const out = new Map<Instance, string>();
+  const walk = (v: Value, path: string) => {
+    if (!v || typeof v !== "object") return;
+    if ("__fb" in v && (v as Instance).std) { out.set(v as Instance, path); return; }
+    if ("__fb" in v) return walk((v as Instance).mem as Value, path);
+    if ("__array" in v) return (v as ArrayValue).items.forEach((x, i) => walk(x, `${path}[${i + (v as ArrayValue).lo}]`));
+    for (const [k, x] of Object.entries(v as Struct)) walk(x, path ? `${path}.${k}` : k);
+  };
+  walk(mem as Value, prefix);
+  return out;
 }
 
 /** Uses recorded events only; no expression, index or call is evaluated for Why?. */

@@ -23,7 +23,7 @@ public static class NativeCaptureEncoder
     static bool registered;
     static readonly Dictionary<string, uint> Widths = new() { ["Bool"] = 1, ["Byte"] = 8, ["SInt"] = 8, ["USInt"] = 8,
         ["Int"] = 16, ["UInt"] = 16, ["Word"] = 16, ["DInt"] = 32, ["UDInt"] = 32, ["DWord"] = 32,
-        ["Real"] = 32, ["LInt"] = 64, ["ULInt"] = 64, ["LWord"] = 64, ["LReal"] = 64 };
+        ["Real"] = 32, ["LInt"] = 64, ["ULInt"] = 64, ["LWord"] = 64, ["LReal"] = 64, ["Time"] = 32 };
     static object? Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Flags, null, args.Select(a => a.GetType()).ToArray(), null)!.Invoke(target, args);
     static int Align(int value, int bytes) => checked((value + bytes - 1) / bytes * bytes);
 
@@ -70,7 +70,7 @@ public static class NativeCaptureEncoder
             object value = type switch {
                 "Bool" => data[0] != 0, "Byte" or "USInt" => data[0], "SInt" => (sbyte)data[0],
                 "Int" => BinaryPrimitives.ReadInt16BigEndian(data), "UInt" or "Word" => BinaryPrimitives.ReadUInt16BigEndian(data),
-                "DInt" => BinaryPrimitives.ReadInt32BigEndian(data), "UDInt" or "DWord" => BinaryPrimitives.ReadUInt32BigEndian(data),
+                "DInt" or "Time" => BinaryPrimitives.ReadInt32BigEndian(data), "UDInt" or "DWord" => BinaryPrimitives.ReadUInt32BigEndian(data),
                 "Real" => BinaryPrimitives.ReadSingleBigEndian(data), "LReal" => BinaryPrimitives.ReadDoubleBigEndian(data),
                 "LInt" => BinaryPrimitives.ReadInt64BigEndian(data), "ULInt" or "LWord" => BinaryPrimitives.ReadUInt64BigEndian(data),
                 _ => throw new NotSupportedException("Unsupported native scalar type."),

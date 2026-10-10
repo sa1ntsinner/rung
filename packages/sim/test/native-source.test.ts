@@ -124,3 +124,11 @@ it("verifies each user FC the FB calls against the PLC's own FC code, and reads 
   index.set(inner, 'FUNCTION "Inner" : Int\nVAR_INPUT\n x : Int;\nEND_VAR\nBEGIN\n#Inner := "Add"(a := #x);\nEND_FUNCTION', 1);
   expect(() => nativeFunctions(index, uri)).toThrow(/recurs/i);
 });
+
+it("binds the members of a standard timer the body reads, TIME included", () => {
+  const index = new WorkspaceIndex();
+  index.set(uri, 'FUNCTION_BLOCK "F"\nVAR_OUTPUT\n done : Bool;\n elapsed : Time;\nEND_VAR\nVAR\n t : TON_TIME;\nEND_VAR\nBEGIN\n#t(IN := TRUE, PT := T#100MS);\n#done := #t.Q;\n#elapsed := #t.ET;\nEND_FUNCTION_BLOCK', 0);
+  const bindings = [{ name: "ELAPSED", bitOffset: 32, bits: 32, type: '{Scalar"33554443"Time}' }, { name: "DONE", bitOffset: 64, bits: 1, type: '{Scalar"33554433"Bool}' },
+    { name: "T.ET", bitOffset: 160, bits: 32, type: '{Scalar"33554443"Time}' }, { name: "T.Q", bitOffset: 194, bits: 1, type: '{Scalar"33554433"Bool}' }];
+  expect(() => verifyNativeScalars(index, uri, bindings, [])).not.toThrow();
+});

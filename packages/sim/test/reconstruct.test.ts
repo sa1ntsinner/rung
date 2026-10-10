@@ -331,7 +331,17 @@ describe("an instance a native sample holds by member path", () => {
   });
   it("refuses a member it does not hold when the cycle reads it, and standard FB instances", () => {
     expect(() => run("#Total := #arr[2];", { TOTAL: 0 }, { TOTAL: 0 })).toThrow(/did not capture/i);
-    expect(() => run("#Total := 1;", { TOTAL: 0 }, { TOTAL: 1 }, "  t : TON_TIME;\n")).toThrow(/Standard function block/i);
+  });
+  it("replays around a timer: its call takes Q and ET as the PLC holds them after the cycle", () => {
+    const timer = "  go : Bool;\n  t : TON_TIME;\n";
+    const body = "#t(IN := #go, PT := T#100MS);\nIF #t.Q THEN\n  #Total := 1;\nELSE\n  #Total := 2;\nEND_IF;";
+    const r = run(body, { GO: true, "T.Q": false, "T.ET": 40, TOTAL: 0 }, { GO: true, "T.Q": true, "T.ET": 100, TOTAL: 1 }, timer);
+    expect(r.divergences).toEqual([]);
+    expect((r.after.T as { mem: Record<string, unknown> }).mem).toMatchObject({ IN: true, PT: 100, Q: true, ET: 100 });
+    expect(run(body, { GO: true, "T.Q": false, TOTAL: 0 }, { GO: true, "T.Q": true, TOTAL: 2 }, timer).divergences).toEqual([{ path: "TOTAL", reconstructed: 1, observed: 2 }]);
+    // an output the sample did not hold stays unknown; a timer called twice in a cycle has no single after-value
+    expect(() => run("#t(IN := #go, PT := T#100MS);\n#Total := TIME_TO_INT(#t.ET);", { GO: true, "T.Q": false, TOTAL: 0 }, { "T.Q": false, TOTAL: 0 }, timer)).toThrow(/did not capture/i);
+    expect(() => run(body + "\n#t(IN := FALSE, PT := T#100MS);", { GO: true, "T.Q": false, TOTAL: 0 }, { "T.Q": false, TOTAL: 1 }, timer)).toThrow(/twice/i);
   });
   it("runs a user FC inside the replay, its in/out writing back into the instance", () => {
     const index = new WorkspaceIndex();
