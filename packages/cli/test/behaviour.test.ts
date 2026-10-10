@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { main } from "../src/main.js";
 
 const conveyor = fileURLToPath(new URL("../../../examples/conveyor", import.meta.url));
-const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+const git = (cwd: string, ...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", ...args], { cwd, encoding: "utf8" });
 
 describe("rung test --against", () => {
   it("runs today's scenarios on the code then and now, and names the first value that differs", async () => {
@@ -21,12 +21,20 @@ describe("rung test --against", () => {
     writeFileSync(scl, readFileSync(scl, "utf8").replace("OR #Fault OR", "OR"));
     const out: string[] = [];
     const io = { cwd: dir, stdout: (s: string) => out.push(s), stderr: (s: string) => out.push(s), env: {} };
-    expect(await main(["test", "--against", "HEAD"], io)).toBe(2); // a case that passed then fails now
+    const code = await main(["test", "--against", "HEAD"], io);
+    expect(code, out.join("")).toBe(2); // a case that passed then fails now
     const text = out.join("");
     expect(text).toMatch(/^behaviour against HEAD \(5 cases\):/);
     expect(text).toContain("a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)");
     expect(text).toMatch(/step \d+: Motor FALSE → TRUE/);
     expect(text).toMatch(/1 case behaves differently, 4 the same/);
+    // the same from the folder's short 8.3 name (a temp folder of a long user name, as on CI runners)
+    if (process.platform === "win32") {
+      const short = spawnSync("cmd", ["/d", "/c", `for %I in ("${dir}") do @echo %~sI`], { encoding: "utf8", windowsVerbatimArguments: true }).stdout.trim();
+      out.length = 0;
+      const again = await main(["test", "--against", "HEAD"], { ...io, cwd: short });
+      expect(again, `${short}\n${out.join("")}`).toBe(2);
+    }
     out.length = 0;
     expect(await main(["test", "--against", "nope-rev"], io)).toBe(1);
     expect(out.join("")).toContain("nope-rev is not a revision of this repository");

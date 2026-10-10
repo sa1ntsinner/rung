@@ -2,6 +2,7 @@
 // rung test --against <git revision>: the same scenarios (today's test files) run on the code as it was at that
 // revision and as it is now; where the block's values differ after a step is the change in behaviour, the thing a
 // reviewer needs that a text diff does not show.
+import { realpathSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,9 +34,20 @@ export async function indexAt(ws: string, current: WorkspaceIndex, rev: string):
   });
   const base = new WorkspaceIndex();
   base.layout = current.layout;
+  // git names the top folder by its long name; the workspace may be spelled by its 8.3 short one (a temp folder of a
+  // long user name): compare real paths, and give files the workspace's own spelling, as the index has them
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  const realTop = real(top);
+  const realWs = real(ws);
   for (const uri of current.docs.keys()) {
     if (!uri.startsWith("file:")) continue;
-    const rel = relative(top, fileURLToPath(uri)).split("\\").join("/");
+    const rel = relative(realTop, real(fileURLToPath(uri))).split("\\").join("/");
     if (rel.startsWith("..")) continue;
     // a file that did not exist then is not part of the code then
     const text = await run("git", ["-C", top, "show", `${rev}:${rel}`], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then(
@@ -45,11 +57,11 @@ export async function indexAt(ws: string, current: WorkspaceIndex, rev: string):
     if (text !== undefined) base.set(uri, text, 0);
   }
   // code that was there then and is gone or moved now (deleted, renamed): part of the code then too
-  const prefix = relative(top, ws).split("\\").join("/");
+  const prefix = relative(realTop, realWs).split("\\").join("/");
   const listed = await run("git", ["-C", top, "ls-tree", "-r", "--name-only", rev, "--", prefix || "."], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout.split(/\r?\n/).filter(Boolean), () => [] as string[]);
   for (const rel of listed) {
     if (!/\.(scl|db|udt|awl|xml|s7dcl|st)$/i.test(rel) || /(^|\/)tests\//.test(rel)) continue;
-    const uri = pathToFileURL(join(top, rel)).href;
+    const uri = pathToFileURL(join(ws, relative(realWs, join(realTop, rel)))).href;
     if (base.docs.has(uri) || current.docs.has(uri)) continue;
     const text = await run("git", ["-C", top, "show", `${rev}:${rel}`], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout, () => undefined);
     if (text !== undefined) base.set(uri, text, 0);
