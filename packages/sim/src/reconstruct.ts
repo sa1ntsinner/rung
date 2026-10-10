@@ -14,8 +14,10 @@ export interface CycleCapture {
   clockStart: number;
   coherence: "controlled-cycle" | "subscription-sample";
   /** globals: whole globals (offline captures); reads: members and tags read by name ("Line_DB".Speed), the rest of those globals unknown */
-  before: { mem: Struct; globals: Struct; reads?: Record<string, Value> };
+  before: { mem: Struct; globals: Struct; reads?: Record<string, Value>; paths?: Record<string, Value> };
   observed: Struct;
+  /** with before.paths: the members a native sample holds after the cycle, by path (S.A, ARR[1]) */
+  observedPaths?: Record<string, Value>;
 }
 type Location = { uri: string; line: number; column: number };
 export type ReconstructedEntry = Location & ({ kind: "statement"; statement: Stmt["k"] }
@@ -129,11 +131,28 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
     return value as Value;
   }
   if (!capture.before || !plain(capture.before.globals) || !plain(capture.before.mem)) throw new SimError("Missing pre-cycle state");
-  instance.mem = state(instance.mem, capture.before.mem, "instance") as Struct;
-  const observed = state(instance.mem, capture.observed, "observed") as Struct;
-  for (const d of block.vars.filter(d => d.section !== "Temp" && d.section !== "Constant")) {
-    declaration(d, `instance.${d.name}`, instance.mem[d.name.toUpperCase()]);
-    declaration(d, `observed.${d.name}`, observed[d.name.toUpperCase()]);
+  // a native sample holds the members its code touches, by path; the rest stays unknown and reading it refuses
+  const partial = capture.before.paths !== undefined;
+  let observed: Struct = Object.create(null);
+  if (partial) {
+    if (Object.keys(capture.before.mem).length || !plain(capture.before.paths) || !plain(capture.observedPaths)) throw new SimError("Missing pre-cycle state");
+    for (const d of block.vars.filter(d => d.section !== "Temp" && d.section !== "Constant")) declaration(d, `instance.${d.name}`);
+    if (opaque(instance.mem)) throw new SimError("Standard function block instances (TON, CTU, …) keep state a native sample does not hold");
+    sim.uncapturedIn(instance.mem);
+    for (const [path, value] of Object.entries(capture.before.paths!)) {
+      const at = leafOf(instance.mem, path);
+      const def = (at.obj as Record<string | number, Value>)[at.key];
+      if (def === undefined || typeof def === "object" || typeof value !== typeof def || (typeof value === "number" && !Number.isFinite(value)))
+        throw new SimError(`instance.${path}: invalid state type`);
+      sim.fill(at.obj, at.key, value);
+    }
+  } else {
+    instance.mem = state(instance.mem, capture.before.mem, "instance") as Struct;
+    observed = state(instance.mem, capture.observed, "observed") as Struct;
+    for (const d of block.vars.filter(d => d.section !== "Temp" && d.section !== "Constant")) {
+      declaration(d, `instance.${d.name}`, instance.mem[d.name.toUpperCase()]);
+      declaration(d, `observed.${d.name}`, observed[d.name.toUpperCase()]);
+    }
   }
   const selectedName = /^"([^"\r\n]+)"$/.exec(selected.instance)?.[1]?.toUpperCase();
   const selectedDb = selectedName ? scoped.global(selectedName)?.block : undefined;
@@ -226,14 +245,55 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
       for (const key of Object.keys(expected).sort()) compare((actual as Struct)[key], (expected as Struct)[key], path ? `${path}.${key}` : key);
     } else if (!Object.is(actual, expected)) divergences.push({ path, reconstructed: structuredClone(actual), observed: structuredClone(expected) });
   }
-  compare(instance.mem, observed, "");
+  if (partial) {
+    for (const [path, value] of Object.entries(capture.observedPaths!)) {
+      const at = leafOf(instance.mem, path);
+      const actual = (at.obj as Record<string | number, Value>)[at.key];
+      if (!Object.is(actual, value)) divergences.push({ path, reconstructed: structuredClone(actual)!, observed: structuredClone(value) });
+    }
+  } else compare(instance.mem, observed, "");
   // the globals it captured stood still across the sample: a replay that leaves another value there disagrees with the PLC
   for (const at of placed) {
     const replayed = sim.read(at.ref as never, null);
     if (!Object.is(replayed, at.v)) divergences.push({ path: at.path, reconstructed: structuredClone(replayed), observed: structuredClone(at.v as Value) });
   }
   return { kind: "reconstructed" as const, exact: false as const, scope: { ...selected }, sourceRevision: capture.sourceRevision,
-    coherence: capture.coherence, time: capture.time, trace, after: structuredClone(instance.mem), divergences };
+    coherence: capture.coherence, time: capture.time, trace, after: (partial ? sim.withoutUncaptured(instance.mem) : structuredClone(instance.mem)) as Struct, divergences };
+}
+
+/** Where a member path (S.A, ARR[1], S.T.X) of an instance lives: its container and key. */
+function leafOf(mem: Struct, path: string): { obj: Struct | Value[]; key: string | number } {
+  const tokens = [...path.toUpperCase().matchAll(/([A-Z_]\w*)|\[(-?\d+)\]/g)];
+  if (!tokens.length || tokens.map((t) => t[0]).join("").replace(/\]\[/g, "][") !== path.toUpperCase().replace(/\./g, "")) throw new SimError(`${path}: not a member path`);
+  let obj: Struct | Value[] = mem;
+  let key: string | number = "";
+  for (const [i, t] of tokens.entries()) {
+    if (i > 0) {
+      let v: Value = (obj as Record<string | number, Value>)[key];
+      if (v && typeof v === "object" && "__fb" in v) v = (v as Instance).mem;
+      if (!v || typeof v !== "object") throw new SimError(`${path}: not a member path`);
+      obj = "__array" in v ? v as never : v as Struct;
+    }
+    if (t[2] !== undefined) {
+      const array = obj as unknown as ArrayValue;
+      if (!("__array" in array)) throw new SimError(`${path}: not an array`);
+      const n = Number(t[2]) - array.lo;
+      if (n < 0 || n >= array.items.length) throw new SimError(`${path}: index outside the array`);
+      obj = array.items; key = n;
+    } else {
+      if (!Object.hasOwn(obj, t[1]!)) throw new SimError(`${path}: no such member`);
+      key = t[1]!;
+    }
+  }
+  return { obj, key };
+}
+
+/** A standard FB instance (TON) or pointer anywhere in the state: what it keeps is not in a native sample. */
+function opaque(v: Value): boolean {
+  if (!v || typeof v !== "object") return false;
+  if ("std" in v || "stub" in v || "__ptr" in v) return true;
+  const inner = "__fb" in v ? (v as Instance).mem : "__array" in v ? (v as ArrayValue).items : v;
+  return Object.values(inner as Record<string, Value>).some(opaque);
 }
 
 /** Uses recorded events only; no expression, index or call is evaluated for Why?. */

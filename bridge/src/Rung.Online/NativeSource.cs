@@ -17,7 +17,7 @@ public static class NativeSource
         ["OpAs"] = ":=", ["OpPl"] = "+", ["OpMi"] = "-", ["OpMu"] = "*", ["OpDi"] = "/",
         ["OpU"] = "<>", ["OpG"] = ">", ["OpL"] = "<", ["OpE"] = "=", ["OpGE"] = ">=", ["OpLE"] = "<=",
         ["OpAND"] = "AND", ["OpOR"] = "OR", ["OpNOT"] = "NOT", ["OpMOD"] = "MOD", ["OpXOR"] = "XOR",
-        ["BracO"] = "(", ["BracC"] = ")", ["FiSt"] = ";", ["Comma"] = ",", ["Colon"] = ":",
+        ["BracO"] = "(", ["BracC"] = ")", ["BoxO"] = "[", ["BoxC"] = "]", ["FiSt"] = ";", ["Comma"] = ",", ["Colon"] = ":",
         ["Dot"] = ".", ["LDots"] = "..", ["KwENDC"] = "END_CASE", ["KwENDIF"] = "END_IF", ["KwENDFOR"] = "END_FOR",
         ["KwBY"] = "BY", ["KwDO"] = "DO", ["KwELSE"] = "ELSE", ["KwOF"] = "OF", ["KwTHEN"] = "THEN", ["KwTO"] = "TO",
     };
@@ -103,14 +103,23 @@ public static class NativeSource
         uint? instancePointer = null;
         foreach (var element in debug.Descendants().Where(e => e.Name.LocalName == "LanguageElement" && (string?)e.Attribute("cuId") == rendered.CompilationUnit)) {
             if (!nodes.TryGetValue((string?)element.Attribute("elementId") ?? "", out var node)) throw new NotSupportedException("Unmapped native language element.");
-            if (node.Name.LocalName != "SymVa" || (string?)node.Attribute("ODN") is not { } name || !name.StartsWith('#')) continue;
-            if (!System.Text.RegularExpressions.Regex.IsMatch(name, @"^#[\p{L}_][\p{L}\p{N}_]*$")) throw new NotSupportedException("Structured native symbol binding is unsupported.");
+            // a local (#Count), a member monitored alone (a of #s.a: its path is the parent's text) or a whole element (#arr[1])
+            var odn = (string?)node.Attribute("ODN");
+            var name = node.Name.LocalName == "SymVa" && odn?.StartsWith('#') == true ? odn
+                : node.Name.LocalName == "SymVa" && (string?)node.Parent?.Attribute("SI") == "ExprDot" && node.ElementsBeforeSelf().LastOrDefault()?.Name.LocalName == "Dot" ? Text(node.Parent!)
+                : node.Name.LocalName == "Expression" ? Text(node) : null;
+            if (name == null) continue;
+            var path = System.Text.RegularExpressions.Regex.IsMatch(name, @"^#[\p{L}_][\p{L}\p{N}_]*(\.[\p{L}_][\p{L}\p{N}_]*|\[-?\d+\])*$");
             foreach (var monitoring in element.Elements().Where(e => e.Name.LocalName == "MonitoringElement")) {
                 var value = values[(string?)monitoring.Attribute("debugValueRef") ?? ""];
                 var address = value.Descendants().SingleOrDefault(e => e.Name.LocalName == "Indirect");
                 // Compiler temporary results do not describe persistent instance memory.
                 if (address == null && value.Descendants().Any(e => e.Name.LocalName == "Native" && (string?)e.Attribute("scope") == "NativeLocal")) continue;
-                if (address == null) throw new NotSupportedException("Missing native instance address.");
+                // an expression is no state of its own (a sum carries its target's address); a computed element (#arr[#i])
+                // stays uncaptured, and the replay refuses if the cycle reads it
+                // a value TIA Portal computes for display (no address in the instance) is no state either: a member that never
+                // shows with an address stays uncaptured the same way
+                if (!path || address == null) continue;
                 // pointerNumber names the native pointer the instance is addressed through (4 on S7-1500 V20), not a block number
                 if ((string?)address.Attribute("typeSafe") != "true" || (string?)address.Attribute("granted") != "true"
                     || (string?)address.Attribute("pointerScope") != "NativeBlock" || (uint?)address.Attribute("pointerNumber") is not { } addressPointer
@@ -126,6 +135,20 @@ public static class NativeSource
         if (bindings.Count == 0) throw new NotSupportedException("No supported native scalar state.");
         pointer = instancePointer!.Value;
         return bindings.Values.OrderBy(b => b.BitOffset).ToArray();
+    }
+
+    /// <summary>The source text of one node: a path (#s.a, #arr[1]) reads as written.</summary>
+    static string Text(XElement node)
+    {
+        var text = new StringBuilder();
+        foreach (var e in node.DescendantsAndSelf())
+        {
+            var n = e.Name.LocalName;
+            if (n is "SymVa" or "Sub" or "SymPa") text.Append((string?)e.Attribute("ODN"));
+            else if (e.Attribute("TE") is { } token && n != "LC") text.Append(token.Value);
+            else if (Tokens.TryGetValue(n, out var value)) text.Append(value);
+        }
+        return text.ToString();
     }
 
     public static NativeBody Render(string xml)

@@ -314,3 +314,23 @@ describe("globals a sample's FB writes", () => {
       .toEqual([{ path: '"Line_DB".Target', reconstructed: 10, observed: 7 }]);
   });
 });
+
+describe("an instance a native sample holds by member path", () => {
+  const run = (body: string, before: Record<string, unknown>, after: Record<string, unknown>, statics = "") => {
+    const index = new WorkspaceIndex();
+    index.set(uri, `FUNCTION_BLOCK "Counter"\nVAR_OUTPUT\n  Total : Int;\nEND_VAR\nVAR\n  s : Struct\n    a : Int;\n    b : Bool;\n  END_STRUCT;\n  arr : Array[0..2] of Int;\n${statics}END_VAR\nBEGIN\n${body}\nEND_FUNCTION_BLOCK`, 0);
+    return reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
+      coherence: "subscription-sample", before: { mem: {}, globals: {}, paths: before as never }, observed: {}, observedPaths: after as never }, scope);
+  };
+  it("replays structure members and array elements it holds and compares only those", () => {
+    const r = run("#s.a := #s.a + 1;\n#arr[1] := #s.a;\n#Total := #arr[1];", { "S.A": 5, "ARR[1]": 0, TOTAL: 0 }, { "S.A": 6, "ARR[1]": 6, TOTAL: 6 });
+    expect(r.divergences).toEqual([]);
+    // what the sample did not hold shows as unknown, not as its default
+    expect((r.after.ARR as { items: unknown[] }).items).toEqual([null, 6, null]);
+    expect(run("#s.a := #s.a + 1;", { "S.A": 5 }, { "S.A": 9 }).divergences).toEqual([{ path: "S.A", reconstructed: 6, observed: 9 }]);
+  });
+  it("refuses a member it does not hold when the cycle reads it, and standard FB instances", () => {
+    expect(() => run("#Total := #arr[2];", { TOTAL: 0 }, { TOTAL: 0 })).toThrow(/did not capture/i);
+    expect(() => run("#Total := 1;", { TOTAL: 0 }, { TOTAL: 1 }, "  t : TON_TIME;\n")).toThrow(/Standard function block/i);
+  });
+});

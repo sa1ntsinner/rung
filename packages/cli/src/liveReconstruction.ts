@@ -17,7 +17,8 @@ export function reconstructNativeSample(index: WorkspaceIndex, uri: string, nati
   const scope = { plc: expected.device, instance: `"${instance}"`, epoch: expected.epoch };
   // Native scalar gates refuse CPU clocks, external memory, user dependencies and opaque state.
   const replay = reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
-    coherence: "subscription-sample", before: { mem: sample.state.before, globals: {}, reads: reads as never }, observed: sample.state.after }, scope);
+    // the sample holds the members the code touches, by path (S.A, ARR[1]); the rest of the instance stays unknown
+    coherence: "subscription-sample", before: { mem: {}, globals: {}, reads: reads as never, paths: sample.state.before }, observed: {}, observedPaths: sample.state.after }, scope);
   return { ...replay, freshness: "native-sample" as const, coherence: "subscription-sample" as const, observedAt: sample.observedAt,
     sequence: sample.sequence, reason: "Reconstructed native subscription sample; PLC execution unverified",
     why: Object.fromEntries(Object.keys(replay.after).map(name => [name, reconstructionWhy(replay, name)])) };

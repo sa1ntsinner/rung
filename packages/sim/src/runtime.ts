@@ -829,6 +829,30 @@ export class Simulator {
     return storage;
   }
 
+  /** A native sample holds some members of an instance: every leaf of `mem` counts as not captured until filled. */
+  uncapturedIn(mem: Struct): void {
+    for (const key of Object.keys(mem)) this.mark(mem, key, "uncaptured");
+  }
+
+  /** A copy of `value` where every leaf still marked "not captured" is null: shown as unknown, not as its default. */
+  withoutUncaptured(value: Value): Value {
+    const copy = (v: Value): Value => {
+      if (!v || typeof v !== "object" || isPointer(v)) return v;
+      if (isInstance(v)) return { ...v, mem: copy(v.mem) as Struct } as Value;
+      if (isArray(v)) { const a = v as ArrayValue; return { ...a, items: a.items.map((x, i) => this.unset.get(a.items)?.get(i) === "uncaptured" ? null : copy(x)) } as unknown as Value; }
+      const out: Struct = Object.create(null);
+      for (const [k, x] of Object.entries(v as Struct)) out[k] = this.unset.get(v as Struct)?.get(k) === "uncaptured" ? (null as unknown as Value) : copy(x);
+      return out;
+    };
+    return copy(value);
+  }
+
+  /** Puts a captured value at its place and takes the "not captured" mark off it. */
+  fill(container: Struct | Value[], key: string | number, value: Value): void {
+    (container as Record<string | number, Value>)[key] = value;
+    this.unset.get(container)?.delete(key);
+  }
+
   /** A capture holds some members of this global: every leaf counts as not captured until the capture writes it. */
   uncaptured(name: string): void {
     this.mark(this.globals, name.toUpperCase(), "uncaptured");

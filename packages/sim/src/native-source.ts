@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { lex, parseAbsolute, type Member, type WorkspaceIndex } from "@rung/lsp";
-import { SimError } from "./runtime.js";
+import { lex, parseAbsolute, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
+import { SimError, splitArrayType } from "./runtime.js";
 
 export interface NativeScalarBinding { name: string; bitOffset: number; bits: number; type: string }
 
@@ -27,16 +27,39 @@ export function verifyNativeScalars(index: WorkspaceIndex, uri: string, bindings
   for (const binding of bindings) {
     if (!binding || typeof binding.name !== "string" || names.has(binding.name.toUpperCase())) throw new SimError("Duplicate or invalid native scalar binding");
     const name = binding.name.toUpperCase(); names.add(name);
-    const declaration = expected.get(name), type = /^\{Scalar"[0-9]+"([A-Za-z0-9_]+)\}$/.exec(binding.type)?.[1]?.toUpperCase();
-    if (!declaration || declaration.members?.length || declaration.isArray || !type || type !== declaration.type.trim().toUpperCase()
-      || widths[type] === undefined || widths[type] !== binding.bits) throw new SimError(`${name}: native scalar type differs or is unsupported`);
+    const declared = leafType(index, expected, name), type = /^\{Scalar"[0-9]+"([A-Za-z0-9_]+)\}$/.exec(binding.type)?.[1]?.toUpperCase();
+    if (!type || type !== declared || widths[type] === undefined || widths[type] !== binding.bits) throw new SimError(`${name}: native scalar type differs or is unsupported`);
     if (!Number.isSafeInteger(binding.bitOffset) || binding.bitOffset < 0 || binding.bitOffset > 0xffffffff - binding.bits)
       throw new SimError("Invalid native scalar offset");
   }
-  if ([...expected.keys()].some(name => !names.has(name))) throw new SimError("Missing native scalar state");
+  // a member without a binding is not captured: the replay marks it so and refuses only if the cycle reads it
   const intervals = [...bindings].sort((a, b) => a.bitOffset - b.bitOffset);
   if (intervals.some((binding, i) => i > 0 && binding.bitOffset < intervals[i - 1]!.bitOffset + intervals[i - 1]!.bits))
     throw new SimError("Native scalar addresses overlap");
+}
+
+/** The declared type of a member path (S.A, ARR[1]) of the block's instance; refuses what is no single value there. */
+function leafType(index: WorkspaceIndex, declared: Map<string, VarDecl>, path: string): string {
+  const tokens = [...path.matchAll(/([A-Z_]\w*)|\[(-?\d+)\]/g)];
+  type Decl = { type: string; typeRef?: string; members?: VarDecl[] };
+  const top = declared.get(tokens[0]?.[1] ?? "");
+  if (!top || tokens[0]![2] !== undefined) throw new SimError(`${path}: not a member of the block`);
+  let decl: Decl = top;
+  for (const t of tokens.slice(1)) {
+    if (t[2] !== undefined) {
+      const array = splitArrayType(decl.type);
+      const bounds = array?.dims.length === 1 ? /^\s*([+-]?\d+)\s*\.\.\s*([+-]?\d+)\s*$/.exec(array.dims[0]!) : null;
+      const n = Number(t[2]);
+      if (!array || !bounds || n < Number(bounds[1]) || n > Number(bounds[2])) throw new SimError(`${path}: index outside the array`);
+      decl = { type: array.element, typeRef: array.element.replace(/^"|"$/g, "") };
+    } else {
+      const member: Decl | undefined = index.membersOf(decl as VarDecl).find((m) => m.name.toUpperCase() === t[1]);
+      if (!member) throw new SimError(`${path}: no such member`);
+      decl = member;
+    }
+  }
+  if (decl.members?.length || splitArrayType(decl.type) || index.membersOf(decl as VarDecl).length) throw new SimError(`${path}: not a single value`);
+  return decl.type.trim().toUpperCase();
 }
 
 /** Body gate only; native interface/state and session provenance must also be verified. */

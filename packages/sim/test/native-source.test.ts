@@ -22,7 +22,8 @@ it("requires complete nonoverlapping native scalar declarations with matching wi
   index.set(uri, 'FUNCTION_BLOCK "F"\nVAR_INPUT\n n : Int;\nEND_VAR\nVAR\n flag : Bool;\nEND_VAR\nVAR_TEMP\n tmp : Int;\nEND_VAR\nBEGIN\n#n := 2;\nEND_FUNCTION_BLOCK', 0);
   const bindings = [{ name: "N", bitOffset: 32, bits: 16, type: '{Scalar"33554437"Int}' }, { name: "FLAG", bitOffset: 48, bits: 1, type: '{Scalar"33554433"Bool}' }];
   expect(() => verifyNativeScalars(index, uri, bindings)).not.toThrow();
-  expect(() => verifyNativeScalars(index, uri, bindings.slice(0, 1))).toThrow(/missing/i);
+  // a member without a binding is not captured: the replay refuses only if the cycle reads it
+  expect(() => verifyNativeScalars(index, uri, bindings.slice(0, 1))).not.toThrow();
   expect(() => verifyNativeScalars(index, uri, [bindings[0]!, { ...bindings[1]!, bitOffset: 40 }])).toThrow(/overlap/i);
   expect(() => verifyNativeScalars(index, uri, [{ ...bindings[0]!, type: '{Scalar"33554439"DInt}', bits: 32 }, bindings[1]!])).toThrow(/type/i);
   expect(() => verifyNativeScalars(index, uri, [...bindings, bindings[0]!])).toThrow(/duplicate/i);
@@ -80,4 +81,14 @@ it("lists the DB members and tags a body reads, and refuses what a sample cannot
   expect(nativeGlobalReads(make('"Line_DB".Speed := #n + "Line_DB".s.a;'), uri)).toEqual(['"Line_DB".Speed', '"Line_DB".s.a']);
   expect(() => nativeGlobalReads(make('#n := "Line_DB".arr[#n];'), uri)).toThrow(/index/i);
   expect(() => nativeGlobalReads(make('#n := "Line_DB".s;'), uri)).toThrow(/whole/i);
+});
+
+it("accepts a structure member and an array element by path when the declaration says so", () => {
+  const index = new WorkspaceIndex();
+  index.set(uri, 'FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nVAR\n s : Struct\n  a : Int;\n  b : Bool;\n END_STRUCT;\n arr : Array[0..2] of Int;\nEND_VAR\nBEGIN\n#s.a := #arr[1];\nEND_FUNCTION_BLOCK', 0);
+  const int = (name: string, bitOffset: number) => ({ name, bitOffset, bits: 16, type: '{Scalar"33554437"Int}' });
+  expect(() => verifyNativeScalars(index, uri, [int("S.A", 48), int("ARR[1]", 96), { name: "S.B", bitOffset: 64, bits: 1, type: '{Scalar"33554433"Bool}' }])).not.toThrow();
+  expect(() => verifyNativeScalars(index, uri, [int("ARR[5]", 96)])).toThrow(/ARR\[5\]/);
+  expect(() => verifyNativeScalars(index, uri, [int("S.Z", 96)])).toThrow(/S\.Z/);
+  expect(() => verifyNativeScalars(index, uri, [int("S.B", 64)])).toThrow(/type/i);
 });

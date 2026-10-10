@@ -62,6 +62,30 @@ public sealed class NativeSourceTests
         </Monitoring></DebugInfo>
         """;
 
+    // as TIA Portal V20 writes #s.a := 1; #arr[1] := 2; (seen live): the member is monitored alone, the element whole
+    const string CompositeBody = "<Network Lang='SCL' RefID='1'><RootStatements>"
+        + "<Statement UId='48'><Expression UId='65' SI='ExprDot'><Expression UId='62' SI='ExprPrimD'><SymVa UId='31' SI='VarStruct' ODN='#s'/></Expression><Dot UId='32'/><SymVa UId='34' SI='Var' ODN='a'/></Expression></Statement>"
+        + "<Statement UId='159'><Expression UId='161' SI='ExprInd'><Expression UId='162' SI='ExprPrimD'><SymVa UId='154' SI='VarArray' ODN='#arr'/></Expression><BoxO UId='155'/><Expression UId='164' SI='ExprPrimC'><Const TE='1' UId='156'/></Expression><BoxC UId='157'/><SymVa UId='165' SI='VarElem' ODN='' Deco='ArrayElement§7'/></Expression></Statement>"
+        + "</RootStatements></Network>";
+    static string CompositeDebug(string arrayElement = "161") => $$"""
+        <DebugInfo><Monitoring>
+        <LanguageElement cuId="1" elementId="34"><MonitoringElement type="{Scalar&quot;33554437&quot;Int}" debugValueRef="3"/></LanguageElement>
+        <LanguageElement cuId="1" elementId="{{arrayElement}}"><MonitoringElement type="{Scalar&quot;33554437&quot;Int}" debugValueRef="5"/></LanguageElement>
+        <DebugValue id="3" bitSize="16"><Indirect typeSafe="true" granted="true" pointerScope="NativeBlock" pointerNumber="4" bitOffset="48"/></DebugValue>
+        <DebugValue id="5" bitSize="16"><Indirect typeSafe="true" granted="true" pointerScope="NativeBlock" pointerNumber="4" bitOffset="96"/></DebugValue>
+        </Monitoring></DebugInfo>
+        """;
+
+    [Fact]
+    public void NamesAStructureMemberAndAConstantArrayElementByTheirWholePath()
+    {
+        var bindings = NativeSource.Scalars(CompositeDebug(), CompositeBody);
+        Assert.Equal(new[] { "S.A", "ARR[1]" }, bindings.Select(b => b.Name).ToArray());
+        Assert.Equal(new uint[] { 48, 96 }, bindings.Select(b => b.BitOffset).ToArray());
+        // what is no path (here the index expression) binds nothing: a computed element stays uncaptured
+        Assert.Equal(new[] { "S.A" }, NativeSource.Scalars(CompositeDebug("164"), CompositeBody).Select(b => b.Name).ToArray());
+    }
+
     [Fact]
     public void InstanceMembersShareOneNativePointerWhateverTheBlockNumbers()
     {
