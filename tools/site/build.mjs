@@ -22,6 +22,10 @@ await build({
   alias: {
     "@rung/lsp": join(root, "tools", "site", "lsp-lite.ts"),
     "@rung/sim": join(root, "packages", "sim", "src", "index.ts"),
+    // the language server parses addresses with core's pure parser; the rest of core is Node-only
+    "@rung/core": join(root, "packages", "core", "src", "address.ts"),
+    "node:crypto": nodeStub,
+    "node:util": nodeStub,
     "node:fs/promises": nodeStub,
     "node:fs": nodeStub,
     "node:path": nodeStub,
