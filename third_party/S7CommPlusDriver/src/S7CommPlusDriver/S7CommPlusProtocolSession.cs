@@ -510,6 +510,15 @@ namespace S7CommPlusDriver
             queue.Enqueue(notification);
         }
 
+        /// <summary>Drops what is still queued for a deleted object: the PLC may give its id to the next object created.</summary>
+        internal void DiscardNotifications(uint subscriptionObjectId)
+        {
+            lock (m_NotificationQueueLock)
+            {
+                m_NotificationQueues.Remove(subscriptionObjectId);
+            }
+        }
+
         private bool TryDequeueNotification(uint subscriptionObjectId, out Notification notification)
         {
             lock (m_NotificationQueueLock)
@@ -1239,6 +1248,8 @@ namespace S7CommPlusDriver
             {
                 return res;
             }
+            // notifications of the deleted object arrived before this response (one ordered stream): none can follow
+            DiscardNotifications(deleteObjectId);
             // If we delete our own session id, then there's no IntegrityId in the response.
             // And the error code gives an error, but not a fatal one.
             // If we delete another object, there should be an IntegrityId in the response, and

@@ -46,6 +46,23 @@ namespace S7CommPlusDriver.Tests
             Assert.Equal(0, waitResponse.Invoke(connection, new object[] { request, 10 }));
         }
         [Fact]
+        public void ADeletedSubscriptionLeavesNoQueuedNotificationsForTheNextObjectWithItsId()
+        {
+            // the PLC reuses object ids: a TIS watch created right after another one got the old queue (seen live, PLCSIM)
+            var connection = new S7CommPlusProtocolSession();
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var enqueue = typeof(S7CommPlusProtocolSession).GetMethod("EnqueueNotification", flags, null, new[] { typeof(uint), typeof(Notification) }, null)!;
+            var dequeue = typeof(S7CommPlusProtocolSession).GetMethod("TryDequeueNotification", flags)!;
+            enqueue.Invoke(connection, new object[] { 7u, new Notification(ProtocolVersion.V2) { SubscriptionObjectId = 7 } });
+            enqueue.Invoke(connection, new object[] { 8u, new Notification(ProtocolVersion.V2) { SubscriptionObjectId = 8 } });
+            connection.DiscardNotifications(7);
+            var args = new object[] { 7u, null! };
+            Assert.False((bool)dequeue.Invoke(connection, args)!);
+            args = new object[] { 8u, null! };
+            Assert.True((bool)dequeue.Invoke(connection, args)!);
+        }
+
+        [Fact]
         public void RequestTimeoutReplacesHandshakeTimeoutAfterConnection()
         {
             var connection = new S7CommPlusProtocolSession();

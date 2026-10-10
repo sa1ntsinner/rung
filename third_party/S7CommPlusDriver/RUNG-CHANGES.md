@@ -7,6 +7,7 @@ LGPL-3.0-or-later. This file accompanies the corresponding fork source.
 - `ClientApi/PlcTag.cs`: scalar STRING/WSTRING reads validate their headers and retain PLC-reported capacity. Writes preserve that capacity; public read-only MaxLength allows scalar literal validation. Malformed payloads produce bad quality.
 - `ClientApi/Browser.cs`: propagate HMI read-only permissions through containing members so nested tags cannot bypass a parent's write restriction.
 - `S7CommPlusCertificateProbe.cs`: classify transport timeouts consistently even when the socket's timer wins the race against cancellation; transport disposal and credential-free inspection are retained.
+- `S7CommPlusProtocolSession.cs`: deleting an object drops the notifications still queued under its id. The PLC reuses object ids, so a subscription created right after another one could receive the old one's notifications.
 - `S7CommPlusProtocolSession.cs`: retain the one serialized pending request's matching response when an already-active notification reader receives it. Clear the bounded slot on the next request/reset; unrelated responses remain discarded. Idle notification readers yield while a foreground request is pending; that waiter continues routing notifications. This prevents response loss and receive-lock starvation during CPU diagnostics and credit renewals.
 
 - `src/S7CommPlusDriver/S7CommPlusDriver.csproj`: target only `net10.0`, retain
