@@ -39,6 +39,12 @@ describe("usagesTree", () => {
 
 describe("remember", () => {
   const q = (symbol: string, uri = "file:///w/a.scl") => ({ symbol, uri });
+  it("shows the HMI tags bound to it with their screens, and says the HMI is covered", () => {
+    const nodes = usagesTree({ writes: [], reads: [], hmi: [{ panel: "HMI_1", table: "Default tag table", tag: "M_AutoMode", connection: "HMI_Connection_1", screens: ["Main Overview"] }] }, (u) => u);
+    expect(nodes[0]).toMatchObject({ id: "hmi", label: "HMI", description: "1", children: [{ label: "HMI_1", description: "tag M_AutoMode · Main Overview" }] });
+    expect(nodes.at(-1)).toMatchObject({ label: "Workspace code and HMI panels" });
+    expect(nodes.at(-1)!.tooltip).not.toMatch(/HMI/);
+  });
   it("keeps the latest question first, once, and at most `max`", () => {
     let h = remember([], q("a"), 3);
     h = remember(h, q("b"), 3);

@@ -440,7 +440,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
       ...(s.handedTo ? { handedTo: s.handedTo } : {}),
     });
     const list = (l: UsageSite[]) => l.filter((s) => index.docs.get(s.uri)).map(out);
-    return { writes: list(r.writes), reads: list(r.reads), ...(r.handedOn ? { handedOn: list(r.handedOn) } : {}) };
+    return { writes: list(r.writes), reads: list(r.reads), ...(r.handedOn ? { handedOn: list(r.handedOn) } : {}), ...(r.hmi ? { hmi: r.hmi } : {}) };
   });
   connection.onRenameRequest(async (p) => {
     const uri = p.textDocument.uri;

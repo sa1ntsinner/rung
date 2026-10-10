@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Workspace-wide symbol index: blocks, data blocks, UDTs and PLC tags, with member resolution.
+import { HmiIndex } from "./hmi.js";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -91,6 +92,8 @@ export class WorkspaceIndex {
   private dirty = true;
   /** Set by load(): rung workspace, TIA VCI export, or IEC/TwinCAT/loose sources. */
   layout?: WorkspaceLayout;
+  /** HMI tags of Basic/Comfort panels and their screens, from views/hmi (empty until load). */
+  hmi = new HmiIndex();
 
   /**
    * Loads <root>/plc of a rung workspace and the technology objects of its views; otherwise every source under
@@ -119,6 +122,8 @@ export class WorkspaceIndex {
     const views = join(root, "views", "techobjects");
     const files = await readdir(views).catch(() => [] as string[]);
     for (const f of files) if (f.endsWith(".yaml")) this.set(uriOf(join(views, f)), await readFile(join(views, f), "utf8"), 0);
+    // HMI tags bound to PLC tags and DB members, and the screens showing them (rung views)
+    this.hmi = await HmiIndex.load(root);
   }
 
   private async loadTree(root: string): Promise<void> {

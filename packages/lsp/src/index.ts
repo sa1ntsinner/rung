@@ -31,3 +31,4 @@ export * from "./callHierarchy.js";
 export * from "./format.js";
 export * from "./typecheck.js";
 export * from "./impact.js";
+export * from "./hmi.js";

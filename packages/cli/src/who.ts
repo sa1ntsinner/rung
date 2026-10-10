@@ -76,6 +76,7 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
   const ws = await findWorkspace(dir).catch(() => dir);
   const index = new WorkspaceIndex();
   await index.load(ws);
+  const hmiMirrored = index.hmi.tags.length > 0;
   const file = v.file ? pathToFileURL(resolve(io.cwd, String(v.file))).href : undefined;
   const where = (uri: string, start: number) => {
     const text = index.docs.get(uri)?.text ?? "";
@@ -151,10 +152,10 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
       ...(s.calledFrom ? { calledFrom: s.calledFrom.map((c) => ({ block: c.block, ...where(c.uri, c.start) })) } : {}),
       ...(s.handedTo ? { handedTo: s.handedTo } : {}),
     });
-    io.stdout(JSON.stringify({ name, ...(key ? { tag: address?.name ?? null } : {}), ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site), ...(r.handedOn ? { handedOn: r.handedOn.map(site) } : {}) }, null, 2) + "\n");
+    io.stdout(JSON.stringify({ name, ...(key ? { tag: address?.name ?? null } : {}), ...(input ? { input } : {}), writes: r.writes.map(site), reads: r.reads.map(site), ...(r.handedOn ? { handedOn: r.handedOn.map(site) } : {}), ...(r.hmi ? { hmi: r.hmi } : {}) }, null, 2) + "\n");
     return 0;
   }
-  if (!r.writes.length && !r.reads.length && !r.handedOn?.length && declared?.uri !== undefined) {
+  if (!r.writes.length && !r.reads.length && !r.handedOn?.length && !r.hmi?.length && declared?.uri !== undefined) {
     const w = where(declared.uri, declared.start!);
     io.stdout(`${name}: declared (${w.path}:${w.line}), used nowhere\n`);
     return 0;
@@ -186,6 +187,9 @@ export async function cmdWho(dir: string, name: string | undefined, v: Record<st
     line(s);
     io.stdout(`  ${"".padEnd(20)}   to ${s.handedTo!.block} as ${s.handedTo!.param}\n`);
   }
-  io.stdout("not seen: HMI, communication blocks, indirect access (pointers, VARIANT, PEEK/POKE)\n");
+  // an HMI tag bound to it reads it and, from an input field or a button, writes it
+  if (r.hmi?.length) io.stdout("HMI\n");
+  for (const h of r.hmi ?? []) io.stdout(`  ${h.panel.padEnd(20)} tag ${h.tag} (${h.table}${h.connection ? `, ${h.connection}` : ""})${h.screens.length ? `  on ${h.screens.join(", ")}` : "  on no screen"}\n`);
+  io.stdout(`not seen: ${r.hmi === undefined && !hmiMirrored ? "HMI (rung views mirrors Basic/Comfort panels), " : ""}communication blocks, indirect access (pointers, VARIANT, PEEK/POKE)\n`);
   return 0;
 }

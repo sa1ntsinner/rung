@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
+import type { HmiUse } from "./hmi.js";
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import { analyse } from "./analysis.js";
 import { argumentMismatches, typeMismatches } from "./typecheck.js";
@@ -562,6 +563,10 @@ function dbPathAt(index: WorkspaceIndex, uri: string, offset: number): { db: Glo
  * in FB_Motor), three calls deep. An input is a copy, so only its reads count there; an output only its writes.
  */
 export function usagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: string[]): Usages {
+  return withHmi(index, ownUsagesOfPath(index, db, chain), [db.name, ...chain].join("."));
+}
+
+function ownUsagesOfPath(index: WorkspaceIndex, db: GlobalSymbol, chain: string[]): Usages {
   const want = chain.map((n) => n.toUpperCase());
   const { kindOf, add, same, whole, passedTo, follow, result } = usageCollector(index);
   for (const d of index.docs.values()) {
@@ -599,6 +604,8 @@ export interface Usages {
   reads: UsageSite[];
   /** The calls that hand the value whole to an in/out or output of a block rung followed it into (`handedTo`). */
   handedOn?: UsageSite[];
+  /** HMI tags of Basic/Comfort panels bound to it, with the screens that show them (from `rung views`). */
+  hmi?: HmiUse[];
 }
 
 /**
@@ -710,7 +717,13 @@ export function usagesAt(index: WorkspaceIndex, uri: string, offset: number): Us
   }
   // an address handed whole to an in/out (N := %MW0) is followed like a name
   if (at) for (const s of addressUses(index, own?.uri ?? uri, at)) whole(s.uri, { start: s.start, end: s.end, members: [] }, s, s.block !== undefined ? index.blockAt(s.uri, s.start) : undefined, 0);
-  return result();
+  return withHmi(index, result(), own?.tag ? own.name : undefined);
+}
+
+/** The HMI tags bound to a PLC tag or DB member join its uses (an HMI reads and writes it too). */
+function withHmi(index: WorkspaceIndex, r: Usages, plcName: string | undefined): Usages {
+  const hmi = plcName ? index.hmi.usesOf(plcName) : [];
+  return hmi.length ? { ...r, hmi } : r;
 }
 
 /** `%IX0.2`, `%E0.2`: the address as TIA Portal writes it (`%I0.2`); undefined for what is no address. */

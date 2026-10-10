@@ -28,6 +28,8 @@ export interface Usages {
   writes: Site[];
   reads: Site[];
   handedOn?: Site[];
+  /** HMI tags of Basic/Comfort panels bound to it, with the screens showing them (rung views) */
+  hmi?: { panel: string; table: string; tag: string; connection?: string; screens: string[] }[];
 }
 
 export interface UNode {
@@ -63,8 +65,12 @@ export function usagesTree(r: Usages, rel: (uri: string) => string): UNode[] {
   };
   const group = (key: string, label: string, sites: Site[] | undefined): UNode[] =>
     sites?.length ? [{ id: key, label, description: String(sites.length), children: sites.map((s, i) => siteNode(s, key, i)) }] : [];
-  const groups = [...group("writes", "Writes", r.writes), ...group("reads", "Reads", r.reads), ...group("handed", "Handed on", r.handedOn)];
-  return [...(groups.length ? groups : [{ id: "none", label: "No uses in the workspace", icon: "info" }]), { id: "coverage", label: "Workspace code only", tooltip: NOT_SEEN, icon: "info" }];
+  const hmi: UNode[] = r.hmi?.length ? [{ id: "hmi", label: "HMI", description: String(r.hmi.length), children: r.hmi.map((h, i) => ({
+    id: `hmi-${i}`, label: h.panel, description: `tag ${h.tag} · ${h.screens.length ? h.screens.join(", ") : "on no screen"}`,
+    tooltip: `${h.panel}: HMI tag ${h.tag} in ${h.table}${h.connection ? ` over ${h.connection}` : ""}\nScreens: ${h.screens.join(", ") || "none"}`, icon: "device-desktop" })) }] : [];
+  const groups = [...group("writes", "Writes", r.writes), ...group("reads", "Reads", r.reads), ...group("handed", "Handed on", r.handedOn), ...hmi];
+  return [...(groups.length ? groups : [{ id: "none", label: "No uses in the workspace", icon: "info" }]),
+    { id: "coverage", label: r.hmi ? "Workspace code and HMI panels" : "Workspace code only", tooltip: r.hmi ? NOT_SEEN.replace("HMI, ", "") : NOT_SEEN, icon: "info" }];
 }
 
 /** A question asked of the Usages view, newest first: the same name in the same file once, at most `max`. */
