@@ -131,6 +131,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         items.push({ range: { start: { line, character: 0 }, end: { line, character: 200 } }, severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung sync" });
       }
     }
+    // a publish already reading the file when the server stopped has no connection left to send to
+    if (disposed) return;
     await connection.sendDiagnostics({ uri, diagnostics: items });
   }
 
@@ -587,7 +589,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     await monitor?.closed(3000);
   });
 
+  let disposed = false;
   function dispose() {
+    disposed = true;
     monitor?.stop(undefined, false);
     fsWatcher?.close();
     clearInterval(pollTimer);
