@@ -10,7 +10,25 @@ import { modelSummary } from "./modelSummary.js";
 /** Inspect the authoritative native manifest and raw documents without opening the engineering project. */
 export async function cmdLibrary(dir: string, files: string[] | undefined, json: boolean, io: Io,
   options: { typeGuid?: string; versionGuid?: string; exportDir?: string; preview?: boolean; device?: string;
-    apply?: boolean; expectedRevision?: string; expectedPackageRevision?: string; release?: boolean; update?: boolean; number?: string; author?: string; comment?: string } = {}): Promise<number> {
+    apply?: boolean; expectedRevision?: string; expectedPackageRevision?: string; release?: boolean; update?: boolean; number?: string; author?: string; comment?: string;
+    masterCopy?: string; from?: string } = {}): Promise<number> {
+  if (options.masterCopy !== undefined || options.from !== undefined) {
+    const name = /^[^\p{Cc}"/\\]{1,128}$/u;
+    if (options.masterCopy === undefined || !name.test(options.masterCopy) || (options.from !== undefined && !name.test(options.from)) || !options.device
+      || options.release || options.update || files?.length || options.exportDir || options.expectedPackageRevision || options.typeGuid || options.versionGuid || !!options.preview === !!options.apply
+      || (options.apply ? !/^[0-9a-f]{64}$/.test(options.expectedRevision ?? "") : options.expectedRevision !== undefined))
+      throw new WorkspaceError("BAD_ARGUMENT", "A master copy needs --master-copy <name>, --device, optionally --from <block>, and preview or apply with a reviewed revision");
+    const config = await loadConfig(await findWorkspace(dir));
+    if (config.project.tiaVersion !== "V20") throw new WorkspaceError("BAD_ARGUMENT", "Master copies currently support V20");
+    if (options.apply && (config.writesOff || config.sync.import !== "auto")) throw new WorkspaceError("WRITES_OFF", "Master copies require writes on and sync.import = auto");
+    const client = await bridgeFor(config, io, options.apply ? ["--allow-import", ...(config.sync.save === "after-import" ? ["--save-after-import"] : [])] : []);
+    try {
+      const request = { action: options.from === undefined ? "use" : "create", name: options.masterCopy, device: options.device, ...(options.from === undefined ? {} : { block: options.from }) };
+      const result = await client.request(options.apply ? "library.mastercopy" : "library.mastercopy.preview",
+        options.apply ? { ...request, expectedRevision: options.expectedRevision, operationId: randomUUID() } : request);
+      io.stdout(JSON.stringify(result, null, json ? undefined : 2) + "\n"); return 0;
+    } finally { await client.close(); }
+  }
   if(options.update){
     if(options.release||files?.length||options.exportDir||options.expectedPackageRevision||options.number!==undefined||options.author!==undefined||options.comment!==undefined||!options.device||!!options.preview===!!options.apply
       || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(options.typeGuid??"")||!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(options.versionGuid??"")

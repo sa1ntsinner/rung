@@ -229,6 +229,15 @@ namespace Rung.Bridge.Core.Protocol
                     var releaseRevision=Str(p,"expectedRevision");LibraryImportPlan.CheckRevision(releaseRevision);
                     if(!Guid.TryParseExact(Str(p,"operationId"),"D",out var releaseId)||releaseId==Guid.Empty)throw new RpcException(ErrorCodes.BadRequest,"Library operationId must be a UUID");
                     return Session.ReleaseLibrary(releaseRequest,releaseRevision,releaseId.ToString("D"));
+                case "library.mastercopy.preview":
+                case "library.mastercopy":
+                    LibraryParams(p, method == "library.mastercopy.preview" ? new[] { "action", "name", "device", "block" } : new[] { "action", "name", "device", "block", "expectedRevision", "operationId" });
+                    var copyRequest = new MasterCopyRequest { Action = Str(p, "action"), Name = Str(p, "name"), Device = Str(p, "device"), Block = OptStr(p, "block") };
+                    MasterCopyPlan.Check(copyRequest);
+                    if (method == "library.mastercopy.preview") return Session.PreviewMasterCopy(copyRequest);
+                    var copyRevision = Str(p, "expectedRevision"); LibraryImportPlan.CheckRevision(copyRevision);
+                    if (!Guid.TryParseExact(Str(p, "operationId"), "D", out var copyId) || copyId == Guid.Empty) throw new RpcException(ErrorCodes.BadRequest, "Library operationId must be a UUID");
+                    return Session.ApplyMasterCopy(copyRequest, copyRevision, copyId.ToString("D"));
                 case "hardware.preview":
                 case "hardware.apply":
                     var patchText = Str(p, "patchText");

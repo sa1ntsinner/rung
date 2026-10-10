@@ -31,6 +31,8 @@ namespace Rung.Bridge.Core
         ArtifactResult ImportProjectArtifact(string kind,string device,string name,byte[] bytes,string expectedRevision,string operationId);
         LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId);
         LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request, string expectedRevision, string operationId);
+        MasterCopyPreview PreviewMasterCopy(MasterCopyRequest request);
+        MasterCopyResult ApplyMasterCopy(MasterCopyRequest request, string expectedRevision, string operationId);
         LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId);
         /// <summary>Guarded import. expectedTiaRevision = fingerprint the caller last exported, or "absent".</summary>
         ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId);

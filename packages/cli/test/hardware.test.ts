@@ -36,6 +36,19 @@ it("previews and applies explicit library default updates with write guards",asy
  expect(await main([...args,"--apply","--expected-revision","a".repeat(64)],io)).toBe(0);expect(request).toHaveBeenLastCalledWith("library.update",expect.objectContaining({operationId:expect.any(String)}));
  }finally{await rm(root,{recursive:true,force:true});}
 });
+it("makes a master copy of a block and a block from a master copy through the write guards",async()=>{
+ const root=await mkdtemp(join(tmpdir(),"rung-master-copy-")),config=defaultConfig("fixture.ap20","V20","",["PLC_1"]);await saveConfig(root,config);
+ const io={cwd:root,env:{},stdout:vi.fn(),stderr:vi.fn()},request=vi.fn(async()=>({revision:"a".repeat(64)})),close=vi.fn(async()=>{});const bridge=vi.spyOn(common,"bridgeFor").mockResolvedValue({request,close} as never);
+ try{
+  expect(await main(["library","--master-copy","Motor template","--from","Motor","--device","PLC_1","--preview"],io)).toBe(0);
+  expect(request).toHaveBeenLastCalledWith("library.mastercopy.preview",{action:"create",name:"Motor template",device:"PLC_1",block:"Motor"});
+  bridge.mockClear();expect(await main(["library","--master-copy","Motor template","--device","PLC_1","--apply","--expected-revision","a".repeat(64)],io)).toBe(1);expect(bridge).not.toHaveBeenCalled();
+  await grantWrites(root,config);
+  expect(await main(["library","--master-copy","Motor template","--device","PLC_1","--apply","--expected-revision","a".repeat(64)],io)).toBe(0);
+  expect(request).toHaveBeenLastCalledWith("library.mastercopy",expect.objectContaining({action:"use",name:"Motor template",operationId:expect.any(String)}));
+  expect(await main(["library","--master-copy","Motor template","--preview"],io)).toBe(1);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 it("applies library packages only with reviewed revisions and workspace writes enabled", async () => {
   const root=await mkdtemp(join(tmpdir(),"rung-library-import-"));
   const config=defaultConfig("fixture.ap20","V20","",["PLC_1"]);await saveConfig(root,config);

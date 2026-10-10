@@ -129,6 +129,8 @@ PLC:
   rung library [dir] --type-guid <uuid> --version-guid <uuid> --export <new-dir> [--json]
   rung library [dir] --release --type-guid <uuid> --version-guid <uuid> --number <version> --author <name> --comment <text> (--preview | --apply --expected-revision <sha256>) [--json]
   rung library [dir] --update --type-guid <uuid> --version-guid <default-uuid> --device <plc> (--preview | --apply --expected-revision <sha256>) [--json]
+  rung library [dir] --master-copy <name> [--from <block>] --device <plc> (--preview | --apply --expected-revision <sha256>) [--json]
+                                                          a master copy of a PLC block (--from), or a new block from a master copy
   rung alarms [dir] --device <plc> (--export <new.xlsx> | --file <edited.xlsx> --preview) [--json]
   rung safety [dir] --device <plc> [--json]                 read-only offline safety service observation
   rung technology [dir] --device <plc> --name <object> (--export <new.xml> | --file <edited.xml> --preview) [--json]
@@ -440,7 +442,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   open: { options: ["dir", "save"], positionals: 1 },
   session: { options: ["release", "save", "discard", "json"], positionals: 1 },
   hardware: { options: ["file", "apply", "json","expected-artifact-revision"], positionals: 1 },
-  library: { options: ["file", "json", "type-guid", "version-guid", "export", "preview", "device", "apply", "expected-revision", "expected-package-revision", "release", "update", "number", "author", "comment"], positionals: 1 },
+  library: { options: ["file", "json", "type-guid", "version-guid", "export", "preview", "device", "apply", "expected-revision", "expected-package-revision", "release", "update", "number", "author", "comment", "master-copy", "from"], positionals: 1 },
   alarms:{options:["device","export","file","preview","apply","expected-revision","expected-artifact-revision","json"],positionals:1},
   safety:{options:["device","json"],positionals:1},
   technology:{options:["device","name","export","file","preview","apply","expected-revision","expected-artifact-revision","json"],positionals:1},
@@ -492,6 +494,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
       fresh: { type: "boolean" },
       save: { type: "boolean" },
         release: { type: "boolean" },
+        "master-copy": { type: "string" },
+        from: { type: "string" },
         discard: { type: "boolean" },
         update: { type: "boolean" },
         name: { type:"string" },
@@ -635,6 +639,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           preview: !!v.preview, device: v.device?.[0],
           apply: !!v.apply, expectedRevision: v["expected-revision"], expectedPackageRevision: v["expected-package-revision"],
           release: !!v.release, update: !!v.update, number: v.number, author: v.author, comment: v.comment,
+          masterCopy: v["master-copy"], from: v.from,
         });
       case "live-server": {
         await startLiveServer(dir, io.env);

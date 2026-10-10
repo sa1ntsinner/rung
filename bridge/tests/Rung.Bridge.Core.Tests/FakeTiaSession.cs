@@ -24,6 +24,8 @@ public sealed class FakeTiaSession : ITiaSession
     public LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId)=>new LibraryImportResult{TypeGuid=request.TypeGuid,VersionGuid=request.VersionGuid};
     public LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request,string expectedRevision,string operationId) => new LibraryImportResult { TypeGuid=request.TypeGuid,VersionGuid=request.VersionGuid,State="Committed" };
     public IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir) => LibraryExport(typeGuid, versionGuid, targetDir);
+    public MasterCopyPreview PreviewMasterCopy(MasterCopyRequest request) => new MasterCopyPreview { Request = request, Revision = new string('a', 64) };
+    public MasterCopyResult ApplyMasterCopy(MasterCopyRequest request, string expectedRevision, string operationId) => new MasterCopyResult { Action = request.Action, Name = request.Name, Revision = expectedRevision };
     public DescribeNode HardwareTree;
     public string LastHardwareMethod;
     public HardwarePreview PreviewHardware(HardwarePatch patch) { LastHardwareMethod = "hardware.preview"; return HardwarePlan.Preview(Describe("hardware", 4096), patch); }

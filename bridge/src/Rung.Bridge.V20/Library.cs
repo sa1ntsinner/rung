@@ -154,6 +154,58 @@ namespace Rung.Bridge.V20
             }
 #endif
         }
+        public MasterCopyPreview PreviewMasterCopy(MasterCopyRequest request)
+        {
+#if TIA_V19 || TIA_V21
+            throw new RpcException(ErrorCodes.UnsupportedCapability, "Master copies are validated for V20 only");
+#else
+            Alive();
+            using (var access = _portal.ExclusiveAccess("rung: master copy preview")) { MasterCopyTarget(request); return new MasterCopyPreview { Request = request, Revision = LibraryImportPlan.Revision(LibraryState()) }; }
+#endif
+        }
+        /// <summary>The PLC block to copy (create) or the master copy to use, refused before anything changes.</summary>
+        object MasterCopyTarget(MasterCopyRequest request)
+        {
+            var plc = Plc(request.Device);
+            var copies = _project.ProjectLibrary.MasterCopyFolder;
+            if (request.Action == "create") {
+                // ponytail: PLC root blocks only; groups and software units are not searched
+                var block = plc.BlockGroup.Blocks.Find(request.Block) ?? throw new RpcException(ErrorCodes.BadRequest, $"PLC {plc.Name} has no block {request.Block} in its root");
+                if (copies.MasterCopies.Find(request.Name) != null) throw new RpcException(ErrorCodes.BadRequest, "A master copy of that name already exists");
+                return block;
+            }
+            return copies.MasterCopies.Find(request.Name) ?? throw new RpcException(ErrorCodes.BadRequest, "The project library has no master copy " + request.Name + " in its master copy folder");
+        }
+        public MasterCopyResult ApplyMasterCopy(MasterCopyRequest request, string expectedRevision, string operationId)
+        {
+#if TIA_V19 || TIA_V21
+            throw new RpcException(ErrorCodes.UnsupportedCapability, "Master copies are validated for V20 only");
+#else
+            Alive(); FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
+            using (var access = _portal.ExclusiveAccess("rung: master copy")) {
+                MasterCopyTarget(request);
+                operationId = HardwarePlan.StartOperation(operationId, _libraryOperations, "Library"); MasterCopyResult result; _inImport = true;
+                try {
+                    result = MasterCopyPlan.Apply(LibraryState, request, expectedRevision, () => {
+                        var plc = Plc(request.Device);
+                        if (request.Action == "create") {
+                            var copy = _project.ProjectLibrary.MasterCopyFolder.MasterCopies.Create(MasterCopyTarget(request) as Siemens.Engineering.Library.MasterCopies.IMasterCopySource ?? throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA cannot make a master copy of this block"));
+                            copy.Name = request.Name;
+                            _index.Clear();
+                            return null;
+                        }
+                        var block = plc.BlockGroup.Blocks.CreateFrom((Siemens.Engineering.Library.MasterCopies.MasterCopy)MasterCopyTarget(request));
+                        _index.Clear();
+                        return Addr(plc.Name, "block", new List<string>(), block.Name, null);
+                    }, work => { using (var tx = access.Transaction(_project, "rung master copy " + operationId)) { work(); tx.CommitOnDispose(); } });
+                } finally { _inImport = false; _index.Clear(); _libraryTypes.Clear(); }
+                Receipts.Write(operationId, "library:" + _project.Path.FullName);
+                if (_args.SaveAfterImport)
+                    try { _project.Save(); result.Saved = true; } catch (Siemens.Engineering.EngineeringException) { result.Warnings = new[] { WarningCodes.SaveFailed }; }
+                return result;
+            }
+#endif
+        }
         public LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId)
         {
 #if TIA_V19 || TIA_V21

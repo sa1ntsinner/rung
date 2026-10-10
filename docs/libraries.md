@@ -143,3 +143,19 @@ is separate because TIA forbids it inside a transaction. Actual bridge, CLI and
 VS Code used-instance updates passed on disposable offline clones with source
 and project graph restoration. See [project assets](project-assets.md) for other
 artifact commands and the safety availability limitation.
+
+## Master copies
+
+```powershell
+rung library --master-copy "Motor template" --from Motor --device PLC_1 --preview --json
+rung library --master-copy "Motor template" --device PLC_1 --preview --json
+rung library --master-copy "Motor template" --device PLC_1 --apply --expected-revision <preview.revision> --json
+```
+
+With `--from`, the PLC root block becomes a master copy of that name in the project
+library's master copy folder; without it, the master copy becomes a new block in
+the PLC root. TIA names the new block (`FC_ProveSwap_1` when the name is taken) and
+the result reports it. Apply runs in one transaction and keeps it only when exactly
+the one master copy or the one block appeared and nothing else changed; otherwise
+the transaction is rolled back and checked. Writes on and `sync.import = "auto"`
+are required, as for package import.
