@@ -38,11 +38,14 @@ rung technology --device PLC_1 --name RungPID_Probe --file pid.xml --apply --exp
 rung compile --plc PLC_1
 ```
 
-The proven initial scope is a compiled root **PID_Compact 2.3** object and its
-writable Real **Config.InputUpperLimit.StartValue**. Preserve every other native
-XML field. Other TO versions, parameters, nesting, object creation and deletion
-refuse. Read-only gain parameters are not editable. Removing this StartValue
-restores the version-pinned native implicit value 120.
+Export any compiled root technology object. In the exported XML, set or change
+`StartValue` of any parameter (`Config.InputUpperLimit`, `Config.InvertControl`,
+nested members by their path); the preview lists each one. A parameter changes
+only when TIA Portal lets it be written and the value fits its elementary type
+(Bool, integers, Real/LReal, String); every parameter of the object is checked
+after the import. Preserve every other native XML field. Removing a StartValue
+(an unshown default), object creation and deletion refuse. Proven live on
+PID_Compact 2.3.
 
 Native Override import replaces object handles and makes the TO inconsistent.
 The adapter reacquires it and verifies its complete parameter inventory, identity
