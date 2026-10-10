@@ -57,7 +57,7 @@ observations; the running PLC's executed branches cannot be inferred from them.
 On a supported S7CommPlus target, live watch also requests native begin/end
 snapshots through its existing reader lease. A validated matching SCL FB, whose
 instance DB OB1 calls or which is a multi-instance below it (`--instance
-Line_DB.motor`), can show `native-sample` reconstruction and recorded Why in VS
+Line_DB.motor`) or an instance DB an FB called from OB1 calls (`"Motor_DB"()` inside FB_Line), can show `native-sample` reconstruction and recorded Why in VS
 Code. Ordinary observed declaration values stay separate.
 Native sample times belong to the capture, and its coherence remains
 `subscription-sample`: reconstructed branches are not verified PLC execution.
@@ -75,7 +75,7 @@ or through other FCs, runs inside the replay when its source is the code the PLC
 holds; the DB members and tags it reads are read next to the sample like the FB's.
 Standard FB instances (TON, CTU: their state is not in the sample), other constants,
 CPU clocks, calls of FBs other than multi-instances, recursive FCs, instance DBs
-called from inside an FB, other OBs and computed array indexes that the cycle reads
+called deeper than inside an FB that OB1 calls, other OBs and computed array indexes that the cycle reads
 are explicitly refused. Source revision, session scope/epoch, reader lifetime
 and dirty editor sources invalidate the result. Missing native support retains
 the unavailable subscription-only behavior described above.

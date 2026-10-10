@@ -18,7 +18,7 @@ public sealed class NativeSourceTests
         Assert.Equal(256u, route.FunctionBlock);
         Assert.Equal(route, Assert.Single(NativeSource.RootCallSites(debug, [body], [references], "Counter_DB")));
         Assert.Equal(2, NativeSource.RootCallSites(debug.Replace("</DebugInfo>", "<Operand sac='94' cuId='3' elementId='258'/></DebugInfo>"), [body], [references], "Counter_DB").Length);
-        Assert.ThrowsAny<Exception>(() => NativeSource.RootCallSites(debug, [body], [references], "Other_DB"));
+        Assert.Empty(NativeSource.RootCallSites(debug, [body], [references], "Other_DB"));
         Assert.ThrowsAny<Exception>(() => NativeSource.RootCallSites(debug, [body, body], [references], "Counter_DB"));
         Assert.ThrowsAny<Exception>(() => NativeSource.RootCall(debug, body, [references], 119));
         Assert.ThrowsAny<Exception>(() => NativeSource.RootCall(debug, body.Replace("SI='DB'", "SI='Local'"), [references], 118));
@@ -106,6 +106,16 @@ public sealed class NativeSourceTests
             + "<Ident Name='Fx_Global' Scope='Global' RefId='6'><CrossRefInfo><XRefItem UId='60' Usage='Read' NetId='1' /></CrossRefInfo><Access><DBBlock BlockNumber='2' /></Access></Ident></IdentContainer>";
         Assert.Equal(new uint[] { 5 }, NativeSource.CalledFunctions([refs]));
         Assert.Empty(NativeSource.CalledFunctions([]));
+        var fbRefs = refs.Replace("FCBlock BlockNumber='5' BlockType='FC'", "FBBlock BlockNumber='19' BlockType='FB'");
+        Assert.Equal(new uint[] { 19 }, NativeSource.CalledFunctionBlocks([fbRefs]));
+        Assert.Empty(NativeSource.CalledFunctionBlocks([refs]));
+    }
+
+    [Fact]
+    public void ABlockThatDoesNotCallTheInstanceHasNoCallSites()
+    {
+        var body = "<Network Lang='SCL' RefID='1'><RootStatements><Statement UId='1'><SymVa UId='2' SI='Var' ODN='#x' /></Statement></RootStatements></Network>";
+        Assert.Empty(NativeSource.RootCallSites("<DebugInfo />", [body], [], "Motor_DB"));
     }
 
     [Fact]

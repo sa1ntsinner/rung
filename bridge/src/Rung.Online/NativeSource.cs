@@ -45,6 +45,7 @@ public static class NativeSource
             return document.Descendants().Where(e => e.Name.LocalName == "Sub" && (string?)e.Attribute("ODN") == "\"" + instance + "\"")
                 .Select(call => (Text: text, Cu: (string?)document.Root?.Attribute("RefID"), Uid: (string?)call.Attribute("UId")));
         }).ToArray();
+        if (calls.Length == 0) return [];
         var selected = calls.Single();
         if (string.IsNullOrEmpty(selected.Cu) || string.IsNullOrEmpty(selected.Uid)) throw new NotSupportedException("Incomplete native call location.");
         var operands = Parse(debugXml).Descendants().Where(e => e.Name.LocalName == "Operand"
@@ -167,12 +168,25 @@ public static class NativeSource
     }
 
     /// <summary>The numbers of the FCs a block's code calls, from its cross references.</summary>
-    public static uint[] CalledFunctions(string[] references)
+    public static uint[] CalledFunctions(string[] references) => CalledBlocks(references, "FCBlock");
+
+    /// <summary>The numbers of the FBs a block's code calls (through instance DBs or multi-instances).</summary>
+    public static uint[] CalledFunctionBlocks(string[] references) => CalledBlocks(references, "FBBlock");
+
+    /// <summary>The call the caller's code makes at a SAC its stack frame shows: an instance DB call (RootCall).</summary>
+    public static NativeRootCall CallAt(string debugXml, string[] bodies, string[] references, uint sac)
+    {
+        var cu = Parse(debugXml).Descendants().Where(e => e.Name.LocalName == "Operand" && (uint?)e.Attribute("sac") == sac)
+            .Select(e => (string?)e.Attribute("cuId")).Distinct().Single() ?? throw new NotSupportedException("Missing caller compilation unit.");
+        return RootCall(debugXml, bodies.Single(b => (string?)Parse(b).Root?.Attribute("RefID") == cu), references, sac);
+    }
+
+    static uint[] CalledBlocks(string[] references, string kind)
     {
         if (references.Length > 256 || references.Sum(r => (long)r.Length) > 1_048_576) throw new NotSupportedException("Native call references exceed limits.");
         return references.SelectMany(r => Parse(r).Descendants().Where(e => e.Name.LocalName == "Ident"
                 && e.Descendants().Any(x => x.Name.LocalName == "XRefItem" && (string?)x.Attribute("Usage") == "Call")))
-            .SelectMany(i => i.Descendants().Where(e => e.Name.LocalName == "FCBlock").Select(e => (uint?)e.Attribute("BlockNumber") ?? throw new NotSupportedException("Missing FC number.")))
+            .SelectMany(i => i.Descendants().Where(e => e.Name.LocalName == kind).Select(e => (uint?)e.Attribute("BlockNumber") ?? throw new NotSupportedException("Missing block number.")))
             .Distinct().OrderBy(n => n).ToArray();
     }
 
