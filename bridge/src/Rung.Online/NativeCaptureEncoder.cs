@@ -27,15 +27,33 @@ public static class NativeCaptureEncoder
     static object? Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Flags, null, args.Select(a => a.GetType()).ToArray(), null)!.Invoke(target, args);
     static int Align(int value, int bytes) => checked((value + bytes - 1) / bytes * bytes);
 
+    /// <summary>The caller of a block called right from an OB: the stack holds that one frame.</summary>
     public static (uint Number, uint Sac) RootCaller(byte[] raw)
     {
-        // ponytail: validated ten-slot layout and a single OB frame; nested stacks are refused.
-        if (raw.Length < 112 || raw[22] != 0 || raw[23] != 0 || raw.AsSpan(24, 72).ContainsAnyExcept((byte)0)
-            || raw[96] != 1 || raw[97] != 0) throw new NotSupportedException("Unsupported native caller stack.");
-        uint number = BinaryPrimitives.ReadUInt16BigEndian(raw.AsSpan(98, 2));
-        if (number == 0 || BinaryPrimitives.ReadUInt16BigEndian(raw.AsSpan(20, 2)) != number)
+        var frames = CallerFrames(raw);
+        if (frames.Length != 1) throw new NotSupportedException("Unsupported native caller stack.");
+        return (frames[0].Number, frames[0].Sac);
+    }
+
+    /// <summary>
+    /// The call chain a sample reports, outermost first: ten 8-byte slots (bytes 24–103), the innermost caller in the
+    /// last, each [type 1 = OB, 3 = FB][0][block number][call site SAC]. Seen on S7-1500 V20: OB1 → FB_ProveMath → #inner.
+    /// </summary>
+    public static (byte Type, uint Number, uint Sac)[] CallerFrames(byte[] raw)
+    {
+        if (raw.Length < 112 || raw[22] != 0 || raw[23] != 0) throw new NotSupportedException("Unsupported native caller stack.");
+        var frames = new List<(byte Type, uint Number, uint Sac)>();
+        for (var at = 24; at <= 96; at += 8)
+        {
+            var slot = raw.AsSpan(at, 8);
+            if (!slot.ContainsAnyExcept((byte)0)) { if (frames.Count > 0) throw new NotSupportedException("Native caller stack has a gap."); continue; }
+            if (slot[1] != 0 || slot[0] != 1 && slot[0] != 3) throw new NotSupportedException("Unsupported native caller frame.");
+            frames.Add((slot[0], BinaryPrimitives.ReadUInt16BigEndian(slot[2..4]), BinaryPrimitives.ReadUInt32BigEndian(slot[4..8])));
+        }
+        if (frames.Count == 0 || frames[0].Type != 1 || frames.Skip(1).Any(f => f.Type != 3) || frames.Any(f => f.Number == 0)
+            || BinaryPrimitives.ReadUInt16BigEndian(raw.AsSpan(20, 2)) != frames[0].Number)
             throw new NotSupportedException("Native caller stack disagrees with its OB.");
-        return (number, BinaryPrimitives.ReadUInt32BigEndian(raw.AsSpan(100, 4)));
+        return frames.ToArray();
     }
 
     public static NativeCaptureState Decode(NativeCapturePlan plan, byte[] raw)

@@ -50,6 +50,31 @@ public static class NativeSource
             (uint?)operand.Attribute("sac") ?? throw new NotSupportedException("Missing caller SAC."))).ToArray();
     }
 
+    /// <summary>
+    /// Where a caller FB calls its multi-instance #member (InstCa/Sub SI="FB"): the call sites' SACs, as the caller frames
+    /// of a sample name them, and the FB that instance is of, from the cross-reference.
+    /// </summary>
+    public static (uint Callee, uint[] Sacs) MemberCallSites(string debugXml, string[] bodies, string[] references, string member)
+    {
+        if (bodies.Length is 0 or > 256 || bodies.Sum(b => (long)b.Length) > 1_048_576 || references.Length > 256 || string.IsNullOrWhiteSpace(member) || member.Length > 128)
+            throw new NotSupportedException("Native caller bodies exceed limits.");
+        var calls = bodies.SelectMany(text => {
+            var document = Parse(text);
+            var cu = (string?)document.Root?.Attribute("RefID");
+            return document.Descendants().Where(e => e.Name.LocalName == "Sub" && (string?)e.Attribute("SI") == "FB" && (string?)e.Attribute("ODN") == "#" + member
+                && e.Parent?.Name.LocalName == "InstCa").Select(call => (Cu: cu, Uid: (string?)call.Attribute("UId")));
+        }).ToArray();
+        if (calls.Length == 0 || calls.Any(c => string.IsNullOrEmpty(c.Cu) || string.IsNullOrEmpty(c.Uid))) throw new NotSupportedException($"#{member} is not called as a multi-instance in its caller.");
+        var sacs = Parse(debugXml).Descendants().Where(e => e.Name.LocalName == "Operand" && calls.Any(c => (string?)e.Attribute("cuId") == c.Cu && (string?)e.Attribute("elementId") == c.Uid))
+            .Select(e => (uint?)e.Attribute("sac") ?? throw new NotSupportedException("Missing caller SAC.")).Distinct().OrderBy(s => s).ToArray();
+        var uids = calls.Select(c => c.Uid).ToHashSet();
+        var callees = references.SelectMany(r => Parse(r).Descendants().Where(e => e.Name.LocalName == "Ident"
+                && e.Descendants().Any(x => x.Name.LocalName == "XRefItem" && (string?)x.Attribute("Usage") == "Call" && uids.Contains((string?)x.Attribute("UId")))))
+            .SelectMany(i => i.Descendants().Where(e => e.Name.LocalName == "FBBlock").Select(e => (uint?)e.Attribute("BlockNumber") ?? 0)).Distinct().ToArray();
+        if (sacs.Length is 0 or > 256 || callees.Length != 1 || callees[0] is 0 or > 65535) throw new NotSupportedException($"The call of #{member} has no unique call site or FB.");
+        return (callees[0], sacs);
+    }
+
     public static NativeRootCall RootCall(string debugXml, string bodyXml, string[] references, uint sac)
     {
         if (references.Length is 0 or > 256 || references.Sum(r => (long)r.Length) > 1_048_576)

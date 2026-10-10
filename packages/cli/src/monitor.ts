@@ -51,7 +51,9 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
   let inst: string | undefined;
   if (block.kind === "FB") {
     const dbs = monitorInstances(index, uri);
-    inst = instance ? (/^"/.test(instance.trim()) ? instance.trim() : quoted(instance.trim())) : dbs.length === 1 ? quoted(dbs[0]!) : undefined;
+    // a multi-instance names its DB and the member path below it: Line_DB.Motor1 → "Line_DB".Motor1
+    const named = instance?.trim();
+    inst = named ? (/^"/.test(named) ? named : /\./.test(named) ? quoted(named.slice(0, named.indexOf("."))) + named.slice(named.indexOf(".")) : quoted(named)) : dbs.length === 1 ? quoted(dbs[0]!) : undefined;
     if (!inst)
       throw new WorkspaceError(
         "NO_INSTANCE",

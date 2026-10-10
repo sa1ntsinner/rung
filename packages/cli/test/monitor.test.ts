@@ -16,6 +16,13 @@ describe("monitoring a DB", () => {
     try { monitorPlan(idx, uri); } catch (e) { error = e; }
     expect(error).toMatchObject({ code: "NO_INSTANCE", details: { instances: ["A", "B"] } });
   });
+  it("reads a multi-instance through its DB and member path, written with or without quotes", () => {
+    const idx = new WorkspaceIndex(), uri = "file:///w/plc/P/blocks/Motor.scl";
+    idx.set(uri, fb("Motor", "Run"), 0);
+    expect(monitorPlan(idx, uri, "Line_DB.motor").vars.Run).toBe('"Line_DB".motor.Run');
+    expect(monitorPlan(idx, uri, '"Line_DB".motor').vars.Run).toBe('"Line_DB".motor.Run');
+    expect(monitorPlan(idx, uri, "Motor_DB").vars.Run).toBe('"Motor_DB".Run');
+  });
   it("reads the members of its STRUCTs too, each on its own line, labelled with its path", () => {
     const idx = new WorkspaceIndex();
     const text = 'DATA_BLOCK "Line_DB"\n   VAR \n      Ready : Bool;\n      Motor : Struct\n         Speed : Int;\n         "Set point" : Real;\n      END_STRUCT;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK\n';

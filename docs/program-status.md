@@ -55,15 +55,22 @@ timestamp. Stale/disconnected frames explain their refusal. Live values remain
 observations; the running PLC's executed branches cannot be inferred from them.
 
 On a supported S7CommPlus target, live watch also requests native begin/end
-snapshots through its existing reader lease. A validated matching SCL FB and
-root instance DB called from OB1 can show `native-sample` reconstruction and
-recorded Why in VS Code. Ordinary observed declaration values stay separate.
+snapshots through its existing reader lease. A validated matching SCL FB, whose
+instance DB OB1 calls or which is a multi-instance below it (`--instance
+Line_DB.motor`), can show `native-sample` reconstruction and recorded Why in VS
+Code. Ordinary observed declaration values stay separate.
 Native sample times belong to the capture, and its coherence remains
 `subscription-sample`: reconstructed branches are not verified PLC execution.
 
-This producer needs the installed V20 serializers and supports complete
-persistent primitive scalar state only. Other callers, nested instances,
-composites, local constants, used TEMP, clocks, external state and unmatched user dependencies
+This producer needs the installed V20 serializers. The sample holds the members
+the code touches, by path (`count`, `s.a`, `arr[1]`); a member it does not hold is
+unknown, and a cycle that reads one is refused rather than replayed with a guess.
+Temporaries need no capture: a temporary read before the cycle wrote it refuses the
+sample. DB members and tags the FB reads or writes are read right before and after
+the sample; a value that moved in between refuses it, and what the FB writes is
+compared with the PLC's value. Standard FB instances (TON, CTU: their state is not
+in the sample), local constants, CPU clocks, calls of user blocks, instance DBs
+called from inside an FB, other OBs and computed array indexes that the cycle reads
 are explicitly refused. Source revision, session scope/epoch, reader lifetime
 and dirty editor sources invalidate the result. Missing native support retains
 the unavailable subscription-only behavior described above.

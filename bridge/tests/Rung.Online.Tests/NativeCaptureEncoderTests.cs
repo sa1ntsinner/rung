@@ -20,6 +20,21 @@ public sealed class NativeCaptureEncoderTests
         Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.RootCaller(raw));
         Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.RootCaller(raw[..100]));
     }
+
+    [Fact]
+    public void ReadsTheCallerChainOfAMultiInstanceAsTheCpuReportsIt()
+    {
+        // seen live: FB_ProveInner as #inner of FB_ProveMath (FB 10), whose ProveMath_DB OB1 calls at SAC 255
+        var raw = new byte[456];
+        Convert.FromHexString("0100000100000" + "0FF" + "0300000A000001C4").CopyTo(raw, 88);
+        raw[21] = 1;
+        Assert.Equal(new[] { (1, 1u, 255u), (3, 10u, 452u) }, NativeCaptureEncoder.CallerFrames(raw).Select(f => ((int)f.Type, f.Number, f.Sac)).ToArray());
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.RootCaller(raw));
+        var gap = (byte[])raw.Clone(); gap[80] = 1; gap[83] = 1; gap[88] = 0; gap[91] = 0; gap[95] = 0;
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.CallerFrames(gap));
+        var fbFirst = (byte[])raw.Clone(); fbFirst[88] = 3;
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.CallerFrames(fbFirst));
+    }
     [Fact]
     public void DecoderRefusesUnsafeIntegersAndMismatchedFieldWidthsWithoutTia()
     {

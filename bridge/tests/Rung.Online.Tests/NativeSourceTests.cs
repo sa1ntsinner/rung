@@ -87,6 +87,19 @@ public sealed class NativeSourceTests
     }
 
     [Fact]
+    public void FindsAMultiInstanceCallAndTheFbItCallsInTheCallersCode()
+    {
+        // as FB_ProveMath calls #inner (seen live, TIA Portal V20)
+        var body = "<Network Lang='SCL' RefID='1'><RootStatements><Statement UId='1014' SI='STSub'><InstCa UId='1019'><Sub UId='1018' SI='FB' SyId='85' ODN='#inner' /><BracO UId='1012' /><BracC UId='1026' /></InstCa></Statement></RootStatements></Network>";
+        var debug = "<DebugInfo><Operand sac='422' index='0' cuId='1' elementId='1018' /><Operand sac='452' index='0' cuId='1' elementId='1018' /><Operand sac='9' cuId='1' elementId='77' /></DebugInfo>";
+        var references = "<IdentContainer><Ident Name='FB_ProveInner' Scope='Global' RefId='31'><CrossRefInfo><XRefItem UId='1018' Usage='Call' NetId='1' Name='#inner' /></CrossRefInfo><Access><FBBlock BlockNumber='9' BlockType='FB' TypeName='FB_ProveInner' /></Access></Ident></IdentContainer>";
+        var site = NativeSource.MemberCallSites(debug, [body], [references], "inner");
+        Assert.Equal(9u, site.Callee);
+        Assert.Equal(new uint[] { 422, 452 }, site.Sacs);
+        Assert.Throws<NotSupportedException>(() => NativeSource.MemberCallSites(debug, [body], [references], "other"));
+    }
+
+    [Fact]
     public void InstanceMembersShareOneNativePointerWhateverTheBlockNumbers()
     {
         Assert.Equal(2, NativeSource.Scalars(Two(4, 4), TwoBody).Length);

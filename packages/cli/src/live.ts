@@ -347,7 +347,8 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
         const source = await context;
         if (stopped || owner !== generation) return;
         if (reconstructionRevision(source.index, source.uri) !== source.revision) throw new Error("Workspace source changed; restart monitoring");
-        const instance = plan.instance.replace(/^"|"$/g, "");
+        // "Line_DB".Motor1 → Line_DB.Motor1: the host follows the DB from OB1 and each member below it
+        const instance = plan.instance.replace(/"/g, "");
         // the DB members and tags the FB reads, on both sides of the sample: equal values stood still during it
         const globals = nativeGlobalReads(source.index, source.uri);
         const before = globals.length ? await read(globals) : [];
