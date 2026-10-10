@@ -513,6 +513,12 @@
         "icon": "$(table)"
       },
       {
+        "command": "rung.ladder.open",
+        "title": "Show as Ladder",
+        "category": "rung",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
         "command": "rung.tableKey",
         "title": "Table key (handled by the table)",
         "category": "rung"
@@ -1292,6 +1298,11 @@
         {
           "command": "rung.declarations.open",
           "when": "resourceLangId == scl && resourceExtname != .udt",
+          "group": "navigation@0"
+        },
+        {
+          "command": "rung.ladder.open",
+          "when": "resourceExtname == .xml && resourcePath =~ /[\\/]blocks[\\/]/",
           "group": "navigation@0"
         },
         {

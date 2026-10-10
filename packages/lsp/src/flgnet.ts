@@ -583,7 +583,7 @@ function callRefs(info: XmlNode | undefined, refs: Ref[]) {
 }
 
 /** An Access (or an Instance) as SCL: #local.member, "Global".member[i], a constant, %I0.0. */
-function operandText(a: XmlNode): string {
+export function operandText(a: XmlNode): string {
   const scope = a.attrs.Scope?.value ?? "";
   if (scope === "Text") return a.text; // an operand already written as SCL (a network read from SIMATIC SD)
   if (scope === "LiteralConstant" || scope === "TypedConstant") {

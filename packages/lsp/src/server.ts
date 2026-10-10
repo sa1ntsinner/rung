@@ -51,6 +51,7 @@ const TEST_FILE = /\.test\.ya?ml$/i;
 import { foldingRanges } from "./folding.js";
 import { pathMembers, workspaceSymbols, type FoundSymbol } from "./symbols.js";
 import { Monitoring, MONITOR_COMMAND, STOP_MONITOR_COMMAND, type MonitorProvider } from "./monitor.js";
+import { ladderOf } from "./ladder.js";
 
 const SEVERITY = { error: DiagnosticSeverity.Error, warning: DiagnosticSeverity.Warning, information: DiagnosticSeverity.Information, info: DiagnosticSeverity.Information, hint: DiagnosticSeverity.Hint } as const;
 const COMPLETION_KIND: Record<CompletionKind, CompletionItemKind> = {
@@ -310,6 +311,17 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     return declarationModel(p.textDocument.uri, documents.get(p.textDocument.uri)?.version ?? 0, doc.text, doc.parsed, offset, isFb, diagnostics(index, p.textDocument.uri), nextTagAddress(p.textDocument.uri));
   });
   // the data types a declaration table offers: elementary, TIA's instruction FBs, the file's PLC's UDTs and FBs
+  // a LAD block's networks as a ladder the editor draws (read-only), FBD/STL/SCL networks as text
+  connection.onRequest("rung/ladder", async (p: { textDocument: { uri: string } }) => {
+    const uri = p.textDocument.uri;
+    const text = documents.get(uri)?.getText() ?? index.docs.get(uri)?.text ?? (await readFile(fileURLToPath(uri), "utf8").catch(() => undefined));
+    if (text === undefined) return { error: "the file is not there" };
+    try {
+      return ladderOf(text);
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
   connection.onRequest("rung/typeNames", (p: { textDocument: { uri: string } }) => ({
     elementary: ELEMENTARY_TYPES.filter((t) => t !== "Void"),
     types: [

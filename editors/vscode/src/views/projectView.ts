@@ -93,7 +93,8 @@ export class ProjectItem extends vscode.TreeItem {
     md.appendMarkdown(`status: ${o.status}${o.readOnly ? " · read-only in rung" : ""}`);
     for (const w of o.warnings.slice(0, 5)) md.appendMarkdown(`  \n$(warning) ${w.replace(/[\\`*_[\]]/g, "\\$&")}`);
     this.tooltip = md;
-    this.command = { command: "vscode.open", title: "Open", arguments: [this.resourceUri] };
+    // a LAD/FBD block is SimaticML: it opens as networks, its XML is one click away in that view
+    this.command = o.kind === "block" && o.form === "xml" ? { command: "rung.ladder.open", title: "Show as Ladder", arguments: [this.resourceUri] } : { command: "vscode.open", title: "Open", arguments: [this.resourceUri] };
   }
 }
 

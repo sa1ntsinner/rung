@@ -813,3 +813,34 @@
 .rg-trace-plot polyline { stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
 .rg-trace-plot circle { fill: var(--vscode-charts-blue, #3794ff); }
 .rg-trace-cursor { stroke: var(--vscode-editorCursor-foreground); stroke-dasharray: 4 4; }
+
+/* Ladder view: TIA Portal's drawing in the editor's theme */
+rg-ladder { display: block; }
+.lad { padding: var(--rg-s4) var(--rg-s5) var(--rg-s5); max-width: 100%; box-sizing: border-box; }
+.lad-block h1 { font-size: 1.3em; font-weight: 600; margin: 0 0 var(--rg-s1); display: flex; gap: var(--rg-s2); align-items: center; }
+.lad-badge { font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.lad-tools { display: flex; gap: var(--rg-s3); align-items: center; margin: var(--rg-s3) 0 var(--rg-s2); position: sticky; top: 0; z-index: 1; padding: var(--rg-s2) 0; background: var(--rg-bg); }
+.lad-filter { flex: 0 1 360px; min-width: 120px; height: 24px; box-sizing: border-box; padding: 0 var(--rg-s2); background: var(--rg-input-bg); color: var(--rg-input-fg); border: 1px solid var(--rg-input-border); border-radius: var(--rg-radius); font: inherit; }
+.lad-filter:focus { outline: 1px solid var(--rg-focus); outline-offset: -1px; }
+.lad-count { color: var(--rg-muted); flex: 1; }
+.lad-net { border-top: 1px solid var(--rg-line); padding: var(--rg-s3) 0 var(--rg-s2); }
+.lad-head { display: flex; gap: var(--rg-s3); align-items: baseline; }
+.lad-num { font-weight: 600; white-space: nowrap; }
+.lad-title { white-space: pre-line; }
+.lad-comment { color: var(--rg-muted); margin: var(--rg-s1) 0 0; white-space: pre-line; }
+.lad-note { color: var(--rg-muted); font-style: italic; margin: var(--rg-s2) 0; }
+.lad-text { font-family: var(--rg-code); font-size: var(--rg-code-size); background: var(--vscode-textCodeBlock-background); padding: var(--rg-s2) var(--rg-s3); border-radius: var(--rg-radius); overflow-x: auto; margin: var(--rg-s2) 0 0; }
+.lad-scroll { overflow-x: auto; padding-top: var(--rg-s2); }
+.lad-svg { display: block; font-family: var(--rg-code); font-size: 12px; }
+.lad-svg line, .lad-svg path, .lad-svg rect { stroke: var(--rg-fg); stroke-width: 1.2; fill: none; }
+.lad-svg .lad-rail { stroke-width: 3; }
+.lad-svg .lad-sym { stroke-width: 1.6; }
+.lad-svg .lad-box { fill: var(--vscode-editorWidget-background, transparent); }
+.lad-svg text { fill: var(--rg-fg); stroke: none; }
+.lad-svg .lad-operand { fill: var(--vscode-symbolIcon-variableForeground, var(--vscode-textLink-foreground)); cursor: pointer; }
+.lad-svg .lad-operand:hover { text-decoration: underline; }
+.lad-svg .lad-const { fill: var(--vscode-debugTokenExpression-number, var(--rg-fg)); }
+.lad-svg .lad-letter { font-weight: 600; font-size: 11px; }
+.lad-svg .lad-boxname { font-weight: 600; }
+.lad-svg .lad-pin, .lad-svg .lad-muted { fill: var(--rg-muted); font-size: 11px; }
+.lad-svg .lad-small { font-size: 11px; }
