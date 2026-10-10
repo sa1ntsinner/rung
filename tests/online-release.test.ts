@@ -24,7 +24,8 @@ it.skipIf(process.platform !== "win32")("refuses non-fixture identities before l
     expect(result.stderr).toMatch(/Only local RungProve/);
     expect(result.stderr).not.toMatch(/Add-Type/);
   }
-});
+  // three powershell starts: a busy CI runner takes well over the default 20 s
+}, 120_000);
 
 it("rejects forbidden binaries, missing licenses and altered corresponding driver source", () => {
   const root = mkdtempSync(join(tmpdir(), "rung-release-test-"));

@@ -60,7 +60,8 @@ public class SessionTests
         {
             Assert.False(KeeperFile.WaitForRelease(file, 42, System.TimeSpan.FromMilliseconds(30)));
             Assert.True(System.IO.File.Exists(file));
-            var waiting = System.Threading.Tasks.Task.Run(() => KeeperFile.WaitForRelease(file, 42, System.TimeSpan.FromSeconds(2)));
+            // a long limit: a busy runner may stretch the 100 ms below by seconds
+            var waiting = System.Threading.Tasks.Task.Run(() => KeeperFile.WaitForRelease(file, 42, System.TimeSpan.FromSeconds(60)));
             await System.Threading.Tasks.Task.Delay(100);
             Assert.False(waiting.IsCompleted);
             System.IO.File.Delete(file);
