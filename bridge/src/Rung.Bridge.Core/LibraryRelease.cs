@@ -23,7 +23,7 @@ namespace Rung.Bridge.Core
             try {
                 var doc=new XmlDocument { PreserveWhitespace=true,XmlResolver=null };
                 using(var stream=new MemoryStream(bytes))using(var reader=XmlReader.Create(stream,new XmlReaderSettings { DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,MaxCharactersInDocument=4*1048576 }))doc.Load(reader);
-                if(doc.DocumentElement?.Name!="Document"||doc.SelectSingleNode("/Document/Engineering/@version")?.Value!="V20")throw new XmlException("Expected native V20 document");
+                if(doc.DocumentElement?.Name!="Document"||!new[]{"V20","V21"}.Contains(doc.SelectSingleNode("/Document/Engineering/@version")?.Value))throw new XmlException("Expected native V20/V21 document");
                 var blocks=doc.SelectNodes("/Document/*[self::SW.Blocks.FB or self::SW.Blocks.FC or self::SW.Types.PlcStruct] | /Document/*/ObjectList/*[(self::SW.Blocks.FB or self::SW.Blocks.FC or self::SW.Types.PlcStruct) and @CompositionName='ContentObject']");
                 if(blocks.Count!=1)throw new XmlException("Expected exactly one native FB, FC or data-type definition");
                 var block=(XmlElement)blocks[0];block.RemoveAttribute("CompositionName");

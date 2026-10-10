@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Native library packages
 
+Versions: package import, export and release need TIA Portal V20 or V21 (V19's
+Openness has no library document API and refuses explicitly). Master copies work
+in V19, V20 and V21. TIA Portal V21 keeps the package's version number on the new
+InWork version (1.0.0 InWork), V20 starts it at 0.0.1; both are accepted.
+
 `rung library` lists a concise inventory with native GUIDs, versions and states when available. `--json` returns the full native tree, including technical metadata. Preview, import, export, release and update results retain their detailed format.
 
 ```powershell

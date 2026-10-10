@@ -31,6 +31,15 @@ public class LibraryImportTests
         Assert.Equal("InWork",result.State); Assert.NotEqual(package.SourceVersionGuid,result.VersionGuid);
         Assert.Equal(LibraryImportPlan.Revision(state),result.Revision);
     }
+    [Fact] public void V21KeepsThePackagesVersionNumberOnTheNewInWorkVersion()
+    {
+        // seen live: TIA Portal V21 imports a 1.0.0 package as 1.0.0 InWork, V20 as 0.0.1 InWork
+        var state = State(); var package = Package(); package.VersionNumber = "1.0.0";
+        var result = LibraryImportPlan.Apply(() => state, package, LibraryImportPlan.Revision(state), () => { var r = Imported(state, package); r.VersionNumber = "1.0.0"; return r; }, work => work());
+        Assert.Equal("1.0.0", result.VersionNumber);
+        state = State();
+        Assert.Throws<RpcException>(() => LibraryImportPlan.Apply(() => state, package, LibraryImportPlan.Revision(state), () => { var r = Imported(state, package); r.VersionNumber = "2.0.0"; return r; }, work => { try { work(); } catch { state = State(); throw; } }));
+    }
     [Fact] public void UnexpectedSideEffectRollsBackAndFailedRestorationIsExplicit()
     {
         var state=State();var package=Package();var revision=LibraryImportPlan.Revision(state);

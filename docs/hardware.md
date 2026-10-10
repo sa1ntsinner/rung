@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Hardware snapshot, preview and apply
 
+Preview and apply of hardware attributes work in TIA Portal V19, V20 and V21 (proven live on each fixture: the CPU cycle time).
+
 `rung hardware` shows a concise engineering summary of the returned snapshot: names, module identities, positions, firmware and addresses when available. `--json` keeps the full tree and revision for scripts and patch preparation. Summary limits and incomplete native snapshots are stated explicitly; the summary does not prove hardware compatibility.
 
 `rung views` already exports read-only hardware YAML, including device/module

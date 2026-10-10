@@ -23,16 +23,9 @@ namespace Rung.Bridge.V20 {
    return(type,source,fb,Addr(plc.Name,"block",new System.Collections.Generic.List<string>(),fb.Name,null),new[]{Addr(plc.Name,"block",new System.Collections.Generic.List<string>(),dbs[0].Name,null)});
   }
   public LibraryUpdatePreview PreviewLibraryUpdate(LibraryUpdateRequest request){
-#if TIA_V21
-   throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library update is validated for V20 only");
-#else
    Alive();using(var access=_portal.ExclusiveAccess("rung: library update preview")){var target=UpdateTarget(request);return new LibraryUpdatePreview{Request=request,SourceVersionGuid=target.source.Guid.ToString("D"),Addresses=new[]{target.address}.Concat(target.dbs).ToArray(),Revision=LibraryImportPlan.Revision(LibraryReadState(request.TypeGuid,true))};}
-#endif
   }
   public LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId){
-#if TIA_V21
-   throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library update is validated for V20 only");
-#else
    Alive();FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
    using(var access=_portal.ExclusiveAccess("rung: library update")){
     var target=UpdateTarget(request);LibraryImportPlan.CheckRevision(expectedRevision);if(LibraryImportPlan.Revision(LibraryReadState(request.TypeGuid,true))!=expectedRevision)throw new RpcException(ErrorCodes.StaleRevision,"Project changed since update preview");operationId=HardwarePlan.StartOperation(operationId,_libraryOperations,"Library");LibraryImportResult result;_inImport=true;
@@ -42,7 +35,6 @@ namespace Rung.Bridge.V20 {
     },work=>{using(var tx=access.Transaction(_project,"rung library update "+operationId)){work();tx.CommitOnDispose();}});}finally{_inImport=false;_index.Clear();_libraryTypes.Clear();}
     Receipts.Write(operationId,"library:"+_project.Path.FullName);if(_args.SaveAfterImport)try{_project.Save();result.Saved=true;}catch(Siemens.Engineering.EngineeringException){result.Warnings=new[]{WarningCodes.SaveFailed};}return result;
    }
-#endif
   }
  }
 }

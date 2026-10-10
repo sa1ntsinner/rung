@@ -43,10 +43,12 @@ namespace Rung.Bridge.Core
         static void Verify(LibraryImportState before, LibraryImportState after, LibraryPackage package, LibraryImportResult result)
         {
             Revision(after);
-            if (result == null || result.TypeGuid != package.TypeGuid || result.State != "InWork" || result.VersionNumber != "0.0.1"
+            if (result == null || result.TypeGuid != package.TypeGuid || result.State != "InWork" || result.VersionNumber != "0.0.1" && result.VersionNumber != package.VersionNumber
                 || !Guid.TryParseExact(result.VersionGuid, "D", out var version) || version == Guid.Empty || result.VersionGuid == package.SourceVersionGuid
                 || result.Address == null || before.Objects.ContainsKey(result.Address) || after.Objects.Count != before.Objects.Count + 1
-                || !after.Objects.ContainsKey(result.Address)) throw new RpcException(ErrorCodes.ImportFailed, "Native library import produced an unexpected identity/state/object set");
+                || !after.Objects.ContainsKey(result.Address)) throw new RpcException(ErrorCodes.ImportFailed, "Native library import produced an unexpected identity/state/object set: "
+                    + (result == null ? "no result" : $"version {result.VersionNumber} {result.State} at {result.Address}; new objects: "
+                        + string.Join(", ", after.Objects.Keys.Except(before.Objects.Keys).Take(4)) + "; gone: " + string.Join(", ", before.Objects.Keys.Except(after.Objects.Keys).Take(4))));
             var reduced = Copy(after); var removed = 0;
             void Remove(DescribeNode node)
             {

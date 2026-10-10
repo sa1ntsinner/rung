@@ -15,12 +15,8 @@ using Siemens.Engineering.SW.TechnologicalObjects;
 namespace Rung.Bridge.V20 {
  public sealed partial class OpennessSession {
   PlcSoftware ArtifactPlc(string kind,string device,string name){
-#if TIA_V21
-   throw new RpcException(ErrorCodes.UnsupportedCapability,"Native project artifacts are validated for V20 only");
-#else
    Alive();if((kind!="alarms"&&kind!="technology")||string.IsNullOrWhiteSpace(device)||device.Length>128||(kind=="alarms"?name!=null:string.IsNullOrWhiteSpace(name)||name.Length>128))throw new RpcException(ErrorCodes.BadRequest,"Invalid artifact target");
    if(Plcs().Count()!=1)throw new RpcException(ErrorCodes.UnsupportedCapability,"Initial artifact writes require one PLC; cross-PLC effects remain unproved");return Plc(device);
-#endif
   }
   static byte[] NativeArtifactBytes(Action<FileInfo> export,string extension){var dir=Path.Combine(Path.GetTempPath(),"rung-artifact-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);try{var file=new FileInfo(Path.Combine(dir,"native"+extension));export(file);file.Refresh();if(!file.Exists||file.Length<1||file.Length>4*1048576)throw new RpcException(ErrorCodes.BadRequest,"Native artifact missing/oversized");return File.ReadAllBytes(file.FullName);}finally{Directory.Delete(dir,true);}}
   string[] ArtifactLanguages()=>_project.LanguageSettings.ActiveLanguages.Select(l=>l.Culture.Name).OrderBy(s=>s,StringComparer.Ordinal).ToArray();

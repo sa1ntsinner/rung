@@ -27,8 +27,8 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportPreview PreviewLibrary(LibraryPackage package, string device)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "Native library packages are validated for V20 only");
+#if TIA_V19
+            throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA Portal V19 Openness has no library document import or export");
 #else
             Alive();
             using (var access = _portal.ExclusiveAccess("rung: library import preview"))
@@ -118,8 +118,8 @@ namespace Rung.Bridge.V20
         }
         public LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library release is validated for V20 only");
+#if TIA_V19
+            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library version release");
 #else
             Alive();using(var access=_portal.ExclusiveAccess("rung: library release preview")) {
                 ReleaseTarget(request);var state=LibraryReadState(request.TypeGuid);
@@ -130,8 +130,8 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request,string expectedRevision,string operationId)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library release is validated for V20 only");
+#if TIA_V19
+            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library version release");
 #else
             Alive();FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
             using(var access=_portal.ExclusiveAccess("rung: library release")) {
@@ -156,12 +156,8 @@ namespace Rung.Bridge.V20
         }
         public MasterCopyPreview PreviewMasterCopy(MasterCopyRequest request)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "Master copies are validated for V20 only");
-#else
             Alive();
             using (var access = _portal.ExclusiveAccess("rung: master copy preview")) { MasterCopyTarget(request); return new MasterCopyPreview { Request = request, Revision = LibraryImportPlan.Revision(LibraryState()) }; }
-#endif
         }
         /// <summary>The PLC block to copy (create) or the master copy to use, refused before anything changes.</summary>
         object MasterCopyTarget(MasterCopyRequest request)
@@ -178,9 +174,6 @@ namespace Rung.Bridge.V20
         }
         public MasterCopyResult ApplyMasterCopy(MasterCopyRequest request, string expectedRevision, string operationId)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "Master copies are validated for V20 only");
-#else
             Alive(); FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             using (var access = _portal.ExclusiveAccess("rung: master copy")) {
                 MasterCopyTarget(request);
@@ -204,12 +197,11 @@ namespace Rung.Bridge.V20
                     try { _project.Save(); result.Saved = true; } catch (Siemens.Engineering.EngineeringException) { result.Warnings = new[] { WarningCodes.SaveFailed }; }
                 return result;
             }
-#endif
         }
         public LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"Native library packages are validated for V20 only");
+#if TIA_V19
+            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library document import or export");
 #else
             Alive();
             FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
@@ -259,8 +251,8 @@ namespace Rung.Bridge.V20
         }
         public IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir)
         {
-#if TIA_V19 || TIA_V21
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "Native library packages are validated for V20 only");
+#if TIA_V19
+            throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA Portal V19 Openness has no library document import or export");
 #else
             Alive();
             using (var access = _portal.ExclusiveAccess("rung: library export"))

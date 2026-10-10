@@ -97,7 +97,7 @@ namespace Rung.Bridge.Core
                     {
                         var xml = XDocument.Load(reader); var blocks = xml.Root?.Elements().Where(e => e.Name == "SW.Blocks.FB" || e.Name == "SW.Blocks.FC" || e.Name == "SW.Types.PlcStruct").ToArray();
                         var engineering = xml.Root?.Elements("Engineering").ToArray();
-                        if (xml.Root?.Name != "Document" || blocks == null || blocks.Length != 1 || engineering == null || engineering.Length != 1 || (string)engineering[0].Attribute("version") != "V20") throw Invalid("unsupported native XML domain/version");
+                        if (xml.Root?.Name != "Document" || blocks == null || blocks.Length != 1 || engineering == null || engineering.Length != 1 || !new[] { "V20", "V21" }.Contains((string)engineering[0].Attribute("version"))) throw Invalid("unsupported native XML domain/version");
                         if (xml.Root.Elements().Any(e => e != blocks[0] && e != engineering[0] && e.Name != "DocumentInfo") || xml.Root.Elements("DocumentInfo").Count() > 1)
                             throw Invalid("unexpected native object");
                         var names = blocks[0].Elements("AttributeList").Elements("Name").ToArray();

@@ -5,7 +5,7 @@ Assets: Review and Apply** share the same preview and guarded apply operations.
 Choose the PLC explicitly. Review the diff before applying; dirty or changed
 artifact files refuse. Workspace writes and import policies, project ownership,
 exclusive transactions, operation IDs and existing save policy still apply.
-These commands edit the offline engineering project. They do not download it.
+These commands edit the offline engineering project. They do not download it. Alarm text lists and technology objects work in TIA Portal V19, V20 and V21 (each proven live on its fixture).
 
 ## Alarm text lists
 
