@@ -18,10 +18,12 @@ internal sealed partial class OnlineDriver
         if (routes.Any(route => route.FunctionBlock != selected.Number) || source.CodeModifiedTimestampBytes?.Length != 8 || callerSource.CodeModifiedTimestampBytes?.Length != 8)
             throw new RpcException(ErrorCodes.UnsupportedObject, "Native source or instance route is unavailable.");
         var bodies = source.BlockBody.Select(NativeSource.Render).ToArray();
-        var scalars = source.BlockBody.SelectMany(body => NativeSource.Scalars(source.FunctionalObjectDebugInfo, body, selected.Number)).ToArray();
+        var pointers = new HashSet<uint>();
+        var scalars = source.BlockBody.SelectMany(body => { var found = NativeSource.Scalars(source.FunctionalObjectDebugInfo, body, out var pointer); pointers.Add(pointer); return found; }).ToArray();
+        if (pointers.Count != 1) throw new NotSupportedException("Native instance members are addressed through more than one pointer.");
         var guid = Guid.NewGuid().ToByteArray(); uint uid = 0;
         foreach (var part in new[] { 0, 4, 8, 12 }) uid ^= BitConverter.ToUInt32(guid, part);
-        var plan = NativeCaptureEncoder.Build(selected.Number, source.CodeModifiedTimestampBytes, scalars, uid);
+        var plan = NativeCaptureEncoder.Build(selected.Number, pointers.Single(), source.CodeModifiedTimestampBytes, scalars, uid);
         var samples = new List<NativeCaptureObservation>();
         var sync = new object(); Exception? failure = null; NativeRootCall? route = null;
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

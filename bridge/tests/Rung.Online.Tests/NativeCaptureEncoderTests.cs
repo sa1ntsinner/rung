@@ -34,9 +34,9 @@ public sealed class NativeCaptureEncoderTests
     [Fact]
     public void RejectsInvalidMetadataBeforeLoadingInstalledSerializers()
     {
-        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(0, new byte[8], [], 1));
-        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(4, [], [], 1));
-        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(4, new byte[8], [new("X", 32, 15, "Int")], 1));
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(0, 4, new byte[8], [], 1));
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(4, 4, [], [], 1));
+        Assert.ThrowsAny<Exception>(() => NativeCaptureEncoder.Build(4, 4, new byte[8], [new("X", 32, 15, "Int")], 1));
     }
 
     [Fact]
@@ -51,7 +51,11 @@ public sealed class NativeCaptureEncoderTests
         var original = root.GetProperty("job").GetProperty("attributes");
         var trigger = Convert.FromHexString(original.GetProperty("2694").GetString()!);
         var uid = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(trigger.AsSpan(5, 4));
-        var plan = NativeCaptureEncoder.Build(4, Convert.FromBase64String(root.GetProperty("codeModifiedTimestamp").GetString()!), bindings, uid);
+        var plan = NativeCaptureEncoder.Build(4, 4, Convert.FromBase64String(root.GetProperty("codeModifiedTimestamp").GetString()!), bindings, uid);
+        // FB 17 whose instance is addressed through native pointer 4 (seen live): same addresses, another trigger block
+        var other = NativeCaptureEncoder.Build(17, 4, Convert.FromBase64String(root.GetProperty("codeModifiedTimestamp").GetString()!), bindings, uid);
+        Assert.Equal(plan.Request.RequestBlob, other.Request.RequestBlob);
+        Assert.NotEqual(plan.Request.TriggerBlob, other.Request.TriggerBlob);
         Assert.Equal(Convert.FromHexString(original.GetProperty("2693").GetString()!), plan.Request.RequestBlob);
         Assert.Equal(trigger, plan.Request.TriggerBlob);
         Assert.Equal(456, plan.ResultBytes);

@@ -43,8 +43,9 @@ public static class NativeCaptureEncoder
         if (raw.Length != plan.ResultBytes || raw.Length > 1_048_576 || plan.Fields.Length is 0 or > 512) throw new ArgumentException("Incomplete native payload.");
         var state = new NativeCaptureState(new(), new());
         foreach (var field in plan.Fields) {
-            if (field.Offset < 0 || field.Bytes < 1 || field.Offset > raw.Length - field.Bytes || field.Validity < 0 || field.Validity >= raw.Length
-                || raw[field.Validity] != 15) throw new ArgumentException("Invalid native value.");
+            if (field.Offset < 0 || field.Bytes < 1 || field.Offset > raw.Length - field.Bytes || field.Validity < 0 || field.Validity >= raw.Length)
+                throw new ArgumentException("Invalid native value.");
+            if (raw[field.Validity] != 15) throw new NotSupportedException($"#{field.Name} ({field.Phase}) is not valid in this native sample (validity {raw[field.Validity]:X2}).");
             var data = raw.AsSpan(field.Offset, field.Bytes);
             var type = Regex.Match(field.Type, "^\\{Scalar\"[0-9]+\"([A-Za-z0-9_]+)\\}$").Groups[1].Value;
             if (!Widths.TryGetValue(type, out var bits) || field.Bytes != Math.Max(1, (int)bits / 8)) throw new ArgumentException("Native scalar width differs from its type.");
@@ -66,9 +67,11 @@ public static class NativeCaptureEncoder
         return state;
     }
 
-    public static NativeCapturePlan Build(uint block, byte[] signature, NativeScalar[] scalars, uint uid)
+    /// <param name="block">FB number: where the trigger fires.</param>
+    /// <param name="pointer">native pointer the instance is addressed through (the debug info's pointerNumber).</param>
+    public static NativeCapturePlan Build(uint block, uint pointer, byte[] signature, NativeScalar[] scalars, uint uid)
     {
-        if (block is 0 or > 65535 || signature.Length != 8 || scalars.Length is 0 or > 256) throw new ArgumentException("Invalid native capture metadata.");
+        if (block is 0 or > 65535 || pointer > 255 || signature.Length != 8 || scalars.Length is 0 or > 256) throw new ArgumentException("Invalid native capture metadata.");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var scalar in scalars) {
             var type = Regex.Match(scalar.Type, "^\\{Scalar\"[0-9]+\"([A-Za-z0-9_]+)\\}$");
@@ -77,10 +80,10 @@ public static class NativeCaptureEncoder
         }
         var sorted = scalars.OrderBy(s => s.BitOffset).ToArray();
         if (sorted.Skip(1).Where((s, i) => s.BitOffset < sorted[i].BitOffset + sorted[i].Bits).Any()) throw new ArgumentException("Native scalar addresses overlap.");
-        lock (Gate) return Serialize(block, signature, scalars, uid);
+        lock (Gate) return Serialize(block, pointer, signature, scalars, uid);
     }
 
-    static NativeCapturePlan Serialize(uint block, byte[] signature, NativeScalar[] scalars, uint uid)
+    static NativeCapturePlan Serialize(uint block, uint pointer, byte[] signature, NativeScalar[] scalars, uint uid)
     {
         if (!registered) {
             AppDomain.CurrentDomain.AssemblyResolve += (_, args) => {
@@ -135,7 +138,7 @@ public static class NativeCaptureEncoder
                 var widthProperty = addressType.GetProperty("Width", Flags)!;
                 widthProperty.SetValue(address, Enum.Parse(widthProperty.PropertyType, width));
                 addressType.GetProperty("Count", Flags)!.SetValue(address, 1u);
-                addressType.GetProperty("Operand", Flags)!.SetValue(address, indirect.Invoke(encoder, [true, true, scope, block, scalar.BitOffset]));
+                addressType.GetProperty("Operand", Flags)!.SetValue(address, indirect.Invoke(encoder, [true, true, scope, pointer, scalar.BitOffset]));
                 if (Convert.ToInt32(Call(address, "Write", blob)) != 0) throw new NotSupportedException("Native address serializer refused metadata.");
             }
         }

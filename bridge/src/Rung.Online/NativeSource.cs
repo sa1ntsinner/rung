@@ -15,7 +15,7 @@ public static class NativeSource
 {
     static readonly Dictionary<string, string> Tokens = new() {
         ["OpAs"] = ":=", ["OpPl"] = "+", ["OpMi"] = "-", ["OpMu"] = "*", ["OpDi"] = "/",
-        ["OpU"] = "<>", ["OpG"] = ">", ["OpL"] = "<", ["OpE"] = "=",
+        ["OpU"] = "<>", ["OpG"] = ">", ["OpL"] = "<", ["OpE"] = "=", ["OpGE"] = ">=", ["OpLE"] = "<=",
         ["OpAND"] = "AND", ["OpOR"] = "OR", ["OpNOT"] = "NOT", ["OpMOD"] = "MOD", ["OpXOR"] = "XOR",
         ["BracO"] = "(", ["BracC"] = ")", ["FiSt"] = ";", ["Comma"] = ",", ["Colon"] = ":",
         ["Dot"] = ".", ["LDots"] = "..", ["KwENDC"] = "END_CASE", ["KwENDIF"] = "END_IF", ["KwENDFOR"] = "END_FOR",
@@ -90,13 +90,17 @@ public static class NativeSource
         return new(name[1..^1], dbNumber, fbNumber, sac, cu, uid);
     }
 
-    public static NativeScalar[] Scalars(string debugXml, string bodyXml, uint blockNumber)
+    public static NativeScalar[] Scalars(string debugXml, string bodyXml) => Scalars(debugXml, bodyXml, out _);
+
+    /// <param name="pointer">the native pointer every instance member is addressed through.</param>
+    public static NativeScalar[] Scalars(string debugXml, string bodyXml, out uint pointer)
     {
         var rendered = Render(bodyXml);
         var nodes = Parse(bodyXml).Descendants().Where(e => e.Attribute("UId") != null).ToDictionary(e => e.Attribute("UId")!.Value);
         var debug = Parse(debugXml);
         var values = debug.Descendants().Where(e => e.Name.LocalName == "DebugValue").ToDictionary(e => (string?)e.Attribute("id") ?? throw new NotSupportedException("Missing debug value ID."));
         var bindings = new Dictionary<string, NativeScalar>();
+        uint? instancePointer = null;
         foreach (var element in debug.Descendants().Where(e => e.Name.LocalName == "LanguageElement" && (string?)e.Attribute("cuId") == rendered.CompilationUnit)) {
             if (!nodes.TryGetValue((string?)element.Attribute("elementId") ?? "", out var node)) throw new NotSupportedException("Unmapped native language element.");
             if (node.Name.LocalName != "SymVa" || (string?)node.Attribute("ODN") is not { } name || !name.StartsWith('#')) continue;
@@ -107,9 +111,11 @@ public static class NativeSource
                 // Compiler temporary results do not describe persistent instance memory.
                 if (address == null && value.Descendants().Any(e => e.Name.LocalName == "Native" && (string?)e.Attribute("scope") == "NativeLocal")) continue;
                 if (address == null) throw new NotSupportedException("Missing native instance address.");
+                // pointerNumber names the native pointer the instance is addressed through (4 on S7-1500 V20), not a block number
                 if ((string?)address.Attribute("typeSafe") != "true" || (string?)address.Attribute("granted") != "true"
-                    || (string?)address.Attribute("pointerScope") != "NativeBlock" || (uint?)address.Attribute("pointerNumber") != blockNumber)
-                    throw new NotSupportedException("Native address scope is unsupported.");
+                    || (string?)address.Attribute("pointerScope") != "NativeBlock" || (uint?)address.Attribute("pointerNumber") is not { } addressPointer
+                    || (instancePointer ??= addressPointer) != addressPointer)
+                    throw new NotSupportedException($"Native address scope of {name} is unsupported ({(string?)address.Attribute("pointerScope")}, typeSafe {(string?)address.Attribute("typeSafe")}, granted {(string?)address.Attribute("granted")}, pointer {(string?)address.Attribute("pointerNumber")}).");
                 var binding = new NativeScalar(name[1..].ToUpperInvariant(), (uint?)address.Attribute("bitOffset") ?? throw new NotSupportedException("Missing native offset."),
                     (uint?)value.Attribute("bitSize") ?? throw new NotSupportedException("Missing native width."), (string?)monitoring.Attribute("type") ?? throw new NotSupportedException("Missing native type."));
                 if (bindings.TryGetValue(binding.Name, out var previous) && previous != binding) throw new NotSupportedException("Ambiguous native symbol address.");
@@ -118,6 +124,7 @@ public static class NativeSource
             }
         }
         if (bindings.Count == 0) throw new NotSupportedException("No supported native scalar state.");
+        pointer = instancePointer!.Value;
         return bindings.Values.OrderBy(b => b.BitOffset).ToArray();
     }
 

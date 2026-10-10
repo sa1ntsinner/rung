@@ -42,15 +42,31 @@ public sealed class NativeSourceTests
     [Fact]
     public void JoinsNativeScalarAddressToItsSourceSymbolAndBlock()
     {
-        var binding = Assert.Single(NativeSource.Scalars(Debug(256, 32), ScalarBody, 256));
+        var binding = Assert.Single(NativeSource.Scalars(Debug(256, 32), ScalarBody));
         Assert.Equal(new NativeScalar("COUNT", 32, 32, "{Scalar\"33554439\"DInt}"), binding);
         var temporary = Debug(256, 32).Replace("</LanguageElement>", "<MonitoringElement type='{Scalar&amp;quot;33554439&amp;quot;DInt}' debugValueRef='4'/></LanguageElement>")
             .Replace("</Monitoring>", "<DebugValue id='4' bitSize='32'><Addr><Native scope='NativeLocal' location='Slot32' locationNumber='0'/></Addr></DebugValue></Monitoring>");
-        Assert.Equal(binding, Assert.Single(NativeSource.Scalars(temporary, ScalarBody, 256)));
-        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(4, 32), ScalarBody, 256));
-        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("cuId=\"1\"", "cuId=\"2\""), ScalarBody, 256));
-        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("granted=\"true\"", "granted=\"false\""), ScalarBody, 256));
-        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("elementId=\"7\"", "elementId=\"8\""), ScalarBody, 256));
+        Assert.Equal(binding, Assert.Single(NativeSource.Scalars(temporary, ScalarBody)));
+        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("cuId=\"1\"", "cuId=\"2\""), ScalarBody));
+        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("granted=\"true\"", "granted=\"false\""), ScalarBody));
+        Assert.ThrowsAny<Exception>(() => NativeSource.Scalars(Debug(256, 32).Replace("elementId=\"7\"", "elementId=\"8\""), ScalarBody));
+    }
+
+    const string TwoBody = "<Network Lang='SCL' RefID='1'><RootStatements><SymVa UId='7' ODN='#Count'/><SymVa UId='8' ODN='#Other'/></RootStatements></Network>";
+    static string Two(uint first, uint second) => $$"""
+        <DebugInfo><Monitoring>
+        <LanguageElement cuId="1" elementId="7"><MonitoringElement type="{Scalar&quot;33554439&quot;DInt}" debugValueRef="3"/></LanguageElement>
+        <LanguageElement cuId="1" elementId="8"><MonitoringElement type="{Scalar&quot;33554439&quot;DInt}" debugValueRef="5"/></LanguageElement>
+        <DebugValue id="3" bitSize="32"><Indirect typeSafe="true" granted="true" pointerScope="NativeBlock" pointerNumber="{{first}}" bitOffset="32"/></DebugValue>
+        <DebugValue id="5" bitSize="32"><Indirect typeSafe="true" granted="true" pointerScope="NativeBlock" pointerNumber="{{second}}" bitOffset="64"/></DebugValue>
+        </Monitoring></DebugInfo>
+        """;
+
+    [Fact]
+    public void InstanceMembersShareOneNativePointerWhateverTheBlockNumbers()
+    {
+        Assert.Equal(2, NativeSource.Scalars(Two(4, 4), TwoBody).Length);
+        Assert.Contains("pointer 5", Assert.ThrowsAny<NotSupportedException>(() => NativeSource.Scalars(Two(4, 5), TwoBody)).Message);
     }
 
     [Fact]

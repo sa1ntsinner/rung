@@ -45,6 +45,17 @@ public sealed class AbsoluteAddressTests
     }
 
     [Fact]
+    public void FindsAPlcTagByItsNameInTheInputOutputAndMemoryAreas()
+    {
+        var input = new OnlineSymbol("IArea.Start_PB", 1, true, 0, AbsoluteAddress: "%I0.0");
+        var db = new OnlineSymbol("Line_DB.Speed", 5, true, 0);
+        Assert.Equal(input, Symbols.Resolve("\"Start_PB\"", [input, db]));
+        Assert.Equal(input, Symbols.Resolve("Start_PB", [input, db]));
+        Assert.Equal(db, Symbols.Resolve("\"Line_DB\".Speed", [input, db]));
+        Assert.Equal(ErrorCodes.SymbolAmbiguous, Assert.Throws<RpcException>(() => Symbols.Resolve("\"Start_PB\"", [input, input with { Name = "MArea.Start_PB" }])).Code);
+    }
+
+    [Fact]
     public void SaysWhatToDoWhenNoTagIsAtTheAddress()
     {
         var refused = Assert.Throws<RpcException>(() => Symbols.Resolve("%mw100", [new OnlineSymbol("Input", 1, true, 0, AbsoluteAddress: "%I2.3")]));

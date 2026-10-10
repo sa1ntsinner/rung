@@ -36,7 +36,7 @@ async Task ValidateSignatures(){
   if(generated==null){
    var ordered=reference.GetProperty("layout").EnumerateArray().Where(v=>v.GetProperty("phase").GetString()=="before").Select(v=>scalars[v.GetProperty("name").GetString()!]).ToArray();
    var guid=Guid.NewGuid().ToByteArray();uint uid=0;foreach(var part in new[]{0,4,8,12})uid^=BitConverter.ToUInt32(guid,part);
-   generated=NativeCaptureEncoder.Build(4,current.CodeModifiedTimestampBytes,ordered,uid);
+   generated=NativeCaptureEncoder.Build(4,4,current.CodeModifiedTimestampBytes,ordered,uid);
    if(!generated.Request.RequestBlob.AsSpan().SequenceEqual(Convert.FromHexString(attributes.GetProperty("2693").GetString()!)))throw new Exception("Generated fixture request differs from validated reference");
   }
   Console.WriteLine(JsonSerializer.Serialize(new{nativeSource=true,block=current.Name,codeModifiedTimestamp=timestamp.GetString(),bodies,scalars=scalars.Values}));

@@ -49,6 +49,9 @@ public static class Symbols
             throw new RpcException(ErrorCodes.UnsupportedObject, $"No PLC tag is at {canonical.ToUpperInvariant()}: rung reads inputs, outputs and memory through their tags. Give the address a tag in a tag table (same address and width), download, and read it.");
         }
         var matches = catalog.Where(v => v.Name == canonical).Take(2).ToArray();
+        // a PLC tag sits in its area: "Start_PB" is IArea.Start_PB (QArea., MArea. for outputs and memory)
+        if (matches.Length == 0) matches = catalog.Where(v => v.Name is { } n && (n.StartsWith("IArea.") || n.StartsWith("QArea.") || n.StartsWith("MArea."))
+            && n.AsSpan(6).SequenceEqual(canonical)).Take(2).ToArray();
         if (matches.Length > 1) throw new RpcException(ErrorCodes.SymbolAmbiguous, "PLC symbol is ambiguous.");
         if (matches.Length == 1) return matches[0];
         // The driver resolves indexed members from PLC array metadata, never from guessed offsets.

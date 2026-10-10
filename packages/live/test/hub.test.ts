@@ -188,3 +188,19 @@ describe("shared live hub", () => {
     } finally { await f.hub.close(); }
   });
 });
+
+it("opens a fresh backend when the host behind the cached one has exited", async () => {
+  let opens = 0;
+  const backends: { dead: boolean }[] = [];
+  const hub = new live.LiveHub(async () => {
+    const state = { dead: false }; backends.push(state); opens++;
+    return { read: async names => { if (state.dead) throw new Error("rung-bridge is not running"); return frame(names); },
+      subscribe: async () => ({ close: async () => {} }), alive: () => !state.dead, close: async () => {} };
+  });
+  try {
+    await hub.read("P", ["X"]);
+    backends[0]!.dead = true;
+    await expect(hub.read("P", ["X"])).resolves.toMatchObject({ items: [{ name: "X" }] });
+    expect(opens).toBe(2);
+  } finally { await hub.close(); }
+});

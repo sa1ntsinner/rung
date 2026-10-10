@@ -43,10 +43,17 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
         } catch (RpcException ex) { return RpcWire.Error(hasId, id, ex.Code, ex.Message); }
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException) { return RpcWire.Error(hasId, id, ErrorCodes.BadRequest, "Malformed request or parameters."); }
         catch (Exception ex) {
-            var code = FailureCode(ex);
-            // Driver exceptions can contain credentials: expose a stable code and safe text only.
-            return RpcWire.Error(hasId, id, code, "Online request failed: " + code + ".");
+            var (code, message) = Failure(ex);
+            return RpcWire.Error(hasId, id, code, message);
         }
+    }
+
+    /// <summary>Driver exceptions can contain credentials: a stable code and safe text only. rung's own refusals keep their words.</summary>
+    public static (string Code, string Message) Failure(Exception ex)
+    {
+        if (ex is NotSupportedException) return (ErrorCodes.UnsupportedObject, ex.Message.Length <= 300 ? ex.Message : ex.Message[..300]);
+        var code = FailureCode(ex);
+        return (code, "Online request failed: " + code + ".");
     }
     internal static string FailureCode(Exception ex) => ex switch {
                 RpcException rpc => rpc.Code,

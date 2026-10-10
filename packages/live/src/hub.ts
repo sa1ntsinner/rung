@@ -10,6 +10,8 @@ export interface LiveBackend {
   state?(): Promise<OnlineStateResult>;
   alarms?(lcid: number): Promise<OnlineAlarmResult>;
   subscribeAlarms?(lcid: number, callback: (frame: OnlineAlarmResult) => void): Promise<{ close(): Promise<void> }>;
+  /** False once the host behind it has exited: the hub opens a fresh backend for the next request. */
+  alive?(): boolean;
   close(): Promise<void>;
 }
 interface Consumer {
@@ -33,6 +35,13 @@ export class LiveHub {
   private async entry(key: string): Promise<Entry> {
     if (this.closed) throw new BridgeError("BRIDGE_EXITED", "Live hub is closed");
     let pending = this.entries.get(key);
+    // ponytail: a dead host is replaced on the next request; its running subscriptions end and their clients start again
+    const cached = pending && await pending.catch(() => undefined);
+    if (cached && cached.backend.alive?.() === false && this.entries.get(key) === pending) {
+      this.entries.delete(key); cached.generation++; clearTimeout(cached.idle);
+      void cached.backend.close().catch(() => {});
+      pending = undefined;
+    }
     if (!pending) {
       pending = this.open(key).then(backend => ({ backend, consumers: new Map(), alarmGroups: new Map(), generation: 0, epoch: 0, tail: Promise.resolve(), busy: 0 }));
       this.entries.set(key, pending);

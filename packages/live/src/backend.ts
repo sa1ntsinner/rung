@@ -22,10 +22,11 @@ export async function createS7Backend(rpc: OnlineEventRpc, target: OnlineConnect
   const alarmEarly = new Map<string, OnlineAlarmResult>();
   const opening = new Set<Promise<unknown>>();
   let openingCount = 0;
-  let closed = false;
+  let closed = false, exited = false;
   rpc.onEvent(event => {
     if (closed) return;
     if (event.event === "exit") {
+      exited = true;
       for (const [id, callback] of alarmCallbacks) { const frame = alarmLatest.get(id); if (frame) callback({ ...frame, at: Date.now(), connectionState: "disconnected", errorCode: "BRIDGE_EXITED" }); }
       for (const [id, callback] of callbacks) {
         const frame = latest.get(id);
@@ -49,6 +50,7 @@ export async function createS7Backend(rpc: OnlineEventRpc, target: OnlineConnect
     else if (openingCount && early.size < 512) early.set(frame.subscriptionId, frame);
   });
   return {
+    alive: () => !exited,
     async capture(block, instance, scope) {
       if (closed) throw new BridgeError("BRIDGE_EXITED", "Online backend is closed");
       const pending = client.call<OnlineNativeCapture>("online.capture", { sessionId: info.sessionId, block, instance, scope });
