@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.ps1 text eol=crlf
 *.sln text eol=crlf
+packages/live/test/fixtures/trace/tia-v20-long-term.csv -text

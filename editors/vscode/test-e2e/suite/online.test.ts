@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rungApi, waitFor } from "./helpers";
+import {traceRenderer} from "./trace-renderer";
 
 describe("native local-fixture monitor", function () {
   this.timeout(90_000);
@@ -86,4 +87,37 @@ describe("native local-fixture monitor", function () {
       changed.dispose(); socket?.close(); await vscode.commands.executeCommand("rung.live.clear");
     }
   });
+});
+
+describe("Trace readonly acceptance",function(){
+ this.timeout(90000);
+ it("records native signals through the command and opens the trace panel",async()=>{
+  const api=await rungApi(),out=join(api.ws.root!,"native-trace.json");
+  await vscode.commands.executeCommand("rung.traceRecord",{signals:["ProveOps_DB.a","ProveOps_DB.sum"],device:"PLC_1",duration:2,interval:100,out});
+  const recording=JSON.parse(await readFile(out,"utf8"));assert.equal(recording.stopReason,"duration");assert.equal(recording.coherence,"asynchronous-observations");assert.ok(recording.frames.length>=5);
+  assert.ok(recording.frames.every((f:any)=>f.scope.address==="192.168.250.1"&&typeof f.cells["ProveOps_DB.a"].value==="number"&&!f.cells["ProveOps_DB.a"].error));
+  assert.equal(api.trace()?.shown?.frames.length,recording.frames.length);
+  const before=await readFile(out,"utf8");await vscode.commands.executeCommand("rung.traceOpen",out);assert.equal(await readFile(out,"utf8"),before);
+  console.log(JSON.stringify({traceNativeFrames:recording.frames.length,source:recording.source,coherence:recording.coherence}));api.trace()?.dispose();
+ });
+ it("saves a valid stopped recording on progress cancellation",async()=>{
+  const api=await rungApi(),out=join(api.ws.root!,"stopped-trace.json"),original=vscode.window.withProgress,source=new vscode.CancellationTokenSource();
+  (vscode.window as any).withProgress=async(_options:any,run:any)=>{const timer=setTimeout(()=>source.cancel(),1200);try{return await run({report:()=>{}},source.token);}finally{clearTimeout(timer);}};
+  try{await vscode.commands.executeCommand("rung.traceRecord",{signals:["ProveOps_DB.a"],device:"PLC_1",duration:30,interval:100,out});const recording=JSON.parse(await readFile(out,"utf8"));assert.equal(recording.stopReason,"stopped");assert.ok(recording.frames.length>=1);assert.equal(api.trace()?.shown?.stopReason,"stopped");console.log(JSON.stringify({stoppedTraceFrames:recording.frames.length}));}
+  finally{(vscode.window as any).withProgress=original;source.dispose();api.trace()?.dispose();}
+ });
+ it("imports real native-format CSV offline and preserves nanoseconds in the panel",async()=>{
+  const api=await rungApi(),source=vscode.Uri.file(join(process.env.RUNG_E2E_REPO!,"packages/live/test/fixtures/trace/tia-v20-long-term.csv")),out=vscode.Uri.file(join(api.ws.root!,"native-import.json"));
+  const open=vscode.window.showOpenDialog,save=vscode.window.showSaveDialog;
+  (vscode.window as any).showOpenDialog=async()=>[source];(vscode.window as any).showSaveDialog=async()=>out;
+  try{await vscode.commands.executeCommand("rung.traceImport");const model=api.trace()?.shown;assert.equal(model?.source,"tia-long-term-csv");assert.ok(model&&"sourceSha256" in model);assert.equal(model.sourceSha256,"47a31eebbdc9b1c61bad42e21c8117f9ab69544f7db6a0c40fa2db02dc61f3b1");assert.ok("sourceTimestamp" in model.frames[3]!);assert.equal(model.frames[3]!.sourceTimestamp,"2023-11-14-22:13:20.300000369");assert.equal(model.frames[3]!.elapsedMs,300.000369);}
+  finally{(vscode.window as any).showOpenDialog=open;(vscode.window as any).showSaveDialog=save;api.trace()?.dispose();}
+ });
+ it("renders Trace curves and exact cursor text inside the real CSP webview",async function(){
+  if(!process.env.RUNG_E2E_RENDERER_PORT)this.skip();const api=await rungApi(),out=join(api.ws.root!,"render-import.json");
+  const result=await api.cli.capture(["trace","import",join(process.env.RUNG_E2E_REPO!,"packages/live/test/fixtures/trace/tia-v20-long-term.csv"),"--out",out,"--json"]);assert.equal(result.code,0);await vscode.commands.executeCommand("rung.traceOpen",out);
+  const renderer=await traceRenderer(Number(process.env.RUNG_E2E_RENDERER_PORT));
+  try{const result=await renderer.evaluate(`(async()=>{const view=document.querySelector('rg-trace');await view.updateComplete;const count=view.querySelectorAll('polyline[data-segment]').length;const cursor=view.querySelector('[aria-label="Time cursor"]');cursor.value='300.000369';cursor.dispatchEvent(new Event('input',{bubbles:true}));await view.updateComplete;const text=view.textContent;view.querySelector('[data-action="zoom-in"]').click();await view.updateComplete;return {count,text,zoomed:view.to-view.from};})()`);assert.ok(result.count>=6);assert.ok(result.text.includes("2023-11-14-22:13:20.300000369"));assert.ok(result.text.includes("Imported TIA long-term CSV"));assert.ok(result.zoomed<300.000369);console.log(JSON.stringify({actualTracePolylines:result.count,exactCursor:true,zoomedMs:result.zoomed}));}
+  finally{renderer.close();api.trace()?.dispose();}
+ });
 });

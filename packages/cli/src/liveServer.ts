@@ -153,6 +153,12 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
   }
   if (!owner) throw new WorkspaceError("CONFIG_INVALID", "The live broker could not start; build the CLI packages first");
   const client = owner;
+  const release = async (id: string) => {
+    let timer: NodeJS.Timeout | undefined;
+    try { await Promise.race([client.request("release", { id }), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new BridgeError("BRIDGE_EXITED", "Live broker lease release timed out")), 5000); timer.unref();
+    })]); } finally { clearTimeout(timer); }
+  };
   const listeners = new Map<string, (frame: LiveFrame) => void>();
   const alarmListeners = new Map<string, (frame: OnlineAlarmResult) => void>();
   const alarmLatest = new Map<string, OnlineAlarmResult>();
@@ -186,8 +192,8 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
       const id = randomUUID(); alarmListeners.set(id, callback);
       try { await client.request("alarmLease", { id, key, lcid, credentials }); }
       catch (error) { alarmListeners.delete(id); alarmLatest.delete(id); throw error; }
-      if (closed) { alarmListeners.delete(id); alarmLatest.delete(id); await client.request("release", { id }).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
-      return { close: async () => { alarmLatest.delete(id); if (!alarmListeners.delete(id) || closed) return; try { await client.request("release", { id }); } catch (error) { if ((error as { code?: string }).code !== "OWNER_GONE") throw error; } } };
+      if (closed) { alarmListeners.delete(id); alarmLatest.delete(id); await release(id).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
+      return { close: async () => { alarmLatest.delete(id); if (!alarmListeners.delete(id) || closed) return; try { await release(id); } catch (error) { if ((error as { code?: string }).code !== "OWNER_GONE") throw error; } } };
     },
     prepare: action => client.request("prepare", { key, action, credentials }),
     commit: (operationId, preview, confirmed) => client.request("commit", { operationId, preview, confirmed }),
@@ -198,14 +204,17 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
       const id = randomUUID(); listeners.set(id, cb);
       try { await client.request("lease", { id, key, labels, cycleMs, credentials }); }
       catch (error) { listeners.delete(id); latest.delete(id); throw error; }
-      if (closed) { listeners.delete(id); await client.request("release", { id }).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
+      if (closed) { listeners.delete(id); await release(id).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
       return { close: async () => {
         latest.delete(id); if (!listeners.delete(id) || closed) return;
-        try { await client.request("release", { id }); }
+        try { await release(id); }
         catch (error) { if ((error as { code?: string }).code !== "OWNER_GONE") throw error; }
       } };
     },
     state: () => client.request("state", { key, credentials }),
-    close: async () => { if (closed) return; closed = true; const ids = [...listeners.keys(), ...alarmListeners.keys()]; listeners.clear(); alarmListeners.clear(); alarmLatest.clear(); latest.clear(); await Promise.allSettled(ids.map(id => client.request("release", { id }))); client.close(); },
+    close: async () => { if (closed) return; closed = true; const ids = [...listeners.keys(), ...alarmListeners.keys()]; listeners.clear(); alarmListeners.clear(); alarmLatest.clear(); latest.clear();
+      try { const results = await Promise.allSettled(ids.map(release)); const failed = results.find(r => r.status === "rejected" && (r.reason as {code?: string})?.code !== "OWNER_GONE"); if (failed?.status === "rejected") throw failed.reason; }
+      finally { client.close(); }
+    },
   };
 }

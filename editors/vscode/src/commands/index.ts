@@ -32,6 +32,7 @@ import type { PlanEntry } from "../core/preview";
 import { registerMerge } from "./merge";
 import { deviceTarget, fileTarget } from "./targets";
 import {projectAssets,type ProjectAssetsOptions} from "./projectAssets";
+import {TraceCommands} from "./trace";
 
 export interface Services {
   ws: RungWorkspace;
@@ -59,6 +60,8 @@ function needsWorkspace(ws: RungWorkspace): boolean {
 export function registerCommands(context: vscode.ExtensionContext, s: Services): void {
   const { ws, cli, out, watch, online, problems } = s;
   const connector = new Connector(ws, cli, out, context.secrets);
+  const trace = new TraceCommands(context,ws,cli,connector);
+  context.subscriptions.push(trace);
   const reg = (id: string, fn: (...args: unknown[]) => unknown) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   const inWs =
     (fn: (...args: unknown[]) => unknown) =>
@@ -67,6 +70,9 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
 
   reg("rung.projectAssets",inWs((options?:unknown)=>projectAssets(s,(options&&typeof options==="object"?options:{}) as ProjectAssetsOptions)));
   reg("rung.projectAssets.apply",inWs(()=>projectAssets(s,{apply:true})));
+  reg("rung.traceRecord",inWs((options?:unknown)=>trace.record(options)));
+  reg("rung.traceOpen",(file?:unknown)=>trace.open(file));
+  reg("rung.traceImport",()=>trace.importCsv());
 
   // --- sync
   /** After pull / sync: point at new conflicts (the terminal has the details). */

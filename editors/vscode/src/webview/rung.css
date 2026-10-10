@@ -800,3 +800,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.rg-trace { padding: 16px; }
+.rg-trace h1 { font-size: 18px; }
+.rg-trace h2 { font-size: 14px; overflow-wrap: anywhere; }
+.rg-trace-toolbar, .rg-trace fieldset { display: flex; flex-wrap: wrap; gap: 12px; }
+.rg-trace fieldset { margin: 12px 0; }
+.rg-trace fieldset label { overflow-wrap: anywhere; }
+.rg-trace input[type=range] { width: 100%; }
+.rg-trace-plot { width: 100%; height: 150px; background: var(--vscode-editor-background); }
+.rg-trace-plot text { fill: var(--vscode-foreground); font-size: 10px; }
+.rg-trace-plot polyline { stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
+.rg-trace-plot circle { fill: var(--vscode-charts-blue, #3794ff); }
+.rg-trace-cursor { stroke: var(--vscode-editorCursor-foreground); stroke-dasharray: 4 4; }

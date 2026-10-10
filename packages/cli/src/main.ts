@@ -26,6 +26,7 @@ import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
 import { cmdLive } from "./live.js";
+import {cmdTrace} from "./trace.js";
 import { cmdHardware } from "./hardware.js";
 import { cmdLibrary } from "./library.js";
 import { cmdProjectArtifact,cmdSafety } from "./project-artifact.js";
@@ -103,6 +104,10 @@ Usage:
   rung live modify|run|stop --confirm-stdin --json  editor confirmation over private stdin
   rung live watch|alarms --json --parent-stdio  editor stream ends when its parent closes stdin (alarms also needs --stream)
   rung live-server [dir]              shared read-only broker; started automatically by live consumers
+  rung trace record <signal>... --device <PLC> --out <new.json> [--duration 60] [--interval 100] [--dir <ws>] [--json]
+                                     read-only asynchronous subscription recording (not cycle-exact)
+  rung trace inspect <file.json> [--json]  open a portable recording offline
+  rung trace import <TIA-long-term.csv> --out <new.json> [--json]
   rung who <name> [--file <f>] [--json]  who writes and who reads a tag, DB member or variable; where the writer is called from
   rung assignments [dir] [--json]      the assignment list: used inputs, outputs, bit memory, timers, counters; overlaps
   rung views [dir] [--offline]         read-only YAML views of hardware, HMI, technology objects, the project library, software units and SimaticML tag tables
@@ -412,6 +417,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
   live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream"], positionals: Infinity },
   "live-server": { options: [], positionals: 1 },
+  trace:{options:["device","out","duration","interval","dir","json","parent-stdio"],positionals:Infinity},
   views: { options: ["offline"], positionals: 1 },
   agents: { options: [], positionals: 1 },
   mcp: { options: [], positionals: 1 },
@@ -537,6 +543,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         instance: { type: "string" },
         table: { type: "string" },
         interval: { type: "string" },
+        out:{type:"string"},
+        duration:{type:"string"},
         transport: { type: "string" },
         ip: { type: "string" },
         "from-plc": { type: "string" },
@@ -597,9 +605,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
     startLsp(io);
     await new Promise<void>(() => {}); // runs until the editor closes the connection
   }
-  const dir = resolve(io.cwd, cmd === "live" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
+  const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
     switch (cmd) {
+      case "trace":
+        if((v.device?.length??0)>1)throw new WorkspaceError("BAD_ARGUMENT","Trace requires one --device");
+        return await cmdTrace(dir,target,positionals.slice(2),io,{device:v.device?.[0],out:v.out,duration:v.duration,interval:v.interval,json:!!v.json,parentStdio:!!v["parent-stdio"]});
       case "hardware":
         return await cmdHardware(dir, v.file as string[] | undefined, !!v.json, io, !!v.apply,v["expected-artifact-revision"]);
       case "safety":

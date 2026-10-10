@@ -9,9 +9,16 @@ import { startLiveServer, brokerReader, liveSelection } from "../src/liveServer.
 import { webApiFor } from "../src/live.js";
 import { main } from "../src/main.js";
 import { WebApiClient } from "@rung/live";
+import {OwnerClient} from "@rung/sync";
 import * as trust from "../src/liveTrust.js";
 
 const closing: (() => Promise<void>)[] = [];
+it.each(["values","alarms"])("closes IPC after a stalled %s release during reader shutdown",async kind=>{
+ const root=await mkdtemp(join(tmpdir(),"rung-release-timeout-")),config=defaultConfig("fixture.ap20","V20","",["A"]);config.live={plc:{A:{transport:"s7commplus",address:"192.168.250.1",certificateSha256:"a".repeat(64)}}};await saveConfig(root,config);
+ const close=vi.fn(),owner={subscribe:async()=>{},close,request:async(method:string)=>method==="release"?new Promise(()=>{}):{}};vi.spyOn(OwnerClient,"connect").mockResolvedValue(owner as unknown as OwnerClient);
+ const reader=await brokerReader(root,{},{});if(kind==="values")await reader.subscribe!({Count:"Count"},100,()=>{});else await reader.subscribeAlarms!(1033,()=>{});
+ vi.useFakeTimers();try{const result=reader.close().then(()=>undefined,error=>error);await vi.advanceTimersByTimeAsync(5100);expect(await result).toMatchObject({message:expect.stringMatching(/release timed out/)});expect(close).toHaveBeenCalledOnce();}finally{vi.useRealTimers();}
+});
 afterEach(async () => { for (const close of closing.splice(0).reverse()) await close(); vi.restoreAllMocks(); });
 it("confirms a typed PLC preview once and cancels without sending", async () => {
   const root = await mkdtemp(join(tmpdir(), "rung-mutation-test-"));

@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: MIT
+import {expect,it} from "vitest";
+import {traceSegments,traceCursor,traceScale,type TraceModel} from "../src/core/trace";
+import {parseTraceCsv} from "@rung/live";
+const model=():TraceModel=>({version:1,source:"s7commplus-subscription",coherence:"asynchronous-observations",startedAt:0,intervalMs:100,signals:["A"],stopReason:"stopped",frames:[0,100,200,300,400,800].map((elapsedMs,i)=>({elapsedMs,sourceAt:1000+elapsedMs,scope:{device:"P",address:"local",transport:"s7commplus",epoch:i<3?1:2},state:i===1?"stale":"live",cells:{A:i===1?{value:null,error:"PLC stale"}:{value:i,observedAt:1000+elapsedMs,type:"INT"}}}))});
+it("splits curves at explicit gaps, epochs and receipt gaps",()=>{expect(traceSegments(model(),"A").map(segment=>segment.map(p=>p.time))).toEqual([[0],[200],[300,400],[800]]);});
+it("cursor reports actual samples and gaps without looking ahead",()=>{const trace=model();expect(traceCursor(trace,50)?.cells.A?.value).toBe(0);expect(traceCursor(trace,100)?.cells.A?.error).toBe("PLC stale");expect(traceCursor(trace,700)).toBeUndefined();expect(traceCursor(trace,-1)).toBeUndefined();expect(traceCursor(trace,800)?.elapsedMs).toBe(800);});
+it("keeps constant and extreme numeric scales finite and boolean axes fixed",()=>{expect(traceScale([{time:0,value:7},{time:1,value:7}]).position(7)).toBe(.5);const scale=traceScale([{time:0,value:-1e308},{time:1,value:1e308}]);expect(scale.position(0)).toBe(.5);expect(scale.position(1e308)).toBe(1);expect(traceScale([{time:0,value:false}])).toMatchObject({min:0,max:1});});
+it("does not clip mixed scalar kinds to a Boolean axis",()=>{expect(traceScale([{time:0,value:false},{time:1,value:100}])).toMatchObject({min:0,max:100});});
+it("accepts imported CSV without inventing a PLC scope and breaks missing sample numbers",()=>{const trace=parseTraceCsv("Native;20261009_120000_000;Value\n0;2023-11-14-22:13:20.000000000;1\n2;2023-11-14-22:13:20.100000123;2\n");expect(traceSegments(trace,"Value").map(s=>s.length)).toEqual([1,1]);expect(traceCursor(trace,100.000123)).not.toHaveProperty("scope");});

@@ -11,7 +11,7 @@ const out = join(root, "out", "webview");
 const minify = process.argv.includes("--minify");
 mkdirSync(out, { recursive: true });
 
-const views = ["declarations", "tests"];
+const views = ["declarations", "tests", "trace"];
 await build({
   entryPoints: views.map((v) => join(root, "src", "webview", `${v}.ts`)),
   bundle: true,

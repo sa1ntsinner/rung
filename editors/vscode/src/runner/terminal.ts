@@ -30,10 +30,10 @@ export function killTree(child: ChildProcess): void {
 }
 
 /** Read-only live clients release their lease on EOF; killing their tree also kills a shared broker. */
-export function stopLive(child: ChildProcess): void {
+export function stopLive(child: ChildProcess, graceMs = 2000): void {
   if (child.exitCode !== null) return;
   child.stdin?.end();
-  const timer = setTimeout(() => killTree(child), 2000); timer.unref();
+  const timer = setTimeout(() => killTree(child), graceMs); timer.unref();
   child.once("exit", () => clearTimeout(timer));
 }
 

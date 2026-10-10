@@ -5,6 +5,7 @@ import { basename } from "node:path";
 import * as vscode from "vscode";
 import { BlockCodeLens } from "./codelens";
 import { DeclarationsPanel } from "./declarations/panel";
+import { TracePanel } from "./trace/panel";
 import { UDT_TABLE, UdtTableEditor } from "./declarations/udtEditor";
 import { TEST_TABLE, TestTableEditor } from "./tests/testEditor";
 import type { RungTests } from "./testing";
@@ -63,6 +64,7 @@ export interface RungExtensionApi {
   usages: UsagesView;
   /** the declarations panel, if open: its model and a way in for the view's messages */
   declarations: () => DeclarationsPanel | undefined;
+  trace: () => TracePanel | undefined;
   /** the UDT tables open, by document */
   udtTables: Map<string, DeclarationsSession>;
   /** the test tables open, by document */
@@ -234,7 +236,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
 
   // a restricted (untrusted) folder never starts TIA Portal on its own
   if (readSettings().autoStartWatch && vscode.workspace.isTrusted && ws.hasConfig && !ws.watching) void watch.start();
-  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why, live };
+  return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, trace: () => TracePanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why, live };
 }
 
 export async function deactivate(): Promise<void> {
