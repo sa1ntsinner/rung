@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, it } from "vitest";
 import { WorkspaceIndex } from "@rung/lsp";
-import { verifyNativeBody, verifyNativeScalars } from "../src/native-source.js";
+import { nativeGlobalReads, verifyNativeBody, verifyNativeScalars } from "../src/native-source.js";
 
 const uri = "file:///fixture/plc/PLC_1/blocks/F.scl";
 function source(body: string) {
@@ -29,7 +29,8 @@ it("requires complete nonoverlapping native scalar declarations with matching wi
   expect(() => verifyNativeScalars(index, uri, [{ ...bindings[0]!, bitOffset: -1 }, bindings[1]!])).toThrow();
   const doc = index.docs.get(uri)!;
   index.set(uri, doc.text.replace("#n := 2", "#n := #tmp"), 1);
-  expect(() => verifyNativeScalars(index, uri, bindings)).toThrow(/temporary/i);
+  // TEMP is left to the replay, which refuses a read on the path it takes before the cycle wrote it
+  expect(() => verifyNativeScalars(index, uri, bindings)).not.toThrow();
 });
 
 it("refuses uncaptured native CPU clock dependencies", () => {
@@ -60,4 +61,22 @@ it("refuses external state and user calls without matching native dependency sou
   const local = new WorkspaceIndex();
   local.set(uri, 'FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nBEGIN\n#n := #n.%X3;\nEND_FUNCTION_BLOCK', 0);
   expect(() => verifyNativeScalars(local, uri, bindings)).not.toThrow();
+});
+
+it("lists the DB members and tags a body reads, and refuses what a sample cannot capture by name", () => {
+  const bindings = [{ name: "N", bitOffset: 32, bits: 16, type: '{Scalar"33554437"Int}' }];
+  const make = (body: string) => {
+    const index = new WorkspaceIndex();
+    index.set(uri, `FUNCTION_BLOCK "F"\nVAR_OUTPUT\n n : Int;\nEND_VAR\nBEGIN\n${body}\nEND_FUNCTION_BLOCK`, 0);
+    index.set(uri.replace("/F.scl", "/Line_DB.db"), 'DATA_BLOCK "Line_DB"\nVERSION : 0.1\n   VAR\n      Speed : Int;\n      arr : Array[0..3] of Int;\n      s : Struct\n         a : Int;\n      END_STRUCT;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK', 0);
+    index.set(uri.replace("/blocks/F.scl", "/tags/Io.tags.st"), "VAR_GLOBAL\n    Start_PB AT %I0.0 : Bool;\nEND_VAR\n", 0);
+    return index;
+  };
+  const ok = make('IF "Start_PB" THEN\n#n := "Line_DB".Speed + "Line_DB".s.a + "Line_DB".Speed;\nEND_IF;');
+  expect(nativeGlobalReads(ok, uri)).toEqual(['"Start_PB"', '"Line_DB".Speed', '"Line_DB".s.a']);
+  expect(() => verifyNativeScalars(ok, uri, bindings)).not.toThrow();
+  expect(nativeGlobalReads(make('#n := DINT_TO_INT(INT_TO_DINT(#n) + 1);'), uri)).toEqual([]);
+  expect(() => nativeGlobalReads(make('"Line_DB".Speed := #n;'), uri)).toThrow(/writes/i);
+  expect(() => nativeGlobalReads(make('#n := "Line_DB".arr[#n];'), uri)).toThrow(/index/i);
+  expect(() => nativeGlobalReads(make('#n := "Line_DB".s;'), uri)).toThrow(/whole/i);
 });

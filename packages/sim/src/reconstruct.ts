@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { deviceOfUri, scopedTo, type WorkspaceIndex } from "@rung/lsp";
 import type { Expr, Stmt } from "./ast.js";
 import { refText, type WhyNode } from "./debug.js";
-import { Simulator, SimError, splitArrayType, type Frame, type Struct, type Value, type ArrayValue, type Instance } from "./runtime.js";
+import { Simulator, SimError, splitArrayType, toMs, type Frame, type Struct, type Value, type ArrayValue, type Instance } from "./runtime.js";
 
 export interface CycleScope { plc: string; instance: string; epoch: number }
 export interface CycleCapture {
@@ -13,7 +13,8 @@ export interface CycleCapture {
   time: number;
   clockStart: number;
   coherence: "controlled-cycle" | "subscription-sample";
-  before: { mem: Struct; globals: Struct };
+  /** globals: whole globals (offline captures); reads: members and tags read by name ("Line_DB".Speed), the rest of those globals unknown */
+  before: { mem: Struct; globals: Struct; reads?: Record<string, Value> };
   observed: Struct;
 }
 type Location = { uri: string; line: number; column: number };
@@ -94,6 +95,7 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
     if (declaredNodes > 100_000) throw new SimError("Capture state limit exceeded");
   }
   const sim = new Simulator(scoped, 100_000);
+  sim.guardTemps = true;
   const instance = sim.newInstance(block.name);
   let nodes = 0;
   const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
@@ -150,9 +152,29 @@ export function reconstructCycle(index: WorkspaceIndex, uri: string, capture: Cy
       if (!isDeepStrictEqual((cloned as Struct).mem, instance.mem)) throw new SimError(`${name}: conflicting selected instance state`);
     } else sim.globals[name] = cloned;
   }
+  // members and tags a sample read by name: what it did not read of those globals stays unknown, and reading it refuses
+  const reads = Object.entries(capture.before.reads ?? {});
+  if (reads.length > 256) throw new SimError("Capture state limit exceeded");
+  const readRoots = new Set<string>();
+  const placed = reads.map(([path, value]) => {
+    const m = /^"([^"\r\n]+)"((?:\.[A-Za-z_]\w*)*)$/.exec(path);
+    const g = m ? scoped.global(m[1]!) : undefined;
+    if (!m || !g || (g.block && g.block.kind !== "DB") || Object.hasOwn(capture.before.globals, m[1]!.toUpperCase()))
+      throw new SimError(`${path}: unknown or repeated global state`);
+    const ref = { root: { kind: "global" as const, name: m[1]! }, path: m[2]!.split(".").slice(1).map((member) => ({ member })), start: 0 };
+    let def: Value;
+    try { def = sim.read(ref as never, null); } catch { throw new SimError(`${path}: unknown global state`); }
+    const v = typeof value === "string" && typeof def === "number" && /^(L?T|L?TIME)#/i.test(value) ? toMs(value) : value;
+    if (def === undefined || typeof def === "object" || typeof v !== typeof def || (typeof v === "number" && !Number.isFinite(v)))
+      throw new SimError(`${path}: the captured value ${JSON.stringify(value)} does not fit its type`);
+    readRoots.add(m[1]!.toUpperCase());
+    return { ref, v };
+  });
+  for (const root of readRoots) sim.uncaptured(root);
+  for (const { ref, v } of placed) sim.write(ref as never, v as Value, null);
   // Template initializers may allocate globals; only supplied captured memory can survive into replay.
   for (const name of Object.keys(sim.globals))
-    if (name !== alias && !Object.hasOwn(capture.before.globals, name)) delete sim.globals[name];
+    if (name !== alias && !Object.hasOwn(capture.before.globals, name) && !readRoots.has(name)) delete sim.globals[name];
   sim.onMissingGlobal = name => { throw new SimError(`${name}: missing pre-cycle global state`); };
   sim.time = capture.time; sim.clockStart = capture.clockStart;
   const trace: ReconstructedEntry[] = [];

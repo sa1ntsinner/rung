@@ -17,8 +17,8 @@ import type { OnlinePreparedWrite } from "@rung/bridge-client";
 import type { OnlineAlarmResult, OnlineNativeCapture, LiveScope } from "@rung/bridge-client";
 import { createInterface } from "node:readline/promises";
 import { frontendConfirmation } from "./liveMutation.js";
-import { reconstructionRevision } from "@rung/sim";
-import { reconstructNativeSample } from "./liveReconstruction.js";
+import { nativeGlobalReads, reconstructionRevision } from "@rung/sim";
+import { reconstructNativeSample, steadyReads } from "./liveReconstruction.js";
 
 export async function webApiFor(dir: string, env: Io["env"], opts: BackendOptions = {}): Promise<WebApiClient> {
   const ws = await findWorkspace(dir);
@@ -348,11 +348,15 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
         if (stopped || owner !== generation) return;
         if (reconstructionRevision(source.index, source.uri) !== source.revision) throw new Error("Workspace source changed; restart monitoring");
         const instance = plan.instance.replace(/^"|"$/g, "");
+        // the DB members and tags the FB reads, on both sides of the sample: equal values stood still during it
+        const globals = nativeGlobalReads(source.index, source.uri);
+        const before = globals.length ? await read(globals) : [];
         const record = await reader.capture(plan.block, instance, expected);
+        const after = globals.length ? await read(globals) : [];
         const current = new WorkspaceIndex(); await current.load(source.root);
         if (stopped || owner !== generation) return;
         if (reconstructionRevision(current, source.uri) !== source.revision) throw new Error("Workspace source changed; restart monitoring");
-        nativeStatus = reconstructNativeSample(current, source.uri, record, expected, instance);
+        nativeStatus = reconstructNativeSample(current, source.uri, record, expected, instance, steadyReads(globals, before, after));
       } catch (error) {
         if (stopped || owner !== generation) return;
         nativeStatus = { ...programStatus()!, reason: liveError(error) };

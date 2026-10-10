@@ -282,6 +282,11 @@ export class Simulator {
   onExpression?: (e: Expr, f: Frame | null, value: Value) => void;
   /** Actual destination and stored value, after conversion; never resolve the reference again. */
   onWrite?: (obj: Struct | Value[], key: string | number, value: Value, frame: Frame | null) => void;
+  /** Reconstruction: a TEMP has no value from before the cycle; reading one nobody wrote yet on this path is refused. */
+  guardTemps = false;
+  /** Leaves that hold no known value: a TEMP before the cycle wrote it, or a global member a capture did not read. */
+  private readonly unset = new WeakMap<object, Map<string | number, "temp" | "uncaptured">>();
+  private marked = false;
   /** The frames running, outermost first. */
   readonly frames: Frame[] = [];
 
@@ -789,7 +794,11 @@ export class Simulator {
     const p = this.propertyAt(ref, frame);
     if (p) return this.runProperty(p.inst, p.prop, "get");
     const { obj, key } = this.locate(ref, frame);
-    return (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
+    const v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
+    const why = this.marked ? this.unset.get(obj)?.get(key) ?? this.unsetInside(v) : undefined;
+    if (why === "temp") throw new SimError(`#${ref.root.name} is read before this cycle wrote it: a temporary has no value from before the cycle`, frame?.block.name, ref.start);
+    if (why) throw new SimError(`${ref.root.kind === "global" ? `"${ref.root.name}"` : ref.root.name}: a value this sample did not capture is read`, frame?.block.name, ref.start);
+    return v;
   }
 
   write(ref: LRef, value: Value, frame: Frame | null) {
@@ -810,7 +819,42 @@ export class Simulator {
     // an assigned structure or array is copied, as on the PLC: #b := #a; then #a.x := 5; leaves #b.x alone
     (obj as Record<string | number, Value>)[key] =
       typeof value === "number" ? fitNumber(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
+    this.unset.get(obj)?.delete(key);
     this.onWrite?.(obj, key, (obj as Record<string | number, Value>)[key]!, frame);
+  }
+
+  /** Registers every elementary leaf of fresh TEMP storage as not written yet (only while guardTemps is on). */
+  private markUnset<T extends Struct | Value[]>(storage: T): T {
+    if (this.guardTemps) for (const key of Object.keys(storage)) this.mark(storage, Array.isArray(storage) ? Number(key) : key, "temp");
+    return storage;
+  }
+
+  /** A capture holds some members of this global: every leaf counts as not captured until the capture writes it. */
+  uncaptured(name: string): void {
+    this.mark(this.globals, name.toUpperCase(), "uncaptured");
+  }
+
+  private mark(container: Struct | Value[], key: string | number, why: "temp" | "uncaptured"): void {
+    let v = (container as Record<string | number, Value>)[key];
+    if (isInstance(v)) v = v.mem;
+    if (isArray(v)) (v as ArrayValue).items.forEach((_, i) => this.mark((v as ArrayValue).items, i, why));
+    else if (v && typeof v === "object" && !isPointer(v)) for (const k of Object.keys(v)) this.mark(v as Struct, k, why);
+    else if (!isInstance(v)) {
+      this.marked = true;
+      const map = this.unset.get(container) ?? new Map();
+      map.set(key, why);
+      this.unset.set(container, map);
+    }
+  }
+
+  private unsetInside(v: Value): "temp" | "uncaptured" | undefined {
+    if (isInstance(v)) v = v.mem;
+    if (!v || typeof v !== "object" || isPointer(v)) return undefined;
+    const container = isArray(v) ? (v as ArrayValue).items : (v as Struct);
+    const own = this.unset.get(container);
+    if (own?.size) return own.values().next().value;
+    for (const x of Object.values(container)) { const why = this.unsetInside(x as Value); if (why) return why; }
+    return undefined;
   }
 
   // ------------------------------------------------------------------ static types (REAL vs integer division)
@@ -1698,7 +1742,7 @@ export class Simulator {
   private callFc(b: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null, capture?: Struct): Value {
     return this.enter(b, () => {
       const mem: Struct = this.structOf(b.vars.filter((v) => v.section === "Input" || v.section === "Output" || v.section === "InOut"), b);
-      const temps: Struct = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
+      const temps: Struct = this.markUnset(this.structOf(b.vars.filter((v) => v.section === "Temp"), b));
       Object.assign(temps, this.constants(b));
       for (const t of b.ladTemps ?? []) temps[t.toUpperCase()] = false;
       this.bindInputs(mem, b, c.args, caller);
@@ -1792,7 +1836,7 @@ export class Simulator {
     const b = this.block(inst.__fb);
     this.enter(b, () => {
       this.bindInputs(inst.mem, b, args, caller);
-      const temps = this.structOf(b.vars.filter((v) => v.section === "Temp"), b);
+      const temps = this.markUnset(this.structOf(b.vars.filter((v) => v.section === "Temp"), b));
       Object.assign(temps, this.constants(b));
       for (const t of b.ladTemps ?? []) temps[t.toUpperCase()] = false;
       this.runBody(b, { block: b, mem: inst.mem, temps, inst });

@@ -255,3 +255,45 @@ END_FUNCTION`, 0);
     finally { spy.mockRestore(); }
   });
 });
+
+describe("temporaries in a reconstructed cycle", () => {
+  const run = (body: string, enable: boolean) => {
+    const index = new WorkspaceIndex();
+    index.set(uri, `FUNCTION_BLOCK "Counter"\nVAR_INPUT\n  Enable : Bool;\nEND_VAR\nVAR_OUTPUT\n  Result : Int;\nEND_VAR\nVAR_TEMP\n  t : Int;\n  pair : Struct\n    a : Int;\n    b : Int;\n  END_STRUCT;\nEND_VAR\nBEGIN\n${body}\nEND_FUNCTION_BLOCK`, 0);
+    const mem = { ENABLE: enable, RESULT: 0 };
+    return reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
+      coherence: "subscription-sample", before: { mem, globals: {} }, observed: mem }, scope);
+  };
+  it("replays a temporary the cycle writes before it reads it", () => {
+    expect(run("#t := 3;\n#Result := #t + 1;", true).after.RESULT).toBe(4);
+    expect(run("#pair.a := 1;\n#Result := #pair.a;", true).after.RESULT).toBe(1);
+  });
+  it("refuses a temporary read on this path before anything set it", () => {
+    expect(() => run("IF #Enable THEN\n  #t := 3;\nEND_IF;\n#Result := #t;", false)).toThrow(/#t is read before/i);
+    expect(run("IF #Enable THEN\n  #t := 3;\nEND_IF;\n#Result := #t;", true).after.RESULT).toBe(3);
+    expect(() => run("#pair.a := 1;\n#Result := #pair.b;", true)).toThrow(/read before/i);
+  });
+});
+
+describe("globals a sample read", () => {
+  const dbUri = "file:///w/plc/P/blocks/Line_DB.db";
+  const run = (body: string, reads: Record<string, unknown>) => {
+    const index = new WorkspaceIndex();
+    index.set(uri, `FUNCTION_BLOCK "Counter"\nVAR_OUTPUT\n  Result : Int;\n  Late : Bool;\nEND_VAR\nBEGIN\n${body}\nEND_FUNCTION_BLOCK`, 0);
+    index.set(dbUri, 'DATA_BLOCK "Line_DB"\nVERSION : 0.1\n   VAR\n      Speed : Int;\n      Limit : Int;\n      Delay : Time;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK', 0);
+    index.set("file:///w/plc/P/tags/Io.tags.st", "VAR_GLOBAL\n    Start_PB AT %I0.0 : Bool;\nEND_VAR\n", 0);
+    const mem = { RESULT: 0, LATE: false };
+    return reconstructCycle(index, uri, { scope, sourceRevision: reconstructionRevision(index, uri), time: 0, clockStart: 0,
+      coherence: "subscription-sample", before: { mem, globals: {}, reads: reads as never }, observed: mem }, scope);
+  };
+  it("replays with the members and tags it captured", () => {
+    const r = run('IF "Start_PB" THEN\n  #Result := "Line_DB".Speed;\nEND_IF;\n#Late := "Line_DB".Delay > T#1s;', { '"Start_PB"': true, '"Line_DB".Speed': 42, '"Line_DB".Delay': "T#2s" });
+    expect(r.after.RESULT).toBe(42);
+    expect(r.after.LATE).toBe(true);
+  });
+  it("refuses a member it did not capture, and a value of the wrong kind", () => {
+    expect(() => run('#Result := "Line_DB".Limit;', { '"Line_DB".Speed': 1 })).toThrow(/did not capture/i);
+    expect(() => run('#Result := "Line_DB".Speed;', { '"Line_DB".Speed': "fast" })).toThrow(/Line_DB.*Speed/i);
+    expect(() => run('#Result := 1;', { '"Nope".x': 1 })).toThrow(/Nope/);
+  });
+});
