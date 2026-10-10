@@ -35,6 +35,8 @@ internal sealed partial class OnlineDriver
         var pointers = new HashSet<uint>();
         var scalars = source.BlockBody.SelectMany(body => { var found = NativeSource.Scalars(source.FunctionalObjectDebugInfo, body, out var pointer); pointers.Add(pointer); return found; }).ToArray();
         if (pointers.Count != 1) throw new NotSupportedException("Native instance members are addressed through more than one pointer.");
+        var constants = source.BlockBody.SelectMany(body => NativeSource.Constants(source.FunctionalObjectDebugInfo, body))
+            .GroupBy(c => c.Name).Select(g => g.Distinct().Count() == 1 ? g.First() : throw new NotSupportedException("Native constant #" + g.Key + " shows two values.")).ToArray();
         var guid = Guid.NewGuid().ToByteArray(); uint uid = 0;
         foreach (var part in new[] { 0, 4, 8, 12 }) uid ^= BitConverter.ToUInt32(guid, part);
         var plan = NativeCaptureEncoder.Build(selected.Number, pointers.Single(), source.CodeModifiedTimestampBytes, scalars, uid);
@@ -75,7 +77,7 @@ internal sealed partial class OnlineDriver
         foreach (var link in chain)
             if (!(await client.GetBlockContentAsync(link.RelationId, token)).CodeModifiedTimestampBytes.AsSpan().SequenceEqual(link.Signature))
                 throw new RpcException(ErrorCodes.UnsupportedObject, "Native source changed during capture.");
-        lock (sync) return new(bodies, scalars, route!, Convert.ToBase64String(source.CodeModifiedTimestampBytes), samples.ToArray());
+        lock (sync) return new(bodies, scalars, route!, Convert.ToBase64String(source.CodeModifiedTimestampBytes), samples.ToArray(), constants);
     }
 }
 

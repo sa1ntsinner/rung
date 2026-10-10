@@ -87,6 +87,16 @@ public sealed class NativeSourceTests
     }
 
     [Fact]
+    public void ReadsTheValueOfALocalConstantTheCompiledCodeUses()
+    {
+        // #Count := #next MOD #LIMIT; with LIMIT : Int := 1000 (seen live: the debug info holds the compiled value)
+        var body = "<Network Lang='SCL' RefID='1'><RootStatements><Statement UId='1'><SymVa UId='118' SI='ConstInt' SyId='6' ODN='#LIMIT' /></Statement></RootStatements></Network>";
+        var debug = "<DebugInfo><Monitoring><LanguageElement cuId='1' elementId='118'><MonitoringElement key='InValue' type='{Scalar&quot;33554437&quot;Int}' debugValueRef='4' /></LanguageElement>"
+            + "<DebugValue id='4' bitSize='16' type='IsSimple'><Addr sac='31'><Immediate value='1000' /></Addr></DebugValue></Monitoring></DebugInfo>";
+        Assert.Equal(new[] { new NativeConstant("LIMIT", "{Scalar\"33554437\"Int}", "1000") }, NativeSource.Constants(debug, body));
+    }
+
+    [Fact]
     public void FindsAMultiInstanceCallAndTheFbItCallsInTheCallersCode()
     {
         // as FB_ProveMath calls #inner (seen live, TIA Portal V20)

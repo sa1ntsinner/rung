@@ -49,6 +49,14 @@ it("refuses local constants whose native initializer was not matched", () => {
   const bindings = [{ name: "N", bitOffset: 32, bits: 16, type: '{Scalar"33554437"Int}' }];
   expect(() => verifyNativeBody(index, uri, '#n := #n + #Step;')).not.toThrow();
   expect(() => verifyNativeScalars(index, uri, bindings)).toThrow(/constant/i);
+  // the PLC reports the value each used constant was compiled with: replay only when it is the one the source declares
+  const step = (value: string, type = '{Scalar"33554437"Int}') => [{ name: "STEP", type, value }];
+  expect(() => verifyNativeScalars(index, uri, bindings, step("2"))).not.toThrow();
+  expect(() => verifyNativeScalars(index, uri, bindings, step("3"))).toThrow(/Step.*3.*2|compiled/i);
+  expect(() => verifyNativeScalars(index, uri, bindings, step("2", '{Scalar"33554439"DInt}'))).toThrow(/Step/);
+  index.set(uri, index.docs.get(uri)!.text.replace("#n := #n + #Step;", "#n := 1;"), 1);
+  // an unused constant changes nothing the replay computes
+  expect(() => verifyNativeScalars(index, uri, bindings, [])).not.toThrow();
 });
 
 it("refuses external state and user calls without matching native dependency sources", () => {

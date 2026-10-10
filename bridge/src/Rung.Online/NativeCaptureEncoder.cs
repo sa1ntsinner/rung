@@ -10,7 +10,7 @@ public sealed record NativeCaptureField(string Phase, string Name, string Type, 
 public sealed record NativeCapturePlan(S7CommPlusTisWatchRequest Request, int ResultBytes, NativeCaptureField[] Fields);
 public sealed record NativeCaptureState(Dictionary<string, object> Before, Dictionary<string, object> After);
 public sealed record NativeCaptureObservation(long ObservedAt, uint Sequence, NativeCaptureState State);
-public sealed record NativeCaptureResult(NativeBody[] Bodies, NativeScalar[] Scalars, NativeRootCall Route, string CodeSignature, NativeCaptureObservation[] Samples);
+public sealed record NativeCaptureResult(NativeBody[] Bodies, NativeScalar[] Scalars, NativeRootCall Route, string CodeSignature, NativeCaptureObservation[] Samples, NativeConstant[]? Constants = null);
 public sealed record OnlineNativeCapture(LiveScope Scope, NativeCaptureResult Capture, string Coherence = "subscription-sample");
 
 /// <summary>Pure installed V20 serializers; no Device, Job or network objects.</summary>

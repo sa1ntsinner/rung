@@ -11,7 +11,7 @@ export function reconstructNativeSample(index: WorkspaceIndex, uri: string, nati
     || native.capture.samples.length < 3 || native.capture.samples.length > 8 || native.capture.bodies.length > 256)
     throw new SimError("Native capture scope or collection changed");
   verifyNativeBody(index, uri, native.capture.bodies.map(body => body.text).join("\n"));
-  verifyNativeScalars(index, uri, native.capture.scalars);
+  verifyNativeScalars(index, uri, native.capture.scalars, native.capture.constants);
   const sample = native.capture.samples.at(-1)!;
   if (!Number.isSafeInteger(sample.observedAt) || sample.observedAt < 1) throw new SimError("Invalid native measurement time");
   const scope = { plc: expected.device, instance: `"${instance}"`, epoch: expected.epoch };

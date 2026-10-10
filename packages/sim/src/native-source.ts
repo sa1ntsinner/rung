@@ -1,20 +1,33 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { lex, parseAbsolute, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
-import { SimError, splitArrayType } from "./runtime.js";
+import { SimError, Simulator, splitArrayType } from "./runtime.js";
 
 export interface NativeScalarBinding { name: string; bitOffset: number; bits: number; type: string }
+/** A local constant as the PLC compiled it (the debug info's immediate value). */
+export interface NativeConstant { name: string; type: string; value: string }
 
 /** Initial native producer supports complete scalar instance state only. */
-export function verifyNativeScalars(index: WorkspaceIndex, uri: string, bindings: NativeScalarBinding[]): void {
+export function verifyNativeScalars(index: WorkspaceIndex, uri: string, bindings: NativeScalarBinding[], constants?: NativeConstant[]): void {
   const doc = index.docs.get(uri), block = doc?.parsed?.blocks[0];
   if (!doc || !block || block.kind !== "FB" || !Array.isArray(bindings) || bindings.length > 100_000)
     throw new SimError("Invalid native scalar declarations");
   const widths: Record<string, number> = { BOOL: 1, SINT: 8, USINT: 8, BYTE: 8, INT: 16, UINT: 16, WORD: 16,
     DINT: 32, UDINT: 32, DWORD: 32, REAL: 32, LINT: 64, ULINT: 64, LWORD: 64, LREAL: 64 };
-  // ponytail: local constants need native initializer matching before they can enter replay.
-  if (block.vars.some(v => v.section === "Constant")) throw new SimError("Native local constant source is unavailable");
   const expected = new Map(block.vars.filter(v => v.section !== "Temp" && v.section !== "Constant").map(v => [v.name.toUpperCase(), v]));
   const tokens = lex(doc.text.slice(block.bodyStart, block.end)).tokens.filter(t => t.kind !== "comment");
+  // a constant the body uses replays with its declared value only when the PLC compiled that same value
+  const used = new Set(tokens.filter(t => t.kind === "local").map(t => t.text.slice(1).toUpperCase()));
+  for (const c of block.vars.filter(v => v.section === "Constant" && used.has(v.name.toUpperCase()))) {
+    if (!constants) throw new SimError("Native local constant source is unavailable");
+    const native = constants.find(n => n?.name === c.name.toUpperCase());
+    const type = /^\{Scalar"[0-9]+"([A-Za-z0-9_]+)\}$/.exec(native?.type ?? "")?.[1]?.toUpperCase();
+    // ponytail: integer constants only; REAL/TIME/STRING immediates need their own native encodings
+    if (!native || type !== c.type.toUpperCase() || !/^(S|US|U|D|UD|L|UL)?INT$/.test(type) || !/^-?\d+$/.test(native.value))
+      throw new SimError(`#${c.name}: the PLC does not show which value this constant was compiled with`);
+    const declared = new Simulator(index).defaultValue(c, block);
+    if (BigInt(native.value) !== BigInt(declared as number))
+      throw new SimError(`#${c.name} is ${native.value} in the PLC but ${String(declared)} in the source: download the block first`);
+  }
   if (tokens.some((t, i) => t.kind === "ident" && ["RD_SYS_T", "RD_LOC_T", "RUNTIME"].includes(t.upper) && tokens[i + 1]?.text === "("))
     throw new SimError("Native CPU clock state is unavailable");
   // ponytail: instance scalars only; external memory and user calls need native dependency matching.

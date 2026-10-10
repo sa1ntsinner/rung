@@ -8,6 +8,8 @@ namespace Rung.Online;
 
 public sealed record NativeBody(string CompilationUnit, string Text);
 public sealed record NativeScalar(string Name, uint BitOffset, uint Bits, string Type);
+/// <summary>A local constant the compiled code uses, with the value it was compiled with.</summary>
+public sealed record NativeConstant(string Name, string Type, string Value);
 public sealed record NativeRootCall(string Instance, uint Database, uint FunctionBlock, uint Sac, string CompilationUnit, string Element);
 
 /// <summary>Renders explicit SCL syntax only; unsupported native nodes are refused.</summary>
@@ -160,6 +162,32 @@ public static class NativeSource
         if (bindings.Count == 0) throw new NotSupportedException("No supported native scalar state.");
         pointer = instancePointer!.Value;
         return bindings.Values.OrderBy(b => b.BitOffset).ToArray();
+    }
+
+    /// <summary>The local constants the body uses (#LIMIT), each with the immediate value the debug info shows for it.</summary>
+    public static NativeConstant[] Constants(string debugXml, string bodyXml)
+    {
+        var body = Parse(bodyXml);
+        var cu = (string?)body.Root?.Attribute("RefID");
+        var nodes = body.Descendants().Where(e => e.Attribute("UId") != null).ToDictionary(e => e.Attribute("UId")!.Value);
+        var debug = Parse(debugXml);
+        var values = debug.Descendants().Where(e => e.Name.LocalName == "DebugValue").ToDictionary(e => (string?)e.Attribute("id") ?? "");
+        var found = new Dictionary<string, NativeConstant>(StringComparer.Ordinal);
+        foreach (var element in debug.Descendants().Where(e => e.Name.LocalName == "LanguageElement" && (string?)e.Attribute("cuId") == cu))
+        {
+            if (!nodes.TryGetValue((string?)element.Attribute("elementId") ?? "", out var node) || node.Name.LocalName != "SymVa"
+                || ((string?)node.Attribute("SI"))?.StartsWith("Const", StringComparison.Ordinal) != true || (string?)node.Attribute("ODN") is not { } odn || !odn.StartsWith('#')) continue;
+            foreach (var monitoring in element.Elements().Where(e => e.Name.LocalName == "MonitoringElement"))
+            {
+                if (!values.TryGetValue((string?)monitoring.Attribute("debugValueRef") ?? "", out var value)) continue;
+                var immediate = value.Descendants().FirstOrDefault(e => e.Name.LocalName == "Immediate");
+                if ((string?)immediate?.Attribute("value") is not { } v || (string?)monitoring.Attribute("type") is not { } type) continue;
+                var constant = new NativeConstant(odn[1..].ToUpperInvariant(), type, v);
+                if (found.TryGetValue(constant.Name, out var seen) && seen != constant) throw new NotSupportedException("Native constant " + odn + " shows two values.");
+                found[constant.Name] = constant;
+            }
+        }
+        return found.Values.OrderBy(c => c.Name, StringComparer.Ordinal).ToArray();
     }
 
     /// <summary>The source text of one node: a path (#s.a, #arr[1]) reads as written.</summary>

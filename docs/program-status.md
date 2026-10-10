@@ -68,8 +68,10 @@ unknown, and a cycle that reads one is refused rather than replayed with a guess
 Temporaries need no capture: a temporary read before the cycle wrote it refuses the
 sample. DB members and tags the FB reads or writes are read right before and after
 the sample; a value that moved in between refuses it, and what the FB writes is
-compared with the PLC's value. Standard FB instances (TON, CTU: their state is not
-in the sample), local constants, CPU clocks, calls of user blocks, instance DBs
+compared with the PLC's value. A local constant the code uses replays with its
+declared value only when the PLC shows it was compiled with that value (integer
+constants; a different value asks for a download). Standard FB instances (TON, CTU:
+their state is not in the sample), other constants, CPU clocks, calls of user blocks, instance DBs
 called from inside an FB, other OBs and computed array indexes that the cycle reads
 are explicitly refused. Source revision, session scope/epoch, reader lifetime
 and dirty editor sources invalidate the result. Missing native support retains
