@@ -18,19 +18,31 @@ internal sealed partial class OnlineDriver
         var path = instance.Split('.');
         if (path.Length > 9 || path.Any(string.IsNullOrWhiteSpace)) throw new RpcException(ErrorCodes.BadRequest, "Invalid instance path.");
         var routes = NativeSource.RootCallSites(callerSource.FunctionalObjectDebugInfo, callerSource.BlockBody.ToArray(), callerSource.InternalReferences.ToArray(), path[0]);
-        // ponytail: one level down only: a DB called inside an FB that OB1 calls through its own instance DB ("Motor_DB"() in FB_Line)
+        // a DB called inside an FB below OB1 ("Motor_DB"() in FB_Line, or deeper): the FBs OB1 reaches, searched for the one that calls it
+        // ponytail: depth 4 and 64 FBs; the stack frames of each sample then prove the way down link by link
+        var graph = new Dictionary<uint, (uint RelationId, S7CommPlusClientBlockContent Content)>();
         (uint Fb, uint RelationId, S7CommPlusClientBlockContent Content)? host = null;
         if (routes.Length == 0 && path.Length == 1) {
-            var found = new List<(uint Fb, uint RelationId, S7CommPlusClientBlockContent Content, NativeRootCall[] Sites)>();
-            foreach (var number in NativeSource.CalledFunctionBlocks(callerSource.InternalReferences.ToArray())) {
-                var fb = blocks.Single(b => b.Type == S7CommPlusBlockType.FB && b.Number == number);
-                var content = await client.GetBlockContentAsync(fb.RelationId, token);
-                var sites = NativeSource.RootCallSites(content.FunctionalObjectDebugInfo, content.BlockBody.ToArray(), content.InternalReferences.ToArray(), path[0]);
-                if (sites.Length > 0) found.Add((number, fb.RelationId, content, sites));
+            var level = NativeSource.CalledFunctionBlocks(callerSource.InternalReferences.ToArray()).ToList();
+            var found = new List<(uint Fb, NativeRootCall[] Sites)>();
+            for (var depth = 0; depth < 4 && level.Count > 0; depth++) {
+                var next = new List<uint>();
+                foreach (var number in level) {
+                    if (graph.ContainsKey(number)) continue;
+                    if (graph.Count >= 64) throw new RpcException(ErrorCodes.UnsupportedObject, $"{instance}: too many FBs below OB1 to find its caller.");
+                    var fb = blocks.Single(b => b.Type == S7CommPlusBlockType.FB && b.Number == number);
+                    var content = await client.GetBlockContentAsync(fb.RelationId, token);
+                    if (content.CodeModifiedTimestampBytes?.Length != 8) continue;
+                    graph[number] = (fb.RelationId, content);
+                    var sites = NativeSource.RootCallSites(content.FunctionalObjectDebugInfo, content.BlockBody.ToArray(), content.InternalReferences.ToArray(), path[0]);
+                    if (sites.Length > 0) found.Add((number, sites));
+                    next.AddRange(NativeSource.CalledFunctionBlocks(content.InternalReferences.ToArray()));
+                }
+                level = next;
             }
-            if (found.Count != 1 || found[0].Content.CodeModifiedTimestampBytes?.Length != 8)
-                throw new RpcException(ErrorCodes.UnsupportedObject, $"{instance} is called neither in OB1 nor in exactly one FB that OB1 calls.");
-            host = (found[0].Fb, found[0].RelationId, found[0].Content);
+            if (found.Count != 1)
+                throw new RpcException(ErrorCodes.UnsupportedObject, $"{instance} is called neither in OB1 nor in exactly one FB below it.");
+            host = (found[0].Fb, graph[found[0].Fb].RelationId, graph[found[0].Fb].Content);
             routes = found[0].Sites;
         }
         if (routes.Select(r => r.FunctionBlock).Distinct().Count() != 1 || source.CodeModifiedTimestampBytes?.Length != 8 || callerSource.CodeModifiedTimestampBytes?.Length != 8)
@@ -70,7 +82,7 @@ internal sealed partial class OnlineDriver
         foreach (var part in new[] { 0, 4, 8, 12 }) uid ^= BitConverter.ToUInt32(guid, part);
         var plan = NativeCaptureEncoder.Build(selected.Number, pointers.Single(), source.CodeModifiedTimestampBytes, scalars, uid);
         var samples = new List<NativeCaptureObservation>();
-        var sync = new object(); Exception? failure = null; NativeRootCall? route = null;
+        var sync = new object(); Exception? failure = null; NativeRootCall? route = null; var used = new HashSet<uint>();
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using (var subscription = await client.OpenBlockOnlineViewAsync(plan.Request, new() { NotificationTimeout = TimeSpan.FromSeconds(2) }, token)) {
             void Fail(Exception error) { lock (sync) { failure ??= error; received.TrySetException(error); } }
@@ -80,13 +92,17 @@ internal sealed partial class OnlineDriver
                     var notification = e.Notification;
                     if (notification.JobEnabled != true) throw new NotSupportedException("Native watch is disabled or unknown.");
                     var frames = NativeCaptureEncoder.CallerFrames(notification.RawResult);
-                    if (frames.Length != 1 + chain.Count + (host == null ? 0 : 1) || frames[0].Number != caller.Number) throw new NotSupportedException("Native caller changed.");
-                    if (host is { } o) {
-                        // OB1 calls the FB through one of its instance DBs, and that FB calls this DB
-                        var through = NativeSource.CallAt(callerSource.FunctionalObjectDebugInfo, callerSource.BlockBody.ToArray(), callerSource.InternalReferences.ToArray(), frames[0].Sac);
-                        if (through.FunctionBlock != o.Fb || frames[1].Number != o.Fb) throw new NotSupportedException("Native call chain differs from the instance's caller.");
-                        frames = frames[1..];
+                    var down = frames.Length - 1 - chain.Count;
+                    if (down < 0 || frames[0].Number != caller.Number || (host == null ? down != 0 : down == 0 || frames[down].Number != host.Value.Fb))
+                        throw new NotSupportedException("Native caller changed.");
+                    // each block on the way down calls the next one at the SAC its frame shows
+                    for (var j = 0; j < down; j++) {
+                        var at = j == 0 ? callerSource : graph.TryGetValue(frames[j].Number, out var link) ? link.Content : throw new NotSupportedException("Native caller is outside the searched FBs.");
+                        if (NativeSource.CalleeAt(at.FunctionalObjectDebugInfo, at.BlockBody.ToArray(), at.InternalReferences.ToArray(), frames[j].Sac) != frames[j + 1].Number)
+                            throw new NotSupportedException("Native call chain differs from the instance's callers.");
+                        if (j > 0) lock (sync) used.Add(frames[j].Number);
                     }
+                    frames = frames[down..];
                     for (var i = 0; i < chain.Count; i++)
                         if (frames[i + 1].Number != chain[i].Fb || !chain[i].Sacs.Contains(frames[i + 1].Sac)) throw new NotSupportedException("Native call chain differs from the instance path.");
                     var actualRoute = routes.Single(r => r.Sac == frames[0].Sac);
@@ -109,7 +125,8 @@ internal sealed partial class OnlineDriver
             || !currentCaller.CodeModifiedTimestampBytes.AsSpan().SequenceEqual(callerSource.CodeModifiedTimestampBytes)
             || host == null && !NativeSource.RootCallSites(currentCaller.FunctionalObjectDebugInfo, currentCaller.BlockBody.ToArray(), currentCaller.InternalReferences.ToArray(), path[0]).SequenceEqual(routes))
             throw new RpcException(ErrorCodes.UnsupportedObject, "Native source changed during capture.");
-        var callers = host is { } outerFb ? new[] { (outerFb.RelationId, Signature: outerFb.Content.CodeModifiedTimestampBytes) } : [];
+        if (host is { } h) used.Add(h.Fb);
+        var callers = used.Select(n => (graph[n].RelationId, Signature: graph[n].Content.CodeModifiedTimestampBytes)).ToArray();
         foreach (var link in chain.Select(c => (c.RelationId, c.Signature)).Concat(functions.Select(f => (f.RelationId, f.Signature))).Concat(callers))
             if (!(await client.GetBlockContentAsync(link.RelationId, token)).CodeModifiedTimestampBytes.AsSpan().SequenceEqual(link.Signature))
                 throw new RpcException(ErrorCodes.UnsupportedObject, "Native source changed during capture.");

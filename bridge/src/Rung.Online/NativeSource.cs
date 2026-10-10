@@ -181,6 +181,24 @@ public static class NativeSource
         return RootCall(debugXml, bodies.Single(b => (string?)Parse(b).Root?.Attribute("RefID") == cu), references, sac);
     }
 
+    /// <summary>The FB a caller's code calls at a SAC its stack frame shows: through an instance DB or as a multi-instance.</summary>
+    public static uint CalleeAt(string debugXml, string[] bodies, string[] references, uint sac)
+    {
+        var operand = Parse(debugXml).Descendants().Where(e => e.Name.LocalName == "Operand" && (uint?)e.Attribute("sac") == sac)
+            .Select(e => ((string?)e.Attribute("cuId"), (string?)e.Attribute("elementId"))).Distinct().Single();
+        var body = bodies.Single(b => (string?)Parse(b).Root?.Attribute("RefID") == operand.Item1);
+        var call = Parse(body).Descendants().Single(e => (string?)e.Attribute("UId") == operand.Item2);
+        if (call.Name.LocalName == "Sub" && call.Parent?.Name.LocalName == "InstCa" && (string?)call.Attribute("SI") == "DB")
+            return RootCall(debugXml, body, references, sac).FunctionBlock;
+        if (call.Name.LocalName == "Sub" && call.Parent?.Name.LocalName == "InstCa" && (string?)call.Attribute("SI") == "FB") {
+            var callees = references.SelectMany(r => Parse(r).Descendants().Where(e => e.Name.LocalName == "Ident"
+                    && e.Descendants().Any(x => x.Name.LocalName == "XRefItem" && (string?)x.Attribute("Usage") == "Call" && (string?)x.Attribute("UId") == operand.Item2)))
+                .SelectMany(i => i.Descendants().Where(e => e.Name.LocalName == "FBBlock").Select(e => (uint?)e.Attribute("BlockNumber") ?? 0)).Distinct().ToArray();
+            if (callees.Length == 1 && callees[0] is > 0 and <= 65535) return callees[0];
+        }
+        throw new NotSupportedException("The caller's stack frame does not point at an FB call.");
+    }
+
     static uint[] CalledBlocks(string[] references, string kind)
     {
         if (references.Length > 256 || references.Sum(r => (long)r.Length) > 1_048_576) throw new NotSupportedException("Native call references exceed limits.");

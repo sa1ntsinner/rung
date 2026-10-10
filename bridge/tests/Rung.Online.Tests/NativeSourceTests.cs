@@ -132,6 +132,18 @@ public sealed class NativeSourceTests
     }
 
     [Fact]
+    public void TheCallAtAStackFrameSacNamesTheFbItCalls()
+    {
+        var body = "<Network Lang='SCL' RefID='1'><RootStatements><Statement UId='1014' SI='STSub'><InstCa UId='1019'><Sub UId='1018' SI='FB' SyId='85' ODN='#inner' /><BracO UId='1012' /><BracC UId='1026' /></InstCa></Statement><Statement UId='70'><SymVa UId='77' SI='Var' ODN='#x' /></Statement></RootStatements></Network>";
+        var debug = "<DebugInfo><Operand sac='422' index='0' cuId='1' elementId='1018' /><Operand sac='9' cuId='1' elementId='77' /></DebugInfo>";
+        var references = "<IdentContainer><Ident Name='FB_ProveInner' Scope='Global' RefId='31'><CrossRefInfo><XRefItem UId='1018' Usage='Call' NetId='1' Name='#inner' /></CrossRefInfo><Access><FBBlock BlockNumber='9' BlockType='FB' TypeName='FB_ProveInner' /></Access></Ident></IdentContainer>";
+        Assert.Equal(9u, NativeSource.CalleeAt(debug, [body], [references], 422));
+        // a SAC on something else than an FB call
+        Assert.Throws<NotSupportedException>(() => NativeSource.CalleeAt(debug, [body], [references], 9));
+        Assert.ThrowsAny<Exception>(() => NativeSource.CalleeAt(debug, [body], [references], 5));
+    }
+
+    [Fact]
     public void InstanceMembersShareOneNativePointerWhateverTheBlockNumbers()
     {
         Assert.Equal(2, NativeSource.Scalars(Two(4, 4), TwoBody).Length);
