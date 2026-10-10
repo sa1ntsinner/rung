@@ -186,7 +186,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     }),
     vscode.commands.registerCommand("rung.ladder.open", (uri?: vscode.Uri) => {
       const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
-      if (target) LadderPanel.show(context, lsp!, target);
+      if (target) LadderPanel.show(context, { lsp: lsp!, ws, cli, access }, target);
     }),
     vscode.commands.registerCommand("rung.declarations.open", (uri?: vscode.Uri, position?: vscode.Position) =>
       DeclarationsPanel.show(context, { lsp: lsp!, ws, monitor }, uri instanceof vscode.Uri ? uri : undefined, position instanceof vscode.Position ? position : undefined),

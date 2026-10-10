@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
-import { layoutRung, rungWidth, type LadderElement, type Shape } from "../src/core/ladderLayout";
+import { layoutRung, operandsOf, rungWidth, type LadderElement, type Shape } from "../src/core/ladderLayout";
 
 const contact = (operand: string): LadderElement => ({ k: "contact", operand, negated: false });
 const coil = (operand: string): LadderElement => ({ k: "coil", operand, kind: "", negated: false });
@@ -49,5 +49,41 @@ describe("ladder layout", () => {
     const t = at(layoutRung([contact(long), coil('"Q"')]).shapes, texts(layoutRung([contact(long), coil('"Q"')]).shapes)[0]!.s);
     expect(t.s.endsWith("…")).toBe(true);
     expect(t.full).toBe(long);
+  });
+});
+
+describe("ladder monitoring", () => {
+  const on = (shapes: Shape[]) => shapes.filter((s) => s.t === "line" && s.y1 === s.y2 && s.cls === "lad-on");
+  const off = (shapes: Shape[]) => shapes.filter((s) => s.t === "line" && s.y1 === s.y2 && s.cls === "lad-off");
+
+  it("carries power through closed contacts and stops at an open one, as TIA Portal's monitoring shows it", () => {
+    const rung = [contact('"A"'), { k: "contact", operand: '"B"', negated: true } as LadderElement, coil('"Q"')];
+    const values = new Map<string, unknown>([['"A"', true], ['"B"', false], ['"Q"', true]]);
+    const flowing = layoutRung(rung, 0, (n) => values.get(n));
+    expect(off(flowing.shapes)).toHaveLength(0);
+    values.set('"B"', true);
+    const stopped = layoutRung(rung, 0, (n) => values.get(n));
+    expect(on(stopped.shapes).length).toBeGreaterThan(0);
+    expect(off(stopped.shapes).length).toBeGreaterThan(0);
+    // without values nothing is coloured
+    expect(layoutRung(rung).shapes.some((s) => s.t === "line" && (s.cls === "lad-on" || s.cls === "lad-off"))).toBe(false);
+  });
+
+  it("joins parallel branches as an OR and leaves unknown operands uncoloured", () => {
+    const rung: LadderElement[] = [{ k: "par", merge: true, branches: [[contact('"A"')], [contact('"B"')]] }, coil('"Q"')];
+    const one = layoutRung(rung, 0, (n) => (n === '"A"' ? false : n === '"B"' ? true : undefined));
+    const coilWire = one.shapes.filter((s): s is Extract<Shape, { t: "line" }> => s.t === "line" && s.y1 === s.y2).at(-1)!;
+    expect(coilWire.cls).toBe("lad-on");
+    const unknown = layoutRung(rung, 0, (n) => (n === '"A"' ? false : undefined));
+    expect(unknown.shapes.filter((s): s is Extract<Shape, { t: "line" }> => s.t === "line" && s.y1 === s.y2).at(-1)!.cls).toBeUndefined();
+  });
+
+  it("compares the values it has, shows them, and reads what a network names", () => {
+    const rung: LadderElement[] = [{ k: "compare", op: "<=", type: "Int", in1: '"Level"', in2: "95" }, { k: "box", name: "TON", instance: '"Delay"', flowIn: "IN", flowOut: "Q", inputs: [{ pin: "PT", operand: "t#3s" }], outputs: [{ pin: "ET", operand: '"Elapsed"' }] }, coil('"Q"')];
+    expect(operandsOf(rung)).toEqual(['"Level"', '"Elapsed"', '"Delay".Q', '"Q"']);
+    const l = layoutRung(rung, 0, (n) => ({ '"Level"': 37, '"Delay".Q': false, '"Elapsed"': "T#1S200MS" })[n]);
+    expect(texts(l.shapes).map((t) => t.s)).toEqual(expect.arrayContaining(["37", "= T#1S200MS"]));
+    expect(l.shapes.some((s) => s.t === "rect" && s.cls === "lad-box lad-on")).toBe(true); // 37 <= 95 holds
+    expect(off(l.shapes).length).toBeGreaterThan(0); // the timer's Q is off: nothing reaches the coil
   });
 });

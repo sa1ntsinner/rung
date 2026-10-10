@@ -844,3 +844,10 @@ rg-ladder { display: block; }
 .lad-svg .lad-boxname { font-weight: 600; }
 .lad-svg .lad-pin, .lad-svg .lad-muted { fill: var(--rg-muted); font-size: 11px; }
 .lad-svg .lad-small { font-size: 11px; }
+.lad-svg line.lad-on, .lad-svg path.lad-on, .lad-svg rect.lad-on { stroke: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); stroke-width: 2; }
+.lad-svg line.lad-off { stroke-dasharray: 4 3; opacity: 0.75; }
+.lad-svg .lad-value { fill: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); font-size: 11px; }
+.lad-monitoring { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); }
+.lad-live { margin: 0 0 var(--rg-s2); color: var(--rg-muted); display: flex; gap: var(--rg-s1); align-items: center; }
+.lad-live-live .codicon { color: var(--vscode-testing-iconPassed, var(--vscode-charts-green)); font-size: 10px; }
+.lad-live-error { color: var(--rg-error); }
