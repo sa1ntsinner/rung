@@ -34,7 +34,7 @@ It installs the VS Code extension, adds rung's MCP server to the agents it finds
 
 ## 3. Mirror a project
 
-In VS Code, run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap19`, `.ap20` or `.ap21` file. rung checks TIA Portal and Openness, initializes the mirror folder, pulls the files and starts watch. It uses the open folder, or asks you to choose one.
+In VS Code, run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap19`, `.ap20` or `.ap21` file, or an archive (`.zap20` and so on): rung retrieves an archive into a folder next to it first (`Line3.zap20` → `Line3\Line3.ap20`; an archive older than V19 with upgrade, by V20). rung checks TIA Portal and Openness, initializes the mirror folder, pulls the files and starts watch. It uses the open folder, or asks you to choose one.
 
 For another Windows PC, choose **TIA Portal on another PC (ssh)…**. Enter the SSH destination (for example `engineer@tia-pc`) and the Windows project path on that PC. It needs key-based SSH login, rung on PATH and `rung setup openness` run there once ([setup](remote.md)). The files stay in your local mirror folder.
 
@@ -113,6 +113,7 @@ In VS Code, the PLC picker puts the last PLC you chose first the next time; it s
 
 ## More
 
+- `rung retrieve <archive.zap20>`: an archive as a project in a folder next to it, without mirroring it (`rung init --project <archive>` retrieves too). An archive rung retrieved before is used again; `rung upgrade <project.ap18>` does the same for an older project folder.
 - `rung init --from-plc <ip> --project <new .ap20>`: no project file, only a running PLC? rung makes a new project from it (TIA's upload device as new station) and binds the folder to it ([downloads](downloads.md#uploading-from-a-plc)).
 - `rung assignments`: TIA Portal's assignment list, every input, output, bit memory, timer and counter address in use with its tag and where the code uses it, and overlapping accesses (exit 2 when two cross).
 - `rung views`: read-only YAML views of hardware, HMI, technology objects, the project library and the software units with their relations; a Basic/Comfort panel's tag tables, screens, templates and text lists also as TIA Portal's XML (`views/hmi/<panel>/`). HMI objects are not editable in Rung; see the [capability map](capabilities.md).

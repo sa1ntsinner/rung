@@ -28,6 +28,9 @@ namespace Rung.Bridge.V20
         public bool OpenWindow;
         /// <summary>Open --project with upgrade to this TIA Portal version, save it and print where it is (Upgrade.cs).</summary>
         public bool Upgrade;
+        /// <summary>Retrieve the archive --project into --target (with upgrade when it is older), print where the project is (Upgrade.cs).</summary>
+        public bool Retrieve;
+        public string TargetPath;
 
         public static BridgeArgs Parse(string[] args)
         {
@@ -66,6 +69,13 @@ namespace Rung.Bridge.V20
                         break;
                     case "--upgrade":
                         a.Upgrade = true;
+                        break;
+                    case "--retrieve":
+                        a.Retrieve = true;
+                        break;
+                    case "--target":
+                        if (i + 1 >= args.Length) throw new ArgumentException("--target needs a folder");
+                        a.TargetPath = args[++i];
                         break;
                     default:
                         throw new ArgumentException("unknown argument: " + args[i]);
@@ -107,6 +117,6 @@ namespace Rung.Bridge.V20
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        static int Run(BridgeArgs args) => args.Upgrade ? Upgrade.Run(args) : args.Keep ? Keeper.Run(args) : Host.Run(args);
+        static int Run(BridgeArgs args) => args.Upgrade || args.Retrieve ? Upgrade.Run(args) : args.Keep ? Keeper.Run(args) : Host.Run(args);
     }
 }

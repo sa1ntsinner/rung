@@ -3,9 +3,11 @@
 import { posix, win32 } from "node:path";
 import type { CheckItem } from "./args";
 
+/** The TIA Portal a project (or archive) needs: an archive older than V19 is retrieved by V20, with upgrade. */
 export function tiaVersionOf(project: string): string | undefined {
-  const m = /\.ap(\d\d)$/i.exec(project);
-  return m ? `V${m[1]}` : undefined;
+  const m = /\.(z?)ap(\d\d)$/i.exec(project);
+  if (!m) return undefined;
+  return m[1] && Number(m[2]) < 19 ? "V20" : `V${m[2]}`;
 }
 
 export function validateRemoteProject(project: string): string | undefined {
@@ -38,6 +40,8 @@ export function preflight(items: CheckItem[] | undefined, tia: string | undefine
 /** Next to the project's folder: C:\Work\Line\Line.ap20 → C:\Work\Line-rung (TIA Portal's own folder stays its own). */
 export function mirrorFolderFor(project: string): string {
   const p = /^[A-Za-z]:|^\\\\/.test(project) ? win32 : posix;
+  // an archive sits among other files: C:\Downloads\Line.zap20 → C:\Downloads\Line-rung
+  if (/\.zap\d+$/i.test(project)) return p.join(p.dirname(project), `${p.basename(project).replace(/\.zap\d+$/i, "")}-rung`);
   const folder = p.dirname(project);
   return p.join(p.dirname(folder), `${p.basename(folder)}-rung`);
 }

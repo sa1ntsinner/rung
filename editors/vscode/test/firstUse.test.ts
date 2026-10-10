@@ -24,7 +24,10 @@ describe("first use: Open TIA Project", () => {
   it("reads the TIA Portal version from the project's extension", () => {
     expect(tiaVersionOf("C:\\P\\Line\\Line.ap19")).toBe("V19");
     expect(tiaVersionOf("C:\\P\\Line\\Line.AP21")).toBe("V21");
-    expect(tiaVersionOf("C:\\P\\Line\\Line.zap20")).toBeUndefined();
+    // an archive: its own version, an older one retrieved with upgrade by V20
+    expect(tiaVersionOf("C:\\P\\Line.zap20")).toBe("V20");
+    expect(tiaVersionOf("C:\\P\\Line.zap17")).toBe("V20");
+    expect(tiaVersionOf("C:\\P\\Line\\Line.ap20.bak")).toBeUndefined();
   });
 
   it("goes on when TIA Portal, Openness and the group are there", () => {
@@ -51,6 +54,7 @@ describe("first use: Open TIA Project", () => {
 
   it("puts the mirror next to the project, never inside TIA Portal's folder", () => {
     expect(mirrorFolderFor("C:\\Work\\Line\\Line.ap20")).toBe("C:\\Work\\Line-rung");
+    expect(mirrorFolderFor("C:\\Downloads\\Line.zap20")).toBe("C:\\Downloads\\Line-rung");
   });
 
   it("init and pull name the folder when it is not the open one", () => {

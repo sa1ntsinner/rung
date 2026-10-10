@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { cmdUpgrade, olderProjectHint } from "./upgrade.js";
+import { cmdRetrieve, cmdUpgrade, olderProjectHint, retrieveArchive } from "./upgrade.js";
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 import { readFile, readdir, writeFile, appendFile } from "node:fs/promises";
@@ -155,6 +155,8 @@ PLC:
   rung setup openness [--grant]        register the bridge in the Openness whitelist (no "Openness access" prompt)
   rung upgrade <project.ap18> [--tia V20] [--timeout <min>]
                                        a project of an older TIA Portal upgraded next to it (<folder>_V20; the original stays)
+  rung retrieve <archive.zap20> [--tia V20] [--timeout <min>]
+                                       an archive as a project in a folder next to it (rung init --project <archive> does it too)
 
 Environment:
   RUNG_BRIDGE           path to rung-bridge-v20.exe (default: bundled/dev build)
@@ -196,7 +198,8 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 }
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  if (v.project && /\.zap\d+$/i.test(String(v.project))) throw new WorkspaceError("BAD_ARGUMENT", "A .zap archive must be retrieved in TIA Portal first; then run rung init --project <retrieved .ap file>");
+  // a downloaded or backed-up project usually comes as an archive: retrieve it next to itself and mirror that
+  if (v.project && /\.zap\d+$/i.test(String(v.project))) v = { ...v, project: await retrieveArchive(resolve(io.cwd, String(v.project)), v, io) };
   const older = v.project ? olderProjectHint(String(v.project)) : undefined;
   if (older) throw new WorkspaceError("BAD_ARGUMENT", older);
   const cfgPath = join(dir, CONFIG_FILE);
@@ -451,6 +454,8 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   assignments: { options: ["json"], positionals: 1 },
   who: { options: ["file", "json", "dir"], positionals: 1 },
   upload: { options: ["ip", "use", "mode", "number"], positionals: 1 },
+  upgrade: { options: ["tia", "timeout", "json"], positionals: 1 },
+  retrieve: { options: ["tia", "timeout", "json"], positionals: 1 },
 };
 
 /** Why these arguments do not fit the command, or undefined. */
@@ -557,6 +562,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         interval: { type: "string" },
         out:{type:"string"},
         duration:{type:"string"},
+        timeout: { type: "string" },
         transport: { type: "string" },
         ip: { type: "string" },
         "from-plc": { type: "string" },
@@ -837,6 +843,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdInit(dir, v, io);
       case "upgrade":
         return await cmdUpgrade(target, v, io);
+      case "retrieve":
+        return await cmdRetrieve(target, v, io);
       case "codesys-bridge":
         return await cmdCodesysBridge(v, io);
       case "who":

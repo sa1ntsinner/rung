@@ -45,7 +45,8 @@ export async function initCommand(ws: RungWorkspace, cli: RungCli, context: vsco
       title: "TIA Portal project to open",
       openLabel: "Open with rung",
       canSelectMany: false,
-      filters: { "TIA Portal project": ["ap19", "ap20", "ap21"] },
+      // an archive is retrieved next to itself by rung init
+      filters: { "TIA Portal project or archive": ["ap19", "ap20", "ap21", "zap19", "zap20", "zap21", "zap18", "zap17", "zap16", "zap15"] },
     });
     project = files?.[0]?.fsPath;
   }

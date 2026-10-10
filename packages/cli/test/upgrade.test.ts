@@ -12,7 +12,7 @@ describe("rung upgrade: an older project upgraded next to it", () => {
   it("refuses what needs no upgrade and what is no project file", () => {
     expect(() => upgradePlan("Line.ap20", "V20", 1)).toThrow(/already/);
     expect(() => upgradePlan("Line.ap21", "V20", 1)).toThrow(/already/);
-    expect(() => upgradePlan("Line.zap18", "V20", 1)).toThrow(/Retrieve/);
+    expect(() => upgradePlan("Line.zap18", "V20", 1)).toThrow(/rung retrieve/);
     expect(() => upgradePlan("Line.txt", "V20", 1)).toThrow(/project file/);
   });
   it("tells rung init what to do with a project older than V19", () => {
