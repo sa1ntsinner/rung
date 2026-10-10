@@ -148,8 +148,8 @@ namespace Rung.Bridge.V20
                         if (transfer.TransferResultState != TransferResultState.Success || !(type is CodeBlockLibraryType) || type.Name != package.TypeName || type.Versions.Count != 1)
                             throw new RpcException(ErrorCodes.ImportFailed,"TIA did not create the expected code-block library type");
                         var version = type.Versions.Single(); var block = plc.BlockGroup.Blocks.Find(package.TypeName);
-                        if (!(version is CodeBlockLibraryTypeVersion) || version.Dependencies.Any() || !(block is FB)
-                            || block.ProgrammingLanguage.ToString() != "LAD" || block.IsKnowHowProtected || !string.IsNullOrEmpty(block.Namespace)
+                        if (!(version is CodeBlockLibraryTypeVersion) || version.Dependencies.Any() || !(package.BlockType == "FB" ? block is FB : block is FC)
+                            || block.ProgrammingLanguage.ToString() != package.Language || block.IsKnowHowProtected || !string.IsNullOrEmpty(block.Namespace)
                             || block.GetService<LibraryTypeInstanceInfo>()?.LibraryTypeVersion?.Guid != version.Guid
                             || version.FindInstances(plc).Count() != 1)
                             throw new RpcException(ErrorCodes.ImportFailed,"Native import test block, binding or dependencies differ");

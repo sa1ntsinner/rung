@@ -108,6 +108,22 @@ public class LibraryPackageTests
         files["type.libinfo"]=Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(files["type.libinfo"]).Replace(oldHash,hash));
         Assert.Throws<RpcException>(()=>LibraryPackage.Check(files,"type",true));
     }
+    [Fact] public void ImportAcceptsSclAndLadFunctionBlocksAndFunctions()
+    {
+        Dictionary<string,byte[]> Edited(params (string from,string to)[] edits)
+        {
+            var files=Package();var oldHash=Convert.ToBase64String(HexBytes(Bundle.Sha256(files["type.xml"])));var text=Encoding.UTF8.GetString(files["type.xml"]);
+            foreach(var e in edits)text=text.Replace(e.from,e.to);
+            files["type.xml"]=Encoding.UTF8.GetBytes(text);var hash=Convert.ToBase64String(HexBytes(Bundle.Sha256(files["type.xml"])));
+            files["type.libinfo"]=Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(files["type.libinfo"]).Replace(oldHash,hash));return files;
+        }
+        var scl=LibraryPackage.Check(Edited((">LAD<",">SCL<")),"type",true);
+        Assert.Equal(("FB","SCL"),(scl.BlockType,scl.Language));
+        var fc=LibraryPackage.Check(Edited(("SW.Blocks.FB","SW.Blocks.FC")),"type",true);
+        Assert.Equal(("FC","LAD"),(fc.BlockType,fc.Language));
+        // languages without native import evidence still refuse
+        Assert.Throws<RpcException>(()=>LibraryPackage.Check(Edited((">LAD<",">STL<")),"type",true));
+    }
     [Fact] public void ImportRpcChecksRevisionsBeforeOpeningAndStagesUnchangedNativeBytes()
     {
         var files=Package();var package=LibraryPackage.Check(files,"type");var session=new FakeTiaSession();var opened=false;

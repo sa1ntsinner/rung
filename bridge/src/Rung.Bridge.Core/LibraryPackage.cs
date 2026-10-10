@@ -23,6 +23,8 @@ namespace Rung.Bridge.Core
     public sealed class LibraryPackage
     {
         public string TypeName, TypeGuid, SourceVersionGuid, VersionNumber, Revision;
+        /// <summary>The library block: FB or FC, and its language (LAD, SCL).</summary>
+        public string BlockType, Language;
         static RpcException Invalid(string why) => new RpcException(ErrorCodes.BadRequest, "Invalid native library package: " + why);
         public static LibraryPackage Check(IReadOnlyDictionary<string, byte[]> files, string stem, bool forImport = false)
         {
@@ -88,13 +90,14 @@ namespace Rung.Bridge.Core
                         if (forImport)
                         {
                             var attributes = blocks[0].Elements("AttributeList").ToArray();
-                            if (blocks[0].Name != "SW.Blocks.FB" || attributes.Length != 1
-                                || attributes[0].Elements("ProgrammingLanguage").Count() != 1 || attributes[0].Element("ProgrammingLanguage")?.Value != "LAD"
+                            // seen live: TIA creates LAD and SCL FB/FC types from these documents
+                            if (attributes.Length != 1
+                                || attributes[0].Elements("ProgrammingLanguage").Count() != 1 || !new[] { "LAD", "SCL" }.Contains(attributes[0].Element("ProgrammingLanguage")?.Value)
                                 || attributes[0].Elements("Namespace").Any(n => !string.IsNullOrEmpty(n.Value))
                                 || attributes[0].Elements("IsKnowHowProtected").Any(n => n.Value != "false"))
-                                throw Invalid("native import is validated only for unprotected LAD FBs without a namespace");
+                                throw Invalid("native import is validated only for unprotected LAD/SCL FBs and FCs without a namespace");
                         }
-                        return new LibraryPackage { TypeName = names[0].Value, TypeGuid = GuidText(type), SourceVersionGuid = GuidText(version), VersionNumber = number,
+                        return new LibraryPackage { TypeName = names[0].Value, BlockType = blocks[0].Name.LocalName.Substring("SW.Blocks.".Length), Language = blocks[0].Element("AttributeList")?.Element("ProgrammingLanguage")?.Value, TypeGuid = GuidText(type), SourceVersionGuid = GuidText(version), VersionNumber = number,
                             Revision = Bundle.Hash(new[] { new ExportFile { Role = "xml", Sha256 = actual }, new ExportFile { Role = "libinfo", Sha256 = Bundle.Sha256(metadata) } }) };
                     }
                 }

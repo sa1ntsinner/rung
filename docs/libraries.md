@@ -26,7 +26,7 @@ state and supported XML domain. The result includes a revision of the raw pair.
 Missing files, duplicate/unknown metadata fields, invalid names/base64/hashes,
 DTD/external entities, extra native objects and unsupported domains refuse.
 
-The initial supported package is one released default dependency-free V20 FB/FC
+The supported package is one released default dependency-free V20 FB/FC
 library version in native XML with its unchanged metadata. Total raw size is
 4 MiB, metadata at most 1 MiB; names use 1–64 ASCII letters, digits or `-`/`_`.
 Other formats, nondefault/InWork versions, dependencies and target-device
@@ -37,8 +37,8 @@ revision are checked separately. Inspection does not establish native acceptance
 
 Import preview validates the package before opening TIA, resolves the selected
 PLC root, then checks project-library type/name/version collisions and existing
-block names under exclusive access. Preview/import initially support only an
-unprotected LAD FB without a namespace; software-unit targets are unavailable.
+block names under exclusive access. Preview/import support an unprotected LAD or
+SCL FB or FC without a namespace; software-unit targets are unavailable.
 Preview does not import, save, release or rename objects; its result explicitly
 reports `nativeImportValidated: false`. Its `revision` covers bounded library and
 hardware graphs plus freshly read engineering object revisions and native
@@ -49,7 +49,7 @@ Apply requires both hashes from a reviewed preview, `rung writes on` and
 `sync.import = "auto"`. It stages the unchanged native files, rechecks the project
 under exclusive access, rejects reused operation IDs, and calls native
 `CreateFromDocuments` with the selected PLC root as the test environment.
-Before commit, only one new project type and one new LAD FB are permitted;
+Before commit, only one new project type and its one new block are permitted;
 unrelated objects must retain their observed identities/revisions/bindings.
 The committed state must match the validated state. On error, native rollback is
 checked; restoration failures are reported explicitly. No guessed deletes or
