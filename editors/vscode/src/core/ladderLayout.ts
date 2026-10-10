@@ -172,7 +172,9 @@ const numberOf = (operand: string, values: Values): number | undefined => {
 
 function compare(e: Extract<LadderElement, { k: "compare" }>, values: Values): Box {
   const v1 = shown(values(e.in1)), v2 = shown(values(e.in2));
-  const w = Math.max(72, textW(e.in1) + 8, textW(e.in2) + 8, v1 ? textW(v1) + 56 : 0, v2 ? textW(v2) + 56 : 0);
+  // room for a value of six characters on both sides of the name: the drawing keeps still while the number changes
+  const room = (v: string | undefined) => (v ? 2 * (Math.max(6, v.length) * CH + 8) : 0);
+  const w = Math.max(72, textW(e.in1) + 8 + room(v1), textW(e.in2) + 8 + room(v2));
   const a = numberOf(e.in1, values), b = numberOf(e.in2, values);
   const result: Power = a === undefined || b === undefined || !COMPARE[e.op] ? undefined : COMPARE[e.op]!(a, b);
   const out = (p: Power) => and(p, result);
@@ -189,8 +191,9 @@ function compare(e: Extract<LadderElement, { k: "compare" }>, values: Values): B
       if (e.type) shapes.push(text(c, y + 18, e.type, "lad-small lad-muted"));
       shapes.push(text(c, y - 17, e.in1, operandCls(e.in1)));
       shapes.push(text(c, y + 36, e.in2, operandCls(e.in2)));
-      if (v1) shapes.push(text(c + 24, y - 2, v1, "lad-value", "start"));
-      if (v2) shapes.push(text(c + 24, y + 22, v2, "lad-value", "start"));
+      // each value beside its operand's name, as TIA Portal's monitoring shows it, never over the wire
+      if (v1) shapes.push(text(c + textW(e.in1) / 2 + 8, y - 17, v1, "lad-value", "start"));
+      if (v2) shapes.push(text(c + textW(e.in2) / 2 + 8, y + 36, v2, "lad-value", "start"));
     },
   };
 }
