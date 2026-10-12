@@ -4,7 +4,7 @@ import type {LiveFrame,LiveScope} from "./types.js";
 export const TRACE_MAX_BYTES=64*1048576,TRACE_MAX_FRAMES=20000;
 export interface TraceCell {value:number|boolean|null;observedAt?:number;type?:string;error?:string;}
 export interface TraceFrame {elapsedMs:number;sourceAt:number;scope:LiveScope;state:LiveFrame["state"];cells:Record<string,TraceCell>;}
-export interface TraceRecording {version:1;source:"s7commplus-subscription";coherence:"asynchronous-observations";startedAt:number;intervalMs:number;signals:string[];frames:TraceFrame[];stopReason:"duration"|"stopped"|"capacity"|"error";}
+export interface TraceRecording {version:1;source:"s7commplus-subscription";coherence:"asynchronous-observations";startedAt:number;intervalMs:number;signals:string[];frames:TraceFrame[];stopReason:"duration"|"stopped"|"capacity"|"error";connectMs?:number;}
 const finite=(v:unknown):v is number=>typeof v==="number"&&Number.isFinite(v);
 const timestamp=(v:unknown):v is number=>finite(v)&&v>=0&&v<=8640000000000000;
 function signalsValid(signals:unknown):signals is string[]{return Array.isArray(signals)&&signals.length>0&&signals.length<=32&&signals.every(s=>typeof s==="string"&&s.trim()&&s.length<=1024&&!/[\x00-\x1f\x7f]/.test(s))&&new Set(signals.map(s=>s.toLowerCase())).size===signals.length;}
@@ -31,13 +31,14 @@ export class TraceRecorder {
   const sample:TraceFrame={elapsedMs,sourceAt:frame.at,scope:{device:frame.scope.device,address:frame.scope.address,transport:frame.scope.transport,epoch:frame.scope.epoch},state:frame.state,cells};
   const size=new TextEncoder().encode(JSON.stringify(sample)).length+1;if(this.bytes+size>TRACE_MAX_BYTES){this.capacity=true;return false;}this.bytes+=size;this.frames.push(sample);if(this.frames.length>=TRACE_MAX_FRAMES)this.capacity=true;return !this.capacity;
  }
- finish(reason:TraceRecording["stopReason"]):TraceRecording{return {version:1,source:"s7commplus-subscription",coherence:"asynchronous-observations",startedAt:this.startedAt,intervalMs:this.intervalMs,signals:[...this.signals],frames:this.frames,stopReason:reason==="error"?reason:this.capacity?"capacity":reason};}
+ finish(reason:TraceRecording["stopReason"],connectMs?:number):TraceRecording{return {...(finite(connectMs)&&connectMs>=0?{connectMs:Math.round(connectMs)}:{}),version:1,source:"s7commplus-subscription",coherence:"asynchronous-observations",startedAt:this.startedAt,intervalMs:this.intervalMs,signals:[...this.signals],frames:this.frames,stopReason:reason==="error"?reason:this.capacity?"capacity":reason};}
 }
 
 export function parseTrace(text:string):TraceRecording{
  if(typeof text!=="string"||text.length>TRACE_MAX_BYTES||new TextEncoder().encode(text).length>TRACE_MAX_BYTES)throw new Error("Trace file size limit exceeded");
  const trace=JSON.parse(text) as TraceRecording;
- fields(trace,["version","source","coherence","startedAt","intervalMs","signals","frames","stopReason"]);
+ fields(trace,["version","source","coherence","startedAt","intervalMs","signals","frames","stopReason","connectMs"],["version","source","coherence","startedAt","intervalMs","signals","frames","stopReason"]);
+ if(trace.connectMs!==undefined&&!(finite(trace.connectMs)&&trace.connectMs>=0))throw new Error("Invalid trace schema");
  if(trace.version!==1||trace.source!=="s7commplus-subscription"||trace.coherence!=="asynchronous-observations"||!timestamp(trace.startedAt)||!Number.isInteger(trace.intervalMs)||trace.intervalMs<100||trace.intervalMs>60000||!signalsValid(trace.signals)||!Array.isArray(trace.frames)||trace.frames.length>TRACE_MAX_FRAMES||!["duration","stopped","capacity","error"].includes(trace.stopReason))throw new Error("Invalid trace schema");
  let previous:TraceFrame|undefined;
  for(const frame of trace.frames){fields(frame,["elapsedMs","sourceAt","scope","state","cells"]);fields(frame.scope,["device","address","transport","epoch"]);fields(frame.cells,trace.signals);

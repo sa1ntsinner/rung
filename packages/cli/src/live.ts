@@ -49,6 +49,10 @@ export interface LiveOptions {
   stream?: boolean;
   /** Explicit native capture request; locked monitors only subscribe to values by default. */
   nativeCapture?: boolean;
+  /** live trust: pin without a prompt when the certificate has this SHA-256. */
+  expectSha256?: string;
+  /** live watch: give up after this many seconds without live values once the connection was lost (default 60). */
+  reconnectTimeoutS?: number;
 }
 
 export async function cmdLive(dir: string, sub: string | undefined, args: string[], io: Io, opts: LiveOptions = {}): Promise<number> {
@@ -63,7 +67,7 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     finally { input.off("end", stop); process.off("SIGINT", stop); input.pause(); }
   }
   try {
-  if (sub === "trust") return trustLiveCertificate(dir, io, opts.device);
+  if (sub === "trust") return trustLiveCertificate(dir, io, opts.device, undefined, opts.expectSha256);
   if (sub === "state" || sub === "alarms") {
     if (args.length || opts.file || opts.table) throw new WorkspaceError("BAD_ARGUMENT", "State and alarms require a PLC device, not variable arguments");
     const reader = await brokerReader(await findWorkspace(dir), io.env, opts);
@@ -368,14 +372,21 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
       } finally { capturing = false; }
       if (!stopped && owner === generation && latest) publish(latest);
     };
+    // a host or PLC that stays away: the hub keeps reconnecting, but a watch that sees nothing live gives up
+    const limitMs = (opts.reconnectTimeoutS ?? 60) * 1000;
+    let lostTimer: NodeJS.Timeout | undefined, gaveUp = false, giveUp!: () => void;
+    const lost = new Promise<void>(r => giveUp = r);
     const lease = await reader.subscribe(plan.vars, interval, (frame) => {
       if (stopped) return;
+      if (frame.state === "live") { clearTimeout(lostTimer); lostTimer = undefined; }
+      else if (frame.state === "disconnected" && !lostTimer) lostTimer = setTimeout(() => { gaveUp = true; giveUp(); }, limitMs);
       if (latest && (frame.state !== latest.state || frame.scope.device !== latest.scope.device || frame.scope.address !== latest.scope.address
         || frame.scope.transport !== latest.scope.transport || frame.scope.epoch !== latest.scope.epoch)) { generation++; nativeStatus = undefined; }
       latest = frame; publish(frame); void capture();
     });
     ready = true; void capture();
-    try { await stop; } finally { generation++; sourceWatcher?.close(); await lease.close(); }
+    try { await Promise.race([stop, lost]); } finally { stopped = true; clearTimeout(lostTimer); generation++; sourceWatcher?.close(); await lease.close(); }
+    if (gaveUp) { io.stderr(`rung: no live values for ${limitMs / 1000} s after the connection was lost; stopped watching\n`); return 1; }
     return 0;
   }
   while (!stopped) {

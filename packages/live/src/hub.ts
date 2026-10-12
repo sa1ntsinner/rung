@@ -21,29 +21,34 @@ interface Consumer {
 }
 interface Entry {
   alarmGroups: Map<number, { callbacks: Map<string, (frame: OnlineAlarmResult) => void>; subscription?: { close(): Promise<void> }; latest?: OnlineAlarmResult }>;
-  backend: LiveBackend; consumers: Map<string, Consumer>; generation: number; epoch: number;
+  key: string; backend: LiveBackend; consumers: Map<string, Consumer>; generation: number; epoch: number;
   subscription?: { close(): Promise<void> }; signature?: string; latest?: OnlineReadResult;
   tail: Promise<unknown>; busy: number; idle?: NodeJS.Timeout;
+  /** Running while a dead host is replaced under live subscriptions. */
+  recovering?: Promise<void>;
+  /** Added to a replacement host's epochs, so they keep counting up from the dead host's. */
+  epochBase?: number;
 }
 
-/** One connection and one symbol union per target; host owns transport recovery. */
+/** One connection and one symbol union per target; host owns transport recovery, the hub replaces a host that exited. */
 export class LiveHub {
   private readonly entries = new Map<string, Promise<Entry>>();
   private closed = false;
-  constructor(private readonly open: (key: string) => Promise<LiveBackend>, private readonly options: { idleMs?: number } = {}) {}
+  constructor(private readonly open: (key: string) => Promise<LiveBackend>, private readonly options: { idleMs?: number; retryMs?: number[] } = {}) {}
 
   private async entry(key: string): Promise<Entry> {
     if (this.closed) throw new BridgeError("BRIDGE_EXITED", "Live hub is closed");
     let pending = this.entries.get(key);
     // ponytail: a dead host is replaced on the next request; its running subscriptions end and their clients start again
     const cached = pending && await pending.catch(() => undefined);
+    if (cached?.recovering) { await cached.recovering; return this.entry(key); }
     if (cached && cached.backend.alive?.() === false && this.entries.get(key) === pending) {
       this.entries.delete(key); cached.generation++; clearTimeout(cached.idle);
       void cached.backend.close().catch(() => {});
       pending = undefined;
     }
     if (!pending) {
-      pending = this.open(key).then(backend => ({ backend, consumers: new Map(), alarmGroups: new Map(), generation: 0, epoch: 0, tail: Promise.resolve(), busy: 0 }));
+      pending = this.open(key).then(backend => ({ key, backend, consumers: new Map(), alarmGroups: new Map(), generation: 0, epoch: 0, tail: Promise.resolve(), busy: 0 }));
       this.entries.set(key, pending);
       void pending.catch(() => { if (this.entries.get(key) === pending) this.entries.delete(key); });
     }
@@ -84,7 +89,9 @@ export class LiveHub {
       };
       current();
       if (!e.backend.capture) throw new BridgeError("UNSUPPORTED_CAPABILITY", "Native capture is unavailable for this transport");
-      const result = await e.backend.capture(block, instance, scope);
+      const base = e.epochBase ?? 0;
+      const raw = await e.backend.capture(block, instance, { ...scope, epoch: scope.epoch - base });
+      const result = base ? { ...raw, scope: { ...raw.scope, epoch: raw.scope.epoch + base } } : raw;
       current();
       if (result.scope.epoch !== scope.epoch || result.scope.device !== scope.device || result.scope.address !== scope.address || result.scope.transport !== scope.transport)
         throw new BridgeError("ONLINE_FAILED", "Native capture result scope changed");
@@ -165,11 +172,13 @@ export class LiveHub {
     }
     const generation = e.generation + 1;
     let opening = true, buffered: OnlineReadResult | undefined;
-    const receive = (frame: OnlineReadResult) => {
+    const receive = (raw: OnlineReadResult) => {
+      const frame = e.epochBase ? { ...raw, scope: { ...raw.scope, epoch: raw.scope.epoch + e.epochBase } } : raw;
       if (opening) { buffered = frame; return; }
       if (this.closed || generation !== e.generation || frame.scope.epoch < e.epoch) return;
       e.epoch = frame.scope.epoch; e.latest = frame;
       for (const c of e.consumers.values()) this.deliver(c, frame);
+      if (frame.connectionState === "disconnected" && e.backend.alive?.() === false) this.recover(e);
     };
     const subscription = await e.backend.subscribe(names, cycle, receive);
     opening = false;
@@ -179,6 +188,28 @@ export class LiveHub {
     e.subscription = subscription; e.signature = signature;
     if (buffered) receive(buffered);
     await previous?.close();
+  }
+  /**
+   * The host behind live subscriptions exited: open a new one and subscribe the same names again, with backoff, while
+   * anyone still watches. Consumers keep their leases and see "disconnected" frames until values are live again.
+   */
+  private recover(e: Entry): void {
+    if (e.recovering || this.closed) return;
+    const delays = this.options.retryMs ?? [1000, 2000, 5000, 10_000];
+    e.recovering = (async () => {
+      for (let attempt = 0; !this.closed && e.consumers.size; attempt++) {
+        await new Promise(r => setTimeout(r, delays[Math.min(attempt, delays.length - 1)]));
+        if (this.closed || !e.consumers.size) return;
+        try {
+          const backend = await this.open(e.key);
+          const old = e.backend;
+          e.backend = backend; e.subscription = undefined; e.signature = undefined; e.epochBase = e.epoch;
+          void old.close().catch(() => {});
+          await this.serial(e, () => this.rebuild(e));
+          return;
+        } catch { /* the PLC or host is not back yet: try again */ }
+      }
+    })().finally(() => { e.recovering = undefined; });
   }
   private deliver(c: Consumer, snapshot: OnlineReadResult): void {
     if (!c.active) return;

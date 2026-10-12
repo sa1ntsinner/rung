@@ -17,13 +17,35 @@ for Web API reads; insecure TLS and the non-loopback HTTP override are refused.
 FB monitors do not automatically capture native program status while locked;
 `rung live watch --native-capture` requests it explicitly.
 
-Upload and `init --from-plc` currently refuse under the lock because their
-station creation uses the general project import permission. Local restore,
-upgrade and retrieve remain available. A locked command refuses reuse of a
-keeper that was started without the lock.
-Compilation also refuses while locked: the bridge currently has no way to
-prove that a project is a new scratch project. Archive remains available for
-a saved project; the lock refuses the save if the source has unsaved changes.
+`rung init --from-plc <ip> --project <dir>/<name>/<name>.ap20` works under the
+lock, into a project that does not exist yet: the bridge is started for that
+new project only and may upload into it and compile it, nothing else.
+`rung upload` into an existing project stays refused. Local restore, upgrade
+and retrieve remain available. A locked command refuses reuse of a keeper that
+was started without the lock. Archive remains available for a saved project;
+the lock refuses the save if the source has unsaved changes.
+
+A PLC with secure communication shows its certificate during the upload, and a
+new project knows none yet: pass `--trust-certificate` to `rung init --from-plc`
+or `rung upload` to trust it for that run (without it, nothing is uploaded and
+rung says why).
+
+`rung live trust --device PLC_1 --expect-sha256 <fingerprint>` pins the PLC
+certificate without a prompt, only when its SHA-256 is exactly the one given
+(compare it beforehand with TIA Portal's certificate manager); scripts and
+remote sessions without a terminal use this.
+
+When the online host or the connection is lost during `rung live watch`, the
+broker starts a new host and subscribes again (after 1, 2, 5, then every 10 s);
+frames say `disconnected` meanwhile, never live. A CLI watch that sees no live
+values for 60 s stops with exit 1 (`--reconnect-timeout <s>`).
+`rung trace record` starts its `--duration` with the first live values; how
+long connecting took is saved as `connectMs`.
+
+A PLC address on another interface of the CPU (X2 rather than X1): with
+several target interfaces set `target_interface` in `[plc.PLC_1]` to the one
+that carries the address; `rung interfaces` lists the CPU's interfaces and their
+addresses, and a failed go-online names the interface it used.
 
 ## Find the PLC
 

@@ -28,7 +28,7 @@ namespace Rung.Bridge.V20
 
         public static int Run(BridgeArgs args)
         {
-            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation();
+            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
             if (string.IsNullOrEmpty(args.ProjectPath)) { Console.Error.WriteLine("--keep needs --project"); return 64; }
             var project = Path.GetFullPath(args.ProjectPath);
             var file = KeeperFile.PathFor(project);
@@ -202,7 +202,10 @@ namespace Rung.Bridge.V20
                 }
                 while (DateTime.UtcNow - started < StartBudget)
                 {
-                    if (Listed(project)) { emit("tia-started", new { project, pid = KeeperFile.Read(file)?.TiaPid ?? 0 }); return; }
+                    // TIA Portal lists the project a moment before the keeper records itself ready; a locked bridge
+                    // attaches only to a keeper it can verify, so it waits for that record too
+                    if (Listed(project) && (!ReadOnlyPolicy.Locked || KeeperFile.Read(file)?.State == KeeperRecord.Ready))
+                    { emit("tia-started", new { project, pid = KeeperFile.Read(file)?.TiaPid ?? 0 }); return; }
                     r = KeeperFile.Read(file);
                     if (r?.State == KeeperRecord.Failed)
                     {
@@ -281,7 +284,7 @@ namespace Rung.Bridge.V20
         static void Spawn(BridgeArgs args, string project)
         {
             var exe = Process.GetCurrentProcess().MainModule.FileName;
-            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "") + (ReadOnlyPolicy.Locked ? " --read-only" : "");
+            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "") + (args.ScratchUpload ? " --scratch-upload" : "") + (ReadOnlyPolicy.Locked ? " --read-only" : "");
             using (var cls = new ManagementClass("Win32_Process"))
             using (var startup = new ManagementClass("Win32_ProcessStartup"))
             {

@@ -2,7 +2,7 @@
 // Portable model mirrors the CLI recorder; the compatibility test pins its shape.
 export interface TraceCell{value:number|boolean|null;observedAt?:number;type?:string;error?:string;}
 export interface TraceFrame{elapsedMs:number;sourceAt:number;scope:{device:string;address:string;transport:"s7commplus"|"webapi";epoch:number};state:"connecting"|"live"|"stale"|"disconnected";cells:Record<string,TraceCell>;}
-export interface SubscriptionTraceModel{version:1;source:"s7commplus-subscription";coherence:"asynchronous-observations";startedAt:number;intervalMs:number;signals:string[];frames:TraceFrame[];stopReason:"duration"|"stopped"|"capacity"|"error";}
+export interface SubscriptionTraceModel{version:1;source:"s7commplus-subscription";coherence:"asynchronous-observations";startedAt:number;intervalMs:number;signals:string[];frames:TraceFrame[];stopReason:"duration"|"stopped"|"capacity"|"error";connectMs?:number;}
 export interface TraceCsvCell extends TraceCell{raw:string;}
 export interface TraceCsvFrame{elapsedMs:number;sourceAt:number;sourceTimestamp:string;sampleNumber:string;state:"recorded";cells:Record<string,TraceCsvCell>;}
 export interface TraceCsvModel{version:1;source:"tia-long-term-csv";coherence:"imported-file";sourceSha256:string;header:string[];startedAt:number;intervalMs:number;signals:string[];frames:TraceCsvFrame[];stopReason:"imported";}

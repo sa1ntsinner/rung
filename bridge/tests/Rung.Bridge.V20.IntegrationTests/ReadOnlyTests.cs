@@ -28,6 +28,25 @@ public class ReadOnlyTests
     }
 
     [LockedFact]
+    public void ScratchUploadNeedsAProjectThatDoesNotExistYet()
+    {
+        var existing = System.IO.Path.GetTempFileName();
+        try
+        {
+            Assert.Equal(2, Program.Main(new[] { "--project", existing, "--create-project", "--scratch-upload" }));
+            Assert.Equal(2, Program.Main(new[] { "--project", existing + ".new.ap20", "--create-project" }));
+            Assert.False(ReadOnlyPolicy.ScratchUpload);
+            ScratchPolicy.Apply(BridgeArgs.Parse(new[] { "--project", existing + ".new.ap20", "--create-project", "--scratch-upload" }));
+            Assert.True(ReadOnlyPolicy.ScratchUpload);
+        }
+        finally
+        {
+            System.IO.File.Delete(existing);
+            typeof(ReadOnlyPolicy).GetField("scratchUpload", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, false);
+        }
+    }
+
+    [LockedFact]
     public void ReadOnlyArgumentIsAcceptedAlongsideLegacyPermissionFlags()
     {
         var args = BridgeArgs.Parse(new[] { "--read-only", "--allow-import", "--allow-download", "--create-project" });

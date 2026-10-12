@@ -18,6 +18,31 @@ async function workspace() {
 const fingerprint = "AB".repeat(32);
 const inspect = async () => ({ address: "192.168.250.1", certificateSha256: fingerprint, details: "Subject: CPU\nSHA-256: " + fingerprint });
 
+describe("pinning with an expected fingerprint", () => {
+  it("pins without a prompt when the fingerprint matches, colons and case ignored", async () => {
+    const { root } = await workspace();
+    const io: Io = { cwd: root, env: {}, stdout: () => {}, stderr: () => {} };
+    expect(await trustLiveCertificate(root, io, "P", inspect, "ab:".repeat(31) + "ab")).toBe(0);
+    expect((await loadConfig(root, { raw: true })).live?.plc?.P?.certificateSha256).toBe(fingerprint);
+  });
+  it("pins nothing and names both fingerprints when it differs", async () => {
+    const { root } = await workspace();
+    let error = "";
+    const io: Io = { cwd: root, env: {}, stdout: () => {}, stderr: text => error += text };
+    expect(await trustLiveCertificate(root, io, "P", inspect, "CD".repeat(32))).toBe(1);
+    expect(error).toContain(fingerprint);
+    expect(error).toContain("CD".repeat(32));
+    expect((await loadConfig(root, { raw: true })).live?.plc?.P?.certificateSha256).toBeUndefined();
+  });
+  it("refuses a malformed fingerprint before contacting the PLC", async () => {
+    const { root } = await workspace();
+    let asked = false;
+    const io: Io = { cwd: root, env: {}, stdout: () => {}, stderr: () => {} };
+    await expect(trustLiveCertificate(root, io, "P", async () => { asked = true; return inspect(); }, "12")).rejects.toThrow(/64 hex/);
+    expect(asked).toBe(false);
+  });
+});
+
 describe("explicit PLC certificate trust", () => {
   it("accepts the device option and reaches the explicit trust flow", async () => {
     const { root } = await workspace();

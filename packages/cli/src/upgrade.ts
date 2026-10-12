@@ -10,7 +10,7 @@ import { WorkspaceError } from "@rung/core";
 import { BridgeError } from "@rung/bridge-client";
 import { bridgeExecutable, tiaOf, type TiaVersion } from "./paths.js";
 import { defaultBridge, type Io } from "./common.js";
-import { whitelistStatus, WHITELIST_HINT } from "./setup.js";
+import { whitelistStatus, WHITELIST_HINT, type WhitelistStatus } from "./setup.js";
 
 export function upgradePlan(file: string, to: TiaVersion, nonce: number) {
   if (/\.zap\d+$/i.test(file)) throw new WorkspaceError("BAD_ARGUMENT", `${basename(file)} is an archive: rung retrieve ${file} makes a project of it (with upgrade when it is older)`);
@@ -56,6 +56,15 @@ const minutesOf = (v: Record<string, unknown>) => {
 };
 
 /**
+ * Whether the bridge would meet the "Openness access" question. RUNG_BRIDGE may name another build of a bridge
+ * (a rebuilt one is a new file to the whitelist): checked too when it is a rung-bridge-vNN.exe, not a dll run by dotnet.
+ */
+export function unlistedBridge(exe: string, named: boolean, status: WhitelistStatus): boolean {
+  if (!named) return status !== "ok";
+  return /rung-bridge-v\d\d\.exe$/i.test(exe) && (status === "missing" || status === "stale");
+}
+
+/**
  * One run of the bridge that opens a project in a TIA Portal without window and prints {"path"} or {"error"}
  * (--upgrade, --retrieve). Stopped with exactly its TIA Portal when it waits longer than `minutes`.
  */
@@ -63,7 +72,7 @@ async function bridgeOnce(to: TiaVersion, args: string[], minutes: number, io: I
   const own = defaultBridge(io.env);
   const exe = io.env.RUNG_BRIDGE ? own.command : bridgeExecutable(io.env, to);
   // a TIA Portal without window that waits for the "Openness access" answer never comes back
-  if (!io.env.RUNG_BRIDGE && (await whitelistStatus(exe, `${to.slice(1)}.0`)) !== "ok") throw new BridgeError("ACCESS_DENIED", WHITELIST_HINT);
+  if (unlistedBridge(exe, !!io.env.RUNG_BRIDGE, await whitelistStatus(exe, `${to.slice(1)}.0`))) throw new BridgeError("ACCESS_DENIED", WHITELIST_HINT);
   // seen on V20: a project carrying device description files (GSD) has TIA Portal install them, which it refuses with a
   // dialog while another TIA Portal runs
   if (process.platform === "win32" && runningPortals() > 0)

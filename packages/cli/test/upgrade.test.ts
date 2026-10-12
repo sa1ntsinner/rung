@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { olderProjectHint, upgradePlan } from "../src/upgrade.js";
+import { olderProjectHint, unlistedBridge, upgradePlan } from "../src/upgrade.js";
 
 describe("rung upgrade: an older project upgraded next to it", () => {
   it("upgrades a copy in a staging folder and puts the result next to the original, named as TIA Portal names it", () => {
@@ -18,5 +18,15 @@ describe("rung upgrade: an older project upgraded next to it", () => {
   it("tells rung init what to do with a project older than V19", () => {
     expect(olderProjectHint("D:/plc/Line/Line.ap18")).toMatch(/TIA Portal V18 project.*rung upgrade/s);
     expect(olderProjectHint("D:/plc/Line/Line.ap20")).toBeUndefined();
+  });
+});
+
+describe("the Openness access question a TIA Portal without window cannot show", () => {
+  it("refuses an unlisted bridge at once, also one named by RUNG_BRIDGE", () => {
+    expect(unlistedBridge("C:/x/rung-bridge-v20.exe", false, "missing")).toBe(true);
+    expect(unlistedBridge("C:/x/rung-bridge-v20.exe", false, "ok")).toBe(false);
+    expect(unlistedBridge("C:/dev/rung-bridge-v20.exe", true, "stale")).toBe(true);
+    expect(unlistedBridge("C:/dev/rung-bridge-v20.exe", true, "ok")).toBe(false);
+    expect(unlistedBridge("C:/dev/Rung.Bridge.V20.dll", true, "missing")).toBe(false);
   });
 });

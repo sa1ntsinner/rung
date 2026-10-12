@@ -4,7 +4,7 @@ rung talks to the PLC through TIA Portal Openness, the same way TIA Portal does:
 
 ## What runs on the PLC
 
-`rung compare` is TIA's online/offline comparison: it goes online, compares the project with the PLC, goes offline and lists what differs, what exists only in the project and what only on the PLC, with the workspace file of each. It changes nothing on the PLC; the MCP tool `rung_compare` does the same for agents. The exit code is 0 when the PLC runs the project and 2 when it does not, so a script can check it.
+`rung compare` is TIA's online/offline comparison: it goes online, compares the project with the PLC, goes offline and lists what differs, what exists only in the project and what only on the PLC, with the workspace file of each. It changes nothing on the PLC; the MCP tool `rung_compare` does the same for agents. The exit code is 0 when the PLC runs the project and 2 when it does not, so a script can check it. Compare a project uploaded from the PLC as it came: a project compiled after the upload reports every block as different (TIA Portal compares the compiled state), so keep an untouched copy for that check.
 
 ## Who downloads
 

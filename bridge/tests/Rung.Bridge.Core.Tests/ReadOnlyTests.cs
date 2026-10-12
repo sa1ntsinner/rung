@@ -39,6 +39,27 @@ public class ReadOnlyTests
             Assert.Equal("PLC_READ_ONLY", response.RootElement.GetProperty("error").GetProperty("code").GetString());
     }
 
+    [LockedTheory]
+    [InlineData("plc.upload", true)]
+    [InlineData("plc.compile", true)]
+    [InlineData("plc.download", false)]
+    [InlineData("objects.import", false)]
+    public void ScratchUploadAdmitsOnlyUploadAndCompile(string method, bool admitted)
+    {
+        var flag = typeof(ReadOnlyPolicy).GetField("scratchUpload", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        ReadOnlyPolicy.AllowScratchUpload();
+        try
+        {
+            var dispatcher = new RpcDispatcher(() => throw new InvalidOperationException("session reached"), new BridgeInfo("V20", "test", "import", "compile"));
+            using (var response = JsonDocument.Parse(dispatcher.Handle(JsonSerializer.Serialize(new { id = 1, method, @params = new { request = new { address = "192.168.250.1" } } }))))
+            {
+                var code = response.RootElement.GetProperty("error").GetProperty("code").GetString();
+                if (admitted) Assert.NotEqual("PLC_READ_ONLY", code); else Assert.Equal("PLC_READ_ONLY", code);
+            }
+        }
+        finally { flag.SetValue(null, false); }
+    }
+
     [LockedFact]
     public void LockSurvivesEnvironmentChange()
     {

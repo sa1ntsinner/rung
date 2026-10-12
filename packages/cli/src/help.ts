@@ -32,6 +32,8 @@ const DETAIL: Record<string, string> = {
   why: "explain the last captured write using recorded operands and controls; no live connection",
   lcid: "alarm text language (Windows LCID; default 1033), with explicit fallback provenance",
   stream: "keep observing complete alarm snapshots until Ctrl+C",
+  "expect-sha256": "pin without a prompt, only when the PLC certificate has exactly this SHA-256",
+  "reconnect-timeout": "seconds a watch waits for live values after the connection was lost (default 60)",
   "confirm-stdin": "editor flow: show a prepared operation and receive its exact human confirmation on private stdin",
   "parent-stdio": "editor read-only stream: release its subscription when the parent closes stdin",
   release: "close the project only in rung's background keeper; stop watch on success", "session.save": "save unsaved changes before releasing the project", discard: "release without saving; unsaved TIA changes are lost (requires --release, excludes --save)",

@@ -11,6 +11,7 @@ import {
   StateStore,
   WorkspaceError,
   assertPlcWritable,
+  plcReadOnly,
   defaultConfig,
   grantWrites,
   loadConfig,
@@ -77,7 +78,7 @@ Usage:
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
-  rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>]
+  rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>] [--trust-certificate]
                                        a new project from a running PLC (TIA's "Upload device as new station")
   rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
   rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
@@ -95,14 +96,14 @@ Usage:
   rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] [--device <PLC>] [--transport s7commplus|webapi] [--json]
                                      read values from the selected PLC backend (read-only)
-  rung live watch --file <block> [--instance <DB>] [--interval 500] [--json]
+  rung live watch --file <block> [--instance <DB>] [--interval 500] [--reconnect-timeout 60] [--json]
   rung live watch --table plc/<PLC>/watch/<table>.xml [--device <PLC>] [--json]
   rung live watch <var>... [--interval 500] [--json]  these values every interval (read-only)
                                        monitor a block like TIA Portal: its values every interval (read-only)
   rung live diag [--dir <ws>]          PLC diagnostic buffer via the Web API
   rung live state --device <PLC> [--json]  CPU mode, cycle and memory from the selected backend
   rung live alarms --device <PLC> [--lcid 1033] [--stream] [--json]  active alarms and live changes
-  rung live trust --device <PLC> [--dir <ws>]  inspect and explicitly pin the PLC certificate
+  rung live trust --device <PLC> [--dir <ws>] [--expect-sha256 <hex>]  inspect and explicitly pin the PLC certificate
   rung live modify <name> <SCL-literal> --device <PLC>  prepare and confirm one current scalar value
   rung live run|stop --device <PLC>    prepare and confirm CPU control
   rung live modify|run|stop --confirm-stdin --json  editor confirmation over private stdin
@@ -146,7 +147,7 @@ PLC:
   rung connect [dir] --address <ip> [--plc <name>]          V21: online address in rung.toml; V19/V20: project address in network.yaml
   rung connect [dir] --address <ip> --project-address      use the address in the project (all TIA versions)
   rung interfaces [dir] [--scan] [--plc <name>]             PG/PC interfaces and targets (+ reachable devices)
-  rung upload [dir] --ip <address> [--use <PG/PC interface>]  the PLC as a new station of the project (the PLC is only read)
+  rung upload [dir] --ip <address> [--use <PG/PC interface>] [--trust-certificate]  the PLC as a new station of the project (the PLC is only read)
   rung download [dir] [--hw|--no-hw] [--no-sw] [--all-blocks] [--allow <q>]... [--no-start] [--yes] [--plc <name>]
                                        download to the PLC; asks you to type the PLC name first, and
                                        cancels whenever TIA asks something not allowed (e.g. stop-cpu)
@@ -201,7 +202,6 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 }
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  if (v["from-plc"] !== undefined) assertPlcWritable(await loadConfig(dir, { raw: true }).catch(() => undefined), undefined, io.env);
   // a downloaded or backed-up project usually comes as an archive: retrieve it next to itself and mirror that
   if (v.project && /\.zap\d+$/i.test(String(v.project))) v = { ...v, project: await retrieveArchive(resolve(io.cwd, String(v.project)), v, io) };
   const older = v.project ? olderProjectHint(String(v.project)) : undefined;
@@ -229,7 +229,11 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   // --from-plc: a new project, and the running PLC uploaded into it as its station
   const fromPlc = v["from-plc"] === undefined ? undefined : uploadRequest(String(v["from-plc"]), v);
   if (fromPlc && (codesys || !v.project)) throw new WorkspaceError("BAD_ARGUMENT", "rung init --from-plc needs --project <folder>/<name>/<name>.ap20, where the new TIA Portal project goes");
-  const create = fromPlc ? ["--create-project", "--allow-import"] : [];
+  // under the read-only lock the upload may only go into a project this run creates: the bridge refuses everything else
+  const locked = !!fromPlc && !!plcReadOnly(await loadConfig(dir, { raw: true }).catch(() => undefined), undefined, io.env);
+  if (locked && (await exists(resolve(io.cwd, String(v.project)))))
+    throw new WorkspaceError("PLC_READ_ONLY", `under the read-only lock rung init --from-plc only creates a new project, and ${String(v.project)} exists`);
+  const create = fromPlc ? ["--create-project", "--allow-import", ...(locked ? ["--scratch-upload"] : [])] : [];
   const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless", ...create] : [])];
   // --host: TIA Portal runs on another PC (this one is Linux or macOS); the bridge starts there over ssh
   const host = v.host as string | undefined;
@@ -419,7 +423,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
-  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes"], positionals: 1 },
+  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: [], positionals: 1 },
   pull: { options: ["force", "verbose"], positionals: 1 },
@@ -431,7 +435,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
-  live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture"], positionals: Infinity },
+  live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture", "expect-sha256", "reconnect-timeout"], positionals: Infinity },
   "live-server": { options: [], positionals: 1 },
   trace:{options:["device","out","duration","interval","dir","json","parent-stdio"],positionals:Infinity},
   views: { options: ["offline"], positionals: 1 },
@@ -457,7 +461,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "codesys-bridge": { options: ["project"], positionals: 0 },
   assignments: { options: ["json"], positionals: 1 },
   who: { options: ["file", "json", "dir"], positionals: 1 },
-  upload: { options: ["ip", "use", "mode", "number"], positionals: 1 },
+  upload: { options: ["ip", "use", "mode", "number", "trust-certificate"], positionals: 1 },
   upgrade: { options: ["tia", "timeout", "json"], positionals: 1 },
   retrieve: { options: ["tia", "timeout", "json"], positionals: 1 },
 };
@@ -555,6 +559,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         json: { type: "boolean" },
         "confirm-stdin": { type: "boolean" },
         "native-capture": { type: "boolean" },
+        "expect-sha256": { type: "string" },
+        "reconnect-timeout": { type: "string" },
         "parent-stdio": { type: "boolean" },
         lcid: { type: "string" },
         stream: { type: "boolean" },
@@ -634,7 +640,6 @@ export async function main(argv: string[], io: Io): Promise<number> {
       || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
       || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply
       || cmd === "connect" && !!v.address || cmd === "doctor" && !!v.fixture
-      || cmd === "init" && v["from-plc"] !== undefined
       || cmd === "live" && ["modify", "run", "stop"].includes(target ?? "");
     if (mutating) {
       assertPlcWritable(undefined, undefined, io.env);
@@ -773,6 +778,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
           json: !!v.json,
           confirmStdin: !!v["confirm-stdin"],
           nativeCapture: v["native-capture"] ? true : undefined,
+          ...(v["expect-sha256"] ? { expectSha256: String(v["expect-sha256"]) } : {}),
+          ...(v["reconnect-timeout"] ? { reconnectTimeoutS: Number(v["reconnect-timeout"]) } : {}),
           parentStdio: !!v["parent-stdio"],
           stream: !!v.stream,
           ...(v.lcid ? { lcid: Number(v.lcid) } : {}),

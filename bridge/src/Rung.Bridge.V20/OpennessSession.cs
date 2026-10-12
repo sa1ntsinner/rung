@@ -149,7 +149,7 @@ namespace Rung.Bridge.V20
 
         public static OpennessSession Attach(BridgeArgs args, Action<string, object> emit)
         {
-            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation();
+            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
             // Attach and release share startup arbitration: a peer cannot arrive after release counted its sessions.
             var path = args.ProjectPath ?? PortalSelector.Choose(TiaPortal.GetProcesses()
                 .Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), null).ProjectPath;

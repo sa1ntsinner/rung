@@ -44,6 +44,38 @@ describe("monitoring a DB", () => {
   });
 });
 
+describe("monitoring an instance or typed DB and constants", () => {
+  it("reads an instance DB through its FB's interface, structs and UDTs included", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/types/Axis.udt", 'TYPE "Axis"\nVERSION : 0.1\n   STRUCT\n      Pos : Real;\n      Ok : Bool;\n   END_STRUCT;\n\nEND_TYPE\n', 0);
+    idx.set("file:///w/plc/P/blocks/Drive.scl", 'FUNCTION_BLOCK "Drive"\n   VAR_INPUT \n      Run : Bool;\n   END_VAR\n   VAR \n      axis : "Axis";\n      st : Struct\n         n : Int;\n      END_STRUCT;\n      tmr : TON_TIME;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Drive_DB.db", db("Drive_DB", "Drive"), 0);
+    const plan = monitorPlan(idx, "file:///w/plc/P/blocks/Drive_DB.db");
+    expect(plan.vars).toMatchObject({ Run: '"Drive_DB".Run', "axis.Pos": '"Drive_DB".axis.Pos', "axis.Ok": '"Drive_DB".axis.Ok', "st.n": '"Drive_DB".st.n', "tmr.Q": '"Drive_DB".tmr.Q' });
+  });
+  it("leaves out what the PLC does not give: hidden members and structured in/outs of a multi-instance", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/types/Cfg.udt", 'TYPE "Cfg"\nVERSION : 0.1\n   STRUCT\n      t : Time;\n   END_STRUCT;\n\nEND_TYPE\n', 0);
+    idx.set("file:///w/plc/P/blocks/Lib.scl", 'FUNCTION_BLOCK "Lib"\n   VAR_INPUT \n      enable : Bool;\n   END_VAR\n   VAR_IN_OUT \n      cfg : "Cfg";\n      n : Int;\n   END_VAR\n   VAR \n      inner { ExternalAccessible := \'False\'; ExternalVisible := \'False\'} : Bool;\n      shown : Bool;\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Top.scl", 'FUNCTION_BLOCK "Top"\n   VAR \n      lib : "Lib";\n   END_VAR\n\nBEGIN\n\t;\nEND_FUNCTION_BLOCK\n', 0);
+    idx.set("file:///w/plc/P/blocks/Top_DB.db", db("Top_DB", "Top"), 0);
+    expect(Object.keys(monitorPlan(idx, "file:///w/plc/P/blocks/Top_DB.db").vars).sort()).toEqual(["lib.enable", "lib.n", "lib.shown"]);
+  });
+  it("refuses an instance DB whose FB is not in the workspace instead of an empty plan", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/blocks/X_DB.db", db("X_DB", "Protected"), 0);
+    expect(() => monitorPlan(idx, "file:///w/plc/P/blocks/X_DB.db")).toThrow(/not in the workspace/);
+  });
+  it("does not read a user constant of a tag table", () => {
+    const idx = new WorkspaceIndex(), uri = "file:///w/plc/P/blocks/Lamp.scl";
+    idx.set("file:///w/plc/P/tags/Main.tags.st", "VAR_GLOBAL\n    Lamp AT %Q0.0 : Bool;\nEND_VAR\nVAR_GLOBAL CONSTANT\n    BACK : Int := 2;\nEND_VAR\n", 0);
+    idx.set(uri, 'FUNCTION "Lamp" : Void\n   VAR_INPUT \n      dir : Int;\n   END_VAR\n\nBEGIN\n\t"Lamp" := #dir = "BACK";\nEND_FUNCTION\n', 0);
+    const plan = monitorPlan(idx, uri);
+    expect(plan.vars['"Lamp"']).toBe('"Lamp"');
+    expect(plan.vars['"BACK"']).toBeUndefined();
+  });
+});
+
 describe("two PLCs with objects of the same names", () => {
   const setup = () => {
     const idx = new WorkspaceIndex();

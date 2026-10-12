@@ -204,3 +204,30 @@ it("opens a fresh backend when the host behind the cached one has exited", async
     expect(opens).toBe(2);
   } finally { await hub.close(); }
 });
+it("replaces an exited host under a live subscription and keeps epochs counting up", async () => {
+  vi.useFakeTimers();
+  const backends: { dead: boolean; emit?: (f: OnlineReadResult) => void; names?: string[] }[] = [];
+  const hub = new live.LiveHub(async () => {
+    const state: (typeof backends)[number] = { dead: false }; backends.push(state);
+    return { read: async names => frame(names),
+      subscribe: async (names, _cycle, onFrame) => { state.emit = onFrame; state.names = names; onFrame(frame(names, 10 + backends.length, 3)); return { close: async () => {} }; },
+      alive: () => !state.dead, close: async () => {} };
+  }, { retryMs: [1000] });
+  const seen: LiveFrame[] = [];
+  try {
+    const lease = hub.subscribe("P", { x: "DB.x" }, 500, f => { seen.push(f); });
+    await vi.advanceTimersByTimeAsync(200);
+    await lease;
+    expect(seen.at(-1)?.state).toBe("live");
+    backends[0]!.dead = true;
+    backends[0]!.emit!({ ...frame(["DB.x"], 20, 3), connectionState: "disconnected", errorCode: "BRIDGE_EXITED" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(seen.at(-1)?.state).toBe("disconnected");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(backends).toHaveLength(2);
+    expect(backends[1]!.names).toEqual(["DB.x"]);
+    const last = seen.at(-1)!;
+    expect(last.state).toBe("live");
+    expect(last.scope.epoch).toBeGreaterThan(3);
+  } finally { await hub.close(); vi.useRealTimers(); }
+});

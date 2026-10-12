@@ -31,7 +31,6 @@ const mutations = [
   ["alarms", "--apply"], ["technology", "--apply"],
   ["connect", "--address", "192.168.0.1"], ["doctor", "--fixture"],
   ["upload", "--ip", "192.168.0.1"],
-  ["init", "--from-plc", "192.168.0.1", "--project", "new.ap20", "--rebind"],
   ["live", "modify", "Value", "1", "--confirm-stdin", "--json"],
   ["live", "run", "--confirm-stdin", "--json"], ["live", "stop"],
 ];
@@ -47,6 +46,21 @@ it.each(mutations)("refuses %j before connecting or spawning under the environme
     expect(await main(args, io)).toBe(2);
     expect(io.stderr.mock.calls.flat().join("")).toMatch(/^rung: PLC_READ_ONLY: .*RUNG_READ_ONLY.*\n$/);
     expect(spawn).not.toHaveBeenCalled(); expect(owner).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("under the lock init --from-plc creates only a new project, through a bridge started for a scratch upload", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rung-readonly-"));
+  await saveConfig(root, defaultConfig("fixture.ap20", "V20", "", ["PLC_1"]));
+  const spawn = vi.spyOn(BridgeClient, "spawn").mockRejectedValue(new Error("spawned"));
+  const io = { cwd: root, env: { RUNG_READ_ONLY: "1" }, stdout: vi.fn(), stderr: vi.fn() };
+  try {
+    await writeFile(join(root, "old.ap20"), "");
+    expect(await main(["init", "--from-plc", "192.168.0.1", "--project", "old.ap20", "--rebind"], io)).toBe(2);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(await main(["init", "--from-plc", "192.168.0.1", "--project", "N/N.ap20", "--rebind"], io).catch(() => 1)).not.toBe(0);
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(spawn.mock.calls[0]![0].args).toEqual(expect.arrayContaining(["--create-project", "--scratch-upload"]));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

@@ -9,10 +9,14 @@ namespace Rung.Bridge.Core.Protocol
         static volatile bool argumentLocked;
         static ReadOnlyPolicy() { }
         public static bool Locked => EnvironmentLocked || argumentLocked;
+        static volatile bool scratchUpload;
         public static void Lock() { argumentLocked = true; }
-        public static void RefuseMutation()
+        /// <summary>This process created a new project for an upload (--scratch-upload): uploading into it and compiling it stay possible while locked.</summary>
+        public static bool ScratchUpload => scratchUpload;
+        public static void AllowScratchUpload() { scratchUpload = true; }
+        public static void RefuseMutation(bool scratchAllowed = false)
         {
-            if (Locked) throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: this process is locked to read-only operations.");
+            if (Locked && !(scratchAllowed && scratchUpload)) throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: this process is locked to read-only operations.");
         }
     }
 

@@ -326,6 +326,8 @@ export interface UploadRequest {
   /** Default: the only PG/PC interface of the mode. */
   pcInterface?: string;
   pcInterfaceNumber?: number;
+  /** Trust the certificate the PLC shows for this upload (--trust-certificate). */
+  trustCertificate?: boolean;
 }
 
 /** A project archive TIA Portal wrote (Project → Retrieve opens it). */

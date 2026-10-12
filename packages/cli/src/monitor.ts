@@ -34,6 +34,48 @@ const quoted = (n: string) => (n.startsWith('"') ? n : `"${n}"`);
 /** Both files of one PLC (or not in a rung layout, where there is one program). */
 const samePlc = (a: string, b: string) => deviceOfUri(a) === deviceOfUri(b);
 
+/**
+ * Every readable leaf below declarations, labelled with its path (Motor.Speed, Axis[3].Pos): inline STRUCTs and
+ * named types (UDTs, FB instances) too when `deep` (a DB's values; an FB monitor keeps its lines short), arrays read
+ * a page of their first elements.
+ */
+function walkDecls(index: WorkspaceIndex, uri: string, decls: (VarDecl | Member)[], label: string, path: string,
+  lineOf: (v: VarDecl | Member) => number | undefined, add: (offset: number, label: string, name: string) => void, deep: boolean, depth = 0): void {
+  if (depth > 8) return; // ponytail: depth cap instead of cycle tracking; deeper nesting is not shown
+  for (const v of decls) {
+    if (v.section === "Temp" || v.section === "Constant" || v.section === "Method" || v.section === "Action") continue;
+    const own = (v as Member).uri ?? uri;
+    // the PLC hides a member marked ExternalAccessible := 'false' from every client, and an in/out of a structured
+    // type is a reference the instance does not hold: neither can be read
+    if (hidden(index, own, v) || v.section === "InOut" && !elementary(v)) continue;
+    const l = label ? `${label}.${v.name}` : v.name;
+    const p = `${path}.${seg(v.name)}`;
+    const at = lineOf(v) ?? 0;
+    if (v.isArray) {
+      const a = /^Array\s*\[\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\]\s*of\s+(.+)$/i.exec(v.type.trim());
+      if (!a) continue;
+      const lo = Number(a[1]);
+      const item = a[3]!.trim();
+      if (!deep && !ELEMENTARY.test(item)) continue;
+      const inner = ELEMENTARY.test(item) ? undefined : index.membersOfType(item.replace(/^"|"$/g, ""));
+      for (let i = lo; i <= Math.min(Number(a[2]), lo + ARRAY_PAGE - 1); i++) {
+        if (inner === undefined) add(at, `${l}[${i}]`, `${p}[${i}]`);
+        else walkDecls(index, own, inner, `${l}[${i}]`, `${p}[${i}]`, () => at, add, deep, depth + 1);
+      }
+    } else if (elementary(v)) add(at, l, p);
+    else if (deep || (v.members?.length ?? 0) > 0) {
+      const inner = index.membersOf(v);
+      // an inline STRUCT's members have lines of their own; a named type's go on the line that names it
+      if (inner.length) walkDecls(index, own, inner, l, p, v.members?.length ? lineOf : () => at, add, deep, depth + 1);
+    }
+  }
+}
+
+const hidden = (index: WorkspaceIndex, uri: string, v: VarDecl | Member): boolean => {
+  const attrs = (v as VarDecl).src?.attrs;
+  return !!attrs && /ExternalAccessible\s*:=\s*'false'/i.test(index.docs.get(uri)?.text.slice(attrs.start, attrs.end) ?? "");
+};
+
 export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: string): MonitorPlan {
   index = scopedTo(index, uri); // the block's own PLC: another may have DBs and tags of the same names
   const doc = index.docs.get(uri);
@@ -69,27 +111,14 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
   // declarations: an FB's inputs, outputs and statics through the instance, a DB's members
   if (block.kind === "FB" || (block.kind === "DB" && !block.dbOf)) {
     const base = block.kind === "FB" ? inst! : quoted(block.name);
-    // members of a STRUCT declared here too, each on its own line, labelled with its path (Motor.Speed)
-    const walk = (vars: VarDecl[], label: string, path: string) => {
-      for (const v of vars) {
-        if (!readable(v)) continue;
-        const l = label ? `${label}.${v.name}` : v.name;
-        if (v.members?.length && !v.isArray) walk(v.members, l, `${path}.${seg(v.name)}`);
-        else if (elementary(v)) add(v.start, l, `${path}.${seg(v.name)}`);
-        else if (v.isArray) {
-          // an array of an elementary type: its first elements (a page), each read like a member
-          const a = /^Array\s*\[\s*(-?\d+)\s*\.\.\s*(-?\d+)\s*\]\s*of\s+(.+)$/i.exec(v.type.trim());
-          if (!a || !ELEMENTARY.test(a[3]!.trim())) continue;
-          const lo = Number(a[1]);
-          for (let i = lo; i <= Math.min(Number(a[2]), lo + ARRAY_PAGE - 1); i++) add(v.start, `${l}[${i}]`, `${path}.${seg(v.name)}[${i}]`);
-        }
-      }
-    };
-    walk(block.vars, "", base);
+    walkDecls(index, uri, block.vars, "", base, (v) => v.start, add, block.kind === "DB");
   } else if (block.kind === "DB" && block.dbOf) {
     // an instance or typed DB declares nothing itself: its values go on the line that names the FB or UDT
     const at = Math.max(block.start, doc.text.indexOf(`"${block.dbOf}"`, block.start));
-    for (const m of index.membersOfType(block.dbOf)) if (m.section !== "Temp" && m.section !== "Constant" && elementary(m)) add(at, m.name, `${quoted(block.name)}.${seg(m.name)}`);
+    const members = index.membersOfType(block.dbOf);
+    if (!members.length)
+      throw new WorkspaceError("BAD_ARGUMENT", `${block.name} is a DB of ${block.dbOf}, which is not in the workspace (know-how protected or from a library): rung cannot list its values`);
+    walkDecls(index, uri, members, "", quoted(block.name), () => at, add, true);
   }
   // uses in the code
   for (const ref of block.refs) {
@@ -102,7 +131,8 @@ export function monitorPlan(index: WorkspaceIndex, uri: string, instance?: strin
       if (elementary(leaf)) add(ref.start, `#${path.join(".")}`, `${inst}.${path.map(seg).join(".")}`);
     } else if (ref.kind === "global") {
       const g = index.global(ref.name);
-      if (g?.tag && !ref.members.length) add(ref.start, `"${ref.name}"`, `"${ref.name}"`);
+      // a user constant of a tag table is no PLC symbol: nothing to read
+      if (g?.tag && g.tag.value === undefined && !ref.members.length) add(ref.start, `"${ref.name}"`, `"${ref.name}"`);
       else if (g?.block?.kind === "DB" && ref.members.length) {
         const root = g.block.dbOf ? index.membersOfType(g.block.dbOf) : g.block.vars;
         const leaf = index.resolveChain(root.map((m) => ({ ...m, uri: g.uri })), ref.members).at(-1);

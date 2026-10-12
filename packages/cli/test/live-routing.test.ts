@@ -123,3 +123,21 @@ it("routes selected native reads and preserves typed display in text and scoped 
   expect(errors).toEqual([]);
   expect(close).toHaveBeenCalledTimes(2);
 });
+
+it("a watch gives up with an error when no live values come back after the connection was lost", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rung-live-lost-")), dir = join(root, "plc", "P", "blocks");
+  await saveConfig(root, defaultConfig("fixture.ap20", "V20", "", ["P"])); await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "G.db"), 'DATA_BLOCK "G"\n   VAR \n      n : Int;\n   END_VAR\nBEGIN\nEND_DATA_BLOCK');
+  const release = vi.fn(async () => {}), errors: string[] = [];
+  vi.spyOn(broker, "brokerReader").mockResolvedValue({ read: async () => [], close: async () => {}, subscribe: async (_labels, _cycle, cb) => {
+    const scope = { device: "P", address: "192.168.250.1", transport: "s7commplus" as const, epoch: 1 };
+    cb({ at: 1, scope, values: { n: 1 }, errors: {}, observedAt: { n: 1 }, state: "live" });
+    cb({ at: 2, scope, values: { n: 1 }, errors: { n: "PLC disconnected" }, observedAt: {}, state: "disconnected" });
+    return { close: release };
+  } });
+  expect(await main(["live", "watch", "--file", "plc/P/blocks/G.db", "--json", "--reconnect-timeout", "0.05"], {
+    cwd: root, env: {}, stdout() {}, stderr: s => errors.push(s), stopSignal: new Promise<void>(() => {}),
+  })).toBe(1);
+  expect(errors.join("")).toMatch(/no live values/);
+  expect(release).toHaveBeenCalledOnce();
+});

@@ -159,6 +159,8 @@ namespace Rung.Bridge.Core
         public string PcInterface;       // null = the only PG/PC interface of the mode
         public int PcInterfaceNumber = 1;
         // a read access password comes from RUNG_PLC_PASSWORD in the bridge's environment, as for downloads
+        /// <summary>Trust the certificate the PLC shows for this upload (a new project knows none yet).</summary>
+        public bool TrustCertificate;
     }
 
     public sealed class UploadOutcome

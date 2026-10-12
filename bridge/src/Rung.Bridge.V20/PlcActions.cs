@@ -147,9 +147,13 @@ namespace Rung.Bridge.V20
                         throw new RpcException(ErrorCodes.BadRequest, "action must be state, online or offline");
                 }
             }
-            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message.Trim() + Through(target)); }
             return new OnlineStatus { Device = device, State = reached ?? provider.State.ToString() };
         }
+
+        /// <summary>Which way rung tried to go online, for a failure TIA Portal explains only with "Changing to online mode failed".</summary>
+        static string Through(ConnectionTarget t) =>
+            t == null || string.IsNullOrEmpty(t.PcInterface) ? "" : " (through " + t.PcInterface + (string.IsNullOrEmpty(t.TargetInterface) ? "" : " to the CPU's " + t.TargetInterface) + (string.IsNullOrEmpty(t.Address) ? "" : " at " + t.Address) + "; is the PLC's address on that interface? rung interfaces lists them)";
 
         static void CheckOnlineAddress(ConnectionTarget target)
         {
@@ -281,7 +285,7 @@ namespace Rung.Bridge.V20
                 Walk(result.RootElement, "", byName, outcome);
                 return outcome;
             }
-            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message); }
+            catch (EngineeringException e) { throw new RpcException(ErrorCodes.OnlineFailed, e.Message.Trim() + Through(target)); }
             finally { if (wentOnline) GoOfflineQuietly(provider); }
         }
 
@@ -429,7 +433,7 @@ namespace Rung.Bridge.V20
         /// </summary>
         public UploadOutcome UploadStation(UploadRequest request)
         {
-            ReadOnlyPolicy.RefuseMutation();
+            ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
             Alive();
             Listen();
             // the project gains a station: a project change like an import
@@ -450,6 +454,10 @@ namespace Rung.Bridge.V20
             var outcome = new UploadOutcome();
             var needsPassword = false;
             UploadResult result;
+            // a PLC with secure communication shows its certificate, which a new project does not know yet: trusted only
+            // when the user said so for this run (--trust-certificate), like going online
+            var asked = new Legitimation(new OnlineCredentialsInput { TrustCertificate = request.TrustCertificate, Password = Environment.GetEnvironmentVariable("RUNG_PLC_PASSWORD") });
+            cfg.OnlineLegitimation += asked.Answer;
             using (var guard = new PasswordPromptGuard(_tiaPid))
             {
                 try
@@ -467,14 +475,20 @@ namespace Rung.Bridge.V20
                             pw.SetPassword(s);
                         }
                         outcome.Messages.Add(c.Message);
+                        if (c is UploadMissingProducts) outcome.Messages.Add("rung answered: try the upload without the missing products (TryUpload)");
                     });
                 }
                 catch (EngineeringException e)
                 {
+                    if (asked.TlsAsked && !request.TrustCertificate)
+                        throw new RpcException(ErrorCodes.TlsUntrusted, request.Address + " shows a certificate TIA Portal does not trust yet" + (string.IsNullOrEmpty(asked.TlsInfo) ? "" : " (" + asked.TlsInfo + ")") + ": nothing was uploaded. Decide whether to trust it for this run (--trust-certificate).");
+                    if (asked.UserNeeded || asked.PasswordAsked && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RUNG_PLC_PASSWORD")))
+                        throw new RpcException(ErrorCodes.PasswordRequired, request.Address + " asks for a user or a password to go online: set RUNG_PLC_PASSWORD. Nothing was uploaded.");
                     throw new RpcException(ErrorCodes.OnlineFailed, "Upload from " + request.Address + " failed: " + Sentence(TiaReason(e))
                         + (needsPassword ? " The PLC asks for a password to read it: set RUNG_PLC_PASSWORD." : "")
                         + (string.Equals(pc.Name, "PLCSIM", StringComparison.OrdinalIgnoreCase) ? " S7-PLCSIM cannot be uploaded as a station; upload from a real PLC." : ""));
                 }
+                finally { cfg.OnlineLegitimation -= asked.Answer; }
             }
             outcome.State = result.State.ToString();
             void Flatten(UploadResultMessageComposition list)
@@ -589,7 +603,7 @@ namespace Rung.Bridge.V20
                 return pc.TargetInterfaces.Find(t.TargetInterface) ?? throw new RpcException(ErrorCodes.NoTarget, "No target interface \"" + t.TargetInterface + "\" on " + t.PcInterface + "; run rung interfaces");
             var all = pc.TargetInterfaces.ToList();
             if (all.Count == 1) return all[0];
-            throw new RpcException(ErrorCodes.NoTarget, (all.Count == 0 ? "No target interface" : "Several target interfaces (" + string.Join(", ", all.Select(a => a.Name)) + ")") + " on " + t.PcInterface + "; set target_interface in rung.toml");
+            throw new RpcException(ErrorCodes.NoTarget, (all.Count == 0 ? "No target interface" : "Several target interfaces (" + string.Join(", ", all.Select(a => a.Name)) + ")") + " on " + t.PcInterface + "; set target_interface in rung.toml to the one that carries the PLC's address (rung interfaces lists the CPU's interfaces with their addresses)");
         }
 
         /// <summary>IP addresses configured for the interfaces of the CPU's station.</summary>

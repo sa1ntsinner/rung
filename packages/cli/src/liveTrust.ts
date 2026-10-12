@@ -23,8 +23,10 @@ async function inspectCertificate(address: string, env: Io["env"]): Promise<Cert
 }
 
 export async function trustLiveCertificate(dir: string, io: Io, device?: string,
-  inspect: (address: string, env: Io["env"]) => Promise<Certificate> = inspectCertificate): Promise<number> {
-  if (!io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "Certificate trust requires an interactive terminal");
+  inspect: (address: string, env: Io["env"]) => Promise<Certificate> = inspectCertificate, expectSha256?: string): Promise<number> {
+  const expected = expectSha256?.replace(/[:\s]/g, "").toUpperCase();
+  if (expected !== undefined && !/^[A-F0-9]{64}$/.test(expected)) throw new WorkspaceError("BAD_ARGUMENT", "--expect-sha256 needs the 64 hex digits of the certificate's SHA-256");
+  if (expected === undefined && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "Certificate trust requires an interactive terminal, or --expect-sha256 <fingerprint> to pin a certificate you compared beforehand");
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws, { raw: true });
   const selected = selectLiveTarget(config, { ...(device ? { device } : {}) }, io.env);
@@ -32,12 +34,19 @@ export async function trustLiveCertificate(dir: string, io: Io, device?: string,
   const certificate = await inspect(selected.target.address, selected.target.readOnly ? { ...io.env, RUNG_READ_ONLY: "1" } : io.env);
   if (certificate.address !== selected.target.address || !/^[a-fA-F0-9]{64}$/.test(certificate.certificateSha256)) throw new WorkspaceError("CONFIG_INVALID", "Host returned an invalid certificate binding");
   io.stdout(`PLC ${selected.device} at ${selected.target.address}\n${certificate.details}\n`);
-  const question = `Compare this certificate with the TIA Portal project. To pin it for ${selected.device} at ${selected.target.address}, type ${selected.device}: `;
-  const rl = io.prompt ? undefined : createInterface({ input: process.stdin, output: process.stdout });
-  let answer: string;
-  try { answer = await (io.prompt ? io.prompt(question) : rl!.question(question)); }
-  finally { rl?.close(); }
-  if (answer !== selected.device) { io.stderr("Certificate trust cancelled\n"); return 1; }
+  if (expected !== undefined) {
+    if (certificate.certificateSha256.toUpperCase() !== expected) {
+      io.stderr(`rung: the PLC's certificate has SHA-256 ${certificate.certificateSha256.toUpperCase()}, not the expected ${expected}: nothing pinned\n`);
+      return 1;
+    }
+  } else {
+    const question = `Compare this certificate with the TIA Portal project. To pin it for ${selected.device} at ${selected.target.address}, type ${selected.device}: `;
+    const rl = io.prompt ? undefined : createInterface({ input: process.stdin, output: process.stdout });
+    let answer: string;
+    try { answer = await (io.prompt ? io.prompt(question) : rl!.question(question)); }
+    finally { rl?.close(); }
+    if (answer !== selected.device) { io.stderr("Certificate trust cancelled\n"); return 1; }
+  }
   const current = await loadConfig(ws, { raw: true });
   const target = selectLiveTarget(current, { device: selected.device }, io.env).target;
   if (JSON.stringify(target) !== JSON.stringify(selected.target)) throw new WorkspaceError("CONFIG_INVALID", "PLC configuration changed during confirmation; inspect the certificate again");

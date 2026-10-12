@@ -18,6 +18,8 @@ namespace Rung.Bridge.V20
         public bool OpenHeadless;
         /// <summary>With OpenHeadless: create the project when its file does not exist yet (rung init --from-plc).</summary>
         public bool CreateProject;
+        /// <summary>--scratch-upload: the new project exists only to receive an upload; allowed under the read-only lock.</summary>
+        public bool ScratchUpload;
         /// <summary>
         /// plc.download is refused without it: only `rung download` (and `rung watch` when downloads are on for the
         /// workspace) start a bridge that may download. Sync, pull, the MCP server and tools never ask for it.
@@ -42,6 +44,9 @@ namespace Rung.Bridge.V20
                 {
                     case "--read-only":
                         ReadOnlyPolicy.Lock();
+                        break;
+                    case "--scratch-upload":
+                        a.ScratchUpload = true;
                         break;
                     case "--project":
                         if (i + 1 >= args.Length) throw new ArgumentException("--project needs a path");
@@ -89,6 +94,21 @@ namespace Rung.Bridge.V20
         }
     }
 
+    /// <summary>
+    /// A new project for a station upload under the read-only lock: only one that does not exist yet, so no existing
+    /// project can be changed through it. Any other project creation stays refused while locked.
+    /// </summary>
+    public static class ScratchPolicy
+    {
+        public static void Apply(BridgeArgs a)
+        {
+            if (!a.ScratchUpload) { ReadOnlyPolicy.RefuseMutation(); return; }
+            if (string.IsNullOrEmpty(a.ProjectPath) || File.Exists(Path.GetFullPath(a.ProjectPath)))
+                throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: --scratch-upload needs a project that does not exist yet.");
+            ReadOnlyPolicy.AllowScratchUpload();
+        }
+    }
+
     public static class Program
     {
         public static int Main(string[] args)
@@ -100,7 +120,7 @@ namespace Rung.Bridge.V20
             BridgeArgs parsed;
             try { parsed = BridgeArgs.Parse(args); }
             catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 64; }
-            try { if (parsed.CreateProject) ReadOnlyPolicy.RefuseMutation(); }
+            try { if (parsed.CreateProject) ScratchPolicy.Apply(parsed); }
             catch (RpcException e) { Console.Error.WriteLine(e.Message); return 2; }
 
             // Must be registered before any Siemens type is touched (Siemens-recommended pattern).

@@ -466,7 +466,7 @@ export async function cmdSession(dir: string, v: Record<string, unknown>, io: Io
 /** --use/--mode/--number of rung connect name the PG/PC interface; without --use the bridge takes the only one. */
 export function uploadRequest(address: string, v: Record<string, unknown>): UploadRequest {
   if (!isIPv4(address)) throw new WorkspaceError("BAD_ARGUMENT", `${address} is not an IP address such as 192.168.0.1`);
-  return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v) } : {}) };
+  return { address, ...(v.mode ? { mode: String(v.mode) } : {}), ...(v.use ? { pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v) } : {}), ...(v["trust-certificate"] ? { trustCertificate: true } : {}) };
 }
 
 /** Prints what an upload brought; exit 3 when no station came. */
@@ -474,6 +474,11 @@ export function reportUpload(io: Io, r: UploadOutcome, address: string): number 
   for (const m of r.messages) io.stdout(`  ${m}\n`);
   if (!r.station) {
     io.stderr(`rung: nothing was uploaded from ${address} (${r.state})\n`);
+    return 3;
+  }
+  // TIA Portal may bring a station and still report the upload as failed (blocks it could not read): not a complete copy
+  if (r.state === "Error") {
+    io.stderr(`rung: the station "${r.station}" came from ${address}, but TIA Portal reports the upload as failed (see the messages above): do not rely on it as a complete copy\n`);
     return 3;
   }
   if (r.saveError) {
