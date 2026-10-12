@@ -70,9 +70,11 @@ export async function cmdPlcBackup(v: Record<string, unknown>, io: Io, steps: Pl
   const quiet = (sink: string[]): Io => ({ ...io, stdout: s => { sink.push(s); }, stderr: s => { sink.push(s); } });
   const step = async (name: string, run: () => Promise<string | void>): Promise<boolean> => {
     const t0 = Date.now();
-    io.stderr(`rung backup: ${name} …\n`);
-    try { const detail = await run(); log.push({ name, status: "ok", ms: Date.now() - t0, ...(detail ? { detail } : {}) }); return true; }
-    catch (e) { const detail = e instanceof Error ? e.message : String(e); log.push({ name, status: "failed", ms: Date.now() - t0, detail }); io.stderr(`rung backup: ${name} failed: ${detail}\n`); return false; }
+    // the step's name now, its result on the same line when it is done
+    io.stderr(`rung backup: ${name.padEnd(16)}`);
+    const took = () => { const s = Math.round((Date.now() - t0) / 1000); return s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`; };
+    try { const detail = await run(); log.push({ name, status: "ok", ms: Date.now() - t0, ...(detail ? { detail } : {}) }); io.stderr(`ok${detail ? `, ${detail}` : ""} (${took()})\n`); return true; }
+    catch (e) { const detail = e instanceof Error ? e.message : String(e); log.push({ name, status: "failed", ms: Date.now() - t0, detail }); io.stderr(`failed: ${detail} (${took()})\n`); return false; }
   };
   const skip = (name: string, detail: string) => { log.push({ name, status: "skipped", ms: 0, detail }); io.stderr(`rung backup: ${name} skipped: ${detail}\n`); };
   // the project's files change until TIA Portal has closed it: the hashes are taken only after that
@@ -96,6 +98,8 @@ export async function cmdPlcBackup(v: Record<string, unknown>, io: Io, steps: Pl
     const code = await steps.init(ws, { "from-plc": address, project, ...pick(v, ["use", "mode", "number", "trust-certificate"]) }, quiet(said));
     await writeFile(join(out, "upload.log"), said.join(""));
     if (code !== 0) throw new Error(said.join("").trim().split("\n").filter(l => l.startsWith("rung:")).at(-1)?.replace(/^rung: /, "") ?? `exit ${code}`);
+    const station = /uploaded the station "([^"]+)"/.exec(said.join(""))?.[1];
+    return station ? `station "${station}"` : undefined;
   });
   if (!uploaded) return finish(out, address, started, log, files, io, 1);
   const config = await loadConfig(ws);
@@ -124,6 +128,7 @@ export async function cmdPlcBackup(v: Record<string, unknown>, io: Io, steps: Pl
     if (code === 1) throw new Error("rung pull failed");
     const failed = said.join("").split("\n").filter(l => /EXPORT_FAILED/.test(l)).length;
     if (failed) throw new Error(`${failed} objects could not be exported as text${compiled !== 0 ? " (the compile reported errors)" : ""}; see pull.log`);
+    return `${(await listFiles(join(ws, "plc"))).length} files`;
   });
   await close();
 
@@ -144,17 +149,19 @@ export async function cmdPlcBackup(v: Record<string, unknown>, io: Io, steps: Pl
   if (!certified) skip("cpu, alarms, values", "no trusted certificate");
   else {
     try {
-      await step("cpu state", async () => { reader = await steps.reader(ws, io.env, device); const s = await reader.state!(); await writeFile(join(out, "cpu.json"), JSON.stringify(s, null, 2) + "\n"); files.cpu = { ...s.identity, mode: s.state.mode, cycleMs: s.state.cycleMs }; });
+      await step("cpu state", async () => { reader = await steps.reader(ws, io.env, device); const s = await reader.state!(); await writeFile(join(out, "cpu.json"), JSON.stringify(s, null, 2) + "\n"); files.cpu = { ...s.identity, mode: s.state.mode, cycleMs: s.state.cycleMs }; return cpuLine(s); });
       if (reader) {
         await step("alarms", async () => { const a = await reader!.alarms!(1033); await writeFile(join(out, "alarms.json"), JSON.stringify(a, null, 2) + "\n"); return `${a.alarms.length} active`; });
         if (v["no-values"]) skip("values", "--no-values");
         else await step("values", async () => { const r = await captureValues(ws, device, reader!, join(out, "values")); files.values = r; if (r.failed) return `${r.values} values, ${r.failed} not readable`; return `${r.values} values of ${r.blocks} data blocks`; });
-        await step("cpu state after", async () => { const s = await reader!.state!(); files.cycleAfterMs = s.state.cycleMs; files.modeAfter = s.state.mode; });
+        await step("cpu state after", async () => { const s = await reader!.state!(); files.cycleAfterMs = s.state.cycleMs; files.modeAfter = s.state.mode; return cpuLine(s); });
       }
     } finally { await reader?.close().catch(() => {}); }
   }
   return finish(out, address, started, log, files, io, log.some(s => s.status !== "ok") ? 2 : 0);
 }
+
+const cpuLine = (s: { state: { mode: string; cycleMs?: number | null } }) => `${s.state.mode.toUpperCase()}${s.state.cycleMs == null ? "" : `, cycle ${s.state.cycleMs.toFixed(1)} ms`}`;
 
 function pick(v: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.filter(k => v[k] !== undefined).map(k => [k, v[k]]));

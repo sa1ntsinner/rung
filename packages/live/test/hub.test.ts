@@ -229,5 +229,9 @@ it("replaces an exited host under a live subscription and keeps epochs counting 
     const last = seen.at(-1)!;
     expect(last.state).toBe("live");
     expect(last.scope.epoch).toBeGreaterThan(3);
+    // and the replacement host's later frames keep coming (its buffered first frame must not raise the epoch twice)
+    backends[1]!.emit!(frame(["DB.x"], 99, 3));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(seen.at(-1)?.values).toMatchObject({ x: 99 });
   } finally { await hub.close(); vi.useRealTimers(); }
 });

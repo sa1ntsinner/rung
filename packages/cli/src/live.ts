@@ -33,6 +33,14 @@ export async function webApiFor(dir: string, env: Io["env"], opts: BackendOption
   return new WebApiClient({ url: w.url, user: w.user, password, readOnly: selected.target.readOnly, ...(w.insecure ? { insecure: true } : {}) });
 }
 
+/** CPU state for a person: what it is, whether it runs, how long a cycle takes, how full its memories are. */
+export function stateText(r: OnlineStateResult): string {
+  const size = (b: number) => b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+  const id = [r.identity.cpu, r.identity.firmware && `firmware ${r.identity.firmware.replace(/\.0$/, "")}`].filter(Boolean).join(", ");
+  const memory = r.state.memory?.map(m => `  ${m.name.padEnd(18)} ${size(m.usedBytes).padStart(8)} of ${size(m.totalBytes).padEnd(8)} ${String(Math.round(100 * m.usedBytes / Math.max(1, m.totalBytes))).padStart(3)} %`).join("\n") ?? "  memory unavailable";
+  return `${r.scope.device} at ${r.scope.address}${id ? `: ${id}` : ""}\n${r.state.mode.toUpperCase()}${r.state.cycleMs == null ? "" : `, cycle ${r.state.cycleMs.toFixed(1)} ms`}\n${memory}\n`;
+}
+
 export interface LiveOptions {
   device?: string;
   transport?: string;
@@ -75,7 +83,7 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     try {
       if (sub === "state") {
         const result = await reader.state!();
-        io.stdout(opts.json ? JSON.stringify(result) + "\n" : `${result.scope.device} · ${result.scope.address} · ${result.identity.plcName}\n${result.state.mode}${result.state.cycleMs == null ? "" : ` · ${result.state.cycleMs} ms`}\n${result.state.memory?.map(m => `${m.name}: ${m.usedBytes}/${m.totalBytes} bytes`).join("\n") ?? "Memory unavailable"}\n`);
+        io.stdout(opts.json ? JSON.stringify(result) + "\n" : stateText(result));
       } else {
         const print = (frame: OnlineAlarmResult) => io.stdout(opts.json ? JSON.stringify(frame) + "\n" : `${frame.scope.device} · ${frame.scope.address} · ${frame.connectionState ?? "connected"}\n${frame.alarms.map(a => `${a.active ? "ACTIVE" : "CLEARED"} ${a.id} · ${a.cpuTimestamp ?? "CPU time unavailable"} · ${a.text.replace(/[\x00-\x1f\x7f]/g, " ")}`).join("\n")}\n`);
         if (opts.stream) { lease = await reader.subscribeAlarms!(opts.lcid ?? 1033, print); await (io.stopSignal ?? new Promise<void>(r => process.once("SIGINT", r))); }

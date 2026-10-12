@@ -173,8 +173,9 @@ export class LiveHub {
     const generation = e.generation + 1;
     let opening = true, buffered: OnlineReadResult | undefined;
     const receive = (raw: OnlineReadResult) => {
+      // the host's own frame is buffered while opening: mapped once, when it is delivered
+      if (opening) { buffered = raw; return; }
       const frame = e.epochBase ? { ...raw, scope: { ...raw.scope, epoch: raw.scope.epoch + e.epochBase } } : raw;
-      if (opening) { buffered = frame; return; }
       if (this.closed || generation !== e.generation || frame.scope.epoch < e.epoch) return;
       e.epoch = frame.scope.epoch; e.latest = frame;
       for (const c of e.consumers.values()) this.deliver(c, frame);
