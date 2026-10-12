@@ -166,6 +166,16 @@ describe("rung test runner", () => {
     expect(await run("{ a: 32767, on: true }")).toBeUndefined();
   });
 
+  it("sets a 64-bit word past 2^53 exactly as 16#..., such as a CANopen word in an LWord's top word", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/Fx_Top.scl", 'FUNCTION_BLOCK "Fx_Top"\nVAR_INPUT\n  raw : LWord;\nEND_VAR\nVAR_OUTPUT\n  top : Word;\nEND_VAR\nBEGIN\n  #top := #raw.%W3;\nEND_FUNCTION_BLOCK\n', 0);
+    const run = async (raw: string) => (await runTestFile(idx, "t.yaml", `block: Fx_Top\ncases:\n  - name: top word\n    steps:\n      - set: { raw: ${raw} }\n      - cycle: 1\n      - expect: { top: 12405 }\n`)).cases[0]!;
+    expect([(await run("'16#3075_0000_0000_0000'")).passed, (await run("'16#3075_0000_0000_0000'")).error]).toEqual([true, undefined]);
+    expect((await run("'16#3075_0000_0000_0001'")).error).toMatch(/16#3075_0000_0000_0001 cannot be held exactly/);
+    expect((await run("3491697086095687680")).error).toMatch(/is past 2\^53 and may not be what was written; write it as 16#/);
+    expect((await run("'16#1_0000_0000_0000_0000'")).error).toMatch(/raw is LWord: .* is outside/);
+  });
+
   it("with two PLCs, the test says which PLC's block (plc: or tests/<PLC>/), never a guess", async () => {
     const idx = new WorkspaceIndex();
     for (const [plc, add] of [["PLC_A", 1], ["PLC_B", 2]] as const)

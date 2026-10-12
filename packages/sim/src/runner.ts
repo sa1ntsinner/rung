@@ -125,7 +125,13 @@ function normalizeExpected(v: unknown, type?: string): unknown {
   if (typeof v === "string" && (isDate(type) || isTod(type))) return dateValue(v) ?? v;
   // a whole number written as TIA Portal does: 16#00F3, 2#0000_0101, WORD#16#FF, INT#16#7F
   const based = typeof v === "string" ? /^(?:[A-Z]+#)?(2|8|16)#([0-9A-F]+(?:_[0-9A-F]+)*)$/i.exec(v.trim()) : null;
-  if (based) return parseInt(based[2]!.replace(/_/g, ""), Number(based[1]));
+  if (based) {
+    const radix = { "2": "0b", "8": "0o", "16": "0x" }[based[1]!]!;
+    const big = BigInt(radix + based[2]!.replace(/_/g, ""));
+    // past 2^53 only where a double holds it, as in the code (an LWord's top word: 16#3075_0000_0000_0000)
+    if (BigInt(Number(big)) !== big) throw new SimError(`${(v as string).trim()} cannot be held exactly: the simulator keeps integers exact up to 2^53, and beyond only where a double holds them`);
+    return Number(big);
+  }
   if (typeof v === "string" && ((!type || isTime(type)) && /^(T|TIME|LT|LTIME)#/i.test(v) || isTime(type) && /^\d+(?:\.\d+)?(?:ms|s|m|h)$/i.test(v))) return toMs(v);
   return v;
 }
@@ -222,9 +228,9 @@ function shapeProblem(spec: unknown): string | undefined {
 }
 
 const INT_RANGE: Record<string, [number, number]> = {
-  SINT: [-128, 127], INT: [-32768, 32767], DINT: [-2147483648, 2147483647], LINT: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
-  USINT: [0, 255], UINT: [0, 65535], UDINT: [0, 4294967295], ULINT: [0, Number.MAX_SAFE_INTEGER],
-  BYTE: [0, 255], WORD: [0, 65535], DWORD: [0, 4294967295], LWORD: [0, Number.MAX_SAFE_INTEGER],
+  SINT: [-128, 127], INT: [-32768, 32767], DINT: [-2147483648, 2147483647], LINT: [-(2 ** 63), 2 ** 63 - 1],
+  USINT: [0, 255], UINT: [0, 65535], UDINT: [0, 4294967295], ULINT: [0, 2 ** 64 - 1],
+  BYTE: [0, 255], WORD: [0, 65535], DWORD: [0, 4294967295], LWORD: [0, 2 ** 64 - 1],
 };
 
 /** Rejects a `set` value the variable's declared type cannot hold (40000 in an Int, 1.5 in a DInt, a number in a Bool). */
@@ -234,7 +240,8 @@ export function checkType(name: string, type: string, value: Value) {
   const range = INT_RANGE[t];
   if (range) {
     if (typeof value !== "number" || !Number.isInteger(value)) throw new SimError(`${name} is ${type}: expects a whole number, got ${shown(value)}`);
-    if (value < range[0] || value > range[1]) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
+    // a 64-bit bound past 2^53 rounds up to the first value outside it, so it is exclusive there
+    if (value < range[0] || value > range[1] || (range[1] > Number.MAX_SAFE_INTEGER && value >= range[1])) throw new SimError(`${name} is ${type}: ${value} is outside ${range[0]}..${range[1]}`);
   } else if (isTime(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a duration, such as T#500ms, got ${shown(value)}`);
   else if (isDate(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a date, such as D#2024-02-28, got ${shown(value)}`);
   else if (isTod(t) && typeof value !== "number") throw new SimError(`${name} is ${type}: expects a time of day, such as TOD#08:30:00, got ${shown(value)}`);
@@ -324,7 +331,8 @@ function hinted(e: unknown, index: WorkspaceIndex, g: GlobalSymbol, typed: strin
 
 /**
  * Everything a stub can stand in for, by upper-case name: the PLC's FBs, FCs and technology objects, the types its
- * blocks declare instances of and the names they call, and the instructions of the catalogue and the simulator.
+ * blocks declare instances of, the names they call, the data blocks they use that the workspace does not have, and
+ * the instructions of the catalogue and the simulator.
  */
 function stubbable(seen: WorkspaceIndex): Map<string, string> {
   const out = new Map<string, string>();
@@ -335,7 +343,7 @@ function stubbable(seen: WorkspaceIndex): Map<string, string> {
   for (const s of seen.allGlobals()) {
     if (s.kind === "FB" || s.kind === "FC" || s.kind === "OBJECT") add(s.name);
     for (const v of s.block?.vars ?? []) add(v.isArray ? (splitArrayType(v.type)?.element ?? "") : (v.typeRef ?? v.type));
-    for (const r of s.block?.refs ?? []) if (r.kind === "call" || (r.kind === "global" && (r.access === "call" || r.name.includes("~")))) add(r.name);
+    for (const r of s.block?.refs ?? []) if (r.kind === "call" || (r.kind === "global" && (r.access === "call" || r.name.includes("~") || !seen.global(r.name)))) add(r.name);
     if (s.block?.dbOf) add(s.block.dbOf);
   }
   for (const e of STANDARD) add(e.name);
@@ -734,6 +742,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
                   const first = seen.membersOf(target.decl ?? { type: "", isArray: false, name: k })[0]?.name ?? Object.keys(mem)[0] ?? "member";
                   throw new SimError(`${k} is ${target.decl?.type ?? "a struct"}: set its members, e.g. '${k}.${first}'`);
                 }
+                // a plain number past 2^53 may have lost digits in YAML already: only 16#... is checked exact
+                if (typeof v === "number" && Number.isInteger(v) && !Number.isSafeInteger(v)) throw new SimError(`${k}: ${v} is past 2^53 and may not be what was written; write it as 16#... so rung can check it is exact`);
                 const value = normalizeExpected(v, target.decl?.type) as Value;
                 if (target.decl) checkType(k, target.decl.type, value);
                 else checkKind(k, currentValue, value);

@@ -684,7 +684,12 @@ export class Simulator {
         if (id === undefined) throw new SimError(`"${name}" is a hardware identifier: it has no value offline; give it one in the test (stubs: { '"${name}"': 257 })`);
         this.globals[key] = id;
         this.stubCalled(name);
-      } else throw new SimError(`"${name}" is not a data block or tag in the workspace`);
+      } else if (!g && this.stubOf(name)) {
+        // a data block the workspace does not have (a library or system FB's instance DB left out of the export):
+        // its members as the stub names them, readable and settable like a technology object's
+        this.globals[key] = { __fb: name.replace(/^"|"$/g, ""), mem: copyValue(this.stubOf(name)!) as Struct, stub: true };
+        this.stubCalled(name);
+      } else throw new SimError(`"${name}" is not a data block or tag in the workspace: give it a stub (stubs: { '"${name}"': { member: value } })`);
     }
     return { obj: this.globals, key };
   }
