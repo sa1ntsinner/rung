@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 const plugin = fileURLToPath(new URL("../../editors/neovim", import.meta.url));
 const cli = fileURLToPath(new URL("../../packages/cli/dist/index.js", import.meta.url));
 const nvim = spawnSync("nvim", ["--version"], { encoding: "utf8" });
-const ready = nvim.status === 0 && existsSync(cli);
+// rung.nvim needs Neovim 0.11+ (`nvim -l` came in 0.9): an older one, as Ubuntu 22.04 ships 0.6, would hang the run
+const [major = 0, minor = 0] = (/NVIM v(\d+)\.(\d+)/.exec(nvim.stdout ?? "") ?? []).slice(1).map(Number);
+const ready = nvim.status === 0 && (major > 0 || minor >= 11) && existsSync(cli);
 
 describe.skipIf(!ready)("rung.nvim", () => {
   it("passes its smoke test: commands, tests, coverage, recorded expectations", () => {
