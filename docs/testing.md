@@ -38,6 +38,7 @@ cases:
 - Every case needs a nonempty `name:` unique within its file, and at least one step.
 - `set` writes inputs, statics, instance members (`Timer.PT`) or globals (`"DB".member`, `"Tag"`). Array elements are addressed as `'pts[2].x'` or `'grid[1,2]'` (quote them inside `{ … }`). The value must fit the variable: `true`/`false` for BOOL, a whole number within range for integer types (40000 is refused for an Int), numbers for reals, strings within their declared length. Set arrays and structs element by element (`'Levels[1]'`, `Data.Cmd.Start`); whole lists and maps are refused.
 - With several PLCs that each have a block of that name, say which: `plc: PLC_1` in the file, or keep the test under `tests/PLC_1/`. rung refuses to guess.
+- 64-bit integers (`LWord`, `LInt`, `ULInt`) past 2^53 are written as `16#…` (`'16#3075_0000_0000_0000'`, a CANopen word in an LWord's top word); rung refuses one a double cannot hold exactly, and a plain number past 2^53, which YAML may already have rounded.
 - `expect` compares with a small tolerance for reals; TIME values accept the same durations as `advance` (`500ms`, `T#500ms`, `2s`).
 - `advance` needs a unit (`200ms`, not `200`). It runs whole cycles, rounded up, at least one: at `cycle: 10ms`, `15ms` runs two cycles and `0ms` runs one.
 - `--case <file>#<n>` runs one case and nothing else: the file is still read and checked as a whole, the other cases do not run. A number past the file's cases, or a file that is not there, is an error, never "all cases". `--json` gives every case its `index` in the file.
@@ -106,6 +107,7 @@ cases:
   - Arguments with `:=` are inputs.
 - **An FC or instruction** named there returns `RET_VAL` from the stub, or else 0 (for a workspace FC: its type's default). It writes the outputs the stub names; an output it does not name keeps the caller's value.
 - **A technology object**, named with its quotes, has the members the stub names. They are readable and settable (`'"Axis_1".StatusWord'`), and the object can be called like an instance.
+- **A data block the workspace does not have** (often a library or system FB's instance DB that was not exported, such as a PID's), named with its quotes, has the members the stub names, readable and settable (`'"Pid_Steer".ER'`). Without a stub the error says how to give one.
 - **A hardware identifier** (`"Rack~Gateway"`, a system constant) has no value offline. The test gives it one, a number, where the code passes it on (to a stubbed RDREC, for example).
 - **Only what is named is stubbed.**
   - `rung test` prints once per file what the stubs stood in for (`stubbed: RDREC ×2, MB_CLIENT`), and marks a stub of code the simulator could run itself ("replaces code the simulator runs"). This is allowed, to test one unit alone.

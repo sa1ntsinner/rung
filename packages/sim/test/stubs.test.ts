@@ -35,6 +35,7 @@ function workspace() {
   set("blocks/Fx_Log.scl", 'FUNCTION "Fx_Log" : Int\nVAR_INPUT\n  msg : String;\nEND_VAR\nVAR_OUTPUT\n  code : Int;\nEND_VAR\nBEGIN\n  #code := 1;\n  #Fx_Log := 1;\nEND_FUNCTION\n');
   set("blocks/Fx_Drive.scl", fb("Fx_Drive", "VAR_OUTPUT\n  ready : Bool;\n  status : Word;\nEND_VAR\nVAR\n  pw : MC_POWER;\nEND_VAR", '  #pw(Axis := "Fx_Axis", Enable := TRUE);\n  #ready := #pw.Status;\n  #status := "Fx_Axis".StatusWord;'));
   set("techobjects/Fx_Axis.xml", AXIS);
+  set("blocks/Fx_Steer.scl", fb("Fx_Steer", "VAR_OUTPUT\n  forward : Bool;\nEND_VAR", '  #forward := "Pid_Steer".ER < -1.0;\n  "Pid_Steer".SP_INT := 5.0;'));
   set("blocks/Fx_Record.scl", fb("Fx_Record", "VAR_OUTPUT\n  ok : Bool;\nEND_VAR\nVAR\n  rd : RDREC;\nEND_VAR", '  #rd(REQ := TRUE, ID := "Rack_1~Valve_Module", INDEX := 1);\n  #ok := #rd.VALID;'));
   return idx;
 }
@@ -86,6 +87,15 @@ describe("rung test stubs", () => {
       { name: '"Fx_Axis"', calls: 1 },
       { name: "MC_POWER", calls: 2 },
     ]);
+  });
+
+  it("stubs a data block the workspace does not have, such as a library PID's instance DB left out of the export", async () => {
+    const run = (stubs: string, steps: string) => runTestFile(workspace(), "t.yaml", test("Fx_Steer", stubs, steps));
+    const r = await run("  '\"Pid_Steer\"': { ER: -2.0, SP_INT: 0.0 }", "      - cycle: 1\n      - expect: { forward: true, '\"Pid_Steer\".SP_INT': 5.0 }\n      - set: { '\"Pid_Steer\".ER': 0.0 }\n      - cycle: 1\n      - expect: { forward: false }\n");
+    expect([r.error, r.cases.map((c) => [c.passed, c.error, c.failures])]).toEqual([undefined, [[true, undefined, []]]]);
+    expect(r.stubbed).toEqual([{ name: '"Pid_Steer"', calls: 1 }]);
+    const missing = await run("  {}", "      - cycle: 1\n");
+    expect(missing.cases[0]!.error).toContain(`"Pid_Steer" is not a data block or tag in the workspace: give it a stub (stubs: { '"Pid_Steer"': { member: value } })`);
   });
 
   it("gives a hardware identifier the number the device configuration would, where a stub needs one", async () => {
