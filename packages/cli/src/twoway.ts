@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
-import { StateStore, WorkspaceError, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, shellPath, writesGranted, type RungConfig } from "@rung/core";
+import { StateStore, WorkspaceError, assertPlcWritable, plcReadOnly, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, shellPath, writesGranted, type RungConfig } from "@rung/core";
 import { OwnerClient, OwnerServer, Watcher, confirmDelete, localStatus, recordBackup, placeCompileMessages, renameObject, resolveConflict, restoreFile, syncOnce, unifiedDiff, type PlanEntry, type RenameReport, type SyncReport } from "@rung/sync";
 import { WorkspaceIndex, diagnostics, nearest, uriOf } from "@rung/lsp";
 import { readFile } from "node:fs/promises";
@@ -74,6 +74,8 @@ function printPlan(io: Io, r: SyncReport, writesOff: boolean) {
 }
 
 export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; json?: boolean } = {}): Promise<number> {
+  const config = await loadConfig(dir);
+  if (!opts.preview) assertPlcWritable(config, undefined, io.env);
   const owner = await OwnerClient.connect(dir);
   if (owner && opts.preview) {
     try {
@@ -99,7 +101,6 @@ export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; js
       owner.close();
     }
   }
-  const config = await loadConfig(dir);
   // the lock before the bridge: a workspace another rung process holds fails before a TIA Portal starts for nothing
   const state = await openState(dir, config);
   try {
@@ -126,7 +127,11 @@ export async function cmdSync(dir: string, io: Io, opts: { preview?: boolean; js
 
 /** Runs the workspace owner until the stop signal: watcher + IPC for CLI, LSP and MCP clients. */
 export async function cmdWatch(dir: string, io: Io): Promise<number> {
-  const config = await loadConfig(dir);
+  const readConfig = async () => {
+    const config = await loadConfig(dir);
+    return plcReadOnly(config, undefined, io.env) ? { ...config, writesOff: true as const, sync: { ...config.sync, import: "manual" as const } } : config;
+  };
+  const config = await readConfig();
   const state = await openState(dir, config); // single writer: fails with STATE_LOCKED if another owner runs
   let server: OwnerServer | undefined;
   let released!: () => void;
@@ -141,11 +146,11 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   let shown = standing({ exported: 0, imported: 0, created: 0, merged: 0, unchanged: 0, conflicts: 0, removed: 0, pendingDeletes: 0, warnings: [], diagnostics: [] });
   const watcher = new Watcher(dir, state, {
     config,
-    reloadConfig: async () => (live = await loadConfig(dir)),
+    reloadConfig: async () => (live = await readConfig()),
     validateTags,
     // the watch takes downloads only when they are on for the workspace (and checks the confirmed PLC itself)
     bridgeFactory: async () => {
-      const b = await bridgeFor(live, io, [...importFlags(live), ...(config.download.enabled ? ["--allow-download"] : [])]);
+      const b = await bridgeFor(live, io, [...importFlags(live), ...(config.download.enabled && !plcReadOnly(live, undefined, io.env) ? ["--allow-download"] : [])]);
       // the editors show it while TIA Portal starts (the keeper in the background, or a window for Open in TIA Portal)
       b.onEvent((e) => {
         if (e.event === "tia-starting") server?.emit("phase", { phase: "starting-tia", detail: (e.params as { headless?: boolean } | undefined)?.headless === false ? "window" : "background" });
@@ -185,7 +190,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
   };
   server = await OwnerServer.start(dir, {
     status: async () => statusOf(state, watcher),
-    syncNow: async () => watcher.syncNow(true), // asked for: refused imports are tried again
+    syncNow: async () => { assertPlcWritable(await readConfig(), undefined, io.env); return watcher.syncNow(true); },
     preview: async () => {
       const r = await watcher.preview();
       if (!r) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
@@ -200,7 +205,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
     restore: async (p) => restoreFile(dir, state, String(p.path)),
     // the write right as it is now, not as the last pass read it: rung writes off may have come in between
     confirmDelete: async (p) => {
-      mayWrite((live = await loadConfig(dir)), "deleted");
+      mayWrite((live = await readConfig()), "deleted", io.env);
       await watcher.refresh();
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
@@ -208,7 +213,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       return { deleted: true, users: users.map((a) => state.get(a)?.path ?? a) };
     },
     rename: async (p) => {
-      mayWrite((live = await loadConfig(dir)), "renamed");
+      mayWrite((live = await readConfig()), "renamed", io.env);
       await watcher.refresh();
       const b = watcher.bridgeForTools;
       if (!b) throw new WorkspaceError("NOT_READY", `rung watch is still connecting to ${config.project.tiaVersion === "CODESYS" ? "CODESYS" : "TIA Portal"}; try again in a moment`);
@@ -241,6 +246,7 @@ export async function cmdWatch(dir: string, io: Io): Promise<number> {
       // rung download's own checks, applied here too: whatever else reaches the owner cannot skip them
       if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
       const request = p.request as { device?: string } | undefined;
+      assertPlcWritable(await readConfig(), request?.device, io.env);
       if (!request?.device || p.confirmed !== request.device)
         throw new WorkspaceError("BAD_ARGUMENT", "a download names the PLC a person confirmed it for; run rung download, which asks for it");
       return tools().download(request as never);
@@ -355,7 +361,8 @@ export async function cmdResolve(file: string, mode: "ours" | "theirs" | "merged
 }
 
 /** rung rename and rung confirm-delete change the project: refused before any bridge starts when this copy may not write. */
-function mayWrite(config: RungConfig, action: string): void {
+function mayWrite(config: RungConfig, action: string, env: Io["env"] = process.env): void {
+  assertPlcWritable(config, undefined, env);
   if (config.writesOff) throw new WorkspaceError("WRITES_OFF", `not ${action}: writes to TIA Portal are off in this workspace (rung writes on)`);
   if (config.sync.import !== "auto") throw new WorkspaceError("WRITES_OFF", `not ${action}: sync.import = "manual" in rung.toml`);
 }
@@ -387,6 +394,8 @@ export async function cmdRestore(file: string, io: Io): Promise<number> {
 
 export async function cmdConfirmDelete(workspaceDir: string, what: string, io: Io, force = false): Promise<number> {
   const dir = await findWorkspace(workspaceDir);
+  const config = await loadConfig(dir);
+  assertPlcWritable(config, undefined, io.env);
   const address = await addressOf(dir, what, io.cwd);
   const owner = await OwnerClient.connect(dir);
   let users: string[] = [];
@@ -397,8 +406,7 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
       owner.close();
     }
   } else {
-    const config = await loadConfig(dir);
-    mayWrite(config, "deleted");
+    mayWrite(config, "deleted", io.env);
     const state = await openState(dir, config);
     try {
       const client = await bridgeFor(config, io, importFlags(config));
@@ -421,6 +429,8 @@ export async function cmdConfirmDelete(workspaceDir: string, what: string, io: I
  * else with a bridge of its own. Prints nothing (the language server calls it too).
  */
 export async function renameInTia(ws: string, address: string, newName: string, io: Io): Promise<RenameReport> {
+  const config = await loadConfig(ws);
+  assertPlcWritable(config, undefined, io.env);
   const owner = await OwnerClient.connect(ws);
   if (owner) {
     try {
@@ -429,8 +439,7 @@ export async function renameInTia(ws: string, address: string, newName: string, 
       owner.close();
     }
   }
-  const config = await loadConfig(ws);
-  mayWrite(config, "renamed");
+  mayWrite(config, "renamed", io.env);
   const client = await bridgeFor(config, io, importFlags(config));
   try {
     const state = await openState(ws, config);
@@ -469,6 +478,7 @@ export async function addressOf(ws: string, what: string, cwd: string): Promise<
 /** rung rename <file|name> <new-name>: TIA Portal renames it and keeps every use; the files that use it follow. */
 export async function cmdRename(dir: string, what: string, newName: string, io: Io): Promise<number> {
   const ws = await findWorkspace(dir);
+  assertPlcWritable(await loadConfig(ws), undefined, io.env);
   const address = await addressOf(ws, what, io.cwd).catch(async (e) => {
     // a tag or a variable is not an object of its own: say where it is renamed instead
     const index = new WorkspaceIndex();
@@ -521,6 +531,7 @@ export async function cmdWrites(dir: string, what: string | undefined, io: Io): 
     return 1;
   }
   const config = await loadConfig(dir, { raw: true });
+  if (what === "on") assertPlcWritable(config, undefined, io.env);
   if (what === "on") await grantWrites(dir, config);
   if (what === "off") await revokeWrites(dir);
   const on = writesGranted(await readWrites(dir), config);

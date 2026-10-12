@@ -44,6 +44,7 @@ namespace Rung.Bridge.V20
 
         public IReadOnlyList<CompileMessage> CompileHardware(string device)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             var compiler = StationCompiler(device);
@@ -341,6 +342,7 @@ namespace Rung.Bridge.V20
 
         public DownloadOutcome Download(DownloadRequest request)
         {
+            ReadOnlyPolicy.RefuseMutation();
             if (!_args.AllowDownload)
                 throw new RpcException(ErrorCodes.DownloadDisabled, "This bridge was not started for downloads: only rung download starts one that may download (--allow-download). Nothing was downloaded.");
             CheckOnlineAddress(request.Target);
@@ -427,6 +429,7 @@ namespace Rung.Bridge.V20
         /// </summary>
         public UploadOutcome UploadStation(UploadRequest request)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             // the project gains a station: a project change like an import

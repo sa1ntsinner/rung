@@ -6,6 +6,7 @@ import { parse, stringify } from "smol-toml";
 import { writeFileAtomic } from "./atomic.js";
 import { WorkspaceError } from "./errors.js";
 import { readWrites, writesGranted } from "./writes.js";
+import { plcReadOnly } from "./plcReadOnly.js";
 
 export interface RungConfig {
   format: 1;
@@ -58,12 +59,14 @@ export interface LivePlcConfig {
   transport: "s7commplus" | "webapi";
   address: string;
   allowWrites: boolean;
+  readOnly?: boolean;
   certificateSha256?: string;
   user?: string;
   webapi?: LiveWebApiConfig;
 }
 
 export interface PlcConnection {
+  readOnly?: boolean;
   address?: string;
   mode: string;
   pcInterface: string;
@@ -159,7 +162,8 @@ export function parseConfig(text: string): RungConfig {
     if (typeof n !== "number" || !Number.isInteger(n) || n < 1) fail(`plc.${name}.pc_interface_number must be a positive integer`);
     if (v.target_interface !== undefined && typeof v.target_interface !== "string") fail(`plc.${name}.target_interface must be a string`);
     if (v.address !== undefined && (typeof v.address !== "string" || !isIPv4(v.address))) fail(`plc.${name}.address must be an IPv4 address`);
-    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}), ...(typeof v.address === "string" ? { address: v.address } : {}) };
+    if (v.read_only !== undefined && typeof v.read_only !== "boolean") fail(`plc.${name}.read_only must be true or false`);
+    plc[name] = { mode: v.mode, pcInterface: v.pc_interface, pcInterfaceNumber: n, ...(v.read_only !== undefined ? { readOnly: v.read_only as boolean } : {}), ...(typeof v.target_interface === "string" ? { targetInterface: v.target_interface } : {}), ...(typeof v.address === "string" ? { address: v.address } : {}) };
   }
   const rawDl = (raw.download ?? {}) as Record<string, unknown>;
   const download: DownloadSettings = {
@@ -192,12 +196,14 @@ export function parseConfig(text: string): RungConfig {
       if (p.transport !== "s7commplus" && p.transport !== "webapi") fail(`live.plc.${name}.transport must be s7commplus or webapi`);
       if (typeof p.address !== "string" || !isIPv4(p.address)) fail(`live.plc.${name}.address must be a canonical IPv4 literal`);
       if (p.allow_writes !== undefined && typeof p.allow_writes !== "boolean") fail(`live.plc.${name}.allow_writes must be true or false`);
+      if (p.read_only !== undefined && typeof p.read_only !== "boolean") fail(`live.plc.${name}.read_only must be true or false`);
       if (p.certificate_sha256 !== undefined && (typeof p.certificate_sha256 !== "string" || !/^[a-fA-F0-9]{64}$/.test(p.certificate_sha256))) fail(`live.plc.${name}.certificate_sha256 must be a SHA-256 fingerprint`);
       if (p.user !== undefined && (typeof p.user !== "string" || !p.user)) fail(`live.plc.${name}.user must be a nonempty string`);
       const webapi = p.webapi === undefined ? undefined : parseWebApi(p.webapi, `live.plc.${name}.webapi`);
       if (webapi && new URL(webapi.url).hostname !== p.address) fail(`live.plc.${name}.webapi must bind to the same PLC address`);
       if (p.transport === "webapi" && !webapi) fail(`live.plc.${name}.webapi is required`);
       targets[name] = { transport: p.transport, address: p.address, allowWrites: p.allow_writes === true,
+        ...(p.read_only !== undefined ? { readOnly: p.read_only as boolean } : {}),
         ...(p.certificate_sha256 ? { certificateSha256: (p.certificate_sha256 as string).toUpperCase() } : {}),
         ...(p.user ? { user: p.user as string } : {}), ...(webapi ? { webapi } : {}) };
     }
@@ -241,7 +247,7 @@ export function formatConfig(c: RungConfig): string {
       ...(Object.keys(c.plc).length
         ? {
             plc: Object.fromEntries(
-              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.targetInterface ? { target_interface: v.targetInterface } : {}), ...(v.address ? { address: v.address } : {}) }]),
+              Object.entries(c.plc).map(([k, v]) => [k, { mode: v.mode, pc_interface: v.pcInterface, pc_interface_number: v.pcInterfaceNumber, ...(v.readOnly !== undefined ? { read_only: v.readOnly } : {}), ...(v.targetInterface ? { target_interface: v.targetInterface } : {}), ...(v.address ? { address: v.address } : {}) }]),
             ),
           }
         : {}),
@@ -249,6 +255,7 @@ export function formatConfig(c: RungConfig): string {
         ...(c.live.webapi ? { webapi: c.live.webapi } : {}),
         ...(c.live.plc ? { plc: Object.fromEntries(Object.entries(c.live.plc).map(([name, p]) => [name, {
           transport: p.transport, address: p.address, allow_writes: p.allowWrites,
+          ...(p.readOnly !== undefined ? { read_only: p.readOnly } : {}),
           ...(p.certificateSha256 ? { certificate_sha256: p.certificateSha256 } : {}),
           ...(p.user ? { user: p.user } : {}), ...(p.webapi ? { webapi: p.webapi } : {}),
         }])) } : {}),
@@ -270,6 +277,7 @@ export async function loadConfig(root: string, opts: { raw?: boolean } = {}): Pr
     throw new WorkspaceError("NOT_A_WORKSPACE", `${root} has no ${CONFIG_FILE}; run rung init`);
   }
   const config = parseConfig(text);
+  if (!opts.raw && plcReadOnly(config)) return { ...config, sync: { ...config.sync, import: "manual" }, writesOff: true };
   if (opts.raw || config.sync.import !== "auto" || writesGranted(await readWrites(root), config)) return config;
   return { ...config, sync: { ...config.sync, import: "manual" }, writesOff: true };
 }

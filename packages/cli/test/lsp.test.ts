@@ -26,7 +26,7 @@ async function boot(options: { url?: string; password?: boolean; webapi?: boolea
     start: (reader, writer) => lsp.startLsp({ ...io, env: options.password === false ? {} : io.env }, reader, writer),
     setup: async (root) => {
       const config = defaultConfig("fixture.ap20", "V20", "", ["PLC_1"]);
-      if (options.webapi !== false) config.live = { webapi: { url: options.url ?? "https://plc.example", user: "reader" } };
+      if (options.webapi !== false) config.live = { webapi: { url: options.url ?? "https://192.168.250.1", user: "reader" } };
       await saveConfig(root, config);
       brokers.push(await startLiveServer(root, options.password === false ? {} : io.env));
       for (const name of ["Motor1_DB", "Motor2_DB"])

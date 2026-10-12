@@ -3,6 +3,7 @@
 // rung only reads: login, browse, read values and the diagnostic buffer. It never writes to a PLC.
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
+import { plcReadOnly } from "@rung/core";
 
 export interface WebApiOptions {
   /** Base URL, e.g. https://192.168.0.1 (http:// only for tests/simulators). */
@@ -11,6 +12,7 @@ export interface WebApiOptions {
   password: string;
   /** Accept self-signed PLC certificates. Off by default; enable per workspace. */
   insecure?: boolean;
+  readOnly?: boolean;
   timeoutMs?: number;
 }
 
@@ -20,6 +22,7 @@ export interface WebApiOptions {
  */
 export function plainHttpRefusal(url: string, env: Record<string, string | undefined>): string | undefined {
   const loopback = /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:|\/|$)/i.test(url);
+  if (/^http:\/\//i.test(url) && !loopback && plcReadOnly(undefined, undefined, env)) return "Plain HTTP refused by the read-only lock (RUNG_READ_ONLY=1); use verified HTTPS";
   if (!/^http:\/\//i.test(url) || loopback || env.RUNG_WEBAPI_ALLOW_HTTP === "1") return undefined;
   return `${url} is plain http: the password would travel unencrypted. Use https:// (set insecure = true for the PLC's self-signed certificate), or set RUNG_WEBAPI_ALLOW_HTTP=1 if you really mean it`;
 }
@@ -48,9 +51,15 @@ const CERTIFICATE_ERRORS = new Set(["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_
 export class WebApiClient {
   private token: string | undefined;
   private nextId = 1;
-  constructor(private readonly opts: WebApiOptions) {}
+  constructor(private readonly opts: WebApiOptions) { this.checkTransport(); }
+
+  private checkTransport(): void {
+    if ((this.opts.readOnly || plcReadOnly()) && (this.opts.insecure || plainHttpRefusal(this.opts.url, { RUNG_READ_ONLY: "1" })))
+      throw new WebApiError("PLC_READ_ONLY", "Unsafe Web API transport refused by the read-only lock (RUNG_READ_ONLY=1 or PLC read_only = true); use verified HTTPS");
+  }
 
   private post(body: unknown): Promise<RpcResponse[] | RpcResponse> {
+    this.checkTransport();
     const url = new URL("/api/jsonrpc", this.opts.url);
     const data = Buffer.from(JSON.stringify(body), "utf8");
     const req = url.protocol === "https:" ? httpsRequest : httpRequest;

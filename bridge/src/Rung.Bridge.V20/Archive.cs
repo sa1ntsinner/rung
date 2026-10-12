@@ -36,7 +36,7 @@ namespace Rung.Bridge.V20
             var saved = false;
             try
             {
-                if (_project.IsModified) { _project.Save(); saved = true; }
+                if (_project.IsModified) { ReadOnlyPolicy.RefuseMutation(); _project.Save(); saved = true; }
                 _project.Archive(new DirectoryInfo(dir), Path.GetFileName(stem) + ext, ProjectArchivationMode.Compressed);
             }
             catch (EngineeringException e) { throw new RpcException(ErrorCodes.Internal, "TIA Portal could not archive the project: " + TiaText.Clean(e.Message)); }

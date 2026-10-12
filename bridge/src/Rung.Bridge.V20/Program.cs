@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Rung.Bridge.Core.Protocol;
 
 namespace Rung.Bridge.V20
 {
@@ -39,6 +40,9 @@ namespace Rung.Bridge.V20
             {
                 switch (args[i])
                 {
+                    case "--read-only":
+                        ReadOnlyPolicy.Lock();
+                        break;
                     case "--project":
                         if (i + 1 >= args.Length) throw new ArgumentException("--project needs a path");
                         a.ProjectPath = args[++i];
@@ -96,6 +100,8 @@ namespace Rung.Bridge.V20
             BridgeArgs parsed;
             try { parsed = BridgeArgs.Parse(args); }
             catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 64; }
+            try { if (parsed.CreateProject) ReadOnlyPolicy.RefuseMutation(); }
+            catch (RpcException e) { Console.Error.WriteLine(e.Message); return 2; }
 
             // Must be registered before any Siemens type is touched (Siemens-recommended pattern).
             var dir = Environment.GetEnvironmentVariable("RUNG_OPENNESS_DIR");

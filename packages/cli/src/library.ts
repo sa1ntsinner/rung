@@ -2,7 +2,7 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { mkdir, access, writeFile, unlink, rmdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { loadConfig, WorkspaceError } from "@rung/core";
+import { assertPlcWritable, loadConfig, WorkspaceError } from "@rung/core";
 import { bridgeFor, findWorkspace, readBoundedBytes, type Io } from "./common.js";
 import type { DescribeNode } from "@rung/bridge-client";
 import { modelSummary } from "./modelSummary.js";
@@ -12,6 +12,7 @@ export async function cmdLibrary(dir: string, files: string[] | undefined, json:
   options: { typeGuid?: string; versionGuid?: string; exportDir?: string; preview?: boolean; device?: string;
     apply?: boolean; expectedRevision?: string; expectedPackageRevision?: string; release?: boolean; update?: boolean; number?: string; author?: string; comment?: string;
     masterCopy?: string; from?: string } = {}): Promise<number> {
+  if (options.apply) assertPlcWritable(await loadConfig(await findWorkspace(dir)), options.device, io.env);
   if (options.masterCopy !== undefined || options.from !== undefined) {
     const name = /^[^\p{Cc}"/\\]{1,128}$/u;
     if (options.masterCopy === undefined || !name.test(options.masterCopy) || (options.from !== undefined && !name.test(options.from)) || !options.device

@@ -38,6 +38,7 @@ namespace Rung.Bridge.V20
 
         public void ReleaseSession(bool save, bool discard = false)
         {
+            if (save || discard) ReadOnlyPolicy.RefuseMutation();
             var path = _project.Path.FullName;
             using (Keeper.StartLock(path))
             {
@@ -47,7 +48,7 @@ namespace Rung.Bridge.V20
                 if (window || !holds) throw new RpcException(ErrorCodes.ProjectBusy, "Only rung's background keeper can release the project; this TIA Portal belongs to a window or another program.");
                 using (var access = _portal.ExclusiveAccess("rung: release project"))
                 {
-                    var step = SessionRelease.Decide(window, holds, _project.IsModified, save || _args.SaveAfterImport, _portal.GetCurrentProcess().AttachedSessions.Count(), discard);
+                    var step = SessionRelease.Decide(window, holds, _project.IsModified, save || _args.SaveAfterImport && !ReadOnlyPolicy.Locked, _portal.GetCurrentProcess().AttachedSessions.Count(), discard);
                     if (step == WindowStep.InUse) throw new RpcException(ErrorCodes.ProjectInUse, "Cannot release the project: rung watch of another workspace uses it. Stop that Watch before releasing.");
                     if (step == WindowStep.Unsaved) throw new RpcException(ErrorCodes.ProjectUnsaved, "The project has unsaved changes. Use rung session --release --save to save them, or --release --discard to lose them and close without saving.");
                     if (step == WindowStep.SaveAndMove) _project.Save();

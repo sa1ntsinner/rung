@@ -43,6 +43,13 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("Open TIA Project", () => {
+  it("does not start watch automatically while the environment locks writes", async () => {
+    vi.stubEnv("RUNG_READ_ONLY", "1");
+    const t = setup();
+    await t.run();
+    expect(t.cli.run.mock.calls.map(c => c[0])).toEqual([["init", "--project", project, "--host", "engineer@tia-pc"], ["pull"]]);
+    expect(ui.executeCommand).not.toHaveBeenCalledWith("rung.watch.start");
+  });
   it("checks the remote PC, preserves the literal path, pulls and starts watch", async () => {
     const t = setup();
     await t.run();

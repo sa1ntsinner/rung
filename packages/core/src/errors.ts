@@ -26,6 +26,7 @@ export type WorkspaceErrorCode =
   | "CHECK_UNREACHABLE"
   | "NOT_A_WORKSPACE"
   | "READ_ONLY"
+  | "PLC_READ_ONLY"
   /** this copy of the workspace was not given the right to write into its project (rung writes on) */
   | "WRITES_OFF"
   | "IN_USE"

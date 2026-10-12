@@ -28,6 +28,7 @@ namespace Rung.Bridge.V20
 
         public static int Run(BridgeArgs args)
         {
+            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation();
             if (string.IsNullOrEmpty(args.ProjectPath)) { Console.Error.WriteLine("--keep needs --project"); return 64; }
             var project = Path.GetFullPath(args.ProjectPath);
             var file = KeeperFile.PathFor(project);
@@ -57,7 +58,7 @@ namespace Rung.Bridge.V20
             var self = Process.GetCurrentProcess();
             var me = self.Id;
             var myTicks = self.StartTime.ToUniversalTime().Ticks;
-            var record = new KeeperRecord { KeeperPid = me, KeeperStartTicks = myTicks, Project = project, State = KeeperRecord.Starting };
+            var record = new KeeperRecord { KeeperPid = me, KeeperStartTicks = myTicks, Project = project, State = KeeperRecord.Starting, ReadOnly = ReadOnlyPolicy.Locked };
             KeeperFile.Write(file, record);
             TiaPortal portal = null;
             Project opened = null;
@@ -172,8 +173,15 @@ namespace Rung.Bridge.V20
             using (StartLock(project))
             {
                 // another bridge may have opened it meanwhile: a keeper, or a TIA Portal window "Open in TIA Portal" made
-                if (Listed(project)) return;
+                if (Listed(project)) {
+                    var listed = TiaPortal.GetProcesses().First(p => SamePath(p.ProjectPath?.FullName, project));
+                    if (ReadOnlyPolicy.Locked && listed.Mode == TiaPortalMode.WithoutUserInterface && !Holds(project, listed.Id))
+                        throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: cannot reuse an unlocked keeper.");
+                    return;
+                }
                 var r = KeeperFile.Read(file);
+                if (ReadOnlyPolicy.Locked && r != null && !r.ReadOnly && Alive(r.KeeperPid, r.KeeperStartTicks))
+                    throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: cannot reuse an unlocked keeper.");
                 if (r != null && r.State == KeeperRecord.Failed)
                 {
                     // left by a keeper that failed for an earlier bridge: let it finish closing, then start afresh
@@ -273,7 +281,7 @@ namespace Rung.Bridge.V20
         static void Spawn(BridgeArgs args, string project)
         {
             var exe = Process.GetCurrentProcess().MainModule.FileName;
-            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "");
+            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "") + (ReadOnlyPolicy.Locked ? " --read-only" : "");
             using (var cls = new ManagementClass("Win32_Process"))
             using (var startup = new ManagementClass("Win32_ProcessStartup"))
             {

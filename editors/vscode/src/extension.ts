@@ -14,6 +14,7 @@ import type { DeclarationsSession } from "./declarations/session";
 import { UsagesView } from "./views/usagesView";
 import { registerCommands } from "./commands";
 import { Args } from "./core/args";
+import { plcReadOnly } from "./core/rungToml";
 import { addToUserPath, installBundledRung, onPath } from "./bundled";
 import { findExecutable } from "./core/exec";
 import { isFile } from "./workspace";
@@ -269,7 +270,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
   void lsp.start();
 
   // a restricted (untrusted) folder never starts TIA Portal on its own
-  if (readSettings().autoStartWatch && vscode.workspace.isTrusted && ws.hasConfig && !ws.watching) void watch.start();
+  if (readSettings().autoStartWatch && vscode.workspace.isTrusted && ws.hasConfig && !ws.watching && !plcReadOnly(ws.config)) void watch.start();
   return { ws, cli, watch, online, problems, project, plc, environment, monitor, statusBar, activity, changes, decorations, lsp, usages, declarations: () => DeclarationsPanel.open, trace: () => TracePanel.open, udtTables: UdtTableEditor.sessions, testTables: TestTableEditor.tables, tests: () => testsRef, why, live };
 }
 

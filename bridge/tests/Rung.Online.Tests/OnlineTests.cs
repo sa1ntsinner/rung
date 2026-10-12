@@ -134,7 +134,7 @@ public class OnlineTests
         Assert.Equal(new object[] { "DTL#2026-10-07-00:00:00.123456789" }, row.Value);
     }
 
-    sealed class FakeDriver(int count = 42) : IOnlineDriver
+    internal sealed class FakeDriver(int count = 42) : IOnlineDriver
     {
         public bool Disposed;
         readonly Dictionary<string, PlcTag> tags = new() {

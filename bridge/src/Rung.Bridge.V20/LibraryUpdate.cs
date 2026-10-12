@@ -26,6 +26,7 @@ namespace Rung.Bridge.V20 {
    Alive();using(var access=_portal.ExclusiveAccess("rung: library update preview")){var target=UpdateTarget(request);return new LibraryUpdatePreview{Request=request,SourceVersionGuid=target.source.Guid.ToString("D"),Addresses=new[]{target.address}.Concat(target.dbs).ToArray(),Revision=LibraryImportPlan.Revision(LibraryReadState(request.TypeGuid,true))};}
   }
   public LibraryImportResult UpdateLibrary(LibraryUpdateRequest request,string expectedRevision,string operationId){
+   ReadOnlyPolicy.RefuseMutation();
    Alive();FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
    using(var access=_portal.ExclusiveAccess("rung: library update")){
     var target=UpdateTarget(request);LibraryImportPlan.CheckRevision(expectedRevision);if(LibraryImportPlan.Revision(LibraryReadState(request.TypeGuid,true))!=expectedRevision)throw new RpcException(ErrorCodes.StaleRevision,"Project changed since update preview");operationId=HardwarePlan.StartOperation(operationId,_libraryOperations,"Library");LibraryImportResult result;_inImport=true;

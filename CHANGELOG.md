@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A read-only lock (`RUNG_READ_ONLY=1` or per-PLC `read_only = true`) blocks PLC changes and TIA imports across the CLI, hosts and VS Code. Watch exports only, and protected-address reads require the lock.
+
 **TIA Portal without window**
 - *Open TIA Project…* in VS Code checks the local PC or another Windows PC over ssh, mirrors the project and starts watch. Watch starts with a trusted folder by default (`rung.watch.autoStart`). A keeper reuses one background TIA Portal for the project's commands and editors (10 min idle, `RUNG_KEEPER_IDLE_S`); *Open in TIA Portal* moves the project into a window, with *Save and Open* for unsaved changes. `rung session` inspects it without starting TIA Portal; `rung session --release` stops watch and releases the background project. The PLC picker remembers its last choice. `rung connect --address` edits `network.yaml` for V19/V20; V21 uses an online address with the project unchanged. PLC passwords and users come from the CLI environment or VS Code's secret storage. Untrusted TLS certificates require consent for that connection, never remembered. V21 Openness setup writes its `AllowList`. See [Going online](docs/online.md) and the [measurements](docs/evidence.md#tia-portal-without-window-measured).
 

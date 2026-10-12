@@ -25,6 +25,7 @@ public sealed class WriteOperationEngine(Func<WriteAction, CancellationToken, Ta
     }
 
     public async Task<PreparedWrite> PrepareAsync(WriteAction action, CancellationToken token = default) {
+        ReadOnlyPolicy.RefuseMutation();
         if (action.Action is not ("modify" or "run" or "stop") || action.Action == "modify" && (string.IsNullOrWhiteSpace(action.Name) || action.Name.Length > 1024 || string.IsNullOrWhiteSpace(action.Literal)) || action.Action != "modify" && (action.Name != null || action.Literal != null))
             throw new RpcException(ErrorCodes.BadRequest, "Prepare one scalar modification or CPU action.");
         var context = await resolve(action, token); Check(context.Binding);
@@ -43,6 +44,7 @@ public sealed class WriteOperationEngine(Func<WriteAction, CancellationToken, Ta
     }
 
     public async Task<WriteResult> CommitAsync(string id, string preview, bool confirmed, CancellationToken token = default) {
+        ReadOnlyPolicy.RefuseMutation();
         PreparedWrite? operation;
         lock (operations) operations.Remove(id, out operation);
         if (operation == null || operation.Preview != preview) throw Stale();

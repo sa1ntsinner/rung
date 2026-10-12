@@ -10,6 +10,7 @@ import {
   ENGINEERING_VERSIONS,
   StateStore,
   WorkspaceError,
+  assertPlcWritable,
   defaultConfig,
   grantWrites,
   loadConfig,
@@ -21,6 +22,7 @@ import {
   type RungConfig,
 } from "@rung/core";
 import { BridgeClient, BridgeError } from "@rung/bridge-client";
+import { WebApiError } from "@rung/live";
 import { OwnerClient, OwnerError, doctor, pull, summarize, writeModelViews, writeTagViews } from "@rung/sync";
 import { HINTS, bridgeEnv, bridgeFor, decodeArgs, defaultBridge, exists, findWorkspace, importFlags, isNotice, openState, printWarnings, remoteBridge, type Io } from "./common.js";
 import { startLsp } from "./lsp.js";
@@ -104,6 +106,7 @@ Usage:
   rung live modify <name> <SCL-literal> --device <PLC>  prepare and confirm one current scalar value
   rung live run|stop --device <PLC>    prepare and confirm CPU control
   rung live modify|run|stop --confirm-stdin --json  editor confirmation over private stdin
+  rung live watch <block> --native-capture        explicitly request program-status capture while read-only
   rung live watch|alarms --json --parent-stdio  editor stream ends when its parent closes stdin (alarms also needs --stream)
   rung live-server [dir]              shared read-only broker; started automatically by live consumers
   rung trace record <signal>... --device <PLC> --out <new.json> [--duration 60] [--interval 100] [--dir <ws>] [--json]
@@ -187,7 +190,7 @@ async function runBridge(args: string[], io: Io): Promise<number> {
   }
   const own = defaultBridge(io.env);
   const exe = io.env.RUNG_BRIDGE ? own.command : bridgeExecutable(io.env, tia);
-  const child = spawn(exe, [...own.args, ...args], { stdio: "inherit", windowsHide: true, env: io.env as NodeJS.ProcessEnv });
+  const child = spawn(exe, [...own.args, ...args], { stdio: "inherit", windowsHide: true, env: bridgeEnv(io.env, args.includes("--read-only") ? { RUNG_READ_ONLY: "1" } : {}) });
   return await new Promise<number>((done) => {
     child.on("exit", (code) => done(code ?? 1));
     child.on("error", (e) => {
@@ -198,6 +201,7 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 }
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  if (v["from-plc"] !== undefined) assertPlcWritable(await loadConfig(dir, { raw: true }).catch(() => undefined), undefined, io.env);
   // a downloaded or backed-up project usually comes as an archive: retrieve it next to itself and mirror that
   if (v.project && /\.zap\d+$/i.test(String(v.project))) v = { ...v, project: await retrieveArchive(resolve(io.cwd, String(v.project)), v, io) };
   const older = v.project ? olderProjectHint(String(v.project)) : undefined;
@@ -427,7 +431,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "confirm-delete": { options: ["dir", "force"], positionals: 1 },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
-  live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream"], positionals: Infinity },
+  live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture"], positionals: Infinity },
   "live-server": { options: [], positionals: 1 },
   trace:{options:["device","out","duration","interval","dir","json","parent-stdio"],positionals:Infinity},
   views: { options: ["offline"], positionals: 1 },
@@ -550,6 +554,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         block: { type: "string" },
         json: { type: "boolean" },
         "confirm-stdin": { type: "boolean" },
+        "native-capture": { type: "boolean" },
         "parent-stdio": { type: "boolean" },
         lcid: { type: "string" },
         stream: { type: "boolean" },
@@ -625,6 +630,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
+    const mutating = ["download", "upload", "confirm-delete", "rename"].includes(cmd)
+      || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
+      || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply
+      || cmd === "connect" && !!v.address || cmd === "doctor" && !!v.fixture
+      || cmd === "init" && v["from-plc"] !== undefined
+      || cmd === "live" && ["modify", "run", "stop"].includes(target ?? "");
+    if (mutating) {
+      assertPlcWritable(undefined, undefined, io.env);
+      const start = ["rename", "confirm-delete", "writes"].includes(cmd) ? resolve(io.cwd, (v.dir as string | undefined) ?? ".") : dir;
+      const ws = await findWorkspace(start).catch(error => { if (error instanceof WorkspaceError && error.code === "NOT_A_WORKSPACE") return undefined; throw error; });
+      const config = ws ? await loadConfig(ws, { raw: true }) : undefined;
+      assertPlcWritable(config, (v.plc as string | undefined) ?? (v.device as string[] | undefined)?.[0], io.env);
+    }
     switch (cmd) {
       case "trace":
         if((v.device?.length??0)>1)throw new WorkspaceError("BAD_ARGUMENT","Trace requires one --device");
@@ -754,6 +772,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
           ...(v.table ? { table: String(v.table) } : {}),
           json: !!v.json,
           confirmStdin: !!v["confirm-stdin"],
+          nativeCapture: v["native-capture"] ? true : undefined,
           parentStdio: !!v["parent-stdio"],
           stream: !!v.stream,
           ...(v.lcid ? { lcid: Number(v.lcid) } : {}),
@@ -932,13 +951,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 1;
     }
   } catch (e) {
-    if (e instanceof BridgeError || e instanceof WorkspaceError || e instanceof OwnerError) {
+    if (e instanceof BridgeError || e instanceof WorkspaceError || e instanceof OwnerError || e instanceof WebApiError) {
       // the bridge's own words for "started without the right to import" mean nothing to a person running rung
       const message = e.code === "READ_ONLY" && /--allow-import/.test(e.message) ? "TIA Portal was not changed: this workspace may not write into it now" : e.message;
       io.stderr(`rung: ${e.code}: ${message}\n`);
+      if (e.code === "PLC_READ_ONLY") return 2;
       // a bridge TIA Portal knows does not wait for the "Openness access" question: TIA was slow, not asking
       const slow = e.code === "TIMEOUT" && (await whitelistStatus(bridgeExecutable(io.env)).catch(() => "unknown")) === "ok";
-      const hint = slow ? "TIA Portal took longer than rung waited. Opening a project in a TIA Portal without window can take minutes after a reboot or for a new project; run the command again." : ((cmd === "init" ? initHint(e.code, !!v.project) : undefined) ?? HINTS[e.code]);
+      const hint = slow ? "TIA Portal took longer than rung waited. Opening a project in a TIA Portal without window can take minutes after a reboot or for a new project; run the command again." : ((cmd === "init" ? initHint(String(e.code), !!v.project) : undefined) ?? HINTS[e.code]);
       if (hint) io.stderr(`hint: ${hint}\n`);
       return 1;
     }

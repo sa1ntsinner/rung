@@ -11,6 +11,7 @@ import { readSettings } from "../settings";
 import type { RungWorkspace } from "../workspace";
 import type { Connector } from "./connect";
 import { deviceTarget } from "./targets";
+import { allowPlcWrite } from "../plcReadOnly";
 
 let inProgress = false;
 
@@ -48,6 +49,7 @@ async function pickOptions(o: DownloadOptions, tomlHardware: boolean): Promise<D
 }
 
 export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: OnlineMonitor, connector: Connector, arg: unknown): Promise<void> {
+  await ws.reload();
   if (inProgress) {
     void vscode.window.showWarningMessage("A download is already running. Wait for it to finish.");
     return;
@@ -63,6 +65,7 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
   }
   const device = await deviceTarget(ws, arg, "Download");
   if (!device) return;
+  if (!allowPlcWrite(ws.config, device)) return;
   // rung download would look for the PLC itself; do it first so the confirmation names the connection
   if (!(await connector.ensure(device))) return;
   const conn = ws.config?.plc[device];
@@ -83,6 +86,8 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
   await vscode.commands.executeCommand("setContext", "rung.downloading", true);
   try {
     for (;;) {
+      await ws.reload();
+      if (!allowPlcWrite(ws.config, device)) return;
       let args: string[];
       try {
         args = downloadArgs(options);

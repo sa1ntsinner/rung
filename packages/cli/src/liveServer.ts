@@ -3,10 +3,10 @@ import { spawn } from "node:child_process";
 import { relative, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
-import { loadConfig, WorkspaceError } from "@rung/core";
+import { loadConfig, plcReadOnly, WorkspaceError } from "@rung/core";
 import { BridgeError, type OnlineAlarmResult, type OnlineNativeCapture, type LiveScope } from "@rung/bridge-client";
 import { OwnerClient, OwnerServer } from "@rung/sync";
-import { LiveHub, createS7Backend, createWebApiBackend, selectLiveTarget, WebApiClient, plainHttpRefusal, type LiveBackend, type LiveFrame, type OnlineReadResult } from "@rung/live";
+import { LiveHub, createS7Backend, createWebApiBackend, selectLiveTarget, validateLiveAddress, WebApiClient, plainHttpRefusal, type LiveBackend, type LiveFrame, type OnlineReadResult } from "@rung/live";
 import { onlineHost } from "./liveTrust.js";
 import type { Io } from "./common.js";
 import type { LiveReader } from "./live.js";
@@ -15,7 +15,7 @@ import { liveMutations } from "./liveMutation.js";
 import { runningSimulator } from "./simulate.js";
 
 export interface BackendOptions { device?: string; file?: string; transport?: string }
-export async function liveSelection(root: string, options: BackendOptions) {
+export async function liveSelection(root: string, options: BackendOptions, env: Io["env"] = process.env) {
   const config = await loadConfig(root);
   if (!Object.keys(config.live?.plc ?? {}).length) {
     // no PLC named: the workspace's own rung simulate, while it runs (any user and password)
@@ -27,9 +27,11 @@ export async function liveSelection(root: string, options: BackendOptions) {
     const device = devices[0] ?? options.device;
     if (!device || (options.device && device !== options.device)) throw new WorkspaceError("CONFIG_INVALID", "Choose --device <PLC>; the workspace has no unambiguous live target");
     if (options.transport && options.transport !== "webapi") throw new WorkspaceError("CONFIG_INVALID", "Legacy [live.webapi] only supports --transport webapi");
-    return { device, transport: "webapi", target: { transport: "webapi" as const, address: new URL(w.url).hostname, allowWrites: false, webapi: w } };
+    const readOnly = !!plcReadOnly(config, device, env), address = /^https?:\/\/([^/:?#]+)/i.exec(w.url)?.[1] ?? "";
+    validateLiveAddress(address, { readOnly });
+    return { device, transport: "webapi", target: { transport: "webapi" as const, address, allowWrites: false, ...(readOnly ? { readOnly: true } : {}), webapi: w } };
   }
-  const selected = selectLiveTarget(config, { ...options, ...(options.file ? { file: relative(root, resolve(root, options.file)).split(sep).join("/") } : {}) });
+  const selected = selectLiveTarget(config, { ...options, ...(options.file ? { file: relative(root, resolve(root, options.file)).split(sep).join("/") } : {}) }, env);
   const transport = options.transport ?? selected.target.transport;
   if (transport !== "webapi" && transport !== "s7commplus") throw new WorkspaceError("BAD_ARGUMENT", "--transport must be s7commplus or webapi");
   if (transport === "webapi" && !selected.target.webapi) throw new WorkspaceError("CONFIG_INVALID", `No Web API configured for ${selected.device}`);
@@ -38,23 +40,23 @@ export async function liveSelection(root: string, options: BackendOptions) {
 
 export async function startLiveServer(root: string, env: Io["env"], options: { backendFactory?: (key: string) => Promise<LiveBackend>; idleMs?: number } = {}) {
   const credentials = new Map<string, { user?: string; password?: string }>();
-  const mutations = liveMutations(root, env, options => liveSelection(root, options));
+  const mutations = liveMutations(root, env, options => liveSelection(root, options, env));
   const hub = new LiveHub(options.backendFactory ?? (async (key) => {
-    const selected = await liveSelection(root, JSON.parse(key) as BackendOptions);
+    const selected = await liveSelection(root, JSON.parse(key) as BackendOptions, env);
     const auth = credentials.get(key) ?? {};
     if (selected.transport === "s7commplus") {
-      const host = await onlineHost(env);
+      const host = await onlineHost(selected.target.readOnly ? { ...env, RUNG_READ_ONLY: "1" } : env);
       const user = auth.user ?? selected.target.user;
-      try { return await createS7Backend(host, { device: selected.device, address: selected.target.address, certificateSha256: selected.target.certificateSha256 ?? "", ...(user ? { user } : {}), ...(auth.password ? { password: auth.password } : {}) }); }
+      try { return await createS7Backend(host, { device: selected.device, address: selected.target.address, readOnly: selected.target.readOnly, certificateSha256: selected.target.certificateSha256 ?? "", ...(user ? { user } : {}), ...(auth.password ? { password: auth.password } : {}) }); }
       catch (error) { await host.close(); throw error; }
     }
     const w = selected.target.webapi!;
     // rung simulate takes any password: none is asked for it
     if (!auth.password && (await runningSimulator(root))?.url === w.url) auth.password = "simulator";
     if (!auth.password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
-    const refused = plainHttpRefusal(w.url, env);
+    const refused = plainHttpRefusal(w.url, selected.target.readOnly ? { ...env, RUNG_READ_ONLY: "1" } : env);
     if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
-    return createWebApiBackend(new WebApiClient({ ...w, password: auth.password }), { device: selected.device, address: selected.target.address, transport: "webapi", epoch: 1 });
+    return createWebApiBackend(new WebApiClient({ ...w, readOnly: selected.target.readOnly, password: auth.password }), { device: selected.device, address: selected.target.address, transport: "webapi", epoch: 1 });
   }));
   const leases = new Map<string, { clientId: string; key?: string; close(): Promise<void> }>();
   const opening = new Set<string>();
@@ -65,7 +67,7 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
   const touch = (clientId: string) => { consumers.add(clientId); clearTimeout(timer); };
   const bind = async (p: Record<string, unknown>) => {
     if (typeof p.key !== "string") throw new BridgeError("BAD_REQUEST", "Missing live target");
-    const selected = await liveSelection(root, JSON.parse(p.key) as BackendOptions);
+    const selected = await liveSelection(root, JSON.parse(p.key) as BackendOptions, env);
     const auth = (p.credentials ?? {}) as { user?: string; password?: string };
     if ([auth.user, auth.password].some(value => value !== undefined && (typeof value !== "string" || value.length > 4096))) throw new BridgeError("BAD_REQUEST", "Invalid live credentials");
     if (p.key !== liveKey(selected, auth.user)) throw new BridgeError("CONFIG_INVALID", "Live target configuration changed; start monitoring again");
@@ -138,11 +140,13 @@ function liveKey(selected: Awaited<ReturnType<typeof liveSelection>>, user?: str
 }
 
 export async function brokerReader(root: string, env: Io["env"], options: BackendOptions): Promise<LiveReader> {
-  const selected = await liveSelection(root, options); // refuse ambiguous scope before starting a process
+  const selected = await liveSelection(root, options, env); // refuse ambiguous scope before starting a process
+  if (selected.target.readOnly) env = { ...env, RUNG_READ_ONLY: "1" };
   // rung simulate takes any password: none is asked for it
   if (selected.transport === "webapi" && !env.RUNG_WEBAPI_PASSWORD && (await runningSimulator(root))?.url === selected.target.webapi?.url) env = { ...env, RUNG_WEBAPI_PASSWORD: "simulator" };
   if (selected.transport === "webapi") {
     if (!env.RUNG_WEBAPI_PASSWORD) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
+    new WebApiClient({ ...selected.target.webapi!, password: env.RUNG_WEBAPI_PASSWORD, readOnly: selected.target.readOnly });
     const refused = plainHttpRefusal(selected.target.webapi!.url, env);
     if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
   }

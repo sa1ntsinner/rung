@@ -33,6 +33,8 @@ import { registerMerge } from "./merge";
 import { deviceTarget, fileTarget } from "./targets";
 import {projectAssets,type ProjectAssetsOptions} from "./projectAssets";
 import {TraceCommands} from "./trace";
+import { allowPlcWrite } from "../plcReadOnly";
+import { plcReadOnly } from "../core/rungToml";
 
 export interface Services {
   ws: RungWorkspace;
@@ -67,9 +69,13 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     (fn: (...args: unknown[]) => unknown) =>
     (...args: unknown[]) =>
       needsWorkspace(ws) ? fn(...args) : undefined;
+  const inWritableWs = (fn: (...args: unknown[]) => unknown) => inWs(async (...args) => {
+    await ws.reload();
+    if (allowPlcWrite(ws.config)) return fn(...args);
+  });
 
   reg("rung.projectAssets",inWs((options?:unknown)=>projectAssets(s,(options&&typeof options==="object"?options:{}) as ProjectAssetsOptions)));
-  reg("rung.projectAssets.apply",inWs(()=>projectAssets(s,{apply:true})));
+  reg("rung.projectAssets.apply",inWritableWs(()=>projectAssets(s,{apply:true})));
   reg("rung.traceRecord",inWs((options?:unknown)=>trace.record(options)));
   reg("rung.traceOpen",(file?:unknown)=>trace.open(file));
   reg("rung.traceImport",()=>trace.importCsv());
@@ -119,13 +125,13 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.watch.show", () => watch.show());
   // writes into the project: off after rung init; a running watch started its bridge without them, so it restarts
   const setWrites = (on: boolean) =>
-    inWs(async () => {
+    (on ? inWritableWs : inWs)(async () => {
       const r = await cli.run(["writes", on ? "on" : "off"]);
       if (r.error || r.code !== 0) return;
       await ws.reload();
       if (watch.owned && watch.status === "running") {
         await watch.stop();
-        await watch.start();
+        if (!plcReadOnly(ws.config)) await watch.start();
       } else if (ws.watching) void vscode.window.showInformationMessage("rung watch runs outside VS Code: restart it there for this to apply.");
     });
   reg("rung.writes.on", setWrites(true));
@@ -139,7 +145,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
     }),
   );
   reg("rung.changes.refresh", inWs(() => s.changes.refresh()));
-  reg("rung.changes.sync", inWs(() => s.changes.syncReviewed()));
+  reg("rung.changes.sync", inWritableWs(() => s.changes.syncReviewed()));
   reg("rung.changes.open", (e: unknown) => (e && typeof e === "object" && "path" in e ? s.changes.open(e as PlanEntry) : undefined));
   reg("rung.whoWrites", () => whoWrites(s.usages));
   reg("rung.usages.pick", () => pickUsages(s.lsp));
@@ -444,6 +450,6 @@ async function quickPick(ws: RungWorkspace, watch: WatchController): Promise<voi
     a("settings-gear", "Open rung.toml", "rung.openConfig"),
     a("output", "Show output", "rung.showOutput"),
   ];
-  const pick = await vscode.window.showQuickPick(items, { title: "rung", placeHolder: "rung action", matchOnDescription: true });
+  const pick = await vscode.window.showQuickPick(plcReadOnly(ws.config) ? items.filter(item => item.command !== "rung.download") : items, { title: "rung", placeHolder: "rung action", matchOnDescription: true });
   if (pick?.command) await vscode.commands.executeCommand(pick.command);
 }

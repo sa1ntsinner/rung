@@ -4,10 +4,12 @@ import * as vscode from "vscode";
 import {assetPreviewArgs,assetApplyArgs,assetFileHash,type AssetRequest} from "../core/projectAssets";
 import {deviceTarget} from "./targets";
 import type {Services} from "./index";
+import {allowPlcWrite} from "../plcReadOnly";
 const ACTIONS=[{label:"Preview or apply hardware YAML/JSON",action:"hardware"},{label:"Import library package",action:"library-import"},{label:"Release library version",action:"library-release"},{label:"Update used library definition",action:"library-update"},{label:"Edit alarm text workbook",action:"alarms"},{label:"Edit technology XML",action:"technology"},{label:"Export alarm workbook",action:"export-alarms"},{label:"Export technology XML",action:"export-technology"},{label:"Export library version",action:"export-library"},{label:"List library identities",action:"libraries"},{label:"Observe safety signatures (read-only)",action:"safety"}] as const;
 export interface ProjectAssetsOptions extends Omit<AssetRequest,"action">{action?:AssetRequest["action"]|"libraries"|"safety"|"export-alarms"|"export-technology"|"export-library";exportPath?:string;apply?:boolean;}
 export async function projectAssets(s:Services,options:ProjectAssetsOptions={}):Promise<void>{
  if(!s.ws.hasConfig){void vscode.window.showWarningMessage("Open a rung workspace first.");return;}
+ if(options.apply){await s.ws.reload();if(!allowPlcWrite(s.ws.config))return;}
  const action=options.action??(await vscode.window.showQuickPick(ACTIONS,{title:"Project Assets"}))?.action;if(!action)return;
  const request={...options,action} as AssetRequest;
  async function input(key:keyof AssetRequest,title:string,value?:string){if(request[key]!==undefined)return;const text=await vscode.window.showInputBox({title,value,ignoreFocusOut:true});if(text===undefined)throw new Error("Cancelled");Object.assign(request,{[key]:text});}
@@ -33,6 +35,6 @@ export async function projectAssets(s:Services,options:ProjectAssetsOptions={}):
   if(!options.apply)return;
   const answer=await vscode.window.showWarningMessage("Apply the displayed project asset changes?",{modal:true},"Apply reviewed change");if(answer!=="Apply reviewed change")return;if(dirty())throw new Error("Artifact has unsaved changes; preview again.");
   if(files[0]&&await assetFileHash(files[0],limit)!==fileRevision)throw new Error("Artifact changed after preview; preview again.");
-  await unchanged();await s.cli.capture(inRoot(assetApplyArgs(request,preview,fileRevision)),{progress:"Apply reviewed project asset change"});
+  await unchanged();if(!allowPlcWrite(s.ws.config))return;await s.cli.capture(inRoot(assetApplyArgs(request,preview,fileRevision)),{progress:"Apply reviewed project asset change"});
  }catch(error){const message=error instanceof Error?error.message:String(error);if(message!=="Cancelled")void vscode.window.showErrorMessage(message);}
 }

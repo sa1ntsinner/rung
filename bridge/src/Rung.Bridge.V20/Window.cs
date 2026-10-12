@@ -14,6 +14,7 @@ namespace Rung.Bridge.V20
     {
         void MoveToWindow(bool save)
         {
+            if (save) ReadOnlyPolicy.RefuseMutation();
             var path = _project.Path.FullName;
             var hasWindow = _portal.GetCurrentProcess().Mode == TiaPortalMode.WithUserInterface;
             var rungHolds = _ownsPortal || Keeper.Holds(path, _tiaPid);
@@ -23,7 +24,7 @@ namespace Rung.Bridge.V20
             // the background and the window could not have it)
             using (Keeper.StartLock(path))
             {
-                WindowHandoff.Close(false, rungHolds, save || _args.SaveAfterImport,
+                WindowHandoff.Close(false, rungHolds, save || _args.SaveAfterImport && !ReadOnlyPolicy.Locked,
                     () => _portal.ExclusiveAccess("rung: open project in window"),
                     () => _project.IsModified, () => _project.Save(), () =>
                     {

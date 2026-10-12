@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { isIPv4 } from "node:net";
-import { WorkspaceError, type RungConfig, type LivePlcConfig } from "@rung/core";
+import { WorkspaceError, plcReadOnly, type RungConfig, type LivePlcConfig } from "@rung/core";
 import { BridgeError, type OnlineConnectRequest, type OnlineConnectResult, type OnlineReadResult, type OnlineStateResult, type OnlineMethods } from "@rung/bridge-client";
 
 export interface OnlineRpc { request(method: string, params: Record<string, unknown>): Promise<unknown> }
@@ -9,14 +9,14 @@ const READ_METHODS = new Set(["online.connect", "online.browse", "online.read", 
 /** Read-only adapter over the existing bridge envelope. The caller owns the host process. */
 export class S7CommPlusClient {
   info?: OnlineConnectResult;
-  constructor(private readonly rpc: OnlineRpc) {}
+  constructor(private readonly rpc: OnlineRpc, private readonly readOnly = false) {}
   async call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T> {
     if (!READ_METHODS.has(method)) throw new BridgeError("UNSUPPORTED_CAPABILITY", `${method} is not a read-only online method`);
     return await this.rpc.request(method, params) as T;
   }
   async connect(target: OnlineConnectRequest): Promise<OnlineConnectResult> {
     if (this.info) throw new BridgeError("BUSY", "Disconnect before changing PLC");
-    validateLiveAddress(target.address);
+    validateLiveAddress(target.address, { readOnly: this.readOnly });
     if (!/^[a-fA-F0-9]{64}$/.test(target.certificateSha256 ?? "")) throw new BridgeError("CERTIFICATE_UNTRUSTED", "Verify and pin the PLC certificate with rung live trust --device <PLC>");
     return this.info = await this.call<OnlineConnectResult>("online.connect", { ...target });
   }
@@ -37,13 +37,15 @@ export class S7CommPlusClient {
 }
 
 /** Shared target boundary for host callers and the workspace broker. */
-export function validateLiveAddress(address: string): void {
+export function validateLiveAddress(address: string, opts: { readOnly?: boolean; mutation?: boolean } = {}): void {
+  const locked = opts.readOnly || !!plcReadOnly();
+  if (opts.mutation && locked) throw new WorkspaceError("PLC_READ_ONLY", "PLC changes refused by the read-only lock (RUNG_READ_ONLY=1 or PLC read_only = true)");
   // Reject alternate textual forms before canonical validation; none can reach the host.
-  if (/^(?:::ffff:)?192\.168\.(?:0*1)\.(?:0*1)$/i.test(address)) throw new BridgeError("TARGET_REFUSED", "192.168.1.1 is refused before connection");
+  if (/^(?:::ffff:)?192\.168\.(?:0*1)\.(?:0*1)$/i.test(address) && !(address === "192.168.1.1" && locked && !opts.mutation)) throw new BridgeError("TARGET_REFUSED", "192.168.1.1 is refused before connection");
   if (!isIPv4(address)) throw new WorkspaceError("CONFIG_INVALID", "Live address must be a canonical IPv4 literal");
 }
 
-export function selectLiveTarget(config: RungConfig, opts: { device?: string; file?: string } = {}): { device: string; target: LivePlcConfig } {
+export function selectLiveTarget(config: RungConfig, opts: { device?: string; file?: string } = {}, env: NodeJS.ProcessEnv = process.env): { device: string; target: LivePlcConfig } {
   const fileDevice = opts.file?.replace(/\\/g, "/").match(/^plc\/([^/]+)\//)?.[1];
   if (fileDevice && opts.device && fileDevice !== opts.device) throw new WorkspaceError("CONFIG_INVALID", "Selected device conflicts with the file's PLC scope");
   const devices = [...new Set([...config.devices, ...Object.keys(config.plc), ...Object.keys(config.live?.plc ?? {})])];
@@ -51,7 +53,9 @@ export function selectLiveTarget(config: RungConfig, opts: { device?: string; fi
   if (!device) throw new WorkspaceError("CONFIG_INVALID", "Choose --device <PLC>; the workspace has no unambiguous live target");
   const target = config.live?.plc?.[device];
   if (!target) throw new WorkspaceError("CONFIG_INVALID", `No [live.plc.${device}] configured`);
-  validateLiveAddress(target.address);
+  const readOnly = !!plcReadOnly(config, device, env);
+  validateLiveAddress(target.address, { readOnly });
+  if (target.webapi) validateLiveAddress(/^https?:\/\/([^/:?#]+)/i.exec(target.webapi.url)?.[1] ?? "", { readOnly });
   if (target.webapi && new URL(target.webapi.url).hostname !== target.address) throw new WorkspaceError("CONFIG_INVALID", "Web API fallback must bind to the selected PLC");
-  return { device, target };
+  return { device, target: readOnly ? { ...target, readOnly: true } : target };
 }

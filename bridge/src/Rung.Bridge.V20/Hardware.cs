@@ -60,6 +60,7 @@ namespace Rung.Bridge.V20
 
         public HardwarePreview ApplyHardware(HardwarePatch patch, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             using (var access = _portal.ExclusiveAccess("rung: hardware changes"))

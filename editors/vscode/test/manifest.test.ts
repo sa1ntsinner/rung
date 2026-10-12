@@ -10,6 +10,14 @@ const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const commands = new Set<string>(pkg.contributes.commands.map((c: { command: string }) => c.command));
 
 describe("manifest", () => {
+  it("hides PLC mutations from menus and keybindings while read-only", () => {
+    const guarded = new Set(["rung.download", "rung.live.modify", "rung.live.run", "rung.live.stop", "rung.writes.on", "rung.projectAssets.apply", "rung.changes.sync"]);
+    for (const command of guarded) expect(pkg.contributes.menus.commandPalette.find((item: { command: string }) => item.command === command)?.when ?? "").toContain("!rung.readOnly");
+    for (const items of Object.values(pkg.contributes.menus) as { command?: string; when?: string }[][]) {
+      for (const item of items) if (guarded.has(item.command ?? "")) expect(item.when).toContain("!rung.readOnly");
+    }
+    for (const item of pkg.contributes.keybindings) if (guarded.has(item.command)) expect(item.when).toContain("!rung.readOnly");
+  });
   it("completes the computer check on readiness rather than a command click", () => {
     const step = pkg.contributes.walkthroughs.find((w: { id: string }) => w.id === "rung.getStarted").steps.find((s: { id: string }) => s.id === "check");
     expect(step.completionEvents).toEqual(["onContext:rung.tiaReady"]);

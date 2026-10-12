@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { resolve } from "node:path";
 import { randomUUID,createHash } from "node:crypto";
-import { loadConfig, WorkspaceError } from "@rung/core";
+import { assertPlcWritable, loadConfig, WorkspaceError } from "@rung/core";
 import { hardwarePatchText } from "@rung/lsp";
 import { bridgeFor, findWorkspace, readBoundedBytes, type Io } from "./common.js";
 import type { DescribeNode } from "@rung/bridge-client";
@@ -9,6 +9,8 @@ import { modelSummary } from "./modelSummary.js";
 
 /** Snapshot and preview stay read-only; --apply explicitly enables guarded offline imports. */
 export async function cmdHardware(dir: string, files: string[] | undefined, json: boolean, io: Io, apply = false,expectedArtifactRevision?:string): Promise<number> {
+  const config = await loadConfig(await findWorkspace(dir));
+  if (apply) assertPlcWritable(config, undefined, io.env);
   if (files && files.length !== 1) throw new WorkspaceError("BAD_ARGUMENT", "Hardware preview takes exactly one --file patch.json");
   if (apply && !files?.[0]) throw new WorkspaceError("BAD_ARGUMENT", "Hardware --apply requires --file patch.json");
   let patchText: string | undefined;
@@ -19,7 +21,6 @@ export async function cmdHardware(dir: string, files: string[] | undefined, json
     patchText=bytes?.toString("utf8");
     if (patchText !== undefined) patchText = hardwarePatchText(patchText);
   } catch (error) { throw new WorkspaceError("BAD_ARGUMENT", error instanceof Error ? error.message : String(error)); }
-  const config = await loadConfig(await findWorkspace(dir));
   if (config.project.tiaVersion === "CODESYS") throw new WorkspaceError("BAD_ARGUMENT", "Hardware snapshots require a TIA project");
   if (apply && (config.writesOff || config.sync.import !== "auto")) throw new WorkspaceError("WRITES_OFF", "Hardware apply requires rung writes on and sync.import = auto");
   const client = await bridgeFor(config, io, apply ? ["--allow-import", ...(config.sync.save === "after-import" ? ["--save-after-import"] : [])] : []);

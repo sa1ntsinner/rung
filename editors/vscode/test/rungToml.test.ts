@@ -1,6 +1,30 @@
 // SPDX-License-Identifier: MIT
-import { describe, expect, it } from "vitest";
-import { formatPlcSection, lastBackupOf, parseRungToml, upsertPlcSection, writesState } from "../src/core/rungToml";
+import { describe, expect, it, vi } from "vitest";
+import { formatPlcSection, lastBackupOf, parseRungToml, plcReadOnly, upsertPlcSection, writesState } from "../src/core/rungToml";
+
+it("cannot clear the process environment lock with an environment override", () => {
+  vi.stubEnv("RUNG_READ_ONLY", "1");
+  try { expect(plcReadOnly(undefined, undefined, { RUNG_READ_ONLY: "0" })).toContain("RUNG_READ_ONLY=1"); }
+  finally { vi.unstubAllEnvs(); }
+});
+
+it("reads PLC locks and keeps the lock when replacing a connection", () => {
+  const original = '[plc.A]\nmode="PN/IE"\npc_interface="Ethernet"\nread_only=true\n[live.plc.B]\ntransport="s7commplus"\naddress="192.0.2.2"\nread_only=true';
+  const parsed = parseRungToml(original);
+  expect(parsed.plc.A?.readOnly).toBe(true);
+  expect(parsed.live?.plc.B?.readOnly).toBe(true);
+  expect(parseRungToml(upsertPlcSection(original, "A", { mode: "PN/IE", pcInterface: "New NIC", pcInterfaceNumber: 1 })).plc.A?.readOnly).toBe(true);
+});
+
+it("reports the environment lock before PLC locks and keeps other PLCs writable", () => {
+  const config = parseRungToml('[plc.A]\nmode="PN/IE"\npc_interface="Ethernet"\nread_only=true\n[live.plc.B]\ntransport="s7commplus"\naddress="192.0.2.2"\nread_only=true');
+  expect(plcReadOnly(config, "A", { RUNG_READ_ONLY: "1" })).toContain("RUNG_READ_ONLY=1");
+  expect(plcReadOnly(config, "A", {})).toContain("A");
+  expect(plcReadOnly(config, "B", {})).toContain("B");
+  expect(plcReadOnly(config, "C", {})).toBeUndefined();
+  expect(plcReadOnly(config, undefined, {})).toContain("A");
+  expect(plcReadOnly(undefined, undefined, { RUNG_READ_ONLY: "0" })).toBeUndefined();
+});
 
 it("round trips an online address", () => {
   const connection = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, address: "10.0.0.7" };

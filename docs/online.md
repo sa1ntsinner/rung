@@ -2,6 +2,29 @@
 
 TIA Portal V19, V20 or V21 with Openness must be installed on the Windows PC that runs the bridge. It can be your PC or [another PC over ssh](remote.md). rung reuses the TIA Portal that has the project open, or starts one without window.
 
+## Read-only lock
+
+Set `RUNG_READ_ONLY=1` before starting rung, or set `read_only = true` in
+`[plc.PLC_1]` or `[live.plc.PLC_1]` in `rung.toml`. The environment lock wins
+over workspace permissions, `allow_writes`, command flags and editor settings.
+Refused changes report `PLC_READ_ONLY` and exit with code 2.
+
+The lock blocks downloads, value modification, CPU control and TIA imports and
+apply operations. Pull and export remain available; watch runs export-only and
+does not start automatically in VS Code. `192.168.1.1` is admitted for locked
+read paths only. Use a pinned certificate for native reads and verified HTTPS
+for Web API reads; insecure TLS and the non-loopback HTTP override are refused.
+FB monitors do not automatically capture native program status while locked;
+`rung live watch --native-capture` requests it explicitly.
+
+Upload and `init --from-plc` currently refuse under the lock because their
+station creation uses the general project import permission. Local restore,
+upgrade and retrieve remain available. A locked command refuses reuse of a
+keeper that was started without the lock.
+Compilation also refuses while locked: the bridge currently has no way to
+prove that a project is a new scratch project. Archive remains available for
+a saved project; the lock refuses the save if the source has unsaved changes.
+
 ## Find the PLC
 
 Run these commands in the folder with `rung.toml`:

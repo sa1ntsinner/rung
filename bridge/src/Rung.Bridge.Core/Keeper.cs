@@ -24,6 +24,7 @@ namespace Rung.Bridge.Core
         public string Project { get; set; }
         public string State { get; set; }
         public string Error { get; set; }
+        public bool ReadOnly { get; set; }
 
         public void Fail(string error) { State = Failed; Error = error; }
     }
@@ -144,7 +145,7 @@ namespace Rung.Bridge.Core
     {
         /// <summary>Closing needs verified identities: stale records and recycled PIDs grant no ownership.</summary>
         public static bool Holds(KeeperRecord r, int tiaPid, long? keeperStartTicks, long? tiaStartTicks) =>
-            r != null && r.State == KeeperRecord.Ready && r.TiaPid == tiaPid && tiaPid > 0 && r.KeeperPid > 0
+            r != null && (!ReadOnlyPolicy.Locked || r.ReadOnly) && r.State == KeeperRecord.Ready && r.TiaPid == tiaPid && tiaPid > 0 && r.KeeperPid > 0
             && r.KeeperStartTicks > 0 && r.TiaStartTicks > 0
             && keeperStartTicks == r.KeeperStartTicks && tiaStartTicks == r.TiaStartTicks;
 
@@ -168,7 +169,7 @@ namespace Rung.Bridge.Core
         {
             "SystemRoot", "windir", "ComSpec", "PATH", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "USERNAME", "USERDOMAIN",
             "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "CommonProgramFiles(x86)",
-            "SystemDrive", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS", "COMPUTERNAME", "RUNG_OPENNESS_DIR"
+            "SystemDrive", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS", "COMPUTERNAME", "RUNG_OPENNESS_DIR", "RUNG_READ_ONLY"
         };
 
         /// <summary>Only Windows/runtime variables and keeper settings outlive the requesting command.</summary>

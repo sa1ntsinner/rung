@@ -5,6 +5,7 @@ import { mirrorFolderFor, preflight, tiaVersionOf, validateRemoteProject } from 
 import { FIXES } from "../views/environmentView";
 import { RungCli } from "../runner/cli";
 import type { RungWorkspace } from "../workspace";
+import { plcReadOnly } from "../core/rungToml";
 
 /**
  * Open TIA Project…: one path from a .ap file to a mirrored, watched workspace. Checks first what no click can fix
@@ -90,5 +91,5 @@ export async function initCommand(ws: RungWorkspace, cli: RungCli, context: vsco
   const pull = await cli.run(own ? ["pull"] : ["pull", dir]);
   if (!own) return void vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir));
   await ws.reload();
-  if (pull.code === 0 && ws.hasConfig) await vscode.commands.executeCommand("rung.watch.start");
+  if (pull.code === 0 && ws.hasConfig && !plcReadOnly(ws.config)) await vscode.commands.executeCommand("rung.watch.start");
 }

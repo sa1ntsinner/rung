@@ -7,6 +7,7 @@ if (args.Length == 0 || args is ["--stdio"] or ["--stdio", "--writer-policy-stdi
     Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     WriterConfiguration? policy = null;
     if (args.Length == 2) {
+        if (Rung.Bridge.Core.Protocol.ReadOnlyPolicy.Locked) { await Console.Error.WriteLineAsync("PLC_READ_ONLY: private writer startup is refused."); return 2; }
         try {
             using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var frame = new System.Text.StringBuilder();

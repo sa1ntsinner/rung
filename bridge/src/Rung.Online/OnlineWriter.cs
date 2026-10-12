@@ -13,6 +13,7 @@ internal static class OnlineWriter
         var sent = false;
         WriteResult? completed = null;
         try {
+            ReadOnlyPolicy.RefuseMutation();
             policy.Verify(target);
             if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= operation.ExpiresAt) throw new RpcException(ErrorCodes.StalePreparation, "Confirmation expired before writer connection.");
             await using var client = new S7CommPlusClient(OnlineDriver.Options(target, writes: true));

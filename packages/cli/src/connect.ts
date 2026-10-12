@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { isIPv4 } from "node:net";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { WorkspaceError, writeFileAtomic, type RungConfig } from "@rung/core";
+import { WorkspaceError, parseConfig, writeFileAtomic, type RungConfig } from "@rung/core";
 import type { ConnectionOptions, ConnectionTarget } from "@rung/bridge-client";
 
 export interface Candidate {
@@ -120,6 +120,7 @@ function plcsimRunning(): boolean {
 export async function saveTarget(ws: string, device: string, t: ConnectionTarget): Promise<void> {
   const file = join(ws, "rung.toml");
   const text = await readFile(file, "utf8");
+  const readOnly = parseConfig(text).plc[device]?.readOnly;
   const header = `[plc.${/^[A-Za-z0-9_-]+$/.test(device) ? device : JSON.stringify(device)}]`;
   const block = [
     header,
@@ -127,6 +128,7 @@ export async function saveTarget(ws: string, device: string, t: ConnectionTarget
     `mode = ${JSON.stringify(t.mode)}`,
     `pc_interface = ${JSON.stringify(t.pcInterface)}`,
     `pc_interface_number = ${t.pcInterfaceNumber ?? 1}`,
+    ...(readOnly !== undefined ? [`read_only = ${readOnly}`] : []),
     ...(t.targetInterface ? [`target_interface = ${JSON.stringify(t.targetInterface)}`] : []),
     ...(t.address ? [`address = ${JSON.stringify(t.address)}`] : []),
     "",

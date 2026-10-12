@@ -9,6 +9,7 @@ public sealed record WriterConfiguration(string Workspace, string ConfigRevision
 {
     public void Verify(ConnectRequest target)
     {
+        ReadOnlyPolicy.RefuseMutation();
         OnlineDispatcher.ValidateTarget(target.Address);
         if (!AllowWrites) throw new RpcException(ErrorCodes.WritesDisabled, "PLC modification is not opted in.");
         if (target.Device != Device || target.Address != Address || !string.Equals(target.CertificateSha256, CertificateSha256, StringComparison.OrdinalIgnoreCase))

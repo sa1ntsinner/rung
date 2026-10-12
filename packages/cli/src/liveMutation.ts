@@ -8,6 +8,7 @@ import { onlineHost } from "./liveTrust.js";
 import type { Io } from "./common.js";
 import type { BackendOptions, liveSelection } from "./liveServer.js";
 import type { Readable } from "node:stream";
+import { assertPlcWritable, loadConfig } from "@rung/core";
 
 /** Editor replies must echo the exact prepared operation over this process's private stdin. */
 export async function frontendConfirmation(input: Readable, operation: OnlinePreparedWrite): Promise<boolean> {
@@ -41,6 +42,7 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
   }
   return {
     async prepare(clientId: string, options: BackendOptions, action: MutationAction, credentials: { user?: string; password?: string }) {
+      assertPlcWritable(await loadConfig(root), options.device, env);
       if (closed || pending.size + preparing >= 128) throw new BridgeError("RESOURCE_LIMIT", "Too many pending confirmations or broker is closed");
       const selected = await select(options);
       validateLiveAddress(selected.target.address);
@@ -59,6 +61,7 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
         const prepared = await host.request("online.prepare", { sessionId: session.sessionId, ...action }) as OnlinePreparedWrite & { context: { binding: MutationBinding } };
         const original = prepared.context.binding;
         const policy = new MutationPolicy(async () => {
+          assertPlcWritable(await loadConfig(root), selected.device, env);
           const current = await select(options);
           if (JSON.stringify(current) !== JSON.stringify(selected) || await revision() !== configRevision) throw new BridgeError("STALE_PREPARATION", "PLC configuration changed; prepare again");
           const state = await activeHost.request("online.state", { sessionId: session.sessionId }) as OnlineStateResult;
@@ -76,6 +79,7 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
       finally { preparing--; }
     },
     async commit(clientId: string, id: string, preview: string, confirmed: boolean) {
+      assertPlcWritable(await loadConfig(root), undefined, env);
       const operation = pending.get(id);
       if (!operation || operation.clientId !== clientId) throw new BridgeError("STALE_PREPARATION", "Preparation belongs to another client or expired");
       pending.delete(id); clearTimeout(operation.timer);

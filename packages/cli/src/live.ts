@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung live: read-only values of a running PLC: an S7-1500 through its Web API, CODESYS through rung's CODESYS bridge.
-import { WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
+import { assertPlcWritable, plcReadOnly, WorkspaceError, loadConfig, pathToAddress } from "@rung/core";
 import { WebApiClient, plainHttpRefusal, loadWatchTable, watchTableVariables, type LiveFrame, type OnlineReadResult, type OnlineStateResult } from "@rung/live";
 import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -22,19 +22,15 @@ import { reconstructNativeSample, steadyReads } from "./liveReconstruction.js";
 
 export async function webApiFor(dir: string, env: Io["env"], opts: BackendOptions = {}): Promise<WebApiClient> {
   const ws = await findWorkspace(dir);
-  const config = await loadConfig(ws);
-  let w = config.live?.webapi;
-  if (Object.keys(config.live?.plc ?? {}).length) {
-    const selected = await liveSelection(ws, opts);
-    if (selected.transport !== "webapi") throw new WorkspaceError("CONFIG_INVALID", "Diagnostic buffer requires an explicit Web API fallback (--transport webapi)");
-    w = selected.target.webapi;
-  }
+  const selected = await liveSelection(ws, opts, env);
+  if (selected.transport !== "webapi") throw new WorkspaceError("CONFIG_INVALID", "Diagnostic buffer requires an explicit Web API fallback (--transport webapi)");
+  const w = selected.target.webapi;
   if (!w) throw new WorkspaceError("CONFIG_INVALID", 'no [live.webapi] in rung.toml (url = "https://<plc-ip>", user = "<web server user>")');
   const password = env.RUNG_WEBAPI_PASSWORD;
   if (!password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user (it is never stored in rung.toml)");
-  const refused = plainHttpRefusal(w.url, env);
+  const refused = plainHttpRefusal(w.url, selected.target.readOnly ? { ...env, RUNG_READ_ONLY: "1" } : env);
   if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
-  return new WebApiClient({ url: w.url, user: w.user, password, ...(w.insecure ? { insecure: true } : {}) });
+  return new WebApiClient({ url: w.url, user: w.user, password, readOnly: selected.target.readOnly, ...(w.insecure ? { insecure: true } : {}) });
 }
 
 export interface LiveOptions {
@@ -51,6 +47,8 @@ export interface LiveOptions {
   parentStdio?: boolean;
   lcid?: number;
   stream?: boolean;
+  /** Explicit native capture request; locked monitors only subscribe to values by default. */
+  nativeCapture?: boolean;
 }
 
 export async function cmdLive(dir: string, sub: string | undefined, args: string[], io: Io, opts: LiveOptions = {}): Promise<number> {
@@ -83,10 +81,12 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     } finally { try { await lease?.close(); } finally { await reader.close(); } }
   }
   if (sub === "modify" || sub === "run" || sub === "stop") {
+    assertPlcWritable(undefined, undefined, io.env);
     if (!opts.confirmStdin && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "PLC mutation requires an interactive confirmation");
     if (sub === "modify" ? args.length !== 2 : args.length !== 0) throw new WorkspaceError("BAD_ARGUMENT", "Use live modify <name> <SCL-literal>, live run or live stop");
     const ws = await findWorkspace(dir);
-    const selected = await liveSelection(ws, opts);
+    assertPlcWritable(await loadConfig(ws), opts.device, io.env);
+    const selected = await liveSelection(ws, opts, io.env);
     const reader = await brokerReader(ws, io.env, opts);
     let operation: OnlinePreparedWrite | undefined;
     const rl = io.prompt || opts.confirmStdin ? undefined : createInterface({ input: process.stdin, output: process.stdout });
@@ -124,6 +124,10 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
   // rung live watch "DB".x Tag …: pinned values, read together every interval (the editor's Live Values)
   const plan = sub === "watch" ? (!opts.file && args.length ? { block: "pinned values", vars: Object.fromEntries(args.map((a) => [a, a])) } as MonitorPlan : await watchPlan(dir, io, opts)) : undefined;
   const ws = await findWorkspace(dir);
+  if (plan) {
+    const device = opts.device ?? (opts.file ? pathToAddress(relative(ws, resolve(io.cwd, opts.file)).split(sep).join("/"))?.address.device : undefined);
+    if (plcReadOnly(await loadConfig(ws), device, io.env)) opts = { ...opts, nativeCapture: opts.nativeCapture === true };
+  }
   if (sub !== "diag") {
     const reader = await brokerReader(ws, io.env, opts);
     try {
@@ -136,7 +140,7 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     } catch (error) { io.stderr(`rung live ${opts.transport ?? "configured transport"}: ${liveError(error)}\n`); return 1; }
     finally { await reader.close(); }
   }
-  const selected = await liveSelection(ws, opts);
+  const selected = await liveSelection(ws, opts, io.env);
   if (selected.transport === "s7commplus") {
     const reader = await brokerReader(ws, io.env, opts);
     try {
@@ -152,7 +156,7 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
       return 0;
     } finally { await reader.close(); }
   }
-  await liveSelection(ws, { ...opts, transport: "webapi" });
+  await liveSelection(ws, { ...opts, transport: "webapi" }, io.env);
   const client = await webApiFor(dir, io.env, opts);
   try {
     if (plan) return await watchValues((names) => client.read(names), plan, io, opts);
@@ -324,7 +328,7 @@ async function watchValues(read: Reader, plan: MonitorPlan, io: Io, opts: LiveOp
       if (latest) publish(latest);
     };
     const capture = async () => {
-      if (!ready || stopped || sourceChanged || capturing || latest?.state !== "live" || !reader.capture || plan.kind !== "FB" || !plan.instance || !opts.file || Date.now() - attemptedAt < 5000) return;
+      if (opts.nativeCapture === false || !ready || stopped || sourceChanged || capturing || latest?.state !== "live" || !reader.capture || plan.kind !== "FB" || !plan.instance || !opts.file || Date.now() - attemptedAt < 5000) return;
       capturing = true; attemptedAt = Date.now();
       const owner = generation, expected = latest.scope;
       try {

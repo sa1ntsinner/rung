@@ -5,7 +5,7 @@ import { isIPv4 } from "node:net";
 import { createInterface } from "node:readline/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { addressChange, candidates, describe, notFoundMessage, reachable, saveTarget, targetOf, withNetworkAddress, type Candidate } from "./connect.js";
-import { WorkspaceError, loadConfig, parseAddress, writeFileAtomic, type RungConfig } from "@rung/core";
+import { WorkspaceError, assertPlcWritable, loadConfig, parseAddress, writeFileAtomic, type RungConfig } from "@rung/core";
 import type { BridgeClient, CompareOutcome, CompileMessage, ConnectionOptions, ConnectionTarget, DownloadOutcome, OnlineCredentials, OnlineStatus, ProjectInfo, UploadOutcome, UploadRequest } from "@rung/bridge-client";
 import { OwnerClient, placeCompileMessages, recordCompile } from "@rung/sync";
 import { bridgeFor, findWorkspace, importFlags, type Io } from "./common.js";
@@ -189,6 +189,7 @@ function offeredTarget(t: ConnectionTarget, c: ConnectionOptions): ConnectionTar
 export async function cmdConnect(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   if (v["project-address"] && !v.address) throw new WorkspaceError("BAD_ARGUMENT", "--project-address requires --address");
   const { ws, config, link } = await workspace(dir, io);
+  if (v.address) assertPlcWritable(config, v.plc as string | undefined, io.env);
   const device = await deviceOf(config, v, ws, link);
   if (v.use) {
     const typed: ConnectionTarget = { mode: (v.mode as string | undefined) ?? "PN/IE", pcInterface: String(v.use), pcInterfaceNumber: interfaceNumber(v), ...(v.target ? { targetInterface: String(v.target) } : {}) };
@@ -356,6 +357,7 @@ async function ask(io: Io, question: string): Promise<string> {
 
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   const { ws, config, link } = await workspace(dir, io, true);
+  assertPlcWritable(config, v.plc as string | undefined, io.env);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");
   const hardware = v.hw ? true : v["no-hw"] ? false : config.download.hardware;
   const software = !v["no-sw"];
@@ -496,6 +498,7 @@ export async function cmdUpload(dir: string, v: Record<string, unknown>, io: Io)
   const ws = await findWorkspace(dir);
   const config = await loadConfig(ws);
   // the project gains a station: allowed where the workspace may write into it (sync.import = "auto", writes on)
+  assertPlcWritable(config, undefined, io.env);
   if (config.writesOff) throw new WorkspaceError("WRITES_OFF", "rung upload adds a station to the project, and writes to TIA Portal are off in this workspace: rung writes on first");
   const client = await bridgeFor(config, io, importFlags(config));
   try {

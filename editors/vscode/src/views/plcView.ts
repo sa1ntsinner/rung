@@ -9,6 +9,7 @@ import type { RungCli } from "../runner/cli";
 import type { LiveAccess } from "../liveAccess";
 import { stopLive, startProcess } from "../runner/terminal";
 import type { ChildProcess } from "node:child_process";
+import { plcReadOnly } from "../core/rungToml";
 
 type Node =
   | { type: "watch" }
@@ -193,6 +194,14 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
     const w = this.ws.writes;
     const it = new PlcItem({ type: "writes" }, "Writes to TIA Portal", vscode.TreeItemCollapsibleState.None);
     it.id = "writes";
+    const readOnly = plcReadOnly(this.ws.config);
+    if (readOnly) {
+      it.description = "off · read-only";
+      it.iconPath = new vscode.ThemeIcon("lock");
+      it.tooltip = readOnly;
+      it.contextValue = "rung.writes.off";
+      return it;
+    }
     it.description = w === "on" ? "on" : w === "off" ? "off · click to turn on" : "off (sync.import = manual)";
     it.iconPath = new vscode.ThemeIcon(w === "on" ? "unlock" : "lock", w === "on" ? undefined : new vscode.ThemeColor("list.warningForeground"));
     it.tooltip =

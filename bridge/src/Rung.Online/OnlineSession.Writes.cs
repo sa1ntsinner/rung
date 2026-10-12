@@ -10,7 +10,7 @@ public sealed partial class OnlineSession
 {
     ConnectRequest? target;
     WriteOperationEngine? operations;
-    WriteOperationEngine Writer => operations ?? throw new RpcException(ErrorCodes.WritesDisabled, "This read host has no writer policy.");
+    WriteOperationEngine Writer { get { ReadOnlyPolicy.RefuseMutation(); return operations ?? throw new RpcException(ErrorCodes.WritesDisabled, "This read host has no writer policy."); } }
     public Task<PreparedWrite> PrepareAsync(WriteAction action, CancellationToken token) => Writer.PrepareAsync(action, token);
     public Task<WriteResult> CommitAsync(string id, string preview, bool confirmed, CancellationToken token) => Writer.CommitAsync(id, preview, confirmed, token);
     internal static string ProgramRevision(OnlineSymbol[] symbols) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(symbols.OrderBy(s => s.Name, StringComparer.Ordinal), RpcWire.Json)));

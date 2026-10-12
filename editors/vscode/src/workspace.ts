@@ -5,7 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import * as vscode from "vscode";
-import { lastBackupOf, parseRungToml, writesState, type RungToml } from "./core/rungToml";
+import { lastBackupOf, parseRungToml, plcReadOnly, writesState, type RungToml } from "./core/rungToml";
 import { devicesInState, objectsOf, parseState, summarize, type ObjectInfo, type StateDoc } from "./core/state";
 import type { Output } from "./output";
 
@@ -127,7 +127,7 @@ export class RungWorkspace implements vscode.Disposable {
     }
     this.state = root ? parseState(await readFile(join(root, ".rung", "state.json"), "utf8").catch(() => "")) : undefined;
     this.lastBackup = root ? lastBackupOf(await readFile(join(root, ".rung", "backups.json"), "utf8").catch(() => "")) : undefined;
-    this.writes = writesState(this.config, root ? await readFile(join(root, ".rung", "writes.json"), "utf8").catch(() => "") : "");
+    this.writes = plcReadOnly(this.config) ? "off" : writesState(this.config, root ? await readFile(join(root, ".rung", "writes.json"), "utf8").catch(() => "") : "");
     this.objects = objectsOf(this.state);
     this.readOwner();
     this.out.debug(`workspace: ${root ?? "(none)"}, rung.toml ${this.hasConfig ? "found" : "missing"}, ${this.objects.length} objects, watch ${this.owner ? `pid ${this.owner.pid}` : "not running"}`);
@@ -193,6 +193,7 @@ export class RungWorkspace implements vscode.Disposable {
       set("rung.hasConflicts", this.conflicts.length > 0),
       set("rung.hasObjects", this.objects.length > 0),
       set("rung.writesOn", this.writes === "on"),
+      set("rung.readOnly", !!plcReadOnly(this.config)),
     ]);
   }
 

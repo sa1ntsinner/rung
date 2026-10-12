@@ -19,6 +19,7 @@ export {
   shellPath,
 } from "./address.js";
 export { WorkspaceError, type WorkspaceErrorCode } from "./errors.js";
+export { plcReadOnly, assertPlcWritable } from "./plcReadOnly.js";
 export { sha256, normalizeText, writeFileAtomic, replaceGuarded, type GuardOptions, type GuardResult } from "./atomic.js";
 export { StateStore, type ObjectState, type ObjectStatus, type StateFile, type Binding } from "./state.js";
 export { BlobStore, Journal, publishBundle, recoverJournal, bundleHash, pathKey, writeRecoveryNote, type PublishIntent, type PublishTarget, type RecoveryReport } from "./bundle.js";

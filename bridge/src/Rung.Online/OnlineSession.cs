@@ -41,6 +41,7 @@ internal sealed partial class OnlineDriver : IOnlineDriver
         client = new(Options(request));
     }
     internal static S7CommPlusClientOptions Options(ConnectRequest request, bool writes = false) {
+        if (writes) ReadOnlyPolicy.RefuseMutation();
         OnlineDispatcher.ValidateTarget(request.Address);
         return new S7CommPlusClientOptions {
             Address = request.Address, CertificateSha256 = request.CertificateSha256,

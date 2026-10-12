@@ -130,6 +130,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportResult ReleaseLibrary(LibraryReleaseRequest request,string expectedRevision,string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
 #if TIA_V19
             throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library version release");
 #else
@@ -174,6 +175,7 @@ namespace Rung.Bridge.V20
         }
         public MasterCopyResult ApplyMasterCopy(MasterCopyRequest request, string expectedRevision, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive(); FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
             using (var access = _portal.ExclusiveAccess("rung: master copy")) {
                 MasterCopyTarget(request);
@@ -200,6 +202,7 @@ namespace Rung.Bridge.V20
         }
         public LibraryImportResult ImportLibrary(LibraryPackage package, string device, string dir, string stem, string expectedRevision, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
 #if TIA_V19
             throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library document import or export");
 #else

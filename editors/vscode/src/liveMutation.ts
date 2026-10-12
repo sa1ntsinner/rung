@@ -5,13 +5,16 @@ import type { LiveAccess } from "./liveAccess";
 import type { RungCli } from "./runner/cli";
 import { killTree } from "./runner/terminal";
 import type { RungWorkspace } from "./workspace";
+import { allowPlcWrite } from "./plcReadOnly";
+import { plcReadOnly } from "./core/rungToml";
 
 /** Uses the CLI's private confirmation pipe; source declarations are never changed here. */
 export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAccess, action: "modify" | "run" | "stop",
   name?: string, draft?: string, device?: string): Promise<void> {
   const connection = await access.select(device);
   if (!connection || !ws.root) return;
-  if (connection.simulator && action === "modify") return modifySimulator(connection.simulator, name, draft);
+  if (!allowPlcWrite(ws.config, connection.device)) return;
+  if (connection.simulator && action === "modify") return modifySimulator(ws, connection.device, connection.simulator, name, draft);
   if (connection.target.transport !== "s7commplus") { void vscode.window.showWarningMessage("PLC modification requires a configured s7commplus target."); return; }
   if (action === "modify") {
     name ??= await vscode.window.showInputBox({ title: "Modify current PLC value", prompt: "PLC symbolic name or verified absolute address" });
@@ -21,6 +24,7 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
   }
   const env = await access.environment(connection);
   if (!env || connection.workspace !== access.scope) return;
+  if (!allowPlcWrite(ws.config, connection.device)) return;
   const args = ["live", action, ...(action === "modify" ? [name!, draft!] : []), "--device", connection.device, "--confirm-stdin", "--json"];
   const inv = cli.invocation(args);
   const child = spawn(inv.file, inv.args, { cwd: ws.root, env: { ...process.env, ...env }, stdio: "pipe", windowsHide: true, windowsVerbatimArguments: inv.shell });
@@ -42,7 +46,7 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
       void (async () => {
         const answer = await vscode.window.showWarningMessage(`Confirm ${action} on ${connection.device}?`, { modal: true, detail: operation.preview }, "Confirm");
         await ws.reload();
-        confirmed = answer === "Confirm" && connection.workspace === access.scope && Date.now() < operation.expiresAt && child.exitCode === null;
+        confirmed = answer === "Confirm" && !plcReadOnly(ws.config, connection.device) && connection.workspace === access.scope && Date.now() < operation.expiresAt && child.exitCode === null;
         child.stdin.on("error", () => {});
         if (!child.stdin.destroyed) child.stdin.end(JSON.stringify({ operationId: operation.operationId, preview: operation.preview, confirmed }) + "\n");
       })().catch(() => killTree(child));
@@ -76,11 +80,13 @@ export function simulatorLiteral(text: string): unknown {
  * rung simulate is the workspace's own virtual PLC: a value is written straight into it (its Web API), no confirmation
  * pipe, no real plant behind it. Inputs set this way stand until the program or the next write changes them.
  */
-async function modifySimulator(url: string, name?: string, draft?: string): Promise<void> {
+async function modifySimulator(ws: RungWorkspace, device: string, url: string, name?: string, draft?: string): Promise<void> {
   name ??= await vscode.window.showInputBox({ title: "Set a value in the simulator", prompt: 'PLC tag or DB member, for example "Start_PB"' });
   if (!name) return;
   draft = await vscode.window.showInputBox({ title: `Set ${name} in the simulator`, prompt: "New value: TRUE, FALSE, a number or an SCL literal", value: draft ?? "" });
   if (draft === undefined) return;
+  await ws.reload();
+  if (!allowPlcWrite(ws.config, device)) return;
   const rpc = async (body: unknown, token?: string) => {
     const r = await fetch(`${url}/api/jsonrpc`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-auth-token": token } : {}) }, body: JSON.stringify(body) });
     return (await r.json()) as { result?: unknown; error?: { message?: string } }[];
@@ -88,6 +94,7 @@ async function modifySimulator(url: string, name?: string, draft?: string): Prom
   try {
     const [login] = await rpc([{ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: "simulator" } }]);
     const token = (login?.result as { token?: string } | undefined)?.token;
+    if (!allowPlcWrite(ws.config, device)) return;
     const [write] = await rpc([{ jsonrpc: "2.0", id: 2, method: "PlcProgram.Write", params: { var: name, value: simulatorLiteral(draft) } }], token);
     if (write?.error) void vscode.window.showWarningMessage(`The simulator did not take ${name}: ${write.error.message ?? "refused"}`);
     else void vscode.window.setStatusBarMessage(`$(vm-running) ${name} := ${draft} in the simulator`, 4000);

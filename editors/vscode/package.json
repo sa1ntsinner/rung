@@ -352,11 +352,31 @@
         "title": "Write Read-Only Views (Hardware, HMI, Tags)",
         "category": "rung"
       },
-      {"command":"rung.projectAssets","title":"Project Assets: Preview, Export and Safety","category":"rung"},
-      {"command":"rung.projectAssets.apply","title":"Project Assets: Review and Apply","category":"rung"},
-      {"command":"rung.traceRecord","title":"Trace: Record PLC Signals…","category":"rung"},
-      {"command":"rung.traceOpen","title":"Trace: Open Recording…","category":"rung"},
-      {"command":"rung.traceImport","title":"Trace: Import TIA Long-term CSV…","category":"rung"},
+      {
+        "command": "rung.projectAssets",
+        "title": "Project Assets: Preview, Export and Safety",
+        "category": "rung"
+      },
+      {
+        "command": "rung.projectAssets.apply",
+        "title": "Project Assets: Review and Apply",
+        "category": "rung"
+      },
+      {
+        "command": "rung.traceRecord",
+        "title": "Trace: Record PLC Signals…",
+        "category": "rung"
+      },
+      {
+        "command": "rung.traceOpen",
+        "title": "Trace: Open Recording…",
+        "category": "rung"
+      },
+      {
+        "command": "rung.traceImport",
+        "title": "Trace: Import TIA Long-term CSV…",
+        "category": "rung"
+      },
       {
         "command": "rung.compileFile",
         "title": "Compile This File",
@@ -784,7 +804,7 @@
         },
         {
           "command": "rung.writes.on",
-          "when": "rung.workspace"
+          "when": "rung.workspace && !rung.readOnly"
         },
         {
           "command": "rung.writes.off",
@@ -836,7 +856,7 @@
         },
         {
           "command": "rung.download",
-          "when": "rung.workspace"
+          "when": "rung.workspace && !rung.readOnly"
         },
         {
           "command": "rung.openInTia",
@@ -929,6 +949,26 @@
         {
           "command": "rung.compareBehaviour",
           "when": "rung.workspace"
+        },
+        {
+          "command": "rung.live.modify",
+          "when": "rung.workspace && !rung.readOnly"
+        },
+        {
+          "command": "rung.live.run",
+          "when": "rung.workspace && !rung.readOnly"
+        },
+        {
+          "command": "rung.live.stop",
+          "when": "rung.workspace && !rung.readOnly"
+        },
+        {
+          "command": "rung.projectAssets.apply",
+          "when": "rung.workspace && !rung.readOnly"
+        },
+        {
+          "command": "rung.changes.sync",
+          "when": "rung.workspace && !rung.readOnly"
         }
       ],
       "view/title": [
@@ -1044,12 +1084,12 @@
         },
         {
           "command": "rung.changes.sync",
-          "when": "view == rung.changes && rung.changes.any && !rung.changes.sendsWithWritesOff",
+          "when": "view == rung.changes && rung.changes.any && !rung.changes.sendsWithWritesOff && !rung.readOnly",
           "group": "navigation@1"
         },
         {
           "command": "rung.writes.on",
-          "when": "view == rung.changes && rung.changes.sendsWithWritesOff",
+          "when": "view == rung.changes && rung.changes.sendsWithWritesOff && !rung.readOnly",
           "group": "navigation@1"
         },
         {
@@ -1171,7 +1211,7 @@
         },
         {
           "command": "rung.download",
-          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/ && !rung.readOnly",
           "group": "inline@2"
         },
         {
@@ -1226,7 +1266,7 @@
         },
         {
           "command": "rung.download",
-          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc\\b/ && !rung.readOnly",
           "group": "3_plc@2"
         },
         {
@@ -1261,7 +1301,7 @@
         },
         {
           "command": "rung.download",
-          "when": "view == rung.changes && viewItem == rung.compared",
+          "when": "view == rung.changes && viewItem == rung.compared && !rung.readOnly",
           "group": "1_plc@2"
         },
         {
@@ -1286,17 +1326,17 @@
         },
         {
           "command": "rung.live.modify",
-          "when": "view == rung.live && (viewItem == rung.liveValue || viewItem == rung.watchRow)",
+          "when": "view == rung.live && (viewItem == rung.liveValue || viewItem == rung.watchRow) && !rung.readOnly",
           "group": "live@3"
         },
         {
           "command": "rung.live.run",
-          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/ && !rung.readOnly",
           "group": "live@0"
         },
         {
           "command": "rung.live.stop",
-          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/",
+          "when": "view == rung.plc && viewItem =~ /^rung\\.plc/ && !rung.readOnly",
           "group": "live@1"
         }
       ],
@@ -1543,7 +1583,7 @@
       {
         "key": "alt+q d",
         "command": "rung.download",
-        "when": "rung.workspace"
+        "when": "rung.workspace && !rung.readOnly"
       },
       {
         "key": "alt+q m",

@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { BridgeError, type OnlineWriteResult } from "@rung/bridge-client";
 import { validateLiveAddress } from "./s7commplus.js";
+import { assertPlcWritable } from "@rung/core";
 
 export interface MutationBinding {
   workspace: string; device: string; address: string; certificateSha256: string;
@@ -21,7 +22,7 @@ function bindingOf(b: MutationBinding): MutationBinding {
     cpu: b.cpu, serial: b.serial, plcName: b.plcName, firmware: b.firmware, epoch: b.epoch, programRevision: b.programRevision, configRevision: b.configRevision, allowWrites: b.allowWrites };
 }
 function check(binding: MutationBinding) {
-  validateLiveAddress(binding.address);
+  validateLiveAddress(binding.address, { mutation: true });
   if (binding.allowWrites !== true) throw new BridgeError("WRITES_DISABLED", "Enable allow_writes for this PLC before preparing a mutation");
   if (!/^[a-fA-F0-9]{64}$/.test(binding.certificateSha256)) throw new BridgeError("CERTIFICATE_UNTRUSTED", "Verify the PLC certificate before modifying it");
   if (!Number.isSafeInteger(binding.epoch) || binding.epoch < 1 || [binding.workspace, binding.device, binding.cpu, binding.serial, binding.plcName, binding.programRevision, binding.configRevision].some(s => typeof s !== "string" || !s || s.length > 4096))
@@ -36,6 +37,7 @@ export class MutationPolicy {
     private readonly now = Date.now) {}
 
   async prepare(request: MutationAction, preview?: string): Promise<PreparedMutation> {
+    assertPlcWritable();
     const binding = bindingOf(await this.current()); check(binding);
     if (!["modify", "run", "stop"].includes(request.action) || request.action === "modify" && (!request.name?.trim() || !request.literal?.trim() || request.name.length > 1024 || request.literal.length > 4096) || request.action !== "modify" && (request.name !== undefined || request.literal !== undefined))
       throw new BridgeError("BAD_REQUEST", "Prepare one scalar modification or CPU action");
@@ -49,6 +51,7 @@ export class MutationPolicy {
   }
 
   async commit(id: string, preview: string, confirmed: boolean): Promise<MutationEvidence> {
+    assertPlcWritable();
     const operation = this.operations.get(id); this.operations.delete(id);
     if (!operation || preview !== operation.preview) throw new BridgeError("STALE_PREPARATION", "Preparation was changed, cancelled or already consumed");
     if (confirmed !== true) throw new BridgeError("WRITES_DISABLED", "Explicit confirmation is required");

@@ -4,6 +4,7 @@
 import { parse } from "smol-toml";
 
 export interface PlcConnection {
+  readOnly?: boolean;
   address?: string;
   mode: string;
   pcInterface: string;
@@ -32,7 +33,14 @@ export interface RungToml {
   live?: { webapi?: LiveWebApi; plc: Record<string, LivePlc> };
 }
 export interface LiveWebApi { url: string; user: string; insecure?: boolean }
-export interface LivePlc { transport: "s7commplus" | "webapi"; address: string; user?: string; certificateSha256?: string; webapi?: LiveWebApi }
+export interface LivePlc { transport: "s7commplus" | "webapi"; address: string; user?: string; certificateSha256?: string; webapi?: LiveWebApi; readOnly?: boolean }
+
+export function plcReadOnly(config?: RungToml, device?: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (process.env.RUNG_READ_ONLY === "1" || env.RUNG_READ_ONLY === "1") return "Read-only: RUNG_READ_ONLY=1";
+  const devices = device ? [device] : [...new Set([...Object.keys(config?.plc ?? {}), ...Object.keys(config?.live?.plc ?? {})])];
+  const locked = devices.find(d => config?.plc[d]?.readOnly || config?.live?.plc[d]?.readOnly);
+  return locked ? `Read-only: PLC ${locked} has read_only = true in rung.toml` : undefined;
+}
 
 export const DOWNLOAD_DEFAULTS: Readonly<DownloadDefaults> = {
   enabled: true,
@@ -58,7 +66,7 @@ export function parseRungToml(text: string): RungToml {
     const t = table(v);
     if (typeof t.mode !== "string" || typeof t.pc_interface !== "string") continue;
     const n = typeof t.pc_interface_number === "number" ? t.pc_interface_number : 1;
-    plc[name] = { mode: t.mode, pcInterface: t.pc_interface, pcInterfaceNumber: n, ...(typeof t.target_interface === "string" ? { targetInterface: t.target_interface } : {}), ...(typeof t.address === "string" ? { address: t.address } : {}) };
+    plc[name] = { mode: t.mode, pcInterface: t.pc_interface, pcInterfaceNumber: n, ...(typeof t.read_only === "boolean" ? { readOnly: t.read_only } : {}), ...(typeof t.target_interface === "string" ? { targetInterface: t.target_interface } : {}), ...(typeof t.address === "string" ? { address: t.address } : {}) };
   }
   const out: RungToml = {
     devices: Array.isArray(raw.devices) ? raw.devices.filter((d): d is string => typeof d === "string" && !!d) : [],
@@ -89,7 +97,7 @@ export function parseRungToml(text: string): RungToml {
     for (const [device, value] of Object.entries(table(live.plc))) {
       const t = table(value);
       if ((t.transport !== "s7commplus" && t.transport !== "webapi") || typeof t.address !== "string") continue;
-      plc[device] = { transport: t.transport, address: t.address, ...(typeof t.user === "string" ? { user: t.user } : {}), ...(typeof t.certificate_sha256 === "string" ? { certificateSha256: t.certificate_sha256 } : {}), ...(web(t.webapi) ? { webapi: web(t.webapi) } : {}) };
+      plc[device] = { transport: t.transport, address: t.address, ...(typeof t.read_only === "boolean" ? { readOnly: t.read_only } : {}), ...(typeof t.user === "string" ? { user: t.user } : {}), ...(typeof t.certificate_sha256 === "string" ? { certificateSha256: t.certificate_sha256 } : {}), ...(web(t.webapi) ? { webapi: web(t.webapi) } : {}) };
     }
     out.live = { plc, ...(web(live.webapi) ? { webapi: web(live.webapi) } : {}) };
   }
@@ -140,6 +148,7 @@ export function formatPlcSection(device: string, c: PlcConnection): string {
     `mode = ${tomlString(c.mode)}`,
     `pc_interface = ${tomlString(c.pcInterface)}`,
     `pc_interface_number = ${c.pcInterfaceNumber}`,
+    ...(c.readOnly !== undefined ? [`read_only = ${c.readOnly}`] : []),
     ...(c.targetInterface !== undefined ? [`target_interface = ${tomlString(c.targetInterface)}`] : []),
     ...(c.address !== undefined ? [`address = ${tomlString(c.address)}`] : []),
   ].join("\n");
@@ -158,7 +167,8 @@ function isPlcHeader(line: string, device: string): boolean {
  */
 export function upsertPlcSection(text: string, device: string, c: PlcConnection): string {
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const section = formatPlcSection(device, c).split("\n").join(eol);
+  const readOnly = parseRungToml(text).plc[device]?.readOnly;
+  const section = formatPlcSection(device, { ...c, ...(readOnly !== undefined ? { readOnly } : {}) }).split("\n").join(eol);
   const lines = text.split(/\r?\n/);
   const start = lines.findIndex((l) => isPlcHeader(l, device));
   if (start < 0) {

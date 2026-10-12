@@ -18,7 +18,8 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
     long epoch;
 
     public static void ValidateTarget(string? address) {
-        if (IPAddress.TryParse(address, out var target) && (target.IsIPv4MappedToIPv6 ? target.MapToIPv4() : target).Equals(IPAddress.Parse("192.168.1.1")))
+        if (IPAddress.TryParse(address, out var target) && (target.IsIPv4MappedToIPv6 ? target.MapToIPv4() : target).Equals(IPAddress.Parse("192.168.1.1"))
+            && !(ReadOnlyPolicy.Locked && address == "192.168.1.1"))
             throw new RpcException(ErrorCodes.TargetRefused, "192.168.1.1 is refused before connection.");
         if (target == null || target.AddressFamily != AddressFamily.InterNetwork || target.ToString() != address)
             throw new RpcException(ErrorCodes.BadRequest, "Address must be a canonical IPv4 literal.");
@@ -74,7 +75,8 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
 
     async Task<object> DispatchAsync(string method, JsonElement p, CancellationToken token)
     {
-        if (method == "bridge.hello") return new { protocol = RpcConstants.ProtocolVersion, tiaVersion = "", bridgeVersion = "0.1.0", capabilities = writerConfiguration == null ? Capabilities : [..Capabilities, "online.prepare", "online.commit"] };
+        if (method is "online.prepare" or "online.commit") ReadOnlyPolicy.RefuseMutation();
+        if (method == "bridge.hello") return new { protocol = RpcConstants.ProtocolVersion, tiaVersion = "", bridgeVersion = "0.1.0", capabilities = writerConfiguration == null || ReadOnlyPolicy.Locked ? Capabilities : [..Capabilities, "online.prepare", "online.commit"] };
         if (!Capabilities.Contains(method) && !(writerConfiguration != null && method is "online.prepare" or "online.commit")) throw new RpcException(ErrorCodes.UnsupportedCapability, "Unsupported online method.");
         if (method == "online.watchTable") return WatchTable.Parse(String(p, "xml"));
         if (method == "online.certificate") {
@@ -90,6 +92,7 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
             if (string.IsNullOrWhiteSpace(request.Device)) throw new RpcException(ErrorCodes.BadRequest, "Missing device.");
             if (request.CertificateSha256 == null || request.CertificateSha256.Length != 64 || !request.CertificateSha256.All(Uri.IsHexDigit)) throw new RpcException(ErrorCodes.CertificateUntrusted, "Verify and pin the PLC certificate with rung live trust --device <PLC>.");
             if (sessions.Count >= 16) throw new RpcException(ErrorCodes.ResourceLimit, "At most 16 sessions per host.");
+            if (writerConfiguration != null) ReadOnlyPolicy.RefuseMutation();
             writerConfiguration?.Verify(request);
             var session = new OnlineSession((factory ?? (r => new OnlineDriver(r)))(request), writerConfiguration, send);
             try { await session.ConnectAsync(request, token, ++epoch); }

@@ -149,6 +149,7 @@ namespace Rung.Bridge.V20
 
         public static OpennessSession Attach(BridgeArgs args, Action<string, object> emit)
         {
+            if (args.CreateProject) ReadOnlyPolicy.RefuseMutation();
             // Attach and release share startup arbitration: a peer cannot arrive after release counted its sessions.
             var path = args.ProjectPath ?? PortalSelector.Choose(TiaPortal.GetProcesses()
                 .Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), null).ProjectPath;
@@ -181,6 +182,9 @@ namespace Rung.Bridge.V20
                     chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath);
                 }
                 var proc = procs.First(p => p.Id == chosen.Pid);
+                if (KeeperFile.Read(KeeperFile.PathFor(Path.GetFullPath(path)))?.ReadOnly == true && Keeper.Holds(path, proc.Id)) ReadOnlyPolicy.Lock();
+                if (ReadOnlyPolicy.Locked && proc.Mode == TiaPortalMode.WithoutUserInterface && !Keeper.Holds(path, proc.Id))
+                    throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: cannot reuse a headless TIA Portal without a verified read-only keeper.");
                 OpennessWhitelist.Require(System.Reflection.Assembly.GetExecutingAssembly().Location, TiaVersion.Name.Substring(1) + ".0",
                     (key, value) => Microsoft.Win32.Registry.GetValue(key, value, null) as string, proc.Mode == TiaPortalMode.WithUserInterface);
                 var portal = proc.Attach();
@@ -913,6 +917,7 @@ namespace Rung.Bridge.V20
 
         public ExportResult Import(string address, string form, string path, string expectedTiaRevision, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             using (OfflineFor(AddressFormat.Parse(address).Device))
@@ -1516,6 +1521,7 @@ namespace Rung.Bridge.V20
         /// </summary>
         public string Rename(string address, string newName, string expectedTiaRevision, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
@@ -1570,6 +1576,7 @@ namespace Rung.Bridge.V20
 
         public void Delete(string address, string expectedTiaRevision, string operationId)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             FixtureGuard.CheckImport(_args.AllowImport, _args.AllowFixtureImport, _project.Path.FullName);
@@ -1608,6 +1615,7 @@ namespace Rung.Bridge.V20
 
         public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses)
         {
+            ReadOnlyPolicy.RefuseMutation();
             Alive();
             Listen();
             var plc = Plc(device);
@@ -1844,10 +1852,10 @@ namespace Rung.Bridge.V20
             _disposed = true;
             if (_ownsPortal)
             {
-                try { if (_args.SaveAfterImport) _project.Save(); } catch (Exception) { }
+                try { if (_args.SaveAfterImport && !ReadOnlyPolicy.Locked) _project.Save(); } catch (Exception) { }
                 try { _project.Close(); } catch (Exception) { }
             }
-            else if (_args.SaveAfterImport)
+            else if (_args.SaveAfterImport && !ReadOnlyPolicy.Locked)
             {
                 // the keeper never saves (a workspace's sync.save can change while it runs): a bridge that may, saves what
                 // it leaves changed in the keeper's project (a compile), so the keeper can end when nobody uses it

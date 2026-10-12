@@ -11,8 +11,8 @@ export interface OnlineEventRpc extends OnlineRpc {
 type ValuesEvent = OnlineReadResult & { sessionId: string; subscriptionId: string };
 
 /** Owns the host and its read session, including callbacks arriving during subscribe. */
-export async function createS7Backend(rpc: OnlineEventRpc, target: OnlineConnectRequest): Promise<LiveBackend> {
-  const client = new S7CommPlusClient(rpc);
+export async function createS7Backend(rpc: OnlineEventRpc, target: OnlineConnectRequest & { readOnly?: boolean }): Promise<LiveBackend> {
+  const client = new S7CommPlusClient(rpc, target.readOnly);
   const info = await client.connect(target);
   const callbacks = new Map<string, (frame: OnlineReadResult) => void>();
   const latest = new Map<string, OnlineReadResult>();

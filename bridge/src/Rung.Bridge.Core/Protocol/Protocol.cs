@@ -3,6 +3,19 @@ using System;
 
 namespace Rung.Bridge.Core.Protocol
 {
+    public static class ReadOnlyPolicy
+    {
+        static readonly bool EnvironmentLocked = Environment.GetEnvironmentVariable("RUNG_READ_ONLY") == "1";
+        static volatile bool argumentLocked;
+        static ReadOnlyPolicy() { }
+        public static bool Locked => EnvironmentLocked || argumentLocked;
+        public static void Lock() { argumentLocked = true; }
+        public static void RefuseMutation()
+        {
+            if (Locked) throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: this process is locked to read-only operations.");
+        }
+    }
+
     public static class RpcConstants
     {
         public const int ProtocolVersion = 1;
@@ -20,6 +33,7 @@ namespace Rung.Bridge.Core.Protocol
         public const string SymbolAmbiguous = "SYMBOL_AMBIGUOUS";
         public const string ResourceLimit = "RESOURCE_LIMIT";
         public const string WritesDisabled = "WRITES_DISABLED";
+        public const string PlcReadOnly = "PLC_READ_ONLY";
         public const string StalePreparation = "STALE_PREPARATION";
         public const string TargetRefused = "TARGET_REFUSED";
         public const string TiaNotRunning = "TIA_NOT_RUNNING";

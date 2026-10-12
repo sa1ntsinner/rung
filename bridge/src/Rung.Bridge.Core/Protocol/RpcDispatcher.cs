@@ -106,6 +106,11 @@ namespace Rung.Bridge.Core.Protocol
 
         object Dispatch(string method, JsonElement p)
         {
+            if (method is "objects.import" or "objects.delete" or "objects.rename" or "hardware.apply" or "artifact.import"
+                or "library.import" or "library.release" or "library.update" or "library.mastercopy"
+                or "plc.download" or "plc.upload" or "plc.compile" or "session.discard"
+                || method == "session.release" && (Bool(p, "save") || Bool(p, "discard"))
+                || method == "objects.show" && Bool(p, "save")) ReadOnlyPolicy.RefuseMutation();
             switch (method)
             {
                 case "bridge.hello":

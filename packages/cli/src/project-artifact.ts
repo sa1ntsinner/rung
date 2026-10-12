@@ -2,10 +2,11 @@
 import { resolve } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { loadConfig, WorkspaceError } from "@rung/core";
+import { assertPlcWritable, loadConfig, WorkspaceError } from "@rung/core";
 import { bridgeFor, findWorkspace, readBoundedBytes, type Io } from "./common.js";
 export async function cmdSafety(dir:string,device:string,io:Io,json:boolean):Promise<number>{if(!device||device.length>128||/\p{Cc}/u.test(device))throw new WorkspaceError("BAD_ARGUMENT","Safety observation requires one PLC");const config=await loadConfig(await findWorkspace(dir));const client=await bridgeFor(config,io);try{io.stdout(JSON.stringify(await client.request("safety.observe",{device}),null,json?undefined:2)+"\n");return 0;}finally{await client.close();}}
 export async function cmdProjectArtifact(kind:"alarms"|"technology",dir:string,io:Io,options:{device?:string;name?:string;exportPath?:string;files?:string[];preview?:boolean;apply?:boolean;expectedRevision?:string;expectedArtifactRevision?:string;json?:boolean}):Promise<number>{
+ if(options.apply)assertPlcWritable(await loadConfig(await findWorkspace(dir)),options.device,io.env);
  const exporting=options.exportPath!==undefined;
  if(!options.device||(kind==="technology"?!options.name:options.name!==undefined)|| (exporting?!!options.files?.length||options.preview||options.apply:options.files?.length!==1||!!options.preview===!!options.apply)
   ||(options.apply?!/^[0-9a-f]{64}$/.test(options.expectedRevision??"")||!/^[0-9a-f]{64}$/.test(options.expectedArtifactRevision??""):options.expectedRevision!==undefined||options.expectedArtifactRevision!==undefined))throw new WorkspaceError("BAD_ARGUMENT","Choose a native export or one file with preview/apply, explicit PLC and technology name; apply requires both reviewed hashes");
