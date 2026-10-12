@@ -108,11 +108,16 @@ namespace Rung.Bridge.Core.Protocol
         {
             if (method is "objects.import" or "objects.delete" or "objects.rename" or "hardware.apply" or "artifact.import"
                 or "library.import" or "library.release" or "library.update" or "library.mastercopy"
-                or "plc.download" or "session.discard"
-                || method == "session.release" && (Bool(p, "save") || Bool(p, "discard"))
+                or "plc.download"
                 || method == "objects.show" && Bool(p, "save")) ReadOnlyPolicy.RefuseMutation();
-            // a station read from a PLC into a project this bridge created for it, and compiling that project
-            if (method is "plc.upload" or "plc.compile") ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
+            // a station read from a PLC into a project created for it: uploading, compiling, saving or discarding that project
+            if (method is "plc.upload" or "plc.compile" or "session.discard"
+                || method == "session.release" && (Bool(p, "save") || Bool(p, "discard")))
+            {
+                // attaching (only reading) tells whether the project is one a keeper created for an upload
+                if (ReadOnlyPolicy.Locked && !ReadOnlyPolicy.ScratchUpload) try { _ = Session; } catch (Exception) { }
+                ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
+            }
             switch (method)
             {
                 case "bridge.hello":

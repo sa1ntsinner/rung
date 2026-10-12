@@ -58,7 +58,7 @@ namespace Rung.Bridge.V20
             var self = Process.GetCurrentProcess();
             var me = self.Id;
             var myTicks = self.StartTime.ToUniversalTime().Ticks;
-            var record = new KeeperRecord { KeeperPid = me, KeeperStartTicks = myTicks, Project = project, State = KeeperRecord.Starting, ReadOnly = ReadOnlyPolicy.Locked };
+            var record = new KeeperRecord { KeeperPid = me, KeeperStartTicks = myTicks, Project = project, State = KeeperRecord.Starting, ReadOnly = ReadOnlyPolicy.Locked, Scratch = args.ScratchUpload && ReadOnlyPolicy.ScratchUpload };
             KeeperFile.Write(file, record);
             TiaPortal portal = null;
             Project opened = null;

@@ -25,6 +25,8 @@ namespace Rung.Bridge.Core
         public string State { get; set; }
         public string Error { get; set; }
         public bool ReadOnly { get; set; }
+        /// <summary>The keeper created this project for a station upload (--scratch-upload): bridges that verify it may compile it and discard its changes while locked.</summary>
+        public bool Scratch { get; set; }
 
         public void Fail(string error) { State = Failed; Error = error; }
     }

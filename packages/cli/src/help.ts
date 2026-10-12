@@ -33,6 +33,7 @@ const DETAIL: Record<string, string> = {
   lcid: "alarm text language (Windows LCID; default 1033), with explicit fallback provenance",
   stream: "keep observing complete alarm snapshots until Ctrl+C",
   "expect-sha256": "pin without a prompt, only when the PLC certificate has exactly this SHA-256",
+  "no-values": "rung backup --from-plc: leave out the data blocks' values",
   "reconnect-timeout": "seconds a watch waits for live values after the connection was lost (default 60)",
   "confirm-stdin": "editor flow: show a prepared operation and receive its exact human confirmation on private stdin",
   "parent-stdio": "editor read-only stream: release its subscription when the parent closes stdin",

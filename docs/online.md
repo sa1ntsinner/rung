@@ -47,6 +47,29 @@ several target interfaces set `target_interface` in `[plc.PLC_1]` to the one
 that carries the address; `rung interfaces` lists the CPU's interfaces and their
 addresses, and a failed go-online names the interface it used.
 
+## Back up a running PLC
+
+```powershell
+$env:RUNG_READ_ONLY = '1'
+rung backup --from-plc 192.168.0.10 --out D:\backups\line1-2026-10-12 --use "<PG/PC interface>" --trust-certificate --expect-sha256 <fingerprint>
+```
+
+One new folder with everything rung can read from the CPU, the PLC only read: the station uploaded into a new TIA
+Portal project (`project/`) and archived (`.zap20`), TIA Portal's online compare of that project with the PLC right
+after the upload (proof the copy is complete), the program as text (`program/`, a workspace bound to the project), the
+CPU's identity, state and certificate, its active alarms, and the values of every data block (`values/`, at most 16
+per read with pauses, so the CPU's cycle does not notice). `manifest.json` lists each step with its result,
+`SHA256SUMS` every file. Exit 0 complete, 2 partial (the steps that worked are kept), 1 when the upload failed.
+`--trust-certificate` trusts the certificate TIA Portal shows for the upload; `--expect-sha256` checks the one the CPU
+shows for live values (without either, the live part is skipped). `--no-values` leaves the values out.
+
+It is not a native CPU image: Siemens' "backup from online device" stops the CPU, so rung never uses it. Watch and
+force tables, web server users and device-internal parameters of drives and gateways are not in it.
+
+`rung backup verify <folder>` checks the files against `SHA256SUMS` without connecting anything. `rung backup diff
+<before> <after>` lists program files and values that differ between two backups: take one before and one after
+working on a machine, and the program part says whether anything changed.
+
 ## Find the PLC
 
 Run these commands in the folder with `rung.toml`:

@@ -41,6 +41,7 @@ import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
 import { cmdBackup, cmdConfirmDelete, cmdRename, cmdResolve, cmdRestore, cmdStatus, cmdSync, cmdWatch, cmdWrites } from "./twoway.js";
+import { cmdBackupDiff, cmdBackupVerify, cmdPlcBackup, realSteps } from "./plcBackup.js";
 import { closePlcLinks, cmdCompare, cmdCompile, cmdConnect, cmdDownload, cmdInterfaces, cmdOnline, cmdOpen, cmdSession, cmdUpload, reportUpload, uploadRequest } from "./plc.js";
 import { WHITELIST_HINT, cmdSetup, whitelistStatus } from "./setup.js";
 import { cmdSimulate } from "./simulate.js";
@@ -89,6 +90,10 @@ Usage:
   rung writes [on|off] [--dir <ws>]    let this workspace write into its project (off after rung init), or stop it
   rung status [dir]
   rung backup [dir]                    TIA Portal archives the project now (.zap; rung makes one before the first write of each day)
+  rung backup --from-plc <ip> --out <new folder> [--use <PG/PC interface>] [--trust-certificate | --expect-sha256 <hex>] [--no-values]
+                                       everything rung can read from a running PLC: upload, archive, text, compare, CPU, alarms, values
+  rung backup verify <folder>          the files of a backup still as written (SHA256SUMS); nothing is connected
+  rung backup diff <a> <b>             what changed between two backups of a PLC: program files, values, CPU
   rung resolve <file> --ours|--theirs|--merged
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
@@ -425,7 +430,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
-  backup: { options: [], positionals: 1 },
+  backup: { options: ["from-plc", "out", "use", "mode", "number", "trust-certificate", "expect-sha256", "no-values", "device"], positionals: 3 },
   pull: { options: ["force", "verbose"], positionals: 1 },
   sync: { options: ["preview", "json"], positionals: 1 },
   watch: { options: [], positionals: 1 },
@@ -560,6 +565,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         "confirm-stdin": { type: "boolean" },
         "native-capture": { type: "boolean" },
         "expect-sha256": { type: "string" },
+        "no-values": { type: "boolean" },
         "reconnect-timeout": { type: "string" },
         "parent-stdio": { type: "boolean" },
         lcid: { type: "string" },
@@ -913,6 +919,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "status":
         return await cmdStatus(await findWorkspace(dir), io);
       case "backup":
+        if (v["from-plc"] !== undefined) return await cmdPlcBackup(v, io, realSteps(cmdInit, cmdPull, cmdCompare, cmdCompile, cmdSession));
+        if (target === "verify") return await cmdBackupVerify(resolve(io.cwd, positionals[2] ?? "."), io);
+        if (target === "diff") {
+          if (positionals.length !== 4) throw new WorkspaceError("BAD_ARGUMENT", "rung backup diff <backup folder> <backup folder>");
+          return await cmdBackupDiff(resolve(io.cwd, positionals[2]!), resolve(io.cwd, positionals[3]!), io);
+        }
         return await cmdBackup(await findWorkspace(dir), io);
       case "writes":
         return await cmdWrites(await findWorkspace(resolve(io.cwd, (v.dir as string | undefined) ?? ".")), target, io);

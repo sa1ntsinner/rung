@@ -38,7 +38,7 @@ namespace Rung.Bridge.V20
 
         public void ReleaseSession(bool save, bool discard = false)
         {
-            if (save || discard) ReadOnlyPolicy.RefuseMutation();
+            if (save || discard) ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
             var path = _project.Path.FullName;
             using (Keeper.StartLock(path))
             {

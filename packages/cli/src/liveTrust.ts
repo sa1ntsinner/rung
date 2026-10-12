@@ -16,7 +16,7 @@ export async function onlineHost(env: Io["env"], policy?: OnlineWriterConfigurat
   return BridgeClient.spawn({ command: host.endsWith(".dll") ? "dotnet" : host, args: host.endsWith(".dll") ? [host, ...args] : args, ...(plcReadOnly(undefined, undefined, env) ? { env: { RUNG_READ_ONLY: "1" } } : {}), ...(policy ? { bootstrap: { ...policy } } : {}) });
 }
 
-async function inspectCertificate(address: string, env: Io["env"]): Promise<Certificate> {
+export async function inspectCertificate(address: string, env: Io["env"]): Promise<Certificate> {
   const host = await onlineHost(env);
   try { return await host.request("online.certificate", { address }) as Certificate; }
   finally { await host.close(); }

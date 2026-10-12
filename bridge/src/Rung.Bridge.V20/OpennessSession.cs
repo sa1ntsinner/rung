@@ -182,7 +182,10 @@ namespace Rung.Bridge.V20
                     chosen = PortalSelector.Choose(procs.Select(p => new PortalCandidate(p.Id, p.ProjectPath?.FullName)).ToList(), args.ProjectPath);
                 }
                 var proc = procs.First(p => p.Id == chosen.Pid);
-                if (KeeperFile.Read(KeeperFile.PathFor(Path.GetFullPath(path)))?.ReadOnly == true && Keeper.Holds(path, proc.Id)) ReadOnlyPolicy.Lock();
+                var kept = KeeperFile.Read(KeeperFile.PathFor(Path.GetFullPath(path)));
+                if (kept?.ReadOnly == true && Keeper.Holds(path, proc.Id)) ReadOnlyPolicy.Lock();
+                // the project a keeper created for an upload: compiling it and discarding its changes stay possible
+                if (kept?.Scratch == true && kept.ReadOnly && Keeper.Holds(path, proc.Id)) ReadOnlyPolicy.AllowScratchUpload();
                 if (ReadOnlyPolicy.Locked && proc.Mode == TiaPortalMode.WithoutUserInterface && !Keeper.Holds(path, proc.Id))
                     throw new RpcException(ErrorCodes.PlcReadOnly, "PLC_READ_ONLY: cannot reuse a headless TIA Portal without a verified read-only keeper.");
                 OpennessWhitelist.Require(System.Reflection.Assembly.GetExecutingAssembly().Location, TiaVersion.Name.Substring(1) + ".0",
@@ -1615,7 +1618,7 @@ namespace Rung.Bridge.V20
 
         public IReadOnlyList<CompileMessage> Compile(string device, string[] addresses)
         {
-            ReadOnlyPolicy.RefuseMutation();
+            ReadOnlyPolicy.RefuseMutation(scratchAllowed: true);
             Alive();
             Listen();
             var plc = Plc(device);
