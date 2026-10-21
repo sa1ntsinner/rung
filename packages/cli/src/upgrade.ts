@@ -13,8 +13,8 @@ import { defaultBridge, type Io } from "./common.js";
 import { whitelistStatus, WHITELIST_HINT, type WhitelistStatus } from "./setup.js";
 
 export function upgradePlan(file: string, to: TiaVersion, nonce: number) {
-  if (/\.zap\d+$/i.test(file)) throw new WorkspaceError("BAD_ARGUMENT", `${basename(file)} is an archive: rung retrieve ${file} makes a project of it (with upgrade when it is older)`);
-  const m = /\.ap(\d+)$/i.exec(file);
+  if (/\.zap\d+(?:_\d+)?$/i.test(file)) throw new WorkspaceError("BAD_ARGUMENT", `${basename(file)} is an archive: rung retrieve ${file} makes a project of it (with upgrade when it is older)`);
+  const m = /\.ap(\d+)(?:_\d+)?$/i.exec(file);
   if (!m) throw new WorkspaceError("BAD_ARGUMENT", "rung upgrade needs a TIA Portal project file (.ap17, .ap18, …)");
   const from = Number(m[1]);
   if (from >= Number(to.slice(1))) throw new WorkspaceError("BAD_ARGUMENT", `${basename(file)} is a TIA Portal V${from} project already: rung init --project ${file}`);
@@ -30,13 +30,13 @@ export function upgradePlan(file: string, to: TiaVersion, nonce: number) {
  * is retrieved by that TIA Portal; an older one by `to` (V20 unless --tia says otherwise), with upgrade.
  */
 export function retrievePlan(archive: string, tia: TiaVersion | undefined) {
-  const m = /\.zap(\d+)$/i.exec(archive);
+  const m = /\.zap(\d+)(?:_\d+)?$/i.exec(archive);
   if (!m) throw new WorkspaceError("BAD_ARGUMENT", "rung retrieve needs a TIA Portal archive (.zap19, .zap20, …)");
   const from = Number(m[1]);
   if (from > 21) throw new WorkspaceError("BAD_ARGUMENT", `${basename(archive)} is an archive of TIA Portal V${from}; rung works with V18, V19, V20 and V21`);
   const to = tia ?? (from >= 18 ? (`V${from}` as TiaVersion) : "V20");
   if (Number(to.slice(1)) < from) throw new WorkspaceError("BAD_ARGUMENT", `TIA Portal ${to} cannot retrieve an archive of V${from}`);
-  return { from, to, upgrade: Number(to.slice(1)) > from, target: join(dirname(archive), basename(archive).replace(/\.zap\d+$/i, "")) };
+  return { from, to, upgrade: Number(to.slice(1)) > from, target: join(dirname(archive), basename(archive).replace(/\.zap\d+(?:_\d+)?$/i, "")) };
 }
 
 /** The project file a retrieve left in its folder (<folder>/<project>/<project>.ap20), if any. */
@@ -166,7 +166,7 @@ export async function cmdRetrieve(target: string | undefined, v: Record<string, 
 
 /** rung init on a project rung cannot open: what to run instead. */
 export function olderProjectHint(file: string): string | undefined {
-  const m = /\.ap(\d+)$/i.exec(file);
+  const m = /\.ap(\d+)(?:_\d+)?$/i.exec(file);
   if (!m || Number(m[1]) >= 18) return undefined;
   return `${basename(file)} is a TIA Portal V${m[1]} project; rung works with V18, V19, V20 and V21. rung upgrade ${file} makes an upgraded project next to it (the original stays as it is), then rung init --project <that project>`;
 }

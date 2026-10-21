@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { olderProjectHint, unlistedBridge, upgradePlan } from "../src/upgrade.js";
+import { olderProjectHint, retrievePlan, unlistedBridge, upgradePlan } from "../src/upgrade.js";
 
 describe("rung upgrade: an older project upgraded next to it", () => {
   it("upgrades a copy in a staging folder and puts the result next to the original, named as TIA Portal names it", () => {
@@ -19,6 +19,11 @@ describe("rung upgrade: an older project upgraded next to it", () => {
     expect(olderProjectHint("D:/plc/Line/Line.ap17")).toMatch(/TIA Portal V17 project.*rung upgrade/s);
     expect(olderProjectHint("D:/plc/Line/Line.ap18")).toBeUndefined();
     expect(olderProjectHint("D:/plc/Line/Line.ap20")).toBeUndefined();
+  });
+  it("reads TIA Portal V15.1's .ap15_1 and .zap15_1 as version 15", () => {
+    expect(olderProjectHint("D:/plc/Line/Line.ap15_1")).toMatch(/TIA Portal V15 project/);
+    expect(retrievePlan(join("D:", "plc", "Line.zap15_1"), undefined)).toMatchObject({ from: 15, to: "V20", upgrade: true, target: join("D:", "plc", "Line") });
+    expect(() => upgradePlan("Line.zap15_1", "V20", 1)).toThrow(/rung retrieve/);
   });
 });
 

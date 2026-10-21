@@ -218,3 +218,19 @@ describe("system instructions", () => {
     expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);
   });
 });
+
+describe("what TIA Portal V15 projects call (a MySQL client in SCL)", () => {
+  it("runs an instruction with its type in the name as the instruction it names", () => {
+    const s = sim({ FB_T: fb("FB_T", "VAR_INPUT\n  x : DWord;\nEND_VAR\nVAR_OUTPUT\n  r : DWord;\n  s : DWord;\n  c : DInt;\n  t : String;\n  l : Int;\nEND_VAR", "  #r := ROR_DWORD(IN := #x, N := 8);\n  #s := SHR_DWORD(IN := #x, N := 4);\n  #c := CEIL_DINT(IN := 2.1);\n  #t := CONCAT_STRING(IN1 := 'ab', IN2 := 'c');\n  #l := LIMIT_INT(IN := 300, MN := 0, MX := 254);") });
+    expect(run(s, "FB_T", { x: 0x11223344 })).toMatchObject({ R: 0x44112233, S: 0x01122334, C: 3, T: "abc", L: 254 });
+  });
+  it("HTA writes the bytes of a DWORD as hex, most significant first; Strg_TO_Chars and Chars_TO_Strg", () => {
+    const decl = "VAR_INPUT\n  x : DWord;\n  m : String;\nEND_VAR\nVAR_OUTPUT\n  h : String;\n  n : UInt;\n  back : String;\n  third : Char;\nEND_VAR\nVAR\n  bytes : Array[0..9] of Byte;\nEND_VAR";
+    const body = "  HTA(IN := #x, N := 4, OUT => #h);\n  Strg_TO_Chars(Strg := #m, pChars := 0, Cnt => #n, Chars := #bytes);\n  Chars_TO_Strg(Chars := #bytes, pChars := 0, Cnt := #n, Strg => #back);\n  #third := #m[3];";
+    expect(run(sim({ FB_H: fb("FB_H", decl, body) }), "FB_H", { x: 0x6a09e667, m: "abcd" })).toMatchObject({ H: "6A09E667", N: 4, BACK: "abcd", THIRD: "c" });
+  });
+  it("refuses a block with an AT view instead of a silently wrong result", () => {
+    const s = sim({ FB_V: fb("FB_V", "VAR\n  b : Array[0..3] of Byte;\n  d AT b : DWord;\nEND_VAR", "  #b[0] := 1;") });
+    expect(errorOf(() => run(s, "FB_V"))).toMatch(/declares d AT b: one memory seen as two types is not simulated/);
+  });
+});

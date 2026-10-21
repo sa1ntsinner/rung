@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
 import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
-import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
+import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, typedInstruction, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
 
 /*
@@ -496,7 +496,7 @@ function requiredStubs(seen: WorkspaceIndex, tested: GlobalSymbol, provided: str
       const target = seen.global(type);
       if (target?.block && /^(FB|FC|PRG)$/.test(target.block.kind)) visit(target);
       else if (target?.kind === "OBJECT" || global?.kind === "OBJECT") continue;
-      else if (!STANDARD_BY_NAME.has(key) && !SYSTEM_FUNCTIONS.has(key) && !/^\w+_TO_\w+$|^__RUNG_/i.test(key))
+      else if (!STANDARD_BY_NAME.has(key) && !SYSTEM_FUNCTIONS.has(key) && !typedInstruction(key) && !/^\w+_TO_\w+$|^__RUNG_/i.test(key))
         add(type, target ? "has no code the simulator can run" : RECORD_INTERFACE.has(key) || /^(MB_|MC_)/.test(key) ? "is not simulated" : "is not in the workspace", member || RECORD_INTERFACE.has(key) ? "{}" : "{ RET_VAL: 0 }");
     }
   };

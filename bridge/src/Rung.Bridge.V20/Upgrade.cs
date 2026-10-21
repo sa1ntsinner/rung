@@ -46,7 +46,7 @@ namespace Rung.Bridge.V20
         /// <summary>Project.zap20 -> 20; 0 when the name says nothing.</summary>
         internal static int ArchiveVersion(string name)
         {
-            var m = System.Text.RegularExpressions.Regex.Match(name, @"\.zap(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            var m = System.Text.RegularExpressions.Regex.Match(name, @"\.zap(\d+)(?:_\d+)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             return m.Success ? int.Parse(m.Groups[1].Value) : 0;
         }
 

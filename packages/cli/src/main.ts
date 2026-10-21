@@ -220,7 +220,7 @@ async function runBridge(args: string[], io: Io): Promise<number> {
 
 async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   // a downloaded or backed-up project usually comes as an archive: retrieve it next to itself and mirror that
-  if (v.project && /\.zap\d+$/i.test(String(v.project))) v = { ...v, project: await retrieveArchive(resolve(io.cwd, String(v.project)), v, io) };
+  if (v.project && /\.zap\d+(?:_\d+)?$/i.test(String(v.project))) v = { ...v, project: await retrieveArchive(resolve(io.cwd, String(v.project)), v, io) };
   const older = v.project ? olderProjectHint(String(v.project)) : undefined;
   if (older) throw new WorkspaceError("BAD_ARGUMENT", older);
   const cfgPath = join(dir, CONFIG_FILE);

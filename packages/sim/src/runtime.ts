@@ -54,9 +54,21 @@ const isInstance = (v: Value): v is Instance => typeof v === "object" && v !== n
 /** Nesting of FB/FC calls before the simulator reports endless recursion. */
 const MAX_CALL_DEPTH = 100;
 
+/**
+ * An instruction with its data type in the name, as TIA Portal writes it into SCL (CEIL_DINT, ROR_DWORD,
+ * CONCAT_STRING, LIMIT_INT): the instruction it names and the type of its result.
+ */
+const TYPED = /^(.+)_(BOOL|BYTE|WORD|DWORD|LWORD|U?S?INT|U?DINT|U?LINT|L?REAL|L?TIME|W?STRING|W?CHAR|DATE|L?TOD|L?DT|DTL)$/i;
+export function typedInstruction(name: string): { base: string; type: string } | undefined {
+  const m = TYPED.exec(name);
+  if (!m || /_TO_/i.test(name)) return undefined;
+  const base = m[1]!.toUpperCase();
+  return STANDARD_BY_NAME.get(base)?.kind === "function" ? { base, type: m[2]!.toUpperCase() } : undefined;
+}
+
 /** The system instructions the simulator runs (systemCall); docs/testing.md lists them. */
 export const SYSTEM_FUNCTIONS = new Set([
-  "SWAP", "RD_SYS_T", "RD_LOC_T", "RUNTIME", "T_DIFF", "T_ADD", "T_SUB", "IS_ARRAY", "COUNTOFELEMENTS", "LOWER_BOUND", "UPPER_BOUND",
+  "SWAP", "RD_SYS_T", "RD_LOC_T", "RUNTIME", "HTA", "STRG_TO_CHARS", "CHARS_TO_STRG", "T_DIFF", "T_ADD", "T_SUB", "IS_ARRAY", "COUNTOFELEMENTS", "LOWER_BOUND", "UPPER_BOUND",
   "MOVE_BLK", "UMOVE_BLK", "FILL_BLK", "UFILL_BLK", "VAL_STRG", "DELETE", "INSERT", "REPLACE",
   "TYPEOF", "TYPEOFELEMENTS", "VARIANTGET", "VARIANTPUT", "MOVE_BLK_VARIANT", "IS_NULL", "NOT_NULL",
 ]);
@@ -793,11 +805,26 @@ export class Simulator {
   }
   private bareEnums?: Map<string, number>;
 
+  /** #s[i] on a STRING or WSTRING: its i-th character, counted from 1 (out of the current length is an error, as on the CPU). */
+  private charAt(ref: LRef, frame: Frame | null): { base: LRef; at: number } | undefined {
+    const last = ref.path[ref.path.length - 1];
+    if (!last || !("index" in last) || last.index.length !== 1) return undefined;
+    const base = { ...ref, path: ref.path.slice(0, -1) };
+    const d = this.declOf(base, frame);
+    if (!d || d.isArray || !/^W?STRING\s*(\[|$)/i.test((d.typeRef ?? d.type).trim())) return undefined;
+    const at = Number(this.eval(last.index[0]!, frame));
+    const length = String(this.read(base, frame) ?? "").length;
+    if (!Number.isInteger(at) || at < 1 || at > length) throw new SimError(`character ${at} of a string of ${length} characters`, frame?.block.name, ref.start);
+    return { base, at };
+  }
+
   read(ref: LRef, frame: Frame | null): Value {
     const en = this.enumConst(ref, frame);
     if (en !== undefined) return en;
     const last = ref.path[ref.path.length - 1];
     if (last && "slice" in last) return sliceGet(this.read({ ...ref, path: ref.path.slice(0, -1) }, frame), last);
+    const ch = this.charAt(ref, frame);
+    if (ch) return String(this.read(ch.base, frame) ?? "")[ch.at - 1] ?? "";
     const p = this.propertyAt(ref, frame);
     if (p) return this.runProperty(p.inst, p.prop, "get");
     const { obj, key } = this.locate(ref, frame);
@@ -816,6 +843,12 @@ export class Simulator {
       const d = this.declOf(base, frame);
       const of = d && !d.isArray ? INT_WIDTH[(d.typeRef ?? d.type).replace(/^"|"$/g, "").toUpperCase()] : undefined;
       this.write(base, sliceSet(this.read(base, frame), last, value, of), frame);
+      return;
+    }
+    const ch = this.charAt(ref, frame);
+    if (ch) {
+      const text = String(this.read(ch.base, frame) ?? "");
+      this.write(ch.base, text.slice(0, ch.at - 1) + String(value ?? "").slice(0, 1) + text.slice(ch.at), frame);
       return;
     }
     const p = this.propertyAt(ref, frame);
@@ -918,6 +951,8 @@ export class Simulator {
         return ["+", "-", "*", "/", "MOD", "**"].includes(e.op) ? realOf([e.l, e.r], e.op === "**") : undefined;
       case "call": {
         if (e.callee.path.length) return undefined;
+        const typed = typedInstruction(e.callee.root.name);
+        if (typed) return named(typed.type);
         // a shift or rotation has the width of its input: NOT SHL(IN := BYTE#16#01, N := 1) is a BYTE
         if (/^(SHL|SHR|ROL|ROR)$/i.test(e.callee.root.name)) {
           const input = e.args.find((a) => a.name?.toUpperCase() === "IN") ?? e.args.find((a) => !a.name);
@@ -1012,7 +1047,9 @@ export class Simulator {
       case "call": {
         if (e.callee.path.length) return "unknown";
         const upper = e.callee.root.name.toUpperCase();
-        if (/_TO_/.test(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
+        const typed = typedInstruction(upper);
+        if (typed) return kindOfType({ type: typed.type, isArray: false });
+        if (/_TO_/.test(upper) && !SYSTEM_FUNCTIONS.has(upper)) return kindOfType({ type: upper.split("_TO_")[1] ?? "", isArray: false });
         if (/^(SQRT|SQR|LN|LOG|EXP|EXPT|SIN|COS|TAN|ASIN|ACOS|ATAN|NORM_X)$/.test(upper)) return "real";
         if (/^(LEN|FIND|SWAP|COUNTOFELEMENTS|LOWER_BOUND|UPPER_BOUND|T_DIFF|MOVE_BLK_VARIANT)$/.test(upper)) return "int";
         if (upper === "RUNTIME") return "real";
@@ -1218,13 +1255,16 @@ export class Simulator {
     }
     const stubbed = path.length ? undefined : this.stubOf(name);
     if (stubbed) return this.callStub(name, c, frame, stubbed);
+    const typed = path.length ? undefined : typedInstruction(name);
+    if (typed) return this.call({ ...c, callee: { ...c.callee, root: { ...c.callee.root, name: typed.base } } }, frame);
     const std = STANDARD_BY_NAME.get(upper);
     const args = c.args.map((a) => this.eval(a.value, frame));
     const named = (n: string, i: number) => {
       const a = c.args.findIndex((x) => x.name?.toUpperCase() === n);
       return a >= 0 ? this.eval(c.args[a]!.value, frame) : args[i];
     };
-    if (std?.kind === "function" || /_TO_/.test(upper)) {
+    // Strg_TO_Chars and Chars_TO_Strg are instructions, not conversions of one value
+    if (std?.kind === "function" || (/_TO_/.test(upper) && !SYSTEM_FUNCTIONS.has(upper))) {
       const n = (x: Value) => Number(x);
       switch (upper) {
         case "ABS":
@@ -1470,6 +1510,42 @@ export class Simulator {
         else throw new Unsupported("OUT must be a DTL, DT or LDT variable");
         return 0;
       }
+      case "STRG_TO_CHARS":
+      case "CHARS_TO_STRG": {
+        // Chars is an array of Char or Byte; pChars counts elements from its first one
+        const chars = variable("CHARS", upper === "STRG_TO_CHARS" ? 3 : 0);
+        const arr = this.read(chars, frame);
+        if (!isArray(arr)) throw new Unsupported("Chars must be an array of Char or Byte");
+        const element = splitArrayType((this.declOf(chars, frame)?.type ?? "").replace(/^"|"$/g, ""))?.element.toUpperCase() ?? "";
+        const asByte = /^(BYTE|USINT|SINT)$/.test(element);
+        const from = number("PCHARS", 1);
+        if (!Number.isInteger(from) || from < 0 || from > arr.items.length) throw new Unsupported(`pChars ${from} is outside Chars (${arr.items.length} elements)`);
+        if (upper === "STRG_TO_CHARS") {
+          const text = String(input("STRG", 0) ?? "");
+          if (from + text.length > arr.items.length) throw new Unsupported(`'${text}' does not fit Chars from element ${from}`);
+          for (let i = 0; i < text.length; i++) arr.items[from + i] = asByte ? text.charCodeAt(i) & 0xff : text[i]!;
+          this.write(variable("CNT", 2), text.length, frame);
+        } else {
+          // Cnt 0: up to the first NUL character or the end of the array
+          const cnt = number("CNT", 2);
+          const items = arr.items.slice(from, cnt > 0 ? from + cnt : undefined).map((x) => (typeof x === "number" ? String.fromCharCode(x & 0xff) : String(x ?? "")));
+          const end = cnt > 0 ? items.length : items.findIndex((x) => x === "\0" || x === "");
+          this.write(variable("STRG", 3), items.slice(0, end < 0 ? items.length : end).join(""), frame);
+        }
+        return 0;
+      }
+      case "HTA": {
+        // the first N bytes of IN as upper-case hex digits, in memory order (a DWORD most significant byte first)
+        const e = argOf("IN", 0).value;
+        const v = this.eval(e, frame);
+        const count = number("N", 1);
+        const width = INT_WIDTH[typeOf(e) ?? ""]?.[0];
+        const bytes = isArray(v) ? v.items.map((x) => Number(x) & 0xff) : width ? [...Array(width / 8)].map((_, i) => Number((BigInt.asUintN(width, BigInt(Number(v))) >> BigInt(width - 8 * (i + 1))) & 0xffn)) : undefined;
+        if (!bytes) throw new Unsupported("IN must be a bit string, an integer or an array of bytes");
+        if (!Number.isInteger(count) || count < 0 || count > bytes.length) throw new Unsupported(`N is ${count}: IN has ${bytes.length} bytes`);
+        this.write(variable("OUT", 2), bytes.slice(0, count).map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(""), frame);
+        return 0;
+      }
       case "RUNTIME": {
         // seconds of virtual time since the last call with this MEM; code runs in no time, so 0 within one cycle
         const mem = variable("MEM", 0);
@@ -1658,6 +1734,10 @@ export class Simulator {
 
   /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
   private runBody(b: BlockModel, frame: Frame, accessor?: "get" | "set") {
+    // x AT y: a second view of y's bytes. The simulator keeps each variable apart, so a result through a view would be
+    // silently wrong; it says so instead
+    const view = b.vars.find((v) => v.at && !v.at.startsWith("%"));
+    if (view) throw new SimError(`${b.name} declares ${view.name} AT ${view.at}: one memory seen as two types is not simulated; stub ${b.name} or test the blocks around it`, b.name);
     if (b.stl) return this.runStlBody(b, frame);
     this.frames.push(frame);
     try {
