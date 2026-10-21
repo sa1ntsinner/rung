@@ -175,6 +175,27 @@ cases:
     expect(diagnostics(idx, "file:///w/FB_Axis.st").map((d) => `${d.code}: ${text.slice(d.start, d.end)}`)).toEqual([]);
   });
 
+  it("OSCAT and TwinCAT forms: a, b : INT; FB(..) instances, PERSISTENT, STRING(n), aliases, namespaces, INTERFACE, EXTENDS", () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/I_Counter.st", "INTERFACE I_Counter\nMETHOD Inc : INT\nEND_METHOD\nEND_INTERFACE\n", 0);
+    idx.set("file:///w/T_Buf.st", "TYPE T_Buf : ARRAY[0..3] OF BYTE;\nEND_TYPE\n", 0);
+    idx.set("file:///w/FB_Base.st", "FUNCTION_BLOCK FB_Base\nVAR_OUTPUT\n  nBase : INT;\nEND_VAR\nEND_FUNCTION_BLOCK\n", 0);
+    idx.set("file:///w/FB_Counter.st", "FUNCTION_BLOCK FB_Counter EXTENDS FB_Base IMPLEMENTS I_Counter\nVAR_OUTPUT PERSISTENT\n  n, m : INT;\nEND_VAR\nEND_FUNCTION_BLOCK\nMETHOD Inc : INT\nn := n + 1;\nInc := n;\nEND_METHOD\n", 0);
+    idx.set(
+      "file:///w/PRG_Main.st",
+      "PROGRAM PRG_Main\nVAR\n  fb : FB_Counter;\n  itf : I_Counter;\n  a, b : INT;\n  buf : T_Buf;\n  t : TON(PT := T#1S);\n  s : STRING(10) := 'abc';\n  ns : Tc2_Standard.TON;\nEND_VAR\nitf := fb;\na := itf.Inc();\na := itf.Inc();\nb := fb.n;\nbuf[2] := 7;\nEND_PROGRAM\n",
+      0,
+    );
+    idx.set("file:///w/PRG_Use.st", "PROGRAM PRG_Use\nVAR\n  fb : FB_Counter;\n  x : INT;\nEND_VAR\nx := fb.nBase + fb.m;\nEND_PROGRAM\n", 0);
+    for (const uri of [...idx.docs.keys()]) expect(diagnostics(idx, uri).filter((d) => d.severity === "error").map((d) => d.message), uri).toEqual([]);
+    expect(diagnostics(idx, "file:///w/PRG_Use.st").map((d) => d.code)).not.toContain("UNKNOWN_MEMBER");
+    const s = new Simulator(idx);
+    const main = s.newInstance("PRG_Main");
+    s.runInstance(main);
+    // the method ran on fb itself, through the interface
+    expect([main.mem.A, main.mem.B, (main.mem.BUF as { items: number[] }).items, main.mem.S]).toEqual([2, 2, [0, 0, 7, 0], "abc"]);
+  });
+
   it("runs PROPERTY accessors: GET when read, SET when written, from outside, by THIS^ and inside the FB", () => {
     const idx = new WorkspaceIndex();
     idx.set(

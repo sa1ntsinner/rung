@@ -275,6 +275,7 @@ export class WorkspaceIndex {
     if (g?.block) {
       const b = g.block;
       if (b.kind === "DB" && b.dbOf) return this.membersOfType(b.dbOf, seen);
+      if (b.alias) return b.alias.isArray ? [] : this.membersOfType(b.alias.typeRef, seen);
       const visible = b.kind === "FB" || b.kind === "PRG" ? b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant") : b.vars;
       // an IEC FB's properties (read and written like variables) and methods are members too
       const owned = (this.docs.get(g.uri)?.parsed?.blocks ?? []).filter((x) => x.owner?.toUpperCase() === b.name.toUpperCase());
@@ -288,7 +289,10 @@ export class WorkspaceIndex {
         start: x.nameStart,
         end: x.nameEnd,
       }));
-      return [...visible.map((v) => ({ ...v, uri: g.uri })), ...extra];
+      const own = [...visible.map((v) => ({ ...v, uri: g.uri })), ...extra];
+      // EXTENDS: the parent's members, unless this type declares the same name
+      const inherited = (b.extends ?? []).flatMap((p) => this.membersOfType(p, seen)).filter((m) => !own.some((o) => o.name.toUpperCase() === m.name.toUpperCase()));
+      return [...own, ...inherited];
     }
     const std = STANDARD_BY_NAME.get(key);
     if (std?.kind === "functionBlock") {

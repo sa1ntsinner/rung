@@ -179,6 +179,8 @@ export function declarationModel(uri: string, version: number, text: string, par
     body: s.body,
   }));
   const readOnly = !!block.xml || !!block.stl || /\.protected\.yaml$/i.test(uri);
+  // IEC a, b : INT;: one edit of a would change b too
+  const shared = block.vars.find((v) => v.src?.shared);
   const declEnd = block.bodyStart ?? block.end;
   const unavailable = parsed.diagnostics.filter((d) => d.severity === "error" && d.start >= block.start && d.start < declEnd).map((d) => ({ start: d.start, end: d.end }));
   return {
@@ -186,8 +188,8 @@ export function declarationModel(uri: string, version: number, text: string, par
     version,
     block: { name: block.name, kind: block.kind, range: { start: block.start, end: block.end }, ...(block.returnType ? { returnType: block.returnType } : {}) },
     sections,
-    editable: !readOnly,
-    ...(readOnly ? { reason: "Read only: graphical or protected block" } : {}),
+    editable: !readOnly && !shared,
+    ...(readOnly ? { reason: "Read only: graphical or protected block" } : shared ? { reason: `${shared.name} is declared together with other names on one line (a, b : INT;): give each its own line to edit the table here` } : {}),
     unavailable,
   };
 }

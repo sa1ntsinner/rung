@@ -24,6 +24,12 @@ const FB = [
 const model = (src: string) => declarationModel("file:///w/plc/PLC_1/blocks/Fx_Motor.scl", 3, src, parse(src));
 
 describe("declarationModel", () => {
+  it("keeps an IEC a, b : INT; line out of table edits, which would change both names", () => {
+    const src = "FUNCTION_BLOCK FB_X\nVAR\n  a, b : INT;\nEND_VAR\nEND_FUNCTION_BLOCK\n";
+    const m = declarationModel("file:///w/FB_X.st", 1, src, parse(src, { dialect: "iec" }));
+    expect(m.sections[0]!.rows.map((r) => [r.name, src.slice(r.ranges.name.start, r.ranges.name.end)])).toEqual([["a", "a"], ["b", "b"]]);
+    expect(m).toMatchObject({ editable: false, reason: expect.stringContaining("a is declared together with other names") });
+  });
   it("groups rows into TIA's sections with nested structs", () => {
     const m = model(FB);
     expect(m.block).toMatchObject({ name: "Fx_Motor", kind: "FB" });

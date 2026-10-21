@@ -33,9 +33,10 @@ export function extractTwinCat(xml: string): TwinCatUnit {
     const write = (at: number, text: string) => {
       for (let k = 0; k < text.length; k++) out[at + k] = text[k]!;
     };
-    write(m.index!, word);
     const close = m[0].lastIndexOf("</Implementation>");
+    // an INTERFACE's accessor has no code: both keywords go over its opening tag
     if (close >= 0) write(m.index! + close, "END_" + word);
+    write(m.index!, close >= 0 || m[0].indexOf(">") < word.length * 2 + 5 ? word : `${word} END_${word}`);
   }
   const root = /<(POU|DUT|GVL|Itf)\s[^>]*Name="([^"]+)"/.exec(xml);
   return { code: out.join(""), ...(root ? { name: root[2], kind: (root[1]!.toUpperCase() === "ITF" ? "ITF" : root[1]!.toUpperCase()) as TwinCatUnit["kind"] } : {}) };

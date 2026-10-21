@@ -47,6 +47,8 @@ export interface DeclSource {
   init?: Span;
   /** the // comment token on the name's line */
   comment?: Span;
+  /** IEC `a, b : BOOL;`: whole, type and init belong to every name of the list */
+  shared?: boolean;
 }
 
 /** A VAR … END_VAR section of a block as written. */
@@ -135,6 +137,12 @@ export interface BlockModel {
   /** IEC enumeration type: its values in order, and the default when it is not the first. */
   enumValues?: { name: string; value: number }[];
   enumDefault?: string;
+  /** IEC INTERFACE: methods and properties only, a variable of it refers to an FB that implements it. */
+  interface?: boolean;
+  /** IEC FB or INTERFACE EXTENDS: the types whose members it has too. */
+  extends?: string[];
+  /** IEC TYPE X : ARRAY[..] OF Y; END_TYPE (or another type): the type it stands for. */
+  alias?: { type: string; typeRef?: string; isArray: boolean };
 }
 
 export interface ParseDiagnostic {
@@ -167,6 +175,7 @@ const HEADERS_IEC: Record<string, { kind: BlockKind; end: string }> = {
   PROPERTY: { kind: "FC", end: "END_PROPERTY" },
   ACTION: { kind: "FC", end: "END_ACTION" },
   TYPE: { kind: "UDT", end: "END_TYPE" },
+  INTERFACE: { kind: "FB", end: "END_INTERFACE" },
 };
 
 const KEYWORDS_IEC = new Set(["IF", "THEN", "ELSIF", "ELSE", "END_IF", "CASE", "OF", "END_CASE", "FOR", "TO", "BY", "DO", "END_FOR", "WHILE", "END_WHILE", "REPEAT", "UNTIL", "END_REPEAT", "EXIT", "CONTINUE", "RETURN", "AND", "OR", "XOR", "NOT", "MOD", "TRUE", "FALSE", "THIS", "SUPER", "AND_THEN", "OR_ELSE", "JMP"]);
@@ -279,12 +288,21 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
     if (t.kind === "ident") {
       next();
       let type = t.text;
-      // String[20], WString[..]
-      if (peek().text === "[") {
-        while (peek().kind !== "eof" && peek().text !== "]") next();
+      let ref = t;
+      // IEC: a library's namespace before the type, OSCAT.GEN_SIN
+      while (iec && peek().text === "." && peek(1).kind === "ident") {
+        next();
+        ref = next();
+        type = src.slice(t.start, ref.end);
+      }
+      // String[20], WString[..]; IEC STRING(20)
+      const open = peek().text;
+      if (open === "[" || (iec && open === "(" && /^W?STRING$/i.test(t.text))) {
+        const close = open === "[" ? "]" : ")";
+        while (peek().kind !== "eof" && peek().text !== close) next();
         type = src.slice(t.start, next().end);
       }
-      return { type, typeRef: t.text, isArray: false };
+      return { type, typeRef: ref.text, isArray: false };
     }
     err("Expected a data type", t);
     return { type: "?", isArray: false };
@@ -305,7 +323,7 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         local = "Constant";
         continue;
       }
-      if (isKw(t, "RETAIN", "NON_RETAIN", "DB_SPECIFIC") && !declared()) {
+      if (isKw(t, "RETAIN", "NON_RETAIN", "DB_SPECIFIC", "PERSISTENT") && !declared()) {
         if (!vars.length) modifiers.push(t);
         next();
         continue;
@@ -316,6 +334,12 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         continue;
       }
       next();
+      // IEC: a, b, c : BOOL; declares three variables of one type
+      const names = [t];
+      while (iec && peek().text === "," && (peek(1).kind === "ident" || peek(1).kind === "global")) {
+        next();
+        names.push(next());
+      }
       let attrs: Span | undefined;
       while (peek().kind === "pragma") {
         const p = next();
@@ -336,6 +360,15 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       const ty = parseType();
       // a Struct's type is its STRUCT keyword (Struct and STRUCT are both six letters)
       const typeEnd = ty.type === "Struct" ? typeStart + 6 : tokens[i - 1]!.end;
+      if (iec && peek().text === "(" && !ty.isArray && ty.type !== "Struct") {
+        // an FB instance with its initialization: SampTim : TON(PT := T#1s); (the start values are not kept)
+        let depth = 0;
+        do {
+          const x = next();
+          if (x.text === "(") depth++;
+          else if (x.text === ")") depth--;
+        } while (depth > 0 && peek().kind !== "eof");
+      }
       let init: string | undefined;
       let initSpan: Span | undefined;
       if (peek().text === ":=") {
@@ -363,7 +396,9 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         // a // comment ends before the line's CR in a CRLF file
         ...(ct ? { comment: { start: ct.start, end: src[ct.end - 1] === "\r" ? ct.end - 1 : ct.end } } : {}),
       };
-      vars.push({ name: unquote(t.text), start: t.start, end: t.end, section: local, ...ty, ...(at ? { at } : {}), ...(init !== undefined ? { init } : {}), ...(ct ? { comment: lineComment(t.end)! } : {}), src: decl });
+      for (const n of names)
+        vars.push({ name: unquote(n.text), start: n.start, end: n.end, section: local, ...ty, ...(at ? { at } : {}), ...(init !== undefined ? { init } : {}), ...(ct ? { comment: lineComment(t.end)! } : {}),
+          src: names.length > 1 ? { ...decl, name: { start: n.start, end: n.end }, shared: true } : decl });
     }
     // set last: a Struct inside parses its members with its own call
     lastModifiers = modifiers;
@@ -542,8 +577,10 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       continue;
     }
     const h = t.kind === "ident" ? headers[t.upper] : undefined;
+    // an INTERFACE's METHODs end it; its END_INTERFACE comes after them
+    if (iec && t.upper === "END_INTERFACE") continue;
     if (!h) {
-      if (t.kind !== "pragma") err(`Expected ${iec ? "FUNCTION_BLOCK, FUNCTION, PROGRAM, METHOD, PROPERTY, ACTION or TYPE" : "FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE"}, found ${t.text}`, t);
+      if (t.kind !== "pragma") err(`Expected ${iec ? "FUNCTION_BLOCK, FUNCTION, PROGRAM, METHOD, PROPERTY, ACTION, INTERFACE or TYPE" : "FUNCTION_BLOCK, FUNCTION, ORGANIZATION_BLOCK, DATA_BLOCK or TYPE"}, found ${t.text}`, t);
       // resynchronize at the next header
       while (peek().kind !== "eof" && !(peek().kind === "ident" && (headers[peek().upper] || (iec && peek().upper === "VAR_GLOBAL")))) next();
       continue;
@@ -574,9 +611,24 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       next();
       block.returnType = parseType().type;
     }
-    if (iec && h.kind === "UDT" && peek().text === ":") next(); // TYPE ST_X : STRUCT ...
+    if (iec && t.upper === "INTERFACE") block.interface = true;
+    if (iec && h.kind === "UDT" && peek().text === ":") {
+      next(); // TYPE ST_X : STRUCT ...
+      if (!isKw(peek(), "STRUCT", "UNION") && peek().text !== "(") {
+        // TYPE T_Buffer : ARRAY[0..9] OF BYTE; END_TYPE: another name for a type
+        const ty = parseType();
+        block.alias = { type: ty.type, ...(ty.typeRef ? { typeRef: ty.typeRef } : {}), isArray: ty.isArray };
+        if (peek().text === ":=") while (peek().kind !== "eof" && peek().text !== ";" && !isKw(peek(), h.end)) next();
+        if (peek().text === ";") next();
+      }
+    }
     if (iec && (isKw(peek(), "EXTENDS") || isKw(peek(), "IMPLEMENTS"))) {
-      while (peek().kind !== "eof" && !(peek().kind === "ident" && (SECTIONS[peek().upper] || headers[peek().upper])) && peek().kind !== "pragma" && !/^(VAR|END_)/.test(peek().upper)) next();
+      let extending = false;
+      while (peek().kind !== "eof" && !(peek().kind === "ident" && (SECTIONS[peek().upper] || headers[peek().upper])) && peek().kind !== "pragma" && !/^(VAR|END_)/.test(peek().upper)) {
+        const x = next();
+        if (isKw(x, "EXTENDS", "IMPLEMENTS")) extending = x.upper === "EXTENDS";
+        else if (extending && x.kind === "ident") (block.extends ??= []).push(x.text);
+      }
     }
     while (peek().kind !== "eof" && !isKw(peek(), h.end) && !(iec && isHeaderAt(peek()))) {
       const x = peek();

@@ -38,7 +38,7 @@ END_PROPERTY
 
 Without SET it is read-only. The language server knows properties as members of the FB, and `rung test` runs GET when a property is read and SET when it is written, in CODESYS files and in TwinCAT's `.TcPOU` alike. Visualizations, the task configuration, libraries and devices stay in CODESYS.
 
-The language server, `rung test` (the offline simulator) and the editors read these files as IEC 61131-3 structured text: METHODs with `THIS^`, enumerations, `POINTER TO`, `REFERENCE TO`.
+The language server, `rung test` (the offline simulator) and the editors read these files as IEC 61131-3 structured text: METHODs with `THIS^`, enumerations, `POINTER TO`, `REFERENCE TO`. Also: several names in one declaration (`Q0, Q1 : BOOL;`), FB instances with start values (`tDelay : TON(PT := T#1S);`), `STRING(20)`, a library's namespace before a type (`OSCAT.GEN_SIN`), `VAR PERSISTENT`, type aliases (`TYPE T_Buf : ARRAY[0..9] OF BYTE; END_TYPE`), INTERFACEs (`.TcIO`) and the members an FB or interface gets with EXTENDS. A variable of an interface refers to the FB instance assigned to it, so its methods run on that instance. The simulator does not run inherited code: an FB that EXTENDS another is checked by the language server, not simulated with its parent's variables.
 
 ## Compile
 

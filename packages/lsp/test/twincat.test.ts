@@ -26,6 +26,34 @@ describe("TwinCAT sources", () => {
     expect(u.code).not.toContain("<POU");
   });
 
+  it("reads an interface (.TcIO): accessors without code, its properties and methods as members", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.10">
+  <Itf Name="I_Valve" Id="{4cab4434-0ff2-463c-97d2-f53a68202f0c}">
+    <Declaration><![CDATA[INTERFACE I_Valve
+]]></Declaration>
+    <Property Name="Setpoint" Id="{64ee94a4-7af2-40f1-87be-5fc9dfbc99df}">
+      <Declaration><![CDATA[PROPERTY Setpoint : REAL]]></Declaration>
+      <Get Name="Get" Id="{27ca2882-4156-4781-aef3-5f7f4e12ba13}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Method Name="Run" Id="{112ddb5e-4eb7-4dfc-ab77-001278816b96}">
+      <Declaration><![CDATA[METHOD Run : BOOL
+]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>
+`;
+    const root = mkdtempSync(join(tmpdir(), "rung-tcio-"));
+    writeFileSync(join(root, "I_Valve.TcIO"), xml);
+    const local = new WorkspaceIndex();
+    const uri = uriOf(join(root, "I_Valve.TcIO"));
+    local.set(uri, xml, 0);
+    expect(local.docs.get(uri)!.parsed!.diagnostics).toEqual([]);
+    expect(local.membersOfType("I_Valve").map((m) => `${m.section}:${m.name}`)).toEqual(["Property:Setpoint", "Method:Run"]);
+  });
+
   it("indexes POUs, methods, DUTs, GVLs and global variables", () => {
     const names = idx.allGlobals().map((g) => `${g.kind}:${g.name}`).sort();
     expect(names).toEqual(["FB:FB_Pump", "FC:Reset", "GVAR:bEStop", "GVAR:nCycles", "GVL:GVL_Plant", "UDT:ST_PumpCfg"]);

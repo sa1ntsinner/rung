@@ -551,6 +551,10 @@ export class Simulator {
     else {
       const g = this.index.global(t);
       const sys = SYSTEM_TYPES.get(t.toUpperCase());
+      // TYPE T_Buf : ARRAY[0..9] OF BYTE; END_TYPE: a value of the type it names
+      if (g?.block?.alias) return this.defaultValue({ ...g.block.alias, ...(decl.init !== undefined ? { init: decl.init } : {}) }, g.block);
+      // a variable of an INTERFACE refers to an FB instance; until assigned it is 0, as on the PLC
+      if (g?.block?.interface) return 0;
       if (g?.block?.enumValues) {
         const def = g.block.enumDefault?.toUpperCase();
         v = (g.block.enumValues.find((e) => e.name.toUpperCase() === def) ?? g.block.enumValues[0])?.value ?? 0;
@@ -2269,6 +2273,11 @@ export class Simulator {
     }
   }
 
+  private interfaceTyped(ref: LRef, f: Frame): boolean {
+    const d = this.declOf(ref, f);
+    return !!d && !d.isArray && !!this.index.global((d.typeRef ?? d.type).replace(/^"|"$/g, ""))?.block?.interface;
+  }
+
   /** Counts a statement or loop iteration against the per-call step budget. */
   private tick(f: Frame, at: number) {
     if (++this.steps > this.maxStepsPerCall) throw new SimError("step limit exceeded (endless loop?)", f.block.name, at);
@@ -2282,6 +2291,12 @@ export class Simulator {
         case "empty":
           return;
         case "assign":
+          // itf := fbInstance; with an INTERFACE variable: it refers to the instance, as REF= does
+          if (s.value.k === "ref" && this.interfaceTyped(s.target, f)) {
+            const at = this.locate(s.target, f, true);
+            (at.obj as Record<string | number, Value>)[at.key] = { __ptr: this.locate(s.value.ref, f), ref: true };
+            return;
+          }
           return this.write(s.target, this.eval(s.value, f), f);
         case "bind": {
           const at = this.locate(s.target, f, true);
