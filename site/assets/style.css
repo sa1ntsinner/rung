@@ -334,6 +334,14 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
   .side { grid-column: 5 / span 4; }
   .notes.right { grid-column: 9 / -1; }
   .board { grid-template-columns: repeat(2, 1fr); }
+  /* narrower, the tools become a list: logo beside its name and line, no column of icon cards */
+  .tiles .board { grid-template-columns: 1fr; gap: 0; background: var(--surface); border-radius: var(--r); overflow: hidden; }
+  .tiles .tile { min-height: 0; border-radius: 0; display: grid; grid-template-columns: 40px 1fr; column-gap: 18px; padding: 18px 24px; }
+  .tiles .tile + .tile:not(.head) { box-shadow: inset 0 1px 0 var(--bg); } /* taste-skill-ignore: a row divider in the ground colour */
+  .tiles .tile.head { grid-column: 1 / -1; display: block; padding: 28px 24px; }
+  .tiles .tile .brand { width: 32px; height: 32px; grid-row: span 2; margin: 2px 0 0; }
+  .tiles .tile .nm, .tiles .tile .nm.small { grid-column: 2; margin: 0 0 2px; padding: 0; font-size: var(--step-body); }
+  .tiles .tile p:not(.nm) { grid-column: 2; }
   .foot .board { grid-template-columns: repeat(2, 1fr); }
   .foot .tile, .foot nav.tile, .foot .mail { grid-column: span 1; }
   .foot .say, .foot .word, .foot .go { grid-column: 1 / -1; }
