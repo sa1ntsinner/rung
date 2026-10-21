@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Offline evidence for a person reviewing source changes. Nothing here opens TIA Portal or a PLC.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,13 +59,45 @@ async function snapshot(root: string, top: string, sha: string): Promise<Workspa
   const paths = (await git(top, ["ls-tree", "-rz", "--name-only", sha, "--", prefix || "."])).split("\0").filter((p) => p && source.test(p));
   const rung = paths.some((p) => p.startsWith(prefix ? `${prefix}/plc/` : "plc/"));
   index.layout = rung ? "rung" : "iec";
-  for (const path of paths) {
+  const wanted = paths.filter((path) => {
     const rel = slash(relative(root, join(top, path)));
-    if (rel.startsWith("../") || /(^|\/)(tests|node_modules|\.rung|dist|views)\//.test(rel) || rung && !rel.startsWith("plc/")) continue;
-    const text = await git(top, ["show", `${sha}:${path}`]);
-    if (!text.includes("\0")) index.set(uriOf(join(top, path)), normalized(text), 0);
-  }
+    return !(rel.startsWith("../") || /(^|\/)(tests|node_modules|\.rung|dist|views)\//.test(rel) || rung && !rel.startsWith("plc/"));
+  });
+  // one git process for all files (a git show each took most of a minute for a thousand blocks)
+  const texts = await gitBlobs(top, wanted.map((path) => `${sha}:${path}`));
+  wanted.forEach((path, i) => {
+    const text = texts[i];
+    if (text !== undefined && !text.includes("\0")) index.set(uriOf(join(top, path)), normalized(text), 0);
+  });
   return index;
+}
+
+/** The contents of `rev:path` objects through one git cat-file --batch, in order (undefined: missing). */
+export function gitBlobs(top: string, objects: string[]): Promise<(string | undefined)[]> {
+  if (!objects.length) return Promise.resolve([]);
+  return new Promise((done, fail) => {
+    const child = spawn("git", ["-C", top, "cat-file", "--batch"], { windowsHide: true });
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (c: Buffer) => chunks.push(c));
+    child.on("error", fail);
+    child.on("close", (code) => {
+      if (code !== 0) return fail(new Error(`git cat-file exited with ${code}`));
+      const out = Buffer.concat(chunks);
+      const result: (string | undefined)[] = [];
+      let at = 0;
+      for (let i = 0; i < objects.length; i++) {
+        const eol = out.indexOf(10, at);
+        const header = out.subarray(at, eol).toString("utf8");
+        at = eol + 1;
+        const size = /^\S+ blob (\d+)$/.exec(header);
+        if (!size) { result.push(undefined); continue; }
+        result.push(out.subarray(at, at + Number(size[1])).toString("utf8"));
+        at += Number(size[1]) + 1;
+      }
+      done(result);
+    });
+    child.stdin.end(objects.join("\n") + "\n");
+  });
 }
 
 function parts(doc: Doc | undefined, block: BlockModel | undefined): Map<string, { kind: LogicChange["kind"]; text: string }> {

@@ -8,6 +8,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { WorkspaceIndex } from "@rung/lsp";
+import { gitBlobs } from "@rung/mcp";
 import { OBSERVATION, runTests, type FileResult } from "@rung/sim";
 
 const run = promisify(execFile);
@@ -45,27 +46,23 @@ export async function indexAt(ws: string, current: WorkspaceIndex, rev: string):
   };
   const realTop = real(top);
   const realWs = real(ws);
-  for (const uri of current.docs.keys()) {
-    if (!uri.startsWith("file:")) continue;
-    const rel = relative(realTop, real(fileURLToPath(uri))).split("\\").join("/");
-    if (rel.startsWith("..")) continue;
-    // a file that did not exist then is not part of the code then
-    const text = await run("git", ["-C", top, "show", `${rev}:${rel}`], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then(
-      (r) => r.stdout,
-      () => undefined,
-    );
-    if (text !== undefined) base.set(uri, text, 0);
-  }
+  const now = [...current.docs.keys()].filter((uri) => uri.startsWith("file:")).map((uri) => ({ uri, rel: relative(realTop, real(fileURLToPath(uri))).split("\\").join("/") })).filter((f) => !f.rel.startsWith(".."));
+  // a file that did not exist then is not part of the code then (one git process for all of them)
+  const then = await gitBlobs(top, now.map((f) => `${rev}:${f.rel}`));
+  now.forEach((f, i) => {
+    if (then[i] !== undefined) base.set(f.uri, then[i]!, 0);
+  });
   // code that was there then and is gone or moved now (deleted, renamed): part of the code then too
   const prefix = relative(realTop, realWs).split("\\").join("/");
   const listed = await run("git", ["-C", top, "ls-tree", "-r", "--name-only", rev, "--", prefix || "."], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout.split(/\r?\n/).filter(Boolean), () => [] as string[]);
-  for (const rel of listed) {
-    if (!/\.(scl|db|udt|awl|xml|s7dcl|st)$/i.test(rel) || /(^|\/)tests\//.test(rel)) continue;
-    const uri = pathToFileURL(join(ws, relative(realWs, join(realTop, rel)))).href;
-    if (base.docs.has(uri) || current.docs.has(uri)) continue;
-    const text = await run("git", ["-C", top, "show", `${rev}:${rel}`], { windowsHide: true, maxBuffer: 64 * 1024 * 1024 }).then((r) => r.stdout, () => undefined);
-    if (text !== undefined) base.set(uri, text, 0);
-  }
+  const gone = listed
+    .filter((rel) => /\.(scl|db|udt|awl|xml|s7dcl|st)$/i.test(rel) && !/(^|\/)tests\//.test(rel))
+    .map((rel) => ({ rel, uri: pathToFileURL(join(ws, relative(realWs, join(realTop, rel)))).href }))
+    .filter((f) => !base.docs.has(f.uri) && !current.docs.has(f.uri));
+  const goneTexts = await gitBlobs(top, gone.map((f) => `${rev}:${f.rel}`));
+  gone.forEach((f, i) => {
+    if (goneTexts[i] !== undefined) base.set(f.uri, goneTexts[i]!, 0);
+  });
   return base;
 }
 
