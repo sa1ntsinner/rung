@@ -72,7 +72,10 @@ auditOnlineRelease(stage);
 // the extension is enough. VERSION changes with the content: the extension copies a new one into place.
 const inExt = join(root, "editors", "vscode", "rung");
 rmSync(inExt, { recursive: true, force: true });
-cpSync(stage, inExt, { recursive: true, filter: (src) => relative(stage, src) !== "rung.exe" });
+// the plugin's own copy of the runtime is for the zip's agents folder: beside the extension's and npm's rung the
+// launcher finds the CLI one level up, and the copy would double both packages
+const pluginRuntime = join("agents", "claude-plugin", "bin", "runtime");
+cpSync(stage, inExt, { recursive: true, filter: (src) => !["rung.exe", pluginRuntime].includes(relative(stage, src)) });
 const digest = createHash("sha256");
 for (const f of walk(inExt).sort()) digest.update(relative(inExt, f)).update(readFileSync(f));
 writeFileSync(join(inExt, "VERSION"), `${version}+${digest.digest("hex").slice(0, 12)}\n`);
@@ -87,7 +90,7 @@ if (existsSync(vsix)) {
 // server, rung test, the bridge over ssh) and for CI. npm links bin entries straight to the file there, so it needs a #!.
 const npmStage = join(out, "npm");
 rmSync(npmStage, { recursive: true, force: true });
-cpSync(stage, npmStage, { recursive: true, filter: (src) => !["rung.exe", "editors", "README.txt"].includes(relative(stage, src)) });
+cpSync(stage, npmStage, { recursive: true, filter: (src) => !["rung.exe", "editors", "README.txt", pluginRuntime].includes(relative(stage, src)) });
 writeFileSync(join(npmStage, "rung.cjs"), "#!/usr/bin/env node\n" + readFileSync(join(stage, "rung.cjs"), "utf8"));
 writeFileSync(
   join(npmStage, "package.json"),
