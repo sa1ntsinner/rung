@@ -132,9 +132,10 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         items.push({ range: { start: { line, character: 0 }, end: { line, character: 200 } }, severity: SEVERITY[d.severity], message: d.message, code: d.code, source: "rung sync" });
       }
     }
-    // a publish already reading the file when the server stopped has no connection left to send to
+    // a publish already reading the file when the server stopped has no connection left to send to;
+    // the client may also close the stream before it says shutdown
     if (disposed) return;
-    await connection.sendDiagnostics({ uri, diagnostics: items });
+    await connection.sendDiagnostics({ uri, diagnostics: items }).catch(() => undefined);
   }
 
   function schedule(uri: string) {
