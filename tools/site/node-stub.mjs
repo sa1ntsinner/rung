@@ -6,6 +6,7 @@ const none = () => {
 };
 export const readFile = none;
 export const readdir = none;
+export const stat = none;
 export const writeFile = none;
 export const mkdir = none;
 export const watch = none;
@@ -21,4 +22,4 @@ export const dirname = (p) => p.replace(/\/[^/]*$/, "") || "/";
 export const basename = (p) => p.replace(/^.*\//, "");
 export const pathToFileURL = (p) => new URL("file://" + (p.startsWith("/") ? "" : "/") + p);
 export const fileURLToPath = (u) => decodeURIComponent(new URL(String(u)).pathname);
-export default { readFile, readdir, writeFile, mkdir, watch, createHash, isDeepStrictEqual, sep, delimiter, join, resolve, relative, dirname, basename, pathToFileURL, fileURLToPath };
+export default { readFile, readdir, stat, writeFile, mkdir, watch, createHash, isDeepStrictEqual, sep, delimiter, join, resolve, relative, dirname, basename, pathToFileURL, fileURLToPath };
