@@ -39,7 +39,7 @@ export interface ReviewReport {
   base: string;
   head: string;
   blocks: BlockReview[];
-  compile: { status: "last sync" | "unavailable"; note: string; diagnostics: unknown[] };
+  compile: { status: "last sync" | "unavailable"; note: string; diagnostics: string[] };
   evidence: { tests: string; coverage: string; behaviour: string };
   limitations: string[];
 }
@@ -193,9 +193,9 @@ export async function reviewChanges(root: string, options: { base?: string; head
         namesMatched: [...new Set(changedText.match(/\b(?:E_Stop\w*|Guard\w*|Interlock\w*|Enable\w*|Brake\w*)\b/gi) ?? [])].sort() });
     }
   }
-  const diagnostics = await readFile(join(root, ".rung", "diagnostics.json"), "utf8").then((t) => (JSON.parse(t) as { items?: unknown[] }).items, () => undefined).catch(() => undefined);
+  const diagnostics = await readFile(join(root, ".rung", "diagnostics.json"), "utf8").then((t) => (JSON.parse(t) as { items?: { path?: string; address?: string; line?: number; severity: string; message: string }[] }).items, () => undefined).catch(() => undefined);
   return { base: baseSha, head: headSha ?? "working tree", blocks,
-    compile: { status: diagnostics ? "last sync" : "unavailable", note: "Cached workspace diagnostics only; they do not prove these changes compiled.", diagnostics: diagnostics ?? [] },
+    compile: { status: diagnostics ? "last sync" : "unavailable", note: "Cached workspace diagnostics only; they do not prove these changes compiled.", diagnostics: (diagnostics ?? []).map((d) => `${d.path || d.address || "workspace"}${d.line ? `:${d.line}` : ""} ${d.severity} ${d.message}`) },
     evidence: { tests: "not run by review; use rung test", coverage: "not measured by review; use rung test --coverage", behaviour: "not run by review; use rung test --against <base>" },
     limitations: ["Text and static dependencies only; no claim about runtime behaviour or safety.", "Names matched are review hints, not a safety check.", "Renamed files are shown as a deletion and an addition; dependencies include both revisions.", "Logic excerpts are capped at 4000 characters per region or network; truncated is explicit."] };
 }
@@ -212,6 +212,6 @@ export function reviewMarkdown(report: ReviewReport): string {
     for (const [key, names] of Object.entries(b.affected)) if (names.length) lines.push("", `${key}: ${names.map(md).join(", ")}`);
     if (b.namesMatched.length) lines.push("", `Names matched (not a safety check): ${b.namesMatched.map(md).join(", ")}`);
   }
-  lines.push("", `Compile: ${report.compile.status}. ${report.compile.note}`, ...report.compile.diagnostics.map((d) => `- ${md(JSON.stringify(d))}`), "", `Tests: ${report.evidence.tests}.`, `Coverage: ${report.evidence.coverage}.`, `Behaviour: ${report.evidence.behaviour}.`, "", ...report.limitations.map((l) => `- ${l}`));
+  lines.push("", `Compile: ${report.compile.status}. ${report.compile.note}`, ...report.compile.diagnostics.map((d) => `- ${md(d)}`), "", `Tests: ${report.evidence.tests}.`, `Coverage: ${report.evidence.coverage}.`, `Behaviour: ${report.evidence.behaviour}.`, "", ...report.limitations.map((l) => `- ${l}`));
   return lines.join("\n") + "\n";
 }

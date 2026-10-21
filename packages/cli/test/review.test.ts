@@ -15,10 +15,13 @@ describe("rung review", () => {
     const git = (...args: string[]) => execFileSync("git", ["-C", root, "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "core.hooksPath=", "-c", "commit.gpgsign=false", ...args], { windowsHide: true, encoding: "utf8" });
     git("init", "-q"); git("add", "."); git("commit", "-qm", "fixture");
     writeFileSync(file, 'FUNCTION_BLOCK "FB_Batch"\nBEGIN\n #Done := TRUE;\nEND_FUNCTION_BLOCK\n');
+    mkdirSync(join(root, ".rung"));
+    writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ items: [{ path: "blocks/Batch.scl", line: 3, severity: "error", message: "Unknown member" }] }));
     const out: string[] = []; const err: string[] = [];
     const io = { cwd: root, stdout: (s: string) => out.push(s), stderr: (s: string) => err.push(s), env: {} };
     expect(await main(["review", "--md"], io), err.join("")).toBe(0);
     expect(out.join("")).toContain("rung change review");
+    expect(out.join("")).toContain("blocks/Batch.scl:3 error Unknown member");
     out.length = 0;
     expect(await main(["review", "--json"], io), err.join("")).toBe(0);
     expect(JSON.parse(out.join("")).blocks[0]).toMatchObject({ name: "FB_Batch", change: "modified" });

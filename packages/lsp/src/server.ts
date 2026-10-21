@@ -37,7 +37,7 @@ import { parsePastedRows } from "./declarationPaste.js";
 import { isSimaticMl } from "./simaticml.js";
 import { complete, definition, diagnostics, documentHighlights, hover, outline, references, rename, renameTarget, signatureHelp, usagesAt, type CompletionKind, type OutlineSymbol, type UsageSite } from "./features.js";
 import { codeActions, freeMemory } from "./actions.js";
-import { testFilesOf, testKeyEdits } from "./testkeys.js";
+import { nestedTestKeyEdits, testFilesOf, testKeyEdits } from "./testkeys.js";
 import { baseText, interfaceImpact, workspaceTests } from "./impact.js";
 import { testSkeleton } from "./testSkeleton.js";
 import { newObject, type NewObjectRequest } from "./newObject.js";
@@ -503,6 +503,8 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     const v = block?.vars.find((x) => x.start === decl!.start);
     if (root && block && v && (block.kind === "FB" || block.kind === "FC") && ["Input", "Output", "InOut", "Static"].includes(v.section))
       for (const [file, edits] of await testKeyEdits(root, block.name, v.name, p.newName, deviceOfUri(decl!.uri))) changes[pathToFileURL(file).href] = edits;
+    if (root && decl) for (const [file, edits] of await nestedTestKeyEdits(root, index, decl, p.newName))
+      (changes[pathToFileURL(file).href] ??= []).push(...edits);
     return { changes };
   });
   connection.onCodeAction((p) => {

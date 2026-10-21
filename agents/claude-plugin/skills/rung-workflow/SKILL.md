@@ -11,6 +11,11 @@ The folder is a live text mirror of a TIA Portal project. `plc/<Device>/blocks/*
 
 Call `rung_check` once at the start of a session (or when something fails for a missing tool). It lists TIA Portal and Openness, the Openness group and whitelist, S7-PLCSIM, TwinCAT XAE, CODESYS, editors and agents, each with what it enables. When a task needs something that is missing, do not work around it: tell the person exactly what to install, quoting the `fix` and `link` from `rung_check`, and what you can still do meanwhile (edit, test offline, simulate). `rung setup` wires rung into their agents and editors.
 
+## CLI commands
+
+- `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order number> [--device <name>]` creates an empty project with one CPU. Writes start on. The bridge picks the newest installed firmware for that order number and sets the lab security settings TIA Portal's wizard would use. Review those settings before commissioning.
+- `rung lint [dir] [--file f]... [--json]` runs the language server's checks in the terminal or CI without TIA Portal. Repeat `--file` for selected files. Exit 1 means errors.
+
 ## Loop
 
 1. **Orient.** `rung_status` (conflicts? compile errors? watcher running? writes to TIA Portal on? effective agent mode and allowed actions for the PLC?) and read `AGENTS.md`. Never change the mode or its external store. When refused, ask the person. For an object you have not seen, `rung_explain <name>` gives its file, interface and users.

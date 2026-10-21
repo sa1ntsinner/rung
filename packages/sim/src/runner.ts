@@ -3,7 +3,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
-import { STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
+import { KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
 
@@ -157,13 +157,16 @@ function splitName(name: string): { global: boolean; root: string; path: Seg[] }
     rest = rest.slice(root.length);
   } else root = m[1]!;
   const path: Seg[] = [];
-  const re = /\.([^.[]+)|\[([^\]]*)\]/g;
+  const re = /\.(?:"([^"]+)"|([^.[]+))|\[([^\]]*)\]/g;
   for (const x of rest.matchAll(re)) {
-    if (x[1] !== undefined) path.push(/^\d+$/.test(x[1]) ? [Number(x[1])] : x[1]);
-    else path.push(x[2]!.split(",").map((s) => Number(s.trim())));
+    const member = x[1] ?? x[2];
+    if (member !== undefined) path.push(x[1] === undefined && /^\d+$/.test(member) ? [Number(member)] : member);
+    else path.push(x[3]!.split(",").map((s) => Number(s.trim())));
   }
   return { global, root, path };
 }
+
+const memberName = (name: string) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(name) && !KEYWORDS.includes(name.toUpperCase()) ? name : `"${name}"`;
 
 const isArrayValue = (v: Value): v is ArrayValue => typeof v === "object" && v !== null && (v as ArrayValue).__array === true;
 
@@ -293,7 +296,7 @@ function closestName(index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: 
   const { global, root, path } = splitName(typed);
   const b = g.block!;
   const seen = scopedTo(index, g.uri);
-  const show = (r: string, p: Seg[]) => (global ? `"${r}"` : r) + p.map((s) => (typeof s === "string" ? `.${s}` : `[${s.join(",")}]`)).join("");
+  const show = (r: string, p: Seg[]) => (global ? `"${r}"` : r) + p.map((s) => (typeof s === "string" ? `.${memberName(s)}` : `[${s.join(",")}]`)).join("");
   let members: Member[];
   if (global) {
     const target = seen.global(root);
@@ -438,7 +441,7 @@ function declaration(seen: WorkspaceIndex, g: GlobalSymbol, name: string): Membe
       const hit = members.find((v) => v.name.toUpperCase() === seg.toUpperCase());
       if (!hit && members.length) {
         const near = nearest(seg, members.map((v) => v.name));
-        const suggested = (global ? `"${root}"` : root) + path.map((p, j) => typeof p === "string" ? `.${j === i ? near : p}` : `[${p.join(",")}]`).join("");
+        const suggested = (global ? `"${root}"` : root) + path.map((p, j) => typeof p === "string" ? `.${memberName(j === i ? near ?? p : p)}` : `[${p.join(",")}]`).join("");
         throw new SimError(`${name} does not exist${near ? ` (did you mean ${suggested}?)` : ""}`);
       }
       m = hit;

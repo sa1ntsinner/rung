@@ -41,6 +41,16 @@ cases:
 `;
 
 describe("rung test runner", () => {
+  it("accepts TIA-quoted nested members and quotes suggestions", async () => {
+    const idx = new WorkspaceIndex();
+    idx.set("file:///w/plc/P/blocks/Motor.scl", 'FUNCTION_BLOCK "Motor"\nVAR\n Pid : Struct\n "idb_PI-Control" : Struct\n Controller_Response_Integral : Real;\n END_STRUCT;\n END_STRUCT;\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n', 0);
+    for (const key of ['Pid.idb_PI-Control.Controller_Response_Integral', 'Pid."idb_PI-Control".Controller_Response_Integral']) {
+      const r = await runTestFile(idx, "t.yaml", `block: Motor\ncases:\n  - name: quoted\n    steps:\n      - set: { '${key}': 2 }\n      - expect: { '${key}': 2 }\n`);
+      expect(r.cases[0]).toMatchObject({ passed: true });
+    }
+    const typo = await runTestFile(idx, "t.yaml", `block: Motor\ncases:\n  - name: typo\n    steps:\n      - set: { 'Pid.idb_PI-Control.Controller_Response_Integra': 2 }\n`);
+    expect(typo.cases[0]?.error).toContain('did you mean Pid."idb_PI-Control".Controller_Response_Integral?');
+  });
   it("runs FB cases and reports failures per step", async () => {
     const r = await runTestFile(index(), "tests/motor.test.yaml", MOTOR);
     expect(r.cases.map((c) => [c.name, c.passed])).toEqual([

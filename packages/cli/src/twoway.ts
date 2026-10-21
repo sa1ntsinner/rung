@@ -535,7 +535,7 @@ export async function cmdWrites(dir: string, what: string | undefined, io: Io): 
 }
 
 async function writes(dir: string, what: string | undefined, io: Io): Promise<number> {
-  if (what === "on") assertHuman(io.env);
+  if (what === "on") assertHuman(io.env, "writes-on");
   if (what !== undefined && what !== "on" && what !== "off") {
     io.stderr("rung: usage: rung writes [on|off] [--dir <workspace>]\n");
     return 1;

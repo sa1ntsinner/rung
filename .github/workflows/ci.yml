@@ -46,6 +46,17 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx tree-sitter generate && git diff --exit-code src/
       - run: npx tree-sitter test
+  zed:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/zed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+      - run: cargo build --release --target wasm32-wasip2
   neovim:
     # rung.nvim against a pinned Neovim and the plugins its debugger and neotest checks use: never skipped here
     runs-on: ubuntu-latest

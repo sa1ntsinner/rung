@@ -9,22 +9,30 @@ import { retrievePlan, retrievedProject } from "../src/upgrade.js";
 // a bridge that answers --retrieve like the real one: the project in a folder under --target, or an error
 const FAKE = `const a = process.argv.slice(2), at = (k) => a[a.indexOf(k) + 1];
 require("node:fs").writeFileSync(process.env.RUNG_FAKE_LOG, JSON.stringify(a));
-if (process.env.RUNG_FAKE_FAIL) { console.log(JSON.stringify({ error: "the archive is damaged" })); process.exit(1); }
+if (process.env.RUNG_FAKE_FAIL) { console.log(JSON.stringify({ error: process.env.RUNG_FAKE_FAIL })); process.exit(1); }
 const dir = require("node:path").join(at("--target"), "Line"); require("node:fs").mkdirSync(dir);
 const ap = require("node:path").join(dir, "Line.ap20"); require("node:fs").writeFileSync(ap, "");
 console.log(JSON.stringify({ tiaPid: 0 })); console.log(JSON.stringify({ path: ap }));`;
 
-function fixture(fail = false) {
+function fixture(fail: boolean | string = false) {
   const cwd = mkdtempSync(join(tmpdir(), "rung-archive-"));
   writeFileSync(join(cwd, "fake.cjs"), FAKE);
   writeFileSync(join(cwd, "Line.zap20"), "archive");
   let out = "", err = "";
-  const env = { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([join(cwd, "fake.cjs")]), RUNG_FAKE_LOG: join(cwd, "args.json"), ...(fail ? { RUNG_FAKE_FAIL: "1" } : {}) };
+  const env = { RUNG_BRIDGE: process.execPath, RUNG_BRIDGE_ARGS: JSON.stringify([join(cwd, "fake.cjs")]), RUNG_FAKE_LOG: join(cwd, "args.json"), ...(fail ? { RUNG_FAKE_FAIL: typeof fail === "string" ? fail : "the archive is damaged" } : {}) };
   const io = { cwd, env, stdout: (s: string) => { out += s; }, stderr: (s: string) => { err += s; } };
   return { cwd, io, out: () => out, err: () => err };
 }
 
 describe("archives: rung retrieve, and rung init on an archive", () => {
+  it.each(["retrieve", "init", "upgrade"])("explains missing HSP after a refused %s", async command => {
+    const t = fixture("The project cannot be opened because Support packages are missing");
+    mkdirSync(join(t.cwd, "source"));
+    const args = command === "init" ? ["init", "--project", "Line.zap20"] : command === "upgrade" ? ["upgrade", "source/Line.ap18"] : ["retrieve", "Line.zap20"];
+    expect(await main(args, t.io)).toBe(1);
+    expect(t.err()).toContain("TARGET_REFUSED");
+    expect(t.err()).toContain("Install them in TIA Portal under Options > Support packages (they come from Siemens Industry Online Support), then run the command again.");
+  });
   it("retrieves an archive into a folder named after it, by the TIA Portal of its version", async () => {
     const t = fixture();
     expect(await main(["retrieve", "Line.zap20"], t.io)).toBe(0);

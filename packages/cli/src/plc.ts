@@ -363,7 +363,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
 }
 
 async function download(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
-  assertHuman(io.env);
+  assertHuman(io.env, "download");
   const { ws, config, link } = await workspace(dir, io, true);
   assertPlcWritable(config, v.plc as string | undefined, io.env);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");

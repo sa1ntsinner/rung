@@ -9,6 +9,11 @@ export const agentPermission = new AsyncLocalStorage<AgentScope>();
 
 export const AGENT_REFUSAL = "PLC changes and enabling writes belong to the person. Ask the person to run the command themselves in their own terminal, or confirm in VS Code started from their terminal. Use rung_download_request to prepare a download handover.";
 
+export function agentRefusal(action?: AgentAction): string {
+  const names: Record<AgentAction, string> = { download: "download", write: "live write", force: "live force/unforce", "run-stop": "run/stop", "alarm-ack": "alarm acknowledgement", "writes-on": "writes on", "openness-setup": "Openness whitelist registration", bridge: "bridge" };
+  return action ? AGENT_REFUSAL.replace("PLC changes and enabling writes belong", `${names[action]} belongs`) : AGENT_REFUSAL;
+}
+
 /** Environment only: workspace files cannot switch this protection off. */
 export function agentMarker(env: Io["env"]): string | undefined {
   return Object.keys(env).find(key => {
@@ -19,9 +24,9 @@ export function agentMarker(env: Io["env"]): string | undefined {
   });
 }
 
-export function assertHuman(env: Io["env"]): void {
+export function assertHuman(env: Io["env"], action?: AgentAction): void {
   const marker = agentMarker(env);
-  if (marker && agentPermission.getStore()?.env !== env) throw new WorkspaceError("AGENT_REFUSED", `${AGENT_REFUSAL} (agent environment: ${marker})`);
+  if (marker && agentPermission.getStore()?.env !== env) throw new WorkspaceError("AGENT_REFUSED", `${agentRefusal(action)} (agent environment: ${marker})`);
 }
 
 /** Shared by the shell hooks and CLI: keep PLC-changing command recognition here. */
@@ -62,7 +67,7 @@ export function guardCommand(command: string, permits?: (action: AgentAction, to
     const positionals = commandTokens(tokens);
     const action = commandAction(positionals, tokens);
     if (positionals[0] === "agent-mode" && positionals.length > 1 || tokens.some(token => /^--confirm-stdin(?:=|$)/.test(token))
-      || action && !permits?.(action, tokens)) return { allowed: false, reason: AGENT_REFUSAL };
+      || action && !permits?.(action, tokens)) return { allowed: false, reason: agentRefusal(action) };
   }
   if (/(?:^|[\s/"'])rung\/agent-modes\.toml\b/i.test(text) && !/^\s*(?:cat|type|Get-Content)\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;&|>]+)\s*$/i.test(text)) return { allowed: false, reason: AGENT_REFUSAL };
   if (/rung\.toml/i.test(text) && /(?:allow_writes|download|read_only|\benabled\b|\b(?:Set-Content|Add-Content|Out-File|tee|sed|perl|python|node|cp|mv|copy|move)\b|[>])/i.test(text)) return { allowed: false, reason: AGENT_REFUSAL };

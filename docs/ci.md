@@ -35,6 +35,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm install -g @rung-plc/cli@0.3   # the CLI for any OS (Node.js 22+); pin the version you tested with
+      - run: rung lint
       - run: rung test --junit plc-tests.xml
       - run: rung review --base origin/main > review.md
       - run: rung-pro check . --git origin/main      # rung Pro: rung.policy.toml gate
@@ -50,6 +51,8 @@ jobs:
       - run: rung sync
       - run: rung status
 ```
+
+`rung lint [dir] [--file f]... [--json]` runs the language server's checks without an editor or TIA Portal. Repeat `--file` to select files; `--json` returns structured diagnostics. Errors exit with code 1; warnings alone exit with code 0. Run it alongside `rung test` on any CI runner.
 
 The free `rung review` creates an offline change report from the files and git. It does not run tests or compile. The Pro policy gate is separate. Fetch the base branch before reviewing it.
 

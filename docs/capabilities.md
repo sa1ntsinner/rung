@@ -1,12 +1,14 @@
 # What rung does, and where TIA Portal is still needed
 
-rung works on the TIA Portal project you already have. TIA Portal itself (licensed, on Windows, with Openness) does the
+rung works on an existing TIA Portal project or creates a new one with one CPU. TIA Portal itself (licensed, on Windows, with Openness) does the
 compiling and downloading in the background; editing, tests and the simulator need no TIA Portal at all.
 Supported: TIA Portal V18, V19, V20 and V21, S7-1500 and S7-1200 projects. V18 syncs, compiles and cross-references like the others; what its Openness lacks is refused with a message: Unified HMI, PLC users for going online, the scan for reachable devices, library documents and version release, SIMATIC SD (LAD and FBD blocks stay SimaticML XML). CODESYS projects through rung's CODESYS bridge.
 
 | Workflow | What rung does | Where it stops |
 |---|---|---|
 | Opening a project | Opens an `.apNN` or a `.zapNN` archive in a TIA Portal without window, mirrors it into files, keeps it open for the next command; **Open in TIA Portal** shows the object you are on | Projects protected by user management (UMAC) are not opened by the background TIA Portal |
+| New project | `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order number> [--device <name>]`: an empty project with one CPU; writes start on. The bridge picks the newest installed firmware for that order number and sets TIA wizard lab security settings | Requires TIA Portal and Openness; review security settings before commissioning |
+| Lint | `rung lint [dir] [--file f]... [--json]`: the language server's checks in the terminal or CI, without TIA Portal; exit 1 on errors | Static checks do not replace TIA compilation |
 | Editing SCL | Language server in VS Code, Zed and Neovim: completion, definitions, references, rename through TIA Portal, TIA's own type rules and formatting, compile errors on their line, Who writes this, interface impact | — |
 | Sync | Save a file: imported, compiled, TIA's version written back (recorded warm median 1.1 s for 624 objects); changes made in TIA Portal come back; three-way merge; conflicts in VS Code's merge editor; writes are off until `rung writes on`; an archive before the first write of the day | Deleting a file never deletes the object in TIA Portal by itself: `rung confirm-delete` |
 | LAD and FBD | Kept as SIMATIC SD text or XML, merged network by network, **drawn as ladders** with live values | Editing graphically stays in TIA Portal |

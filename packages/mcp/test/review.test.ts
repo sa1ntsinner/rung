@@ -25,6 +25,20 @@ function fixture() {
 }
 
 describe("offline change review", () => {
+  it("formats cached compile diagnostics as readable lines", async () => {
+    const { root } = fixture();
+    mkdirSync(join(root, ".rung"));
+    writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ items: [
+      { address: "plc:MixingStation/blocks/FB_Batch", path: "plc/MixingStation/blocks/FB_Batch.scl", line: 6, severity: "error", message: "Unknown member" },
+      { address: "plc:MixingStation", severity: "warning", message: "Compiler warning" },
+    ] }));
+    const report = await reviewChanges(root);
+    expect(report.compile.diagnostics).toEqual([
+      "plc/MixingStation/blocks/FB_Batch.scl:6 error Unknown member",
+      "plc:MixingStation warning Compiler warning",
+    ]);
+    expect(reviewMarkdown(report)).toContain("plc/MixingStation/blocks/FB\\_Batch.scl:6 error Unknown member");
+  });
   it("reports interfaces, only the changed region, callers and data blocks without changing files", async () => {
     const { root, dir } = fixture();
     writeFileSync(join(dir, "FB_Batch.scl"), block("Int", "FALSE"));
