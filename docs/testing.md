@@ -43,7 +43,7 @@ cases:
 - `expect` compares with a small tolerance for reals; TIME values accept the same durations as `advance` (`500ms`, `T#500ms`, `2s`).
 - `advance` needs a unit (`200ms`, not `200`). It runs whole cycles, rounded up, at least one: at `cycle: 10ms`, `15ms` runs two cycles and `0ms` runs one.
 - `--case <file>#<n>` runs one case and nothing else: the file is still read and checked as a whole, the other cases do not run. A number past the file's cases, or a file that is not there, is an error, never "all cases". `--json` gives every case its `index` in the file.
-- Every case counts its checks: each name in an `expect:`, and in a `within`/`always`/`never` step once. A case without any passes by running and says `(checks nothing)`; the totals say how many did. `--strict` fails those cases, so CI cannot report a test that only ran as one that checked behaviour. `--json`, the VS Code Testing view and `rung_test` give the count as `assertions`.
+- Every case counts each name in an `expect:` as one check, including each name in a `within`/`always`/`never` step, regardless of how many cycles it runs. A `never` step with two names counts as two checks. A case without any passes by running and says `(checks nothing)`; the totals say how many did. `--strict` fails those cases, so CI cannot report a test that only ran as one that checked behaviour. `--json`, the VS Code Testing view and `rung_test` give the count as `assertions`.
 - `--filter` matches a path substring or the exact `block:` name, case-insensitively on every platform. Paths accept `/` or `\\`. Otherwise it runs the cases whose name contains it (`--filter stuck`).
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
 - A step runs at most 10 000 000 cycles: `advance: T#1d` at the default 10 ms is 8 640 000. For longer times, set a longer `cycle:` at the top of the file.
@@ -63,6 +63,8 @@ A machine's promises are about time: the motor runs no later than 2 s after star
       - { always: 5s, expect: { Alarm: true } }      # true after every cycle for 5 s
       - { never: 3s, expect: { Valve: true } }       # not once in 3 s
 ```
+
+With several names in `expect:`, all must match in the same cycle. `within` waits for all of them at once; `always` requires all of them after every cycle; `never` requires that they never all match at the same time. For example, `never: 3s` with `expect: { Valve: true, Stopped: true }` forbids that combination, while either value alone may be true.
 
 A broken promise says when: `step 4: Fault expected true got false (within 1s: not reached)`, `(always for 3s: broken after 2.01 s)`, `(never for 3s: happened after 2.01 s)`. `within` ends its step as soon as the expectation holds, so the next step starts from that cycle.
 

@@ -6,6 +6,16 @@ import { basename, join } from "node:path";
 import { testKeyEdits } from "../src/index.js";
 
 describe("a renamed parameter in the block's tests", () => {
+  it("resolves a parameter through TIA-quoted member names", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-testkeys-"));
+    mkdirSync(join(root, "tests"));
+    const file = join(root, "tests", "motor.test.yaml");
+    const text = `block: Motor\ncases:\n  - name: quoted\n    steps:\n      - set: { 'Pid."idb_PI-Control".Value': 2 }\n`;
+    writeFileSync(file, text);
+    const edits = (await testKeyEdits(root, "Motor", "Pid", "Loop")).get(file);
+    expect(edits).toHaveLength(1);
+    expect(edits?.[0]?.newText).toBe("Loop");
+  });
   it("renames set: and expect: keys of that block's tests, flow and block style, not values or other blocks' stubs", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-testkeys-"));
     mkdirSync(join(root, "tests"));

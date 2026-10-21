@@ -61,9 +61,22 @@ git init && git add -A && git commit -m "baseline"
 
 If the project is not open, rung opens it in a TIA Portal without window and keeps it open for the next command (details in [TIA Portal in the background](#tia-portal-in-the-background)). **Open in TIA Portal** (`rung open <file>`) shows the object you are on in a TIA Portal window. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
 
+### Starting from nothing
+
+In an empty workspace folder, create a new project with one CPU:
+
+```sh
+rung init --new --project D:/TIA/Line/Line.ap20 --cpu "6ES7 516-3AN02-0AB0" --device PLC_1
+rung pull
+```
+
+The syntax is `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order number> [--device <name>]`. The project must not exist. Writes start on for this new project. The bridge picks the newest installed firmware for that CPU order number and sets the lab security settings that TIA Portal's wizard would use. Review those settings in TIA Portal before commissioning.
+
+Run `rung lint [dir] [--file f]... [--json]` for the language server's checks in the terminal or CI, without TIA Portal. It exits with code 1 on errors. Repeat `--file` to check selected files.
+
 ## 4. Work two-way
 
-Until you say so, rung writes nothing into the project: `rung pull`, `rung sync` and `rung watch` bring TIA Portal's changes into the files, and your edits stay in the files (`WRITES_OFF` in the report). Look around first, on a copy of the project if you like. Then:
+For an existing project, rung writes nothing into it until you say so: `rung pull`, `rung sync` and `rung watch` bring TIA Portal's changes into the files, and your edits stay in the files (`WRITES_OFF` in the report). Look around first, on a copy of the project if you like. Then:
 
 ```
 rung sync --preview  # what the next sync would send to TIA Portal and bring in, with the lines; writes nothing

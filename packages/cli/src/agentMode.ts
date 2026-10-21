@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { AGENT_ACTIONS, AGENT_MODES, activeAgentEntry, agentModesPath, assertPlcWritable, formatAgentModes, loadConfig, readAgentModes, workspaceAgentModes, workspaceModeKey, WorkspaceError, writeFileAtomic,
   type AgentAction, type AgentMode, type AgentModeEntry, type RungConfig } from "@rung/core";
 import { findWorkspace, type Io } from "./common.js";
-import { AGENT_REFUSAL, agentMarker, agentPermission, commandAction, commandTokens, type AgentScope } from "./guard.js";
+import { AGENT_REFUSAL, agentRefusal, agentMarker, agentPermission, commandAction, commandTokens, type AgentScope } from "./guard.js";
 
 interface DialogRequest { plc: string; action: AgentAction; agent: string; command: string; timeoutMs: number }
 export type DialogRunner = (request: DialogRequest) => Promise<{ answer?: string; reason?: string }>;
@@ -67,7 +67,7 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
   const scope = agentPermission.getStore();
   await assertAgentWritable(undefined, dir, action, plc, io, command);
   const root = await findWorkspace(dir).catch(error => {
-    if (error instanceof WorkspaceError && error.code === "NOT_A_WORKSPACE") throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL);
+    if (error instanceof WorkspaceError && error.code === "NOT_A_WORKSPACE") throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
     throw error;
   });
   const config = await loadConfig(root, { raw: true });
@@ -90,7 +90,7 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
     await appendFile(join(root, ".rung", "agent-actions.jsonl"), records.map(record => JSON.stringify({ ...record, outcome }) + "\n").join(""));
   };
   try {
-    if (targets.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL);
+    if (targets.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
     for (const record of records) if (record.allowedBy === "dialog") {
       if (!record.plc) throw new WorkspaceError("AGENT_REFUSED", "Native approval needs an explicit PLC name; choose --plc or --device");
       const result = await dialog({ plc: record.plc, action, agent: marker, command, timeoutMs: 120000 });
@@ -117,11 +117,11 @@ export async function withAgentPermission<T>(dir: string, action: AgentAction, p
 export async function withAgentPreparation<T>(dir: string, action: AgentAction, plc: string | undefined, io: Io, run: () => Promise<T>, command?: string, audit?: { delegated: boolean }): Promise<T> {
   if (!agentMarker(io.env)) return run();
   await assertAgentWritable(undefined, dir, action, plc, io, command);
-  const root = await findWorkspace(dir).catch(() => { throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL); });
+  const root = await findWorkspace(dir).catch(() => { throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action)); });
   const config = await loadConfig(root, { raw: true });
   await assertAgentWritable(config, root, action, plc, io, command);
   const modes = (await workspaceAgentModes(root, config, io.env)).filter(p => !plc || p.plc === plc);
-  if (!modes.length || modes.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL);
+  if (!modes.length || modes.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
   const parent = agentPermission.getStore();
   return agentPermission.run({ env: io.env, root, plc: plc ?? (modes.length === 1 ? modes[0]!.plc : undefined), action, command: command ?? parent?.command, audit: audit ?? parent?.audit }, run);
 }
@@ -136,7 +136,7 @@ export async function runAgentCommand(argv: string[], io: Io, run: () => Promise
   const positionals = commandTokens(argv);
   const [cmd, sub] = positionals;
   if (cmd === "agent-mode" && sub || argv.some(t => /^--confirm-stdin(?:=|$)/.test(t))) {
-    io.stderr(`rung: AGENT_REFUSED: ${AGENT_REFUSAL}\n`); return 1;
+    io.stderr(`rung: AGENT_REFUSED: ${agentRefusal(commandAction(positionals, argv))}\n`); return 1;
   }
   const action = commandAction(positionals, argv);
   const dir = resolve(io.cwd, option(argv, "dir") ?? (["live", "writes", "setup", "bridge", "agent-mode"].includes(cmd ?? "") ? "." : sub ?? "."));

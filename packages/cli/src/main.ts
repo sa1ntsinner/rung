@@ -681,7 +681,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
   }
   const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
-    if (commandAction(positionals, argv) || v["confirm-stdin"]) assertHuman(io.env);
+    if (commandAction(positionals, argv) || v["confirm-stdin"]) assertHuman(io.env, commandAction(positionals, argv));
     const mutating = ["download", "upload", "confirm-delete", "rename"].includes(cmd)
       || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
       || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply
@@ -1039,6 +1039,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
       // the bridge's own words for "started without the right to import" mean nothing to a person running rung
       const message = e.code === "READ_ONLY" && /--allow-import/.test(e.message) ? "TIA Portal was not changed: this workspace may not write into it now" : e.message;
       io.stderr(`rung: ${e.code}: ${message}\n`);
+      if (/support packages are missing/i.test(message)) io.stderr("hint: Install them in TIA Portal under Options > Support packages (they come from Siemens Industry Online Support), then run the command again.\n");
       if (e.code === "PLC_READ_ONLY") return 2;
       // a bridge TIA Portal knows does not wait for the "Openness access" question: TIA was slow, not asking
       const slow = e.code === "TIMEOUT" && (await whitelistStatus(bridgeExecutable(io.env)).catch(() => "unknown")) === "ok";

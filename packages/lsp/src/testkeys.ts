@@ -3,6 +3,10 @@
 // name it (Start, "Data.Running"), in the test files whose block: is that block. Stubs of other blocks are left alone.
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { KEYWORDS } from "./catalog.js";
+import { LineIndex } from "./lexer.js";
+import { testModel } from "./testModel.js";
+import { deviceOfUri, scopedTo, type Member, type WorkspaceIndex } from "./workspace.js";
 
 export interface KeyEdit {
   range: { start: { line: number; character: number }; end: { line: number; character: number } };
@@ -21,7 +25,7 @@ export async function testKeyEdits(root: string, block: string, name: string, ne
   const ofBlock = new RegExp(`^block:\\s*["']?${escape(block)}["']?\\s*(#.*)?$`, "im");
   // a key: after {, a comma or the indent, quoted or not, the name alone or the first part of a path (the rest:
   // .x members and [2] elements, "Points[2].x")
-  const key = new RegExp(`(?<=(?:^|[{,])\\s*["']?)${escape(name)}(?=((?:\\[[^\\]]*\\]|\\.[^"':,{}\\s\\[]+)*)["']?\\s*:)`, "gi");
+  const key = new RegExp(`(?<=(?:^|[{,])\\s*["']?)${escape(name)}(?=((?:\\[[^\\]]*\\]|\\.(?:"[^"]+"|[^"':,{}\\s\\[]+))*)["']?\\s*:)`, "gi");
   // a name YAML takes unquoted as a key; "Reset: Manual" needs quotes
   const plain = /^[A-Za-z_]\w*$/.test(newName);
   for (const f of files.map(String).filter((f) => /\.test\.ya?ml$/i.test(f))) {
@@ -54,6 +58,50 @@ export async function testKeyEdits(root: string, block: string, name: string, ne
       }
     });
     if (edits.length) out.set(path, edits);
+  }
+  return out;
+}
+
+/** Rename only path segments that resolve to this declaration, including UDTs and multi-instances. */
+export async function nestedTestKeyEdits(root: string, index: WorkspaceIndex, target: { uri: string; start: number }, newName: string): Promise<Map<string, KeyEdit[]>> {
+  const out = new Map<string, KeyEdit[]>();
+  const seen = scopedTo(index, target.uri);
+  const memberName = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(newName) && !KEYWORDS.includes(newName.toUpperCase()) ? newName : `"${newName}"`;
+  for (const g of seen.allGlobals().filter(g => g.block && ["FB", "FC", "PRG", "OB"].includes(g.kind))) {
+    const scope = scopedTo(index, g.uri);
+    for (const file of await testFilesOf(root, g.name, deviceOfUri(g.uri))) {
+      const path = join(root, file);
+      const text = await readFile(path, "utf8").catch(() => "");
+      const model = testModel(text);
+      if (model.errors.length) continue;
+      const lines = new LineIndex(text);
+      const edits: KeyEdit[] = [];
+      for (const c of model.cases) for (const step of c.steps) for (const part of ["set", "expect"] as const) for (const entry of step[part]?.entries ?? []) {
+        const global = entry.key.startsWith('"');
+        let members: Member[] = g.block!.vars.map(v => ({ ...v, uri: g.uri }));
+        const replacements: { start: number; end: number }[] = [];
+        for (const segment of entry.key.matchAll(/(?:^|\.)("[^"]+"|[^.["]+)(?:\[[^\]]*\])*/g)) {
+          const name = segment[1]!.replace(/^"|"$/g, "");
+          if (global && segment.index === 0) {
+            members = scope.membersOfType(scope.global(name)?.name);
+            continue;
+          }
+          const hit = members.find(m => m.name.toUpperCase() === name.toUpperCase());
+          if (!hit) break;
+          const at = segment.index! + (segment[0].startsWith(".") ? 1 : 0);
+          // Root parameters keep the existing flat-key edits and YAML spelling.
+          if (at > 0 && hit.uri === target.uri && hit.start === target.start) replacements.push({ start: at, end: at + segment[1]!.length });
+          members = scope.membersOf(hit);
+        }
+        if (!replacements.length) continue;
+        let key = entry.key;
+        for (const r of replacements.reverse()) key = key.slice(0, r.start) + memberName + key.slice(r.end);
+        const original = text.slice(entry.keyRange.start, entry.keyRange.end);
+        const newText = original.startsWith("'") ? `'${key.replace(/'/g, "''")}'` : original.startsWith('"') || /["':,{}\s]/.test(key) ? JSON.stringify(key) : key;
+        edits.push({ range: { start: lines.position(entry.keyRange.start), end: lines.position(entry.keyRange.end) }, newText });
+      }
+      if (edits.length) out.set(path, edits);
+    }
   }
   return out;
 }

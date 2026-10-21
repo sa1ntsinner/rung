@@ -9,6 +9,17 @@ import { liveMutations } from "../src/liveMutation.js";
 import { AGENT_ENV } from "../../../editors/vscode/src/core/agentEnv.js";
 
 describe("agent shell guard", () => {
+  it.each([
+    [["download"], "download"], [["live", "write", "X", "true"], "live write"],
+    [["live", "stop"], "run/stop"], [["writes", "on"], "writes on"],
+    [["setup", "openness"], "Openness whitelist registration"], [["bridge"], "bridge"],
+  ])("names the refused action for %s", async (args, action) => {
+    expect(guardCommand("rung " + args.join(" ")).reason).toContain(`${action} belongs to the person`);
+    const err: string[] = [];
+    expect(await main(args, { cwd: "/does-not-exist", env: { RUNG_AGENT: "1" }, stdout: () => {}, stderr: text => err.push(text) })).toBe(1);
+    expect(err.join("")).toContain(`${action} belongs to the person`);
+    expect(err.join("")).toContain("Ask the person to run the command themselves");
+  });
   it("blocks oversized or malformed hook input with exit code 2", async () => {
     for (const payload of ["{bad json", "x".repeat(1_048_577)]) {
       const input = vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () { yield payload; });
