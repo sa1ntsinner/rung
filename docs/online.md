@@ -298,8 +298,11 @@ the configuration, certificate, identity, epoch, program and scalar type again.
 The writer uses a separate short-lived TLS session and sends once. A timeout
 after sending reports `unknown`; it never retries. `acknowledged` means the PLC
 accepted the operation; subsequent logic can overwrite a modified value.
-Noninteractive CLI mutation is refused except the dedicated paired frontend
-confirmation protocol. MCP exposes no live mutation tools. Target
+By default a person starts downloads and live changes. A person may set an
+[agent mode](agents/modes.md) that permits selected actions. Real PLCs default to
+`manual`; reliably identified simulators default to `auto`. Noninteractive CLI
+mutation is refused unless an agent mode or the paired frontend confirmation
+protocol permits it. `RUNG_READ_ONLY` and read-only locks always win. MCP exposes no live mutation tools. Target
 `192.168.1.1` is refused before connection, including read requests.
 
 ## Alarms and CPU diagnostics

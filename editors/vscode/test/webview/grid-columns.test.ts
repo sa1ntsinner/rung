@@ -9,8 +9,8 @@ describe("tree-grid columns in a narrow panel", () => {
     { key: "retain", label: "Retain", width: 84 },
     { key: "comment", label: "Comment", width: 0 },
   ];
-  it("lets names and types give way so the comment stays in view", () => {
-    expect(columnsTemplate(cols)).toBe("minmax(121px, 220px) minmax(99px, 180px) minmax(80px, 84px) minmax(100px, 1fr)");
-    expect(columnsMinWidth(cols)).toBe(121 + 99 + 80 + 100);
+  it("keeps the full Name column before making room for Comment", () => {
+    expect(columnsTemplate(cols)).toBe("220px minmax(99px, 180px) minmax(80px, 84px) minmax(100px, 1fr)");
+    expect(columnsMinWidth(cols)).toBe(220 + 99 + 80 + 100);
   });
 });

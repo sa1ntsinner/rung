@@ -44,3 +44,17 @@ it("runs mode changes in a real terminal with inherited markers and a typed-name
   expect(show).toHaveBeenCalled();
   s.mode.dispose();
 });
+
+it.each(["exit", "json", "throw"])("keeps a warning when mode reading fails: %s", async failure => {
+  const s = setup([{ plc: "PLC_1", mode: "bypass", source: "PLC", actions: [] }]);
+  await s.mode.refresh();
+  s.item.hide.mockClear();
+  if (failure === "throw") s.cli.capture.mockRejectedValueOnce(new Error("unreadable"));
+  else s.cli.capture.mockResolvedValueOnce({ code: failure === "exit" ? 1 : 0, output: "invalid" });
+  await s.mode.refresh();
+  expect(s.item.hide).not.toHaveBeenCalled();
+  expect(s.item.text).toMatch(/unknown/);
+  expect(s.item.tooltip).toMatch(/bypass/);
+  expect(s.item.backgroundColor).toEqual(new vscode.ThemeColor("statusBarItem.warningBackground"));
+  s.mode.dispose();
+});

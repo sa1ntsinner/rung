@@ -21,21 +21,22 @@ Export selects a project-library version by those GUIDs, holds TIA exclusive
 access, and uses its native XML/libinfo serializer. The new destination directory
 contains `type.xml` and `type.libinfo`; existing directories refuse. Native files
 travel as bounded binary base64 and retain their exact bytes. Export performs no
-project save, release, instance update or PLC operation. V21 exports refuse until
-independently validated.
+project save, release, instance update or PLC operation. Export is supported in
+V20 and V21.
 
-This inspects the native V20 `Type.libinfo` and adjacent `Type.xml` pair without
+This inspects the native V20/V21 `Type.libinfo` and adjacent `Type.xml` pair without
 opening a TIA project. It preserves raw bytes, including XML UTF-8 BOM and CRLF,
 and checks the native document SHA256, source type/version GUIDs, version number,
 state and supported XML domain. The result includes a revision of the raw pair.
 Missing files, duplicate/unknown metadata fields, invalid names/base64/hashes,
 DTD/external entities, extra native objects and unsupported domains refuse.
 
-The supported package is one released default dependency-free V20 FB/FC
-library version in native XML with its unchanged metadata. Total raw size is
+The supported package is one released default V20/V21 library version in native
+XML with its unchanged metadata: an LAD/SCL FB or FC, or a PLC data type.
+It may list up to 16 dependencies on released library versions. Total raw size is
 4 MiB, metadata at most 1 MiB; names use 1–64 ASCII letters, digits or `-`/`_`.
-Other formats, nondefault/InWork versions, dependencies and target-device
-requirements remain unsupported. Native `LibraryMetaFileHash` is opaque: this
+Other formats, nondefault/InWork source versions and target-device requirements
+remain unsupported. Dependencies must already exist in the target library. Native `LibraryMetaFileHash` is opaque: this
 inspection checks its representation. Native import does not establish an
 independent integrity check of that hash; the raw document hash and whole-pair
 revision are checked separately. Inspection does not establish native acceptance.
@@ -43,7 +44,7 @@ revision are checked separately. Inspection does not establish native acceptance
 Import preview validates the package before opening TIA, resolves the selected
 PLC root, then checks project-library type/name/version collisions and existing
 block names under exclusive access. Preview/import support an unprotected LAD or
-SCL FB or FC without a namespace; software-unit targets are unavailable.
+SCL FB or FC without a namespace, or a PLC data type; software-unit targets are unavailable.
 Preview does not import, save, release or rename objects; its result explicitly
 reports `nativeImportValidated: false`. Its `revision` covers bounded library and
 hardware graphs plus freshly read engineering object revisions and native
@@ -72,7 +73,7 @@ with its one test instance; what it uses must be released already. TIA updates a
 that derived status is not counted as a change. A block calling objects outside
 the library (an FC that is no type) is refused by TIA itself.
 
-The result reports the actual type/version GUID, `InWork` 0.0.1, FB address and
+The result reports the actual type/version GUID, InWork version, object address and
 new engineering revision. Save follows the existing `sync.save` policy and is
 reported by `saved` with any save warning. There is no automatic release, instance
 update, PLC connection or download. Native import acceptance does not prove the
@@ -104,9 +105,9 @@ rung library --release --type-guid <type> --version-guid <in-work-version> --num
 rung library --release --type-guid <type> --version-guid <in-work-version> --number 1.0.0 --author smile --comment "Reviewed" --apply --expected-revision <preview-revision> --json
 ```
 
-The initial V20 scope is one dependency-free InWork version with one compiled,
-unprotected LAD FB test instance in a PLC root, no namespace and at most one
-comment language. Multi-version edited test environments refuse. Release does
+Release supports one InWork version with one compiled, unprotected LAD/SCL FB or
+FC test instance, or one PLC data type, in a PLC root without a namespace and
+with at most one comment language. Its library dependencies must be released. Multi-version edited test environments refuse. Release does
 not automatically create/release dependencies or update other instances.
 It uses the existing writes, operation UUID, exclusive transaction and save
 policies. The result contains the actual **new** native released-version GUID.

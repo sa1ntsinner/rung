@@ -2,7 +2,7 @@
 // A LAD/FBD block read-only, network by network: ladders drawn as TIA Portal draws them, other networks as text.
 // Monitor reads the operands from the PLC and shows where power flows, as TIA Portal's monitoring does.
 import { LitElement, html, svg, nothing } from "lit";
-import { layoutRung, operandsOf, type LadderBlock, type LadderNetwork, type Shape } from "../../core/ladderLayout";
+import { describeRung, layoutRung, operandsOf, type LadderBlock, type LadderNetwork, type Shape } from "../../core/ladderLayout";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -86,7 +86,7 @@ export class RgLadder extends LitElement {
     if (s.t === "path") return svg`<path class=${s.cls} d=${s.d} />`;
     // operands are links: a click finds the tag, DB or instance (Go to Symbol)
     const operand = /lad-operand/.test(s.cls);
-    return svg`<text class=${s.cls} x=${s.x} y=${s.y} text-anchor=${s.anchor ?? "middle"} @click=${operand ? () => vscode.postMessage({ kind: "operand", name: s.full ?? s.s }) : nothing}>${s.full ? svg`<title>${s.full}</title>` : nothing}${s.s}</text>`;
+    return svg`<text class=${s.cls} x=${s.x} y=${s.y} text-anchor=${s.anchor ?? "middle"} tabindex=${operand ? "0" : nothing} role=${operand ? "link" : nothing} aria-label=${operand ? "Go to " + (s.full ?? s.s) : nothing} @keydown=${operand ? (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); vscode.postMessage({ kind: "operand", name: s.full ?? s.s }); } } : nothing} @click=${operand ? () => vscode.postMessage({ kind: "operand", name: s.full ?? s.s }) : nothing}>${s.full ? svg`<title>${s.full}</title>` : nothing}${s.s}</text>`;
   }
 
   private network(n: LadderNetwork, width: number) {
@@ -95,7 +95,7 @@ export class RgLadder extends LitElement {
     if (n.rung) {
       const values = this.monitoring && this.live?.state === "live" ? (name: string) => this.values[name] : undefined;
       const l = layoutRung(n.rung, width, values);
-      return html`<section class="lad-net">${head}${comment}<div class="lad-scroll"><svg class="lad-svg" width=${l.width} height=${l.height} viewBox="0 0 ${l.width} ${l.height}" role="img" aria-label=${`Network ${n.index}`}>${l.shapes.map((s) => this.shape(s))}</svg></div></section>`;
+      return html`<section class="lad-net">${head}${comment}<div class="lad-scroll"><svg class="lad-svg" width=${l.width} height=${l.height} viewBox="0 0 ${l.width} ${l.height}" role="group" aria-label=${`Network ${n.index}${n.title ? ": " + n.title : ""}. ${describeRung(n.rung)}${n.comment ? ". " + n.comment : ""}`}>${l.shapes.map((s) => this.shape(s))}</svg></div></section>`;
     }
     const why = n.note === "empty network" ? html`<p class="lad-note">Empty network</p>` : n.note ? html`<p class="lad-note">${n.note}${n.text ? ": shown as the SCL that rung runs for it" : ""}</p>` : nothing;
     return html`<section class="lad-net">${head}${comment}${why}${n.text ? html`<pre class="lad-text">${n.text}</pre>` : nothing}</section>`;

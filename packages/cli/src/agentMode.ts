@@ -50,11 +50,11 @@ async function assertAgentWritable(config: RungConfig | undefined, dir: string, 
   catch (error) {
     try {
       const root = await findWorkspace(dir);
-      const modes = (await workspaceAgentModes(root, config ?? await loadConfig(root, { raw: true }), io.env)).filter(p => p.mode !== "manual" && (!plc || p.plc === plc));
+      const modes = (await workspaceAgentModes(root, config ?? await loadConfig(root, { raw: true }), io.env)).filter(p => !plc || p.plc === plc);
       if (modes.length) {
         await mkdir(join(root, ".rung"), { recursive: true });
         await appendFile(join(root, ".rung", "agent-actions.jsonl"), modes.map(p => JSON.stringify({ time: new Date().toISOString(), agent: agentMarker(io.env), plc: p.plc,
-          action, mode: p.mode, allowedBy: p.mode === "ask" || p.mode === "auto" && !p.actions.includes(action) ? "dialog" : "mode", outcome: 2, refused: "read-only", command }) + "\n").join(""));
+          action, mode: p.mode, allowedBy: p.mode === "manual" ? "refused" : p.mode === "ask" || p.mode === "auto" && !p.actions.includes(action) ? "dialog" : "mode", outcome: 2, refused: "read-only", command }) + "\n").join(""));
       }
     } catch { /* The existing read-only refusal takes precedence even when the audit store is unavailable. */ }
     throw error;
@@ -80,15 +80,15 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
     const { effectiveAgentMode } = await import("@rung/core");
     targets.push(effectiveAgentMode(await readAgentModes(io.env), root, plc ?? "", config));
   }
-  if (targets.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL);
   if (action === "download" && targets.some(p => p.source === "simulator" && !config.plc[p.plc])) throw new WorkspaceError("NO_TARGET", "rung simulate does not support TIA downloads; configure an explicit PLC connection first");
   const records = targets.map(policy => ({ time: new Date().toISOString(), agent: marker, plc: policy.plc, action, mode: policy.mode,
-    allowedBy: policy.mode === "bypass" || policy.mode === "auto" && policy.actions.includes(action) ? "mode" : "dialog", command }));
+    allowedBy: policy.mode === "manual" ? "refused" : policy.mode === "bypass" || policy.mode === "auto" && policy.actions.includes(action) ? "mode" : "dialog", command }));
   const audit = async (outcome: number) => {
     await mkdir(join(root, ".rung"), { recursive: true });
     await appendFile(join(root, ".rung", "agent-actions.jsonl"), records.map(record => JSON.stringify({ ...record, outcome }) + "\n").join(""));
   };
   try {
+    if (targets.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", AGENT_REFUSAL);
     for (const record of records) if (record.allowedBy === "dialog") {
       if (!record.plc) throw new WorkspaceError("AGENT_REFUSED", "Native approval needs an explicit PLC name; choose --plc or --device");
       const result = await dialog({ plc: record.plc, action, agent: marker, command, timeoutMs: 120000 });
@@ -147,7 +147,7 @@ export async function runAgentCommand(argv: string[], io: Io, run: () => Promise
     const root = await findWorkspace(dir).catch(() => undefined);
     if (!root || ["agent-mode", "mcp", "lsp", "debug", "live-server"].includes(cmd ?? "")) return await execute();
     const policies = await workspaceAgentModes(root, await loadConfig(root), io.env);
-    const records = policies.filter(p => p.mode !== "manual" && (!plc || p.plc === plc));
+    const records = policies.filter(p => !plc || p.plc === plc);
     let outcome = 1;
     try { outcome = await execute(); return outcome; }
     catch (error) { if ((error as { code?: string }).code === "PLC_READ_ONLY") outcome = 2; throw error; }
@@ -155,7 +155,7 @@ export async function runAgentCommand(argv: string[], io: Io, run: () => Promise
       if (action && records.length && !audit.delegated) {
         await mkdir(join(root, ".rung"), { recursive: true });
         await appendFile(join(root, ".rung", "agent-actions.jsonl"), records.map(p => JSON.stringify({ time: new Date().toISOString(), agent: agentMarker(io.env), plc: p.plc, action, mode: p.mode,
-          allowedBy: (p.mode === "ask" || p.mode === "auto" && !p.actions.includes(action)) ? "dialog" : "mode", outcome, command: "rung " + argv.join(" ") }) + "\n").join(""));
+          allowedBy: p.mode === "manual" ? "refused" : (p.mode === "ask" || p.mode === "auto" && !p.actions.includes(action)) ? "dialog" : "mode", outcome, command: "rung " + argv.join(" ") }) + "\n").join(""));
       }
     }
   } catch (error) { io.stderr(`rung: ${(error as { code?: string }).code ?? "ERROR"}: ${(error as Error).message}\n`); return (error as { code?: string }).code === "PLC_READ_ONLY" ? 2 : 1; }

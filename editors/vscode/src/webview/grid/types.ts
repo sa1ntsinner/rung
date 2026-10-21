@@ -29,8 +29,8 @@ export interface GridSection<R extends GridRow = GridRow> {
   rows: R[];
 }
 
-/** The narrowest a wide column gets before the panel scrolls sideways: the free column (comments) stays in view. */
-const floor = (c: GridColumn) => (!c.width ? 100 : c.width > 80 ? Math.max(80, Math.round(c.width * 0.55)) : c.width);
+/** The narrowest a wide column gets before the panel scrolls sideways: names keep their width before comments get space. */
+const floor = (c: GridColumn) => (c.key === "name" ? c.width : !c.width ? 100 : c.width > 80 ? Math.max(80, Math.round(c.width * 0.55)) : c.width);
 
 /** grid-template-columns: wide columns give way down to their floor in a narrow panel, the free one takes the rest. */
 export function columnsTemplate(columns: GridColumn[]): string {

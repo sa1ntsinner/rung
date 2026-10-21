@@ -60,7 +60,7 @@ rung download --allow stop-cpu
 
 Afterwards rung starts the application only if it ran before the download (a full download stopped it), if the download was the first, or in CODESYS's simulation. An application someone had stopped stays stopped, and so does one whose state rung could not read before the download; rung says so.
 
-A person starts every download, as for TIA Portal ([downloads](downloads.md)): the bridge downloads only when `rung download` started it.
+By default a person starts downloads and live changes, as for TIA Portal ([downloads](downloads.md)). A person may set an [agent mode](agents/modes.md) that permits selected actions. `RUNG_READ_ONLY` and read-only locks always win. The bridge downloads only when `rung download` started it.
 
 ## Monitoring
 

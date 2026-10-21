@@ -138,3 +138,15 @@ describe("the save loop as the editor shows it", () => {
     expect(a.entries[0]!.path).toBe("plc/PLC_1/blocks/FB_249.scl");
   });
 });
+
+it("shows persisted agent actions once, with permission and outcome, ignoring incomplete lines", () => {
+  const a = new Activity();
+  const line = JSON.stringify({ time: "2026-10-22T10:00:00Z", agent: "RUNG_AGENT", plc: "PLC_1", action: "write", mode: "manual", allowedBy: "refused", outcome: 1 });
+  a.agentActions(line + "\n{partial");
+  expect(a.entries).toHaveLength(1);
+  expect(a.entries[0]).toMatchObject({ kind: "agent", label: "PLC_1: agent write (manual, refused), exit 1" });
+  a.agentActions(line + "\n");
+  expect(a.entries).toHaveLength(1);
+  a.agentActions("");
+  expect(a.entries).toHaveLength(0);
+});

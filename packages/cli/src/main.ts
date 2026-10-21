@@ -721,7 +721,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         if (v.against) {
           try {
             const b = await behaviourAgainst(ws, index, String(v.against), v.filter as string | undefined);
-            io.stdout(v.json ? JSON.stringify({ against: String(v.against), cases: b.cases, divergences: b.divergences }, null, 2) + "\n" : b.text);
+            io.stdout(v.json ? JSON.stringify({ against: String(v.against), cases: b.cases, divergences: b.divergences, observation: b.observation }, null, 2) + "\n" : b.text);
             return b.worse ? 2 : 0;
           } catch (e) {
             io.stderr(`rung: ${(e as Error).message}\n`);

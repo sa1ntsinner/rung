@@ -24,6 +24,10 @@ import { ELEMENTARY_TYPE } from "./system.js";
  *         - set: { 'pts[2].x': 1.5 }             # array elements
  */
 
+/** Limits of the step-end values used by behavioural comparison and observe. */
+export const OBSERVATION = { arrayLimit: 32, depthLimit: 2, globals: false, betweenSteps: false,
+  description: "Not observed: globals, arrays larger than 32 elements, nesting beyond depth 2, and values between steps. Only the tested block's outputs, inouts, statics and return value are observed." } as const;
+
 export interface TestFailure {
   step: number;
   name: string;
@@ -682,7 +686,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         else if (typeof v === "number" && (isDate(type) || isTod(type))) values[key] = dateText(v, type);
         else if (typeof v === "number" && isReal(type)) values[key] = Number(realText(v));
         else if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") values[key] = v;
-        else if (depth > 0 && isArrayValue(v) && v.items.length <= 32) {
+        else if (depth > 0 && isArrayValue(v) && v.items.length <= OBSERVATION.arrayLimit) {
           const at = splitArrayType(type ?? "");
           // a further dimension of the same array: grid[0,1], as TIA Portal and tests write it, not grid[0][1]
           const inner = at && at.dims.length > 1 ? { type: `Array[${at.dims.slice(1).join(", ")}] of ${at.element}`, ...(decl?.members ? { members: decl.members } : {}) } : undefined;
@@ -708,7 +712,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
           continue;
         }
         const d = own.find((x) => x.name === n.name);
-        put(n.name, v, d ?? { type: n.type }, d?.section === "Static", 2);
+        put(n.name, v, d ?? { type: n.type }, d?.section === "Static", OBSERVATION.depthLimit);
       }
       observed.push({ step, values, ...(statics.length ? { statics: [...new Set(statics)] } : {}) });
     };

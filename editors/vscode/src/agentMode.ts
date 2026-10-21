@@ -39,15 +39,23 @@ export class AgentMode implements vscode.Disposable {
       try {
         const r = await this.cli.capture(["agent-mode", "--json"], { quiet: true, timeoutMs: 10_000 });
         if (this.disposed || root !== this.ws.root) return;
-        const data = r.code === 0 ? JSON.parse(r.output) as { plcs?: PlcMode[] } : undefined;
-        this.plcs = Array.isArray(data?.plcs) ? data.plcs : [];
+        if (r.code !== 0) throw new Error("Mode store unavailable");
+        const data = JSON.parse(r.output) as { plcs?: PlcMode[] };
+        if (!Array.isArray(data.plcs)) throw new Error("Invalid mode store response");
+        this.plcs = data.plcs;
         const active = this.plcs.filter((p) => p.mode !== "manual");
         if (!active.length) { this.item.hide(); return; }
         this.item.text = `$(shield) agent: ${[...new Set(active.map((p) => p.mode))].join(" / ")}`;
         this.item.backgroundColor = active.some((p) => p.mode === "bypass") ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
         this.item.tooltip = this.plcs.map((p) => `${p.plc}: ${p.mode} (${p.source})${p.expires ? ` until ${p.expires}` : ""}`).join("\n");
         this.item.show();
-      } catch { this.plcs = []; if (!this.disposed) this.item.hide(); }
+      } catch {
+        if (this.disposed || root !== this.ws.root) return;
+        this.item.text = "$(warning) agent: unknown";
+        this.item.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+        this.item.tooltip = "Cannot read agent modes. Last known: " + (this.plcs.map(p => p.plc + ": " + p.mode).join(", ") || "unknown");
+        this.item.show();
+      }
     })().finally(() => { this.pending = undefined; });
     return this.pending;
   }

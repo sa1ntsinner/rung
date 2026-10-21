@@ -65,7 +65,7 @@ The Zed extension and `rung.nvim` use the same language server. The VS Code exte
 <details>
 <summary>Coding agents</summary>
 
-`rung setup` connects Claude Code, Codex, Cursor, Gemini CLI and others to rung's MCP server and skills. Agents read, edit and test the files; a person starts every download.
+`rung setup` connects Claude Code, Codex, Cursor, Gemini CLI and others to rung's MCP server and skills. By default a person starts downloads and live changes. A person may choose an [agent mode](docs/agents/modes.md) that permits selected actions. `RUNG_READ_ONLY` and read-only locks always win.
 
 </details>
 
@@ -92,7 +92,7 @@ Full list and limits: [capabilities](docs/capabilities.md). Setup: [quickstart](
 
 ## Careful by default
 
-Only Siemens Openness talks to TIA Portal. Deleting a file never deletes a block. A person starts every [download](docs/downloads.md), and `RUNG_READ_ONLY=1` stops every change to the PLC and the project for a machine you must not touch.
+Only Siemens Openness talks to TIA Portal. Deleting a file never deletes a block. By default a person starts [downloads](docs/downloads.md) and live changes. A person may choose an [agent mode](docs/agents/modes.md) that permits selected actions. `RUNG_READ_ONLY=1` and read-only locks always win and stop changes to the PLC and the project.
 
 ## Common questions
 

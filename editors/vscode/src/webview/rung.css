@@ -876,7 +876,9 @@
 .rg-trace input[type=range] { display: block; width: 100%; margin: var(--rg-s1) 0 0; }
 .rg-trace details { margin: var(--rg-s2) 0; color: var(--rg-muted); }
 .rg-trace summary { cursor: pointer; }
-.rg-trace-plot { width: 100%; height: 150px; background: var(--vscode-editor-background); }
+.rg-trace-chart { display: flex; align-items: stretch; }
+.rg-trace-scale { display: flex; flex-direction: column; justify-content: space-between; flex: 0 0 auto; padding: 6px 8px 6px 0; font-size: 12px; }
+.rg-trace-plot { min-width: 0; width: 100%; height: 150px; background: var(--vscode-editor-background); }
 .rg-trace-plot text { fill: var(--vscode-foreground); font-size: 11px; }
 .rg-trace-plot polyline { stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
 .rg-trace-plot circle { fill: var(--vscode-charts-blue, #3794ff); }
@@ -906,6 +908,7 @@ rg-ladder { display: block; }
 .lad-svg .lad-box { fill: var(--vscode-editorWidget-background, transparent); }
 .lad-svg text { fill: var(--rg-fg); stroke: none; }
 .lad-svg .lad-operand { fill: var(--vscode-symbolIcon-variableForeground, var(--vscode-textLink-foreground)); cursor: pointer; }
+.lad-svg .lad-operand:focus-visible { outline: 2px solid var(--rg-focus); }
 .lad-svg .lad-operand:hover { text-decoration: underline; }
 .lad-svg .lad-const { fill: var(--vscode-debugTokenExpression-number, var(--rg-fg)); }
 .lad-svg .lad-letter { font-weight: 600; font-size: 11px; }

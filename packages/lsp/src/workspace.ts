@@ -324,8 +324,9 @@ export class WorkspaceIndex {
  * Anything else (TwinCAT `PLC/` folders, CODESYS trees with a `plc` folder of .st files) is loaded in IEC mode.
  */
 /**
- * A cheap stamp of what load(root) would read: path, size and modification time of every candidate file. Two equal
- * stamps mean an index loaded at the first is still current at the second.
+ * A cheap stamp of what load(root) would read: path, size, modification and change time of every candidate file. The
+ * change time moves on every write, also when a tool puts the modification time back, so two equal stamps mean an
+ * index loaded at the first is still current at the second.
  */
 export async function sourceStamp(root: string): Promise<string> {
   const rung = await isRungLayout(root);
@@ -343,7 +344,7 @@ export async function sourceStamp(root: string): Promise<string> {
       if (e.isDirectory()) await walk(p);
       else if (rung || TWINCAT_FILE.test(e.name) || IEC_SOURCE.test(e.name) || SOURCE.test(e.name) || XML.test(e.name)) {
         const s = await stat(p).catch(() => undefined);
-        if (s) out.push(`${p}\t${s.size}\t${s.mtimeMs}`);
+        if (s) out.push(`${p}\t${s.size}\t${s.mtimeMs}\t${s.ctimeMs}`);
       }
     }
   };

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // "Activity" view: what rung watch did, newest first (core/activity.ts), so nobody has to read the watch terminal.
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as vscode from "vscode";
 import type { Activity, ActivityEntry } from "../core/activity";
@@ -7,6 +8,7 @@ import type { OwnerEvents } from "../ownerEvents";
 import type { RungWorkspace } from "../workspace";
 
 const ICON: Record<ActivityEntry["kind"], [string, string?]> = {
+  agent: ["shield"],
   import: ["arrow-right"],
   create: ["add"],
   export: ["arrow-left"],
@@ -23,7 +25,7 @@ export class ActivityView implements vscode.TreeDataProvider<ActivityEntry>, vsc
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   readonly view: vscode.TreeView<ActivityEntry>;
-  private readonly sub: vscode.Disposable;
+  private readonly subs: vscode.Disposable[];
 
   constructor(
     private readonly ws: RungWorkspace,
@@ -31,9 +33,27 @@ export class ActivityView implements vscode.TreeDataProvider<ActivityEntry>, vsc
     events: OwnerEvents,
   ) {
     this.view = vscode.window.createTreeView("rung.activity", { treeDataProvider: this });
-    this.sub = events.onEvent(({ event }) => {
+    const watcher = vscode.workspace.createFileSystemWatcher("**/.rung/agent-actions.jsonl");
+    const refresh = () => void this.refreshAgentActions();
+    this.subs = [watcher, watcher.onDidCreate(refresh), watcher.onDidChange(refresh), watcher.onDidDelete(refresh), ws.onDidChange(refresh), events.onEvent(({ event }) => {
       if (event === "report" || event === "error") this.changed.fire();
-    });
+    })];
+    refresh();
+  }
+
+  private async refreshAgentActions(): Promise<void> {
+    const root = this.ws.root;
+    try {
+      const text = root ? await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8") : "";
+      if (root !== this.ws.root) return;
+      this.activity.agentActions(text);
+      this.changed.fire();
+    } catch (error) {
+      if (root === this.ws.root && (error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.activity.agentActions("");
+        this.changed.fire();
+      }
+    }
   }
 
   getChildren(e?: ActivityEntry): ActivityEntry[] {
@@ -55,7 +75,7 @@ export class ActivityView implements vscode.TreeDataProvider<ActivityEntry>, vsc
   }
 
   dispose(): void {
-    this.sub.dispose();
+    for (const sub of this.subs) sub.dispose();
     this.view.dispose();
     this.changed.dispose();
   }
