@@ -14,6 +14,9 @@ import { rungCommand } from "./paths.js";
 import { liveMutations } from "./liveMutation.js";
 import { runningSimulator } from "./simulate.js";
 
+// rung simulate takes any password; this one only fills the field
+const SIMULATOR_LOGIN = "simulator";
+
 export interface BackendOptions { device?: string; file?: string; transport?: string }
 export async function liveSelection(root: string, options: BackendOptions, env: Io["env"] = process.env) {
   const config = await loadConfig(root);
@@ -52,7 +55,7 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
     }
     const w = selected.target.webapi!;
     // rung simulate takes any password: none is asked for it
-    if (!auth.password && (await runningSimulator(root))?.url === w.url) auth.password = "simulator";
+    if (!auth.password && (await runningSimulator(root))?.url === w.url) auth.password = SIMULATOR_LOGIN;
     if (!auth.password) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
     const refused = plainHttpRefusal(w.url, selected.target.readOnly ? { ...env, RUNG_READ_ONLY: "1" } : env);
     if (refused) throw new WorkspaceError("CONFIG_INVALID", refused);
@@ -143,7 +146,7 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
   const selected = await liveSelection(root, options, env); // refuse ambiguous scope before starting a process
   if (selected.target.readOnly) env = { ...env, RUNG_READ_ONLY: "1" };
   // rung simulate takes any password: none is asked for it
-  if (selected.transport === "webapi" && !env.RUNG_WEBAPI_PASSWORD && (await runningSimulator(root))?.url === selected.target.webapi?.url) env = { ...env, RUNG_WEBAPI_PASSWORD: "simulator" };
+  if (selected.transport === "webapi" && !env.RUNG_WEBAPI_PASSWORD && (await runningSimulator(root))?.url === selected.target.webapi?.url) env = { ...env, RUNG_WEBAPI_PASSWORD: SIMULATOR_LOGIN };
   if (selected.transport === "webapi") {
     if (!env.RUNG_WEBAPI_PASSWORD) throw new WorkspaceError("CONFIG_INVALID", "set RUNG_WEBAPI_PASSWORD for the PLC web server user");
     new WebApiClient({ ...selected.target.webapi!, password: env.RUNG_WEBAPI_PASSWORD, readOnly: selected.target.readOnly });
