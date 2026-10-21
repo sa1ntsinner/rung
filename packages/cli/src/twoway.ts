@@ -32,6 +32,8 @@ export function printReport(io: Io, r: SyncReport) {
     io.stdout(`${toTia ? "→" : "←"} TIA  ${c.path}${note}\n`);
   }
   if (changes.length > 8) io.stdout(`… ${changes.length - 8} more files (${changes.length} moved; rung sync --json lists all)\n`);
+  const relaid = changes.filter((c) => c.relaid);
+  if (relaid.length) io.stdout(`note: TIA Portal wrote ${relaid.length === 1 ? relaid[0]!.path : `${relaid.length} new files`} back in its own layout; rung format lays out a new file that way before its first sync, so its diff shows only your changes\n`);
   printWarnings(io, r.warnings.filter((w) => !r.diagnostics.some((d) => d.address === w.address && d.code === w.code && d.message === w.message)));
   for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
   const compiled = r.diagnostics.filter((d) => d.code === "COMPILE");

@@ -92,7 +92,7 @@ export interface SyncReport {
   /** A quick pass TIA Portal refused an import of as stale: a complete pass merges that object and reports with this one. */
   needsComplete?: boolean;
   /** Files moved in this pass; JSON carries every file, terminals show a bounded sample. */
-  changes?: { path: string; action: "export" | "import" | "create" | "merge" | "remove" | "restore" }[];
+  changes?: { path: string; action: "export" | "import" | "create" | "merge" | "remove" | "restore"; relaid?: boolean }[];
   /** A preview (SyncOptions.preview): what the pass would have done. */
   plan?: Plan;
   /** The archive TIA Portal wrote before this pass's first write of the day (sync.backup = "daily"). */
@@ -1221,7 +1221,9 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     if (job.kind === "create") report.created++;
     else if (job.kind === "merge") report.merged++;
     else report.imported++;
-    report.changes!.push({ path: primaryPath, action: job.kind === "update" ? "import" : job.kind });
+    // a new block comes back in TIA Portal's own layout: the file on disk is not what was written
+    const relaid = job.kind === "create" && !pub.localEdit && pub.targets.length > 0;
+    report.changes!.push({ path: primaryPath, action: job.kind === "update" ? "import" : job.kind, ...(relaid ? { relaid } : {}) });
     imported.push(job.address);
     if (result.compile) compiledByImport.set(job.address, result.compile);
     // its instance DBs and callers compile again only when what they see of it changed, or rung cannot tell

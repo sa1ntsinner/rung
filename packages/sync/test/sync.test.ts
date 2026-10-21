@@ -429,6 +429,17 @@ describe("syncOnce", () => {
     expect(t.read(pA)).toContain("#z := 30;");
   });
 
+  it("marks a new block that TIA Portal wrote back in its own layout, not one it kept", async () => {
+    const t = setup(() => {});
+    t.bridge.canon = (s) => s.replace(/:=  +/g, ":= ");
+    await t.sync();
+    t.write("plc/PLC_1/blocks/Fx_Laid.scl", 'FUNCTION "Fx_Laid" : Void\nVAR_TEMP\n  x : Int;\nEND_VAR\nBEGIN\n  #x :=   1;\nEND_FUNCTION\n');
+    t.write("plc/PLC_1/blocks/Fx_Kept.scl", 'FUNCTION "Fx_Kept" : Void\nBEGIN\nEND_FUNCTION\n');
+    const r = await t.sync();
+    expect(r.changes!.filter((c) => c.action === "create").map((c) => [c.path, !!c.relaid]).sort()).toEqual([["plc/PLC_1/blocks/Fx_Kept.scl", false], ["plc/PLC_1/blocks/Fx_Laid.scl", true]]);
+    expect(t.read("plc/PLC_1/blocks/Fx_Laid.scl")).toContain("#x := 1;");
+  });
+
   it("creates a new file in a software unit's folder in that unit, and then stays quiet", async () => {
     const t = setup(() => {});
     await t.sync();
