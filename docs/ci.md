@@ -52,7 +52,7 @@ jobs:
       - run: rung status
 ```
 
-`rung lint [dir] [--file f]... [--json]` runs the language server's checks without an editor or TIA Portal. Repeat `--file` to select files; `--json` returns structured diagnostics. Errors exit with code 1; warnings alone exit with code 0. Run it alongside `rung test` on any CI runner.
+`rung lint [dir] [--file f]... [--json] [--max-warnings n]` runs the language server's checks without an editor or TIA Portal. Repeat `--file` to select files; `--json` returns structured diagnostics. Errors exit with code 1; warnings alone exit with code 0, unless there are more than `--max-warnings` (`--max-warnings 0` fails on any). The last line counts errors, warnings and notes. Run it alongside `rung test` on any CI runner.
 
 The free `rung review` creates an offline change report from the files and git. It does not run tests or compile. The Pro policy gate is separate. Fetch the base branch before reviewing it.
 

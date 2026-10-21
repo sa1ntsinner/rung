@@ -85,7 +85,7 @@ Usage:
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
-  rung lint [dir] [--file <f>]... [--json]  the language server's checks of the files, in the terminal or CI (no TIA Portal); exit 1 on errors
+  rung lint [dir] [--file <f>]... [--json] [--max-warnings <n>]  the language server's checks of the files, in the terminal or CI (no TIA Portal); exit 1 on errors or more than n warnings
   rung review [base..head] [--base <rev>] [--head <rev>] [--json|--md]  offline change report for the person reviewing it; default: working tree against HEAD
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
@@ -451,7 +451,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   why: { options: ["instance", "json"], positionals: 2 },
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
-  lint: { options: ["file", "json"], positionals: 1 },
+  lint: { options: ["file", "json", "max-warnings"], positionals: 1 },
   review: { options: ["base", "head", "json", "md"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "new", "cpu", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
@@ -565,6 +565,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         coverage: { type: "string" },
         against: { type: "string" },
         observe: { type: "boolean" },
+        "max-warnings": { type: "string" },
         strict: { type: "boolean" },
         capture: { type: "string" },
         why: { type: "string" },
@@ -897,7 +898,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
       case "impact":
         return await cmdImpact(target, !!v.json, io);
       case "lint":
-        return await cmdLint(target, (v.file as string[] | undefined) ?? [], !!v.json, io);
+        return await cmdLint(target, (v.file as string[] | undefined) ?? [], !!v.json, io, v["max-warnings"] as string | undefined);
       case "xref":
         return await cmdXref(target, !!v.json, io, !!v.fresh);
       case "format":
