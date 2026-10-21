@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <style>.a { fill: #4ec27a; } .i { fill: #f1f1ee; } @media (prefers-color-scheme: dark) { .a { fill: #1b7a45; } .i { fill: #141414; } }</style>
+  <g class="a"><rect x="8" y="8" width="12" height="84" rx="6"/><rect x="14" y="44" width="21" height="12"/><rect x="31" y="28" width="12" height="44" rx="6"/></g>
+  <g class="i"><rect x="80" y="8" width="12" height="84" rx="6"/><rect x="63" y="44" width="23" height="12"/><rect x="57" y="28" width="12" height="44" rx="6"/></g>
+</svg>

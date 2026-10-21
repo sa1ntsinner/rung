@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <style>path { fill: #1b1c1e; } @media (prefers-color-scheme: dark) { path { fill: #edece8; } }</style>
-  <path fill-rule="evenodd" d="M24 0H76Q100 0 100 24V76Q100 100 76 100H24Q0 100 0 76V24Q0 0 24 0Z M0 45H35V55H0Z M65 45H100V55H65Z M35 26H46V74H35Z M54 26H65V74H54Z"/>
+  <style>.a { fill: #1b7a45; } .i { fill: #1b1c1e; } @media (prefers-color-scheme: dark) { .a { fill: #4ec27a; } .i { fill: #edece8; } }</style>
+  <g class="a"><rect x="8" y="8" width="12" height="84" rx="6"/><rect x="14" y="44" width="21" height="12"/><rect x="31" y="28" width="12" height="44" rx="6"/></g>
+  <g class="i"><rect x="80" y="8" width="12" height="84" rx="6"/><rect x="63" y="44" width="23" height="12"/><rect x="57" y="28" width="12" height="44" rx="6"/></g>
 </svg>

@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>rung — TIA Portal, as plain text</title>
-  <meta name="description" content="Write SCL, LAD and tests in VS Code, Zed or Neovim. rung keeps the TIA Portal project in step both ways, compiles what you save and tests it without a PLC.">
+  <title>rung: PLC code in your editor</title>
+  <meta name="description" content="rung puts a Siemens S7 project in VS Code, Zed or Neovim. You write SCL and LAD as files and test them on your PC, and rung keeps TIA Portal in step.">
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f1f1ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0e0e" media="(prefers-color-scheme: dark)">
-  <meta property="og:title" content="rung — TIA Portal projects, as plain text">
-  <meta property="og:description" content="Write SCL, LAD and tests in VS Code, Zed or Neovim. rung keeps the TIA Portal project in step both ways.">
+  <meta property="og:title" content="rung: PLC code in your editor">
+  <meta property="og:description" content="rung puts a Siemens S7 project in VS Code, Zed or Neovim and keeps TIA Portal in step.">
   <meta property="og:image" content="https://sa1ntsinner.github.io/rung/assets/og.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
@@ -39,8 +39,8 @@
     <!-- the first screen: what it is, how to get it, and the product itself -->
     <section class="hero grid">
       <div class="hero-text">
-        <h1 class="masked"><span class="line"><span>TIA Portal,</span></span><span class="line soft"><span>as plain text.</span></span></h1>
-        <p class="lead">SCL, LAD and tests as files in VS Code, Zed or Neovim, kept in step with TIA Portal both ways.</p>
+        <h1 class="masked"><span class="line"><span>PLC code,</span></span><span class="line soft"><span>in your editor.</span></span></h1>
+        <p class="lead">Write SCL and LAD in VS Code, Zed or Neovim, test them on your PC, and rung keeps the TIA Portal project in step.</p>
         <div class="install">
 <pre><code><span class="prompt">$</span> code --install-extension sa1ntsinner.rung-scl</code></pre>
           <button class="copy" type="button" data-copy="code --install-extension sa1ntsinner.rung-scl">Copy</button>
@@ -63,16 +63,16 @@
         <h2 id="showcase-h" class="two"><span>The whole project,</span> <span class="soft">in your editor.</span></h2>
       </div>
       <div class="row" tabindex="0" aria-label="Panels of rung in VS Code; scroll sideways">
-        <figure class="panel" data-name="Declarations as a table" data-text="A block's interface beside its code, in TIA Portal's sections. Rename, retype and paste rows from Excel; every edit is one text edit you can undo.">
+        <figure class="panel" data-name="Declarations as a table" data-text="A block's interface beside its code, in TIA Portal's sections. Rename, retype or paste rows from Excel, and undo any of it like a text edit.">
           <img src="assets/img/decl-table.jpg" width="1610" height="1150" alt="Declarations table of FB_Batch" loading="lazy">
         </figure>
-        <figure class="panel" data-name="Values beside the code" data-text="Online with the PLC, every line shows what it reads now: the state, the level, the timer. Over S7CommPlus, no web server.">
+        <figure class="panel" data-name="Values beside the code" data-text="Online with the PLC, each line shows its current values: the state, the level, the timer. rung reads them over S7CommPlus, so the PLC needs no web server.">
           <img src="assets/img/values-code.jpg" width="1490" height="1250" alt="SCL code with live values at the end of each line" loading="lazy">
         </figure>
         <figure class="panel" data-name="Tests as a table" data-text="Set, run, advance, expect. The last run's results sit on the expectation that failed, with the value it got.">
           <img src="assets/img/test-table.jpg" width="2020" height="1490" alt="Test table with two failed expectations" loading="lazy">
         </figure>
-        <figure class="panel" data-name="TIA Portal's own messages" data-text="What you save is compiled by TIA Portal itself. Its errors and warnings land on the line they are about.">
+        <figure class="panel" data-name="TIA Portal's own messages" data-text="TIA Portal compiles what you save, and its errors and warnings appear on the line they belong to.">
           <img src="assets/img/tia-compile.jpg" width="1340" height="420" alt="TIA Portal's compile tab: compiling finished, errors 0, warnings 0" loading="lazy">
         </figure>
         <figure class="panel" data-name="The project and the PLC" data-text="Blocks, data types and tag tables as TIA Portal groups them, and the PLC one click away: online, compile, compare, download.">
@@ -83,7 +83,7 @@
         <div class="caption" aria-live="polite">
           <p class="nav"><button class="prev" type="button" aria-label="Previous panel">←</button><button class="next" type="button" aria-label="Next panel">→</button></p>
           <p class="name">Declarations as a table</p>
-          <p class="text">A block's interface beside its code, in TIA Portal's sections. Rename, retype and paste rows from Excel; every edit is one text edit you can undo.</p>
+          <p class="text">A block's interface beside its code, in TIA Portal's sections. Rename, retype or paste rows from Excel, and undo any of it like a text edit.</p>
         </div>
       </div>
     </section>
@@ -94,15 +94,15 @@
         <h2 id="steps-h" class="two"><span>Save, and it is</span> <span class="soft">in TIA Portal.</span></h2>
         <div class="step" data-step="0">
           <p class="say">Save the file.</p>
-          <p>rung watch sends the block to TIA Portal the moment you save, as TIA Portal exports it.</p>
+          <p>While <code>rung watch</code> runs, each save goes to TIA Portal as an import of that block.</p>
         </div>
         <div class="step" data-step="1">
           <p class="say">TIA Portal compiles it.</p>
-          <p>About a second later its messages are in your editor. Measured on TIA Portal V20: 0.7 s for a function block, 1.1 s in a project of 624 objects.</p>
+          <p>You see its errors and warnings in the editor about a second later, before you switch windows.</p>
         </div>
         <div class="step" data-step="2">
           <p class="say">Change it in TIA Portal, and it comes back.</p>
-          <p>An edit made in TIA Portal is written into the file. When both sides changed, SCL merges by line and LAD by network.</p>
+          <p>A colleague edits the block in TIA Portal, and your file gets the change. If you both changed it, rung merges SCL by line and LAD by network.</p>
         </div>
       </div>
       <div class="stage">
@@ -129,8 +129,8 @@
     <section class="play grid" id="play" aria-labelledby="play-h">
       <div class="play-text">
         <h2 id="play-h" class="two"><span>Test without</span> <span class="soft">a PLC.</span></h2>
-        <p>YAML tests run on rung's simulator: in VS Code, in Linux CI and here in your browser. Break the latch and see what the simulator says.</p>
-        <p class="fine">The same simulator ran 26 cases cycle by cycle against PLCSIM Advanced. <a href="#proof">The numbers</a></p>
+        <p>You write a test in YAML: set the inputs, run a cycle, expect the outputs. rung's simulator runs it in VS Code, in Linux CI and here in your browser. Break the latch and watch the test fail.</p>
+        <p class="fine">We check the simulator against Siemens PLCSIM Advanced by running the same tests on both. <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/evidence.md">How we compare</a></p>
       </div>
       <figure class="test" data-ui data-broken="false">
         <div class="panes">
@@ -152,6 +152,12 @@
         <span class="y">cycle</span>: <span class="n">1</span>
         <span class="y">expect</span>: { Running: <span class="n">true</span> }</code></pre>
           </div>
+        </div>
+        <div class="wave" aria-hidden="true">
+          <p class="sig">Start</p><svg viewBox="0 0 400 24" preserveAspectRatio="none"><polyline data-sig="Start"/></svg>
+          <p class="sig">Stop</p><svg viewBox="0 0 400 24" preserveAspectRatio="none"><polyline data-sig="Stop"/></svg>
+          <p class="sig">Running</p><svg viewBox="0 0 400 24" preserveAspectRatio="none"><polyline data-sig="Running" class="out"/></svg>
+          <span></span><p class="cycles"><span>cycle 1</span><span class="mark">expect</span><span>8</span></p>
         </div>
         <div class="run">
           <button class="pill dark toggle" type="button" hidden>Break it</button>
@@ -207,7 +213,7 @@
     <section class="online grid" aria-labelledby="online-h">
       <div class="online-text">
         <h2 id="online-h" class="two"><span>Online with</span> <span class="soft">a real S7-1500.</span></h2>
-        <p>Values next to every line, TIA watch tables live, alarms and the diagnostic buffer, over S7CommPlus with the PLC's certificate pinned. Program status is reconstructed by the simulator, and labelled so.</p>
+        <p>Values next to every line, TIA watch tables live, alarms and the diagnostic buffer, over S7CommPlus with the PLC's certificate pinned. For program status, rung replays the cycle on its simulator and marks those values as simulated.</p>
         <p>For a machine you must not change, one setting makes rung read only: <code>RUNG_READ_ONLY=1</code> blocks every change to the PLC and to the project.</p>
         <p><a href="https://github.com/sa1ntsinner/rung/blob/main/docs/online.md">Going online</a></p>
       </div>
@@ -217,39 +223,26 @@
       </figure>
     </section>
 
-    <!-- the simulator against an S7-1500 runtime, as bars -->
-    <section class="proof dark" id="proof" aria-labelledby="proof-h">
-      <div class="grid proof-head">
-        <p class="figure">1501</p>
-        <h2 id="proof-h">values, as on an S7-1500.</h2>
-        <p class="proof-text">rung's simulator and PLCSIM Advanced V7.0 ran the same 26 test cases cycle by cycle, on twelve blocks as TIA Portal V20 compiled them. Every output after every step was compared. <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/evidence.md">Evidence</a></p>
-      </div>
-      <ol class="bars" data-ui aria-label="Values compared per block">
-        <li style="--v:66" tabindex="0"><span class="tip">FB_Conveyor · 66</span></li>
-        <li style="--v:290" tabindex="0" class="show"><span class="tip">FB_ProveOps · 290</span></li>
-        <li style="--v:240" tabindex="0" class="show"><span class="tip">FB_ProveTime · 240</span></li>
-        <li style="--v:110" tabindex="0"><span class="tip">FB_ProveData · 110</span></li>
-        <li style="--v:105" tabindex="0"><span class="tip">FB_ProveMath · 105</span></li>
-        <li style="--v:90" tabindex="0"><span class="tip">FB_ProveMore · 90</span></li>
-        <li style="--v:114" tabindex="0"><span class="tip">FB_ProveCalls · 114</span></li>
-        <li style="--v:81" tabindex="0"><span class="tip">FB_ProveTypes · 81</span></li>
-        <li style="--v:187" tabindex="0"><span class="tip">FB_ProveEdges · 187</span></li>
-        <li style="--v:46" tabindex="0"><span class="tip">FB_ProveSys · 46</span></li>
-        <li style="--v:32" tabindex="0"><span class="tip">FB_Pump, LAD · 32</span></li>
-        <li style="--v:140" tabindex="0" class="show accent"><span class="tip">Fx_LadEdges, LAD · 140</span></li>
-      </ol>
-    </section>
 
     <!-- why text: the world it comes from -->
     <section class="why grid" aria-labelledby="why-h">
-      <figure class="why-pic">
-        <img src="assets/img/control-room-1979.jpg" width="1920" height="1523" alt="A 1979 control room: a grey console with meters and a graphic panel of a tank process, lamps and selector switches" loading="lazy">
-        <figcaption>Tank area control room with a Modicon controller, 1979. National Archives.</figcaption>
+      <figure class="why-pic flow" data-ui aria-label="Your editor saves to rung, rung writes to TIA Portal, TIA Portal downloads to the S7-1500; git push sends the files to git, and CI on Linux tests each push">
+        <div class="node n-ed"><p class="nm">Your editor</p><p>FB_Batch.scl, FB_Batch.test.yaml</p></div>
+        <p class="wire w-save">save</p>
+        <div class="node n-rung"><p class="nm"><img src="assets/logo.svg" width="20" height="20" alt="">rung</p><p>watch, sync, tests</p></div>
+        <p class="wire w-tia">Openness</p>
+        <div class="node n-tia"><p class="nm">TIA Portal</p><p>compiles, hardware, download</p></div>
+        <p class="wire w-plc">download</p>
+        <div class="node n-plc"><p class="nm">S7-1500</p><p>runs the machine</p></div>
+        <p class="wire w-git">git push</p>
+        <div class="node n-git"><p class="nm">git</p><p>history, branches, review</p></div>
+        <p class="wire w-ci">each push</p>
+        <div class="node n-ci"><p class="nm">CI on Linux</p><p>rung test, format check</p></div>
       </figure>
       <div class="why-text">
-        <h2 id="why-h" class="two"><span>A PLC program</span> <span class="soft">is a program.</span></h2>
-        <p>It runs a machine for twenty years, and for most of them it has lived inside one tool. In text it gets what other code has: git history and branches, review line by line, tests in CI, the editor you already use, and agents that can read it.</p>
-        <p>TIA Portal stays where it is strong: hardware, download, the online view. rung leaves those to it and does the rest in text.</p>
+        <h2 id="why-h" class="two"><span>Git and CI</span> <span class="soft">for PLC code.</span></h2>
+        <p>Your blocks live as files in a git repository. You see who changed which line and why, review a change before it reaches the machine, and let CI run the tests on each push. Agents such as Claude Code read the same files.</p>
+        <p>Hardware configuration and download stay in TIA Portal.</p>
       </div>
     </section>
 
@@ -270,20 +263,20 @@
         <div class="tabpanel" role="tabpanel" id="tp-online" aria-labelledby="tab-online">
           <div><p class="nm">S7CommPlus over TLS</p><p>Live values, watch tables, CPU state, alarms and the diagnostic buffer, for S7-1500 firmware 2.9 and later.</p></div>
           <div><p class="nm">Trace</p><p><code>rung trace record</code> samples signals; TIA Portal's trace CSV imports. VS Code plots both.</p></div>
-          <div><p class="nm">Backup of a running PLC</p><p>Everything rung can read, in one folder with SHA-256 sums. The PLC is only read.</p></div>
-          <div><p class="nm">A read-only lock</p><p>Per PLC or for the whole machine: no change to the PLC or the project gets through.</p></div>
+          <div><p class="nm">Backup of a running PLC</p><p>rung copies what it can read from the PLC into one folder, with checksums. It only reads.</p></div>
+          <div><p class="nm">A read-only lock</p><p>Lock one PLC or the whole machine, and rung refuses any change to the PLC or the project.</p></div>
         </div>
         <div class="tabpanel" role="tabpanel" id="tp-bg" aria-labelledby="tab-bg" hidden>
           <div><p class="nm">TIA Portal without a window</p><p>One TIA Portal in the background serves the project's commands and editors.</p></div>
           <div><p class="nm">Open TIA Project…</p><p>Mirrors the project and starts watch, on this PC or another Windows PC over ssh.</p></div>
           <div><p class="nm">Open in TIA Portal</p><p>Moves the project into a window when you need the hardware view.</p></div>
-          <div><p class="nm">Git branches</p><p>Switching a branch with 57 changed files is in TIA Portal about 40 s later.</p></div>
+          <div><p class="nm">Git branches</p><p>Check out another branch, and rung brings the TIA Portal project to it.</p></div>
         </div>
         <div class="tabpanel" role="tabpanel" id="tp-debug" aria-labelledby="tab-debug" hidden>
           <div><p class="nm">Debug a test</p><p>Breakpoints in SCL, step into calls, step back, set values while stopped.</p></div>
           <div><p class="nm">Why?</p><p>The statement that last wrote a value, its operands, and the branch that made it run.</p></div>
           <div><p class="nm">Coverage</p><p>Which SCL lines the tests reached, in the editor and as lcov for CI.</p></div>
-          <div><p class="nm">Tests against a revision</p><p><code>rung test --against</code> shows every case that behaves differently now.</p></div>
+          <div><p class="nm">Tests against a revision</p><p><code>rung test --against main</code> lists the cases that behave differently from main.</p></div>
         </div>
         <div class="tabpanel" role="tabpanel" id="tp-edit" aria-labelledby="tab-edit" hidden>
           <div><p class="nm">LAD as a ladder</p><p>In the editor's theme, with power flow and live values on the contacts.</p></div>
@@ -318,7 +311,6 @@
         <p>The core is free for individuals, education, non-commercial open source and organisations with up to three rung users, under BUSL-1.1. Sync, SCL, tests and the MCP server are all in it.</p>
       </div>
       <div class="price">
-        <img class="price-pic" src="assets/img/relays.jpg" width="1920" height="1292" alt="Telephone relays in a rack, their contacts in rows" loading="lazy">
         <p class="fig"><span class="cur">€</span>49<span class="per">per user, month</span></p>
         <ul class="incl">
           <li>A commercial licence</li>
@@ -333,20 +325,20 @@
 
   <footer class="foot">
     <div class="board">
-      <div class="tile say"><p class="big">PLC programs deserve the tools code has.</p><p class="fine">Not affiliated with Siemens AG. Core BUSL-1.1, editors and clients MIT.</p></div>
+      <div class="tile say"><p class="big">PLC code in your editor, with TIA Portal in step.</p><p class="fine">Not affiliated with Siemens AG. Core BUSL-1.1, editors and clients MIT.</p></div>
       <nav class="tile" aria-label="Footer">
         <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/quickstart.md">Quickstart</a>
         <a href="https://github.com/sa1ntsinner/rung/tree/main/docs">Docs</a>
         <a href="https://github.com/sa1ntsinner/rung/blob/main/CHANGELOG.md">Changelog</a>
-        <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/evidence.md">Evidence</a>
+        <a href="https://github.com/sa1ntsinner/rung/blob/main/docs/evidence.md">Simulator checks</a>
         <a href="https://github.com/sa1ntsinner/rung/blob/main/LICENSE">License</a>
       </nav>
       <div class="tile"><p class="nm">0.3.0</p><p>21 October 2026</p><p><a href="https://github.com/sa1ntsinner/rung/releases">All releases</a></p></div>
       <div class="tile mail"><p>Questions, a pilot, Pro</p><a href="mailto:rungprojectplc@gmail.com">rungprojectplc@gmail.com</a></div>
-      <div class="tile word" aria-hidden="true"><img src="assets/logo.svg" width="160" height="160" alt="">rung</div>
+      <div class="tile word" aria-hidden="true"><img src="assets/logo-inverse.svg" width="160" height="160" alt="">rung</div>
       <a class="tile go" href="https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rung-scl"><span>Install rung</span><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 38 38 10M16 10h22v22"/></svg></a>
     </div>
-    <p class="credits">Pictures: <a href="https://commons.wikimedia.org/wiki/File:CONTROL_ROOM_-_GRAPHIC_PANEL_TANK_6_-_TANK_AREA_-_MODICAN_CONTROLLER_-_RELAY_PANEL_FOR_TANK_6_-_NARA_-_17472360.jpg">control room, tank area, 1979</a>, National Archives, <a href="https://creativecommons.org/publicdomain/mark/1.0/">public domain</a>; <a href="https://commons.wikimedia.org/wiki/File:Panel_CGO_Line_and_CutOff_Relays.jpg">panel line and cut-off relays</a>, <a href="https://creativecommons.org/publicdomain/mark/1.0/">public domain</a>; both via Wikimedia Commons. Screens: rung on a demo project. Logos: Simple Icons; each is the trademark of its owner.</p>
+    <p class="credits">Screens: rung on a demo project. Logos: Simple Icons; each is the trademark of its owner.</p>
   </footer>
 
 </body>

@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h3 align="center">TIA Portal projects, as plain text.</h3>
+<h3 align="center">PLC code in your editor, with TIA Portal in step.</h3>
 
 <p align="center">
   <a href="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml/badge.svg"></a>

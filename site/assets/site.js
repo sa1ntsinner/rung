@@ -20,12 +20,6 @@ const riseIo = new IntersectionObserver((entries) => {
   for (const e of entries) if (e.isIntersecting) (e.target.classList.add("in"), riseIo.unobserve(e.target));
 }, { rootMargin: "0px 0px -8% 0px" });
 risers.forEach((el) => riseIo.observe(el));
-const bars = $(".bars");
-if (bars) {
-  $$("li", bars).forEach((li, i) => li.style.setProperty("--i", String(i)));
-  const io = new IntersectionObserver(([e]) => e.isIntersecting && (bars.classList.add("in"), io.disconnect()), { threshold: 0.25 });
-  io.observe(bars);
-}
 
 // ------------------------------------------------------------------ copy the install command
 for (const btn of $$("[data-copy]")) {
@@ -214,6 +208,15 @@ cases:
   const btn = $(".toggle", test);
   const result = $(".result", test);
   const expr = $(".expr", test);
+  // the chart under the test: eight cycles of the latch as the page shows it, Start pressed in cycle 1, Stop in cycle 6
+  const wave = (broken) => {
+    const start = [1, 0, 0, 0, 0, 0, 0, 0], stop = [0, 0, 0, 0, 0, 1, 0, 0];
+    let running = 0;
+    const out = start.map((s, i) => (running = (broken ? s : s || running) && !stop[i] ? 1 : 0));
+    const line = (bits) => bits.flatMap((b, i) => [`${i * 50},${b ? 2 : 22}`, `${(i + 1) * 50},${b ? 2 : 22}`]).join(" ");
+    for (const [name, bits] of [["Start", start], ["Stop", stop], ["Running", out]]) $(`[data-sig="${name}"]`, test)?.setAttribute("points", line(bits));
+  };
+  wave(false);
   let worker;
   let broken = false;
   let busy = false;
@@ -270,6 +273,7 @@ cases:
       broken = !broken;
       expr.innerHTML = EXPR[broken];
       test.dataset.broken = String(broken);
+      wave(broken);
     }
     label();
     run();
