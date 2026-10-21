@@ -10,10 +10,12 @@ import { pull } from "@rung/sync";
 import { createMcpServer } from "../src/index.js";
 import { FakeBridge } from "../../sync/test/fake-bridge.js";
 
+const BLOCKS = 240; // more than two pages of the largest limit (100)
+
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "rung-mcp-limits-"));
   const bridge = new FakeBridge();
-  for (let i = 0; i < 624; i++) bridge.add(`plc:PLC_1/blocks/FB_Mixing${i}`, {
+  for (let i = 0; i < BLOCKS; i++) bridge.add(`plc:PLC_1/blocks/FB_Mixing${i}`, {
     content: `FUNCTION_BLOCK "FB_Mixing${i}"\nVAR_OUTPUT\n${Array.from({ length: 24 }, (_, n) => `Done${n} : Bool;`).join("\n")}\nEND_VAR\nBEGIN\nEND_FUNCTION_BLOCK\n`,
   });
   const config = defaultConfig(bridge.info.path, "V20", "fake");
@@ -51,10 +53,10 @@ describe("MCP result contracts", () => {
     expect(result.structuredContent).toBeTruthy();
   });
 
-  it("pages the 624-object fixture with short summaries and an explicit continuation", async () => {
+  it("pages the 240-object fixture with short summaries and an explicit continuation", async () => {
     const result = await client.callTool({ name: "rung_list", arguments: {} });
     const first = JSON.parse((result.content as { text: string }[])[0]!.text);
-    expect(first).toMatchObject({ total: 624, offset: 0, limit: 50, nextOffset: 50 });
+    expect(first).toMatchObject({ total: BLOCKS, offset: 0, limit: 50, nextOffset: 50 });
     expect(first.items).toHaveLength(50);
     // Count the entire wire response, including its structured copy; ASCII bytes are a conservative token upper bound.
     expect(JSON.stringify(result).length).toBeLessThan(25_000);
@@ -64,11 +66,11 @@ describe("MCP result contracts", () => {
     expect((await client.callTool({ name: "rung_list", arguments: { limit: 1000 } })).isError).toBe(true);
     expect((await client.callTool({ name: "rung_list", arguments: { offset: -1 } })).isError).toBe(true);
     const paths: string[] = [];
-    for (let offset = 0; offset < 624; offset += 100) {
+    for (let offset = 0; offset < BLOCKS; offset += 100) {
       const response = await client.callTool({ name: "rung_list", arguments: { offset, limit: 100 } });
       paths.push(...JSON.parse((response.content as { text: string }[])[0]!.text).items.map((s: { path: string }) => s.path));
     }
-    expect(new Set(paths).size).toBe(624);
+    expect(new Set(paths).size).toBe(BLOCKS);
     const graph = await client.readResource({ uri: "rung://graph" });
     expect(JSON.stringify(graph).length).toBeLessThan(10_000);
     const templates = await client.listResourceTemplates();
@@ -115,13 +117,13 @@ describe("MCP result contracts", () => {
     const state = JSON.parse(readFileSync(statePath, "utf8"));
     const objects = Object.values(state.objects) as { status: string; readOnly: boolean; path: string }[];
     for (const item of objects) { item.status = "fileDirty"; item.readOnly = true; }
-    objects[623]!.status = "conflicted";
+    objects[BLOCKS - 1]!.status = "conflicted";
     writeFileSync(statePath, JSON.stringify(state));
     const result = await client.callTool({ name: "rung_list", arguments: { limit: 1 } });
-    expect(JSON.parse((result.content as { text: string }[])[0]!.text).conflicts).toContain(objects[623]!.path);
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text).conflicts).toContain(objects[BLOCKS - 1]!.path);
     const status = await client.callTool({ name: "rung_status", arguments: {} });
     expect(JSON.stringify(status).length).toBeLessThan(25_000);
-    expect(JSON.parse((status.content as { text: string }[])[0]!.text).readOnly).toMatchObject({ total: 624, nextOffset: 50 });
+    expect(JSON.parse((status.content as { text: string }[])[0]!.text).readOnly).toMatchObject({ total: BLOCKS, nextOffset: 50 });
     writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ items: [
       ...Array.from({ length: 624 }, (_, n) => ({ severity: "warning", path: `plc/PLC_1/blocks/FB_Mixing${n}.scl`, message: `warning ${n}` })),
       { severity: "error", path: "plc/PLC_1/blocks/FB_Mixing623.scl", message: "compile error beyond page" },

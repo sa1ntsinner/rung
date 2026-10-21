@@ -124,7 +124,10 @@ function logicChanges(a: Map<string, { kind: LogicChange["kind"]; text: string }
 /** Working tree against HEAD by default; base..head and explicit base/head compare immutable commits. */
 export async function reviewChanges(root: string, options: { base?: string; head?: string } = {}): Promise<ReviewReport> {
   root = resolve(root);
-  const top = (await git(root, ["rev-parse", "--show-toplevel"]).catch(() => { throw new Error("rung review needs a git repository"); })).trim();
+  // the toplevel spelled like root: git's own --show-toplevel may expand an 8.3 short name (RUNNER~1), and the
+  // snapshot paths and URIs would no longer line up with the working tree's
+  const prefix = (await git(root, ["rev-parse", "--show-prefix"]).catch(() => { throw new Error("rung review needs a git repository"); })).trim();
+  const top = resolve(root, prefix.split("/").filter(Boolean).map(() => "..").join("/") || ".");
   let base = options.base ?? "HEAD"; let head = options.head;
   if (base.includes("..")) {
     const range = /^(.+?)\.\.(.+)$/.exec(base);
