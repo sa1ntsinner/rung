@@ -5,6 +5,7 @@
 import { STANDARD_BY_NAME, SYSTEM_TYPES, parseAbsolute, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { parseStl, runStl, stlState, type S5Timer, type StlCall, type StlHost, type StlProgram, type StlState } from "./stl.js";
 import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
+import { decode, encode, LayoutUnsupported } from "./layout.js";
 import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
 export type Value = boolean | number | string | Struct | ArrayValue | Instance | Pointer | undefined;
@@ -84,6 +85,12 @@ function copyValue(v: Value): Value {
 
 type Decl = Pick<VarDecl, "type" | "typeRef" | "isArray" | "members" | "init">;
 type Kind = "real" | "int" | "unknown";
+
+/** A variable and the variables declared AT it, in a block (names upper case). */
+interface ViewGroup {
+  members: VarDecl[];
+  names: Set<string>;
+}
 
 export interface Frame {
   block: BlockModel;
@@ -301,6 +308,9 @@ export class Simulator {
   /** Leaves that hold no known value: a TEMP before the cycle wrote it, or a global member a capture did not read. */
   private readonly unset = new WeakMap<object, Map<string | number, "temp" | "uncaptured">>();
   private marked = false;
+  private readonly views = new WeakMap<BlockModel, ViewGroup[]>();
+  /** The bytes of each view group as last synced, by the storage it lives in. */
+  private readonly viewImages = new WeakMap<object, Map<string, Uint8Array>>();
   /** The frames running, outermost first. */
   readonly frames: Frame[] = [];
 
@@ -827,6 +837,7 @@ export class Simulator {
     if (ch) return String(this.read(ch.base, frame) ?? "")[ch.at - 1] ?? "";
     const p = this.propertyAt(ref, frame);
     if (p) return this.runProperty(p.inst, p.prop, "get");
+    this.syncViewsOf(ref, frame);
     const { obj, key } = this.locate(ref, frame);
     const v = (obj as Struct)[key as string] ?? (obj as Value[])[key as number];
     // an FB instance is read to be called: its members refuse when the call reads them
@@ -861,7 +872,17 @@ export class Simulator {
     (obj as Record<string | number, Value>)[key] =
       typeof value === "number" ? fitNumber(value, this.declOf(ref, frame)) : typeof value === "string" ? fitString(value, this.declOf(ref, frame)) : copyValue(value);
     this.unset.get(obj)?.delete(key);
+    this.syncViewsOf(ref, frame);
     this.onWrite?.(obj, key, (obj as Record<string | number, Value>)[key]!, frame);
+  }
+
+  /** Before a read and after a write of a variable seen through AT: its other views follow. */
+  private syncViewsOf(ref: LRef, frame: Frame | null) {
+    if (!frame || ref.root.kind === "global") return;
+    const groups = this.views.get(frame.block);
+    if (!groups?.length) return;
+    const root = ref.root.name.toUpperCase();
+    for (const g of groups) if (g.names.has(root)) this.syncView(g, frame);
   }
 
   /** Registers every elementary leaf of fresh TEMP storage as not written yet (only while guardTemps is on). */
@@ -1734,13 +1755,12 @@ export class Simulator {
 
   /** Executes a block body: RETURN ends this call only; EXIT/CONTINUE outside a loop are errors. */
   private runBody(b: BlockModel, frame: Frame, accessor?: "get" | "set") {
-    // x AT y: a second view of y's bytes. The simulator keeps each variable apart, so a result through a view would be
-    // silently wrong; it says so instead
-    const view = b.vars.find((v) => v.at && !v.at.startsWith("%"));
-    if (view) throw new SimError(`${b.name} declares ${view.name} AT ${view.at}: one memory seen as two types is not simulated; stub ${b.name} or test the blocks around it`, b.name);
+    const views = this.viewsOf(b);
+    if (views.length && b.stl) throw new SimError(`${b.name} declares a variable AT another in STL: not simulated; stub ${b.name}`, b.name);
     if (b.stl) return this.runStlBody(b, frame);
     this.frames.push(frame);
     try {
+      for (const g of views) this.syncView(g, frame);
       this.exec(this.body(b, accessor), frame);
     } catch (e) {
       if (e instanceof Return) return;
@@ -1748,8 +1768,76 @@ export class Simulator {
       if (e instanceof Goto) throw new SimError(`GOTO ${e.label}: ${b.name} has no label ${e.label}: in a statement list around the GOTO`, b.name, e.at);
       throw e;
     } finally {
-      this.frames.pop();
+      // the outputs the caller reads show the last write, through whichever view it went
+      try {
+        for (const g of views) this.syncView(g, frame);
+      } finally {
+        this.frames.pop();
+      }
     }
+  }
+
+  /** x AT y in a block: y and the variables declared AT it, one memory seen as several types. */
+  private viewsOf(b: BlockModel): ViewGroup[] {
+    let groups = this.views.get(b);
+    if (groups) return groups;
+    groups = [];
+    for (const v of b.vars) {
+      if (!v.at || v.at.startsWith("%")) continue;
+      const name = v.at.replace(/^#|^"|"$/g, "").toUpperCase();
+      const base = b.vars.find((x) => x.name.toUpperCase() === name);
+      if (!base) throw new SimError(`${v.name} AT ${v.at}: ${b.name} has no variable ${v.at}`, b.name);
+      let g = groups.find((x) => x.members[0] === base);
+      if (!g) groups.push((g = { members: [base], names: new Set([name]) }));
+      g.members.push(v);
+      g.names.add(v.name.toUpperCase());
+    }
+    this.views.set(b, groups);
+    return groups;
+  }
+
+  /**
+   * Makes the variables of a view group agree: the one whose bytes changed since the last sync is copied into the
+   * others (standard S7 layout, layout.ts). Runs when the block starts and ends and before each read of one of them.
+   */
+  private syncView(g: ViewGroup, frame: Frame) {
+    const key = (d: VarDecl) => d.name.toUpperCase();
+    const store = key(g.members[0]!) in frame.temps ? frame.temps : frame.mem;
+    const membersOf = (t: string) => {
+      const udt = this.index.global(t)?.block;
+      return udt?.kind === "UDT" ? udt.vars : SYSTEM_TYPES.get(t.toUpperCase());
+    };
+    let bytes: Uint8Array[];
+    try {
+      bytes = g.members.map((m) => encode(store[key(m)], m, membersOf));
+    } catch (e) {
+      if (e instanceof LayoutUnsupported) throw new SimError(`${frame.block.name}: ${g.members.slice(1).map((m) => `${m.name} AT ${m.at}`).join(", ")}: ${e.message}; stub ${frame.block.name} or test the blocks around it`, frame.block.name);
+      throw e;
+    }
+    const images = this.viewImages.get(store) ?? new Map<string, Uint8Array>();
+    this.viewImages.set(store, images);
+    const old = images.get(key(g.members[0]!));
+    const same = (a: Uint8Array, b: Uint8Array) => a.every((x, i) => i >= b.length || x === b[i]);
+    const changed = old ? bytes.findIndex((b) => !same(b, old)) : 0;
+    if (changed < 0) return;
+    const image = new Uint8Array(bytes[0]!.length);
+    if (old) image.set(old.subarray(0, image.length));
+    image.set(bytes[changed]!.subarray(0, image.length));
+    images.set(key(g.members[0]!), image);
+    g.members.forEach((m, i) => {
+      if (i === changed && bytes[i]!.length <= image.length) return;
+      store[key(m)] = decode(image, store[key(m)], m, membersOf) as Value;
+      this.clearUnset(store, key(m));
+    });
+  }
+
+  /** Takes the "not written yet" marks off a variable and everything in it. */
+  private clearUnset(container: Struct | Value[], key: string | number) {
+    this.unset.get(container)?.delete(key);
+    let v = (container as Record<string | number, Value>)[key];
+    if (isInstance(v)) v = v.mem;
+    if (isArray(v)) (v as ArrayValue).items.forEach((_, i) => this.clearUnset((v as ArrayValue).items, i));
+    else if (v && typeof v === "object" && !isPointer(v)) for (const k of Object.keys(v)) this.clearUnset(v as Struct, k);
   }
 
   /** An STL block (stl.ts): parsed once, and refused before it runs when it uses instructions outside the subset. */

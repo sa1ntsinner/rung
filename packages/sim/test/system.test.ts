@@ -229,8 +229,16 @@ describe("what TIA Portal V15 projects call (a MySQL client in SCL)", () => {
     const body = "  HTA(IN := #x, N := 4, OUT => #h);\n  Strg_TO_Chars(Strg := #m, pChars := 0, Cnt => #n, Chars := #bytes);\n  Chars_TO_Strg(Chars := #bytes, pChars := 0, Cnt := #n, Strg => #back);\n  #third := #m[3];";
     expect(run(sim({ FB_H: fb("FB_H", decl, body) }), "FB_H", { x: 0x6a09e667, m: "abcd" })).toMatchObject({ H: "6A09E667", N: 4, BACK: "abcd", THIRD: "c" });
   });
-  it("refuses a block with an AT view instead of a silently wrong result", () => {
-    const s = sim({ FB_V: fb("FB_V", "VAR\n  b : Array[0..3] of Byte;\n  d AT b : DWord;\nEND_VAR", "  #b[0] := 1;") });
-    expect(errorOf(() => run(s, "FB_V"))).toMatch(/declares d AT b: one memory seen as two types is not simulated/);
+  it("x AT y: one memory through both, big-endian, in the standard layout", () => {
+    const s = sim({
+      FB_V: fb(
+        "FB_V",
+        "VAR_OUTPUT\n  d1 : DWord;\n  b2 : Byte;\n  raw : Array[0..3] of Byte;\n  w : Array[0..1] of DWord;\nEND_VAR\nVAR\n  b : Array[0..3] of Byte;\n  d AT b : DWord;\n  s : Struct\n    x : Bool;\n    y : Bool;\n    n : Int;\n  END_STRUCT;\n  r AT s : Array[0..3] of Byte;\nEND_VAR\nVAR_TEMP\n  chunk : Array[0..7] of Byte;\n  words AT chunk : Array[0..1] of DWord;\nEND_VAR",
+        "  #b[0] := 16#12; #b[3] := 16#78;\n  #d1 := #d;\n  #d := 16#AABBCCDD;\n  #b2 := #b[1];\n  #s.x := TRUE; #s.y := TRUE; #s.n := 258;\n  #raw := #r;\n  #words[1] := 16#01020304;\n  #chunk[0] := 16#FF;\n  #w := #words;",
+      ),
+      FB_X: fb("FB_X", "VAR\n  b : Array[0..3] of Byte;\n  v AT b : Variant;\nEND_VAR", "  #b[0] := 1;"),
+    });
+    expect(run(s, "FB_V")).toMatchObject({ D1: 0x12000078, B2: 0xbb, RAW: { items: [3, 0, 1, 2] }, W: { items: [0xff000000, 0x01020304] } });
+    expect(errorOf(() => run(s, "FB_X"))).toMatch(/v AT b: VARIANT has no byte layout in the simulator/);
   });
 });
