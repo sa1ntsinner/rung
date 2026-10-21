@@ -54,6 +54,7 @@ import { cmdWhy } from "./why.js";
 import { cmdProgramStatus } from "./program-status.js";
 import { cmdImpact } from "./impact.js";
 import { cmdLint } from "./lint.js";
+import { cmdSplit } from "./split.js";
 import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
 import { cmdReport } from "./report.js";
@@ -86,6 +87,7 @@ Usage:
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
   rung lint [dir] [--file <f>]... [--json] [--max-warnings <n>]  the language server's checks of the files, in the terminal or CI (no TIA Portal); exit 1 on errors or more than n warnings
+  rung split [file]...                  a source with several objects (TIA's Generate source, a library) into one file per object, where rung keeps it
   rung review [base..head] [--base <rev>] [--head <rev>] [--json|--md]  offline change report for the person reviewing it; default: working tree against HEAD
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
@@ -452,6 +454,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
   lint: { options: ["file", "json", "max-warnings"], positionals: 1 },
+  split: { options: [], positionals: Infinity },
   review: { options: ["base", "head", "json", "md"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "new", "cpu", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
@@ -897,6 +900,8 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         return await cmdMergeDriver(positionals.slice(1), io);
       case "impact":
         return await cmdImpact(target, !!v.json, io);
+      case "split":
+        return await cmdSplit(positionals.slice(1), io);
       case "lint":
         return await cmdLint(target, (v.file as string[] | undefined) ?? [], !!v.json, io, v["max-warnings"] as string | undefined);
       case "xref":

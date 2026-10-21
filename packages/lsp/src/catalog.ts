@@ -25,8 +25,11 @@ const p = (name: string, type: string, dir: CatalogParam["dir"] = "in", note?: s
 const fn = (name: string, params: CatalogParam[], returns: string, doc: string): CatalogEntry => ({ name, kind: "function", params, returns, doc });
 const fb = (name: string, params: CatalogParam[], doc: string): CatalogEntry => ({ name, kind: "functionBlock", params, doc });
 
-const timer = (name: string, t: string, doc: string) =>
-  fb(name, [p("IN", "Bool", "in", "start input"), p("PT", t, "in", "preset time"), p("Q", "Bool", "out", "timer output"), p("ET", t, "out", "elapsed time")], doc);
+// an instance is also called by its kind's name, #t.TON(...), as TIA Portal writes a timer inside a structure
+const timer = (name: string, t: string, doc: string) => ({
+  ...fb(name, [p("IN", "Bool", "in", "start input"), p("PT", t, "in", "preset time"), p("Q", "Bool", "out", "timer output"), p("ET", t, "out", "elapsed time")], doc),
+  methods: [name.replace(/_L?TIME$/, "")],
+});
 
 export const STANDARD: CatalogEntry[] = [
   timer("TON", "Time", "On-delay timer: Q becomes TRUE when IN has been TRUE for PT."),

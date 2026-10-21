@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Editor features as pure functions over the workspace index (the LSP server only adapts them).
+import { pathToAddress } from "@rung/core";
 import type { HmiUse } from "./hmi.js";
 import { CONVERSION, ELEMENTARY_TYPES, KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, TYPE_INFO, type CatalogEntry } from "./catalog.js";
 import { analyse } from "./analysis.js";
-import { argumentMismatches, typeMismatches } from "./typecheck.js";
+import { argumentMismatches, timeComparisons, typeMismatches } from "./typecheck.js";
 import { varsAt, type BlockModel, type Ref, type VarDecl } from "./parser.js";
 import type { Token } from "./lexer.js";
 import { nearest } from "./nearest.js";
-import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
+import { TAG_TEXT, deviceOfUri, scopedTo, tagTableFor, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "./workspace.js";
 import { callSites, missingParams, orderedParams, paramsOf, unknownArgs, type CallSite } from "./calls.js";
 import { TYPE_BITS, parseAbsolute } from "./assignments.js";
 import { RESERVED } from "./declarationEdit.js";
@@ -186,6 +187,14 @@ function suggestAddress(a: { area: string; byte: number }, bits: number): string
   return bits === 1 || bits === 64 ? `%${a.area}${a.byte}.0` : `%${a.area}${({ 8: "B", 16: "W", 32: "D" } as Record<number, string>)[bits]}${a.byte}`;
 }
 
+/** `to` as a path from the folder both URIs share (DoorLock/DoorLock.scl next to Timer/Timer.scl). */
+function relativePath(from: string, to: string): string {
+  const a = decodeURIComponent(from).split("/"), b = decodeURIComponent(to).split("/");
+  let i = 0;
+  while (i < a.length - 1 && i < b.length - 1 && a[i]!.toLowerCase() === b[i]!.toLowerCase()) i++;
+  return b.slice(i).join("/");
+}
+
 export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnostic[] {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const doc = index.docs.get(uri);
@@ -201,6 +210,24 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       }
     };
     for (const b of doc.parsed.blocks) walk(b.vars);
+  }
+  // two objects of one name in one PLC: TIA Portal keeps one of them, and which one rung resolves a call to is chance
+  const device = deviceOfUri(uri);
+  // a file under plc/<PLC>/ is one object, named as the file (sync refuses anything else)
+  const objects = doc.parsed.blocks.filter((b) => !b.owner && b.kind !== "GVL");
+  const at = device && /\.(scl|db|udt)$/i.test(uri) ? pathToAddress(decodeURIComponent(uri).slice(decodeURIComponent(uri).lastIndexOf("/plc/") + 1)) : null;
+  if (at && objects.length > 1)
+    for (const b of objects.slice(1))
+      out.push({ start: b.nameStart, end: b.nameEnd, severity: "error", code: "MULTIPLE_OBJECTS", message: `this file holds ${objects.length} objects, a file under plc/ holds one: rung split puts each in a file of its own` });
+  else if (at && objects.length === 1 && objects[0]!.name !== at.address.name)
+    out.push({ start: objects[0]!.nameStart, end: objects[0]!.nameEnd, severity: "warning", code: "FILE_NAME", message: `the file says ${at.address.name}, the object is "${objects[0]!.name}": TIA Portal takes the object's name; rung split renames the file` });
+  for (const b of doc.parsed.blocks) {
+    if (b.owner || b.kind === "GVL") continue;
+    const twin = unscoped(index).definitions(b.name).find((s) => s.block && s.block !== b && !s.block.owner && deviceOfUri(s.uri) === device);
+    if (!twin) continue;
+    const where = twin.uri === uri ? "in this file too" : `in ${relativePath(uri, twin.uri)} too`;
+    out.push({ start: b.nameStart, end: b.nameEnd, severity: device ? "error" : "warning", code: "DUPLICATE_BLOCK",
+      message: device ? `"${b.name}" is defined ${where}: a PLC has one object of a name` : `"${b.name}" is defined ${where}: if these are separate projects, give each its own rung.toml (rung init) so their names do not meet` });
   }
   // a TIA tag table as text: TIA Portal keeps every PLC tag at an address; what the import refuses shows here first
   if (TAG_TEXT.test(uri)) {
@@ -272,7 +299,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       if (m) out.push({ start: m.start, end: m.end, severity: "warning", message: `${m.name} is not a member of ${m.parent}${m.suggestion ? ` (did you mean ${m.suggestion}?)` : ""}`, code: "UNKNOWN_MEMBER" });
     }
     if (/\.scl$/i.test(uri)) out.push(...literalMismatches(index, uri, doc.parsed.tokens, block));
-    if (/\.scl$/i.test(uri)) out.push(...analyse(block, doc.parsed.tokens, doc.text), ...typeMismatches(index, uri, block, doc.parsed.tokens, doc.text));
+    if (/\.scl$/i.test(uri)) out.push(...analyse(block, doc.parsed.tokens, doc.text), ...typeMismatches(index, uri, block, doc.parsed.tokens, doc.text), ...timeComparisons(index, uri, block, doc.parsed.tokens));
   }
   return out;
 }

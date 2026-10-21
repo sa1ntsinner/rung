@@ -59,7 +59,8 @@ export function conversion(target: string, source: string): "same" | "ok" | "war
 }
 
 /** The declaration a name path (#a.b, "DB".x) means, when it is known all the way. */
-function declOf(index: WorkspaceIndex, uri: string, block: BlockModel, r: Ref): Member | { type: string } | undefined {
+/** `element`: the name is indexed (#a[i]), so an array means its element type. */
+function declOf(index: WorkspaceIndex, uri: string, block: BlockModel, r: Ref, element = false): Member | { type: string } | undefined {
   let decl: Member | { type: string; members?: Member[]; typeRef?: string } | undefined;
   if (r.kind === "local") decl = scopeDecl(index, uri, block, r.name, r.start);
   else if (r.kind === "global") {
@@ -72,7 +73,8 @@ function declOf(index: WorkspaceIndex, uri: string, block: BlockModel, r: Ref): 
     const members: Member[] = "members" in decl && decl.members?.length ? decl.members : "typeRef" in decl && decl.typeRef ? index.membersOfType(decl.typeRef) : [];
     decl = members.find((x) => x.name.toUpperCase() === m.name.toUpperCase());
   }
-  return decl && !("isArray" in decl && decl.isArray) ? decl : undefined;
+  if (decl && "isArray" in decl && decl.isArray) return element ? { type: decl.type.replace(/^[\s\S]*\bof\s+/i, "") } : undefined;
+  return decl;
 }
 
 /** `a := b;` assignments TIA Portal would refuse or warn about. */
@@ -101,6 +103,57 @@ export function typeMismatches(index: WorkspaceIndex, uri: string, block: BlockM
     const c = conversion(a.type, b.type);
     if (c === "error") out.push({ start: rhs.start, end: end(rhs), severity: "error", code: "TYPE_MISMATCH", message: `Data type '${b.type}' cannot be converted implicitly into data type '${a.type}' (TIA Portal refuses it; convert explicitly, e.g. ${elementary(b.type)}_TO_${elementary(a.type)})` });
     else if (c === "warning") out.push({ start: rhs.start, end: end(rhs), severity: "warning", code: "TYPE_NARROWING", message: `${a.type} := ${b.type}: the sign or the accuracy of the value may be lost (TIA Portal warns when compiling)` });
+  }
+  return out;
+}
+
+const COMPARE = new Set(["<", ">", "<=", ">=", "=", "<>"]);
+const ENDS = new Set(["IF", "ELSIF", "WHILE", "UNTIL", "AND", "OR", "XOR", "NOT", "THEN", "DO", "RETURN"]);
+
+/**
+ * `#t - #start < 0` with TIME variables: TIA Portal takes a bare 0 as an integer and refuses the comparison
+ * ("Operator '<' is not compatible with the data types of 'Time' and 'LInt'"). Judged only when every name on that
+ * side is a TIME or LTIME and nothing else stands there but + and -.
+ */
+export function timeComparisons(index: WorkspaceIndex, uri: string, block: BlockModel, tokens: Token[]): FeatureDiagnostic[] {
+  if (block.bodyStart === undefined) return [];
+  const out: FeatureDiagnostic[] = [];
+  const refAt = new Map(block.refs.map((r) => [r.start, r]));
+  for (let i = 1; i + 1 < tokens.length; i++) {
+    const op = tokens[i]!;
+    if (op.start < block.bodyStart || op.start > block.end || op.kind !== "op" || !COMPARE.has(op.text)) continue;
+    const lit = tokens[i + 1]!;
+    const after = tokens[i + 2];
+    if (lit.kind !== "number" || !/^\d+$/.test(lit.text) || (after && ["+", "-", "*", "/", "."].includes(after.text))) continue;
+    const types = new Set<string>();
+    let fine = true;
+    let depth = 0; // inside an index: [#i] is not on that side
+    for (let j = i - 1; j >= 0; j--) {
+      const t = tokens[j]!;
+      if (t.kind === "comment") continue;
+      if (t.text === "]") depth++;
+      if (depth) {
+        if (t.text === "[") depth--;
+        continue;
+      }
+      if ((t.kind === "ident" && ENDS.has(t.upper)) || t.text === "(" || t.text === ";" || t.text === ":=") break;
+      const r = refAt.get(t.start);
+      if (r) {
+        const last = r.members.length ? r.members[r.members.length - 1]!.end : r.end;
+        const d = r.access === "call" ? undefined : declOf(index, uri, block, r, tokens.find((x) => x.start >= last)?.text === "[");
+        types.add(elementary(d?.type) ?? "?");
+        continue;
+      }
+      if (t.kind === "op" && (t.text === "+" || t.text === "-")) continue;
+      // a member of the reference just read
+      if (t.text === "." || t.kind === "local" || t.kind === "global" || t.kind === "ident") continue;
+      fine = false;
+      break;
+    }
+    const type = [...types][0];
+    if (!fine || types.size !== 1 || (type !== "TIME" && type !== "LTIME")) continue;
+    out.push({ start: lit.start, end: lit.end, severity: "error", code: "TIME_COMPARE",
+      message: `a ${type} is compared with a duration only: TIA Portal takes ${lit.text} as an integer and refuses it; write ${type === "TIME" ? "T" : "LT"}#${lit.text}ms` });
   }
   return out;
 }

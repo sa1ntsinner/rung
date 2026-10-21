@@ -74,6 +74,8 @@ The syntax is `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order n
 
 Run `rung lint [dir] [--file f]... [--json]` for the language server's checks in the terminal or CI, without TIA Portal. It exits with code 1 on errors. Repeat `--file` to check selected files.
 
+Sources from elsewhere (a library from GitHub, TIA Portal's *Generate source from blocks*) often hold several objects in one file. Copy them under `plc/<PLC>/blocks/`, then run `rung split`: each type, data block and block gets a file of its own, named as the object (types go to `types/`), with the comments above it. `rung sync` then creates them in TIA Portal in the order they need each other.
+
 ## 4. Work two-way
 
 For an existing project, rung writes nothing into it until you say so: `rung pull`, `rung sync` and `rung watch` bring TIA Portal's changes into the files, and your edits stay in the files (`WRITES_OFF` in the report). Look around first, on a copy of the project if you like. Then:

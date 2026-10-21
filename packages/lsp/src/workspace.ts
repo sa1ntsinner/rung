@@ -250,6 +250,11 @@ export class WorkspaceIndex {
     this.rebuild();
     const all = this.globals.get(name.toUpperCase());
     const device = from ? deviceOfUri(from) : undefined;
+    // a folder of several projects (no plc/<PLC>/): the definition nearest the file, its own folder first
+    if (all && all.length > 1 && from && !device) {
+      const shared = (u: string) => { let i = 0; while (i < u.length && u[i] === from[i]) i++; return u.lastIndexOf("/", i); };
+      return all.reduce((best, s) => (shared(s.uri) > shared(best.uri) ? s : best));
+    }
     if (!all || !device) return all?.[0];
     return all.find((s) => deviceOfUri(s.uri) === device) ?? all.find((s) => !deviceOfUri(s.uri));
   }
@@ -257,6 +262,12 @@ export class WorkspaceIndex {
   allGlobals(): GlobalSymbol[] {
     this.rebuild();
     return [...this.globals.values()].flat();
+  }
+
+  /** Every object of this name, in every PLC (global() gives the one a file sees). */
+  definitions(name: string): GlobalSymbol[] {
+    this.rebuild();
+    return this.globals.get(name.toUpperCase()) ?? [];
   }
 
   /** The block containing `offset` in `uri`. */
@@ -460,7 +471,16 @@ function techObjectsOfView(text: string): NamedObject[] {
 export function scopedTo(index: WorkspaceIndex, from: string): WorkspaceIndex {
   index = unscoped(index); // seen from another file, the view of that file's PLC, not of both
   const device = deviceOfUri(from);
-  if (!device) return index;
+  // outside plc/<PLC>/ only a name defined twice depends on the file (global() takes the nearest)
+  if (!device)
+    return new Proxy(index, {
+      get(target, prop, receiver) {
+        if (prop === UNSCOPED) return target;
+        if (prop === "global") return (name: string, other?: string) => target.global(name, other ?? from);
+        const v = Reflect.get(target, prop, target);
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(receiver) : v;
+      },
+    });
   return new Proxy(index, {
     get(target, prop, receiver) {
       if (prop === UNSCOPED) return target;

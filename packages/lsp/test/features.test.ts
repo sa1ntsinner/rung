@@ -114,7 +114,8 @@ describe("workspace features", () => {
     expect(labels("#sp")).toEqual(expect.arrayContaining(["speed", "Motor", "Delay"]));
     expect(labels("#Motor.")).toEqual(["Start", "Stop", "SpeedSetpoint", "Running", "SpeedOut", "Latch"]);
     expect(labels('"Fx_Global".Station.')).toEqual(["Enabled", "Mode", "Setpoint", "Label"]);
-    expect(labels("#Delay.")).toEqual(["IN", "PT", "Q", "ET"]);
+    // and the call by its kind's name, #Delay.TON(...), as TIA Portal writes a timer inside a structure
+    expect(labels("#Delay.")).toEqual(["IN", "PT", "Q", "ET", "TON"]);
     expect(labels('"Fx_')).toEqual(expect.arrayContaining(["Fx_Global", "Fx_Motor", "Start_Button"]));
   });
 

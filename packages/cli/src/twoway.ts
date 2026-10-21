@@ -36,6 +36,7 @@ export function printReport(io: Io, r: SyncReport) {
   if (relaid.length) io.stdout(`note: TIA Portal wrote ${relaid.length === 1 ? relaid[0]!.path : `${relaid.length} new files`} back in its own layout; rung format lays out a new file that way before its first sync, so its diff shows only your changes\n`);
   printWarnings(io, r.warnings.filter((w) => !r.diagnostics.some((d) => d.address === w.address && d.code === w.code && d.message === w.message)));
   for (const d of r.diagnostics) io.stdout(`  ${d.severity.padEnd(8)} ${d.code.padEnd(18)} ${diagnosticTarget(d)}${d.line ? `:${d.line}` : ""} — ${d.message}\n`);
+  if (r.diagnostics.some((d) => /a file holds exactly that one object/.test(d.message))) io.stdout("hint: rung split puts each object of such a file in a file of its own, named as the object\n");
   const compiled = r.diagnostics.filter((d) => d.code === "COMPILE");
   if (compiled.length) io.stdout(`compile: ${compiled.filter((d) => d.severity === "error").length} error(s), ${compiled.filter((d) => d.severity === "warning").length} warning(s)\n`);
   // a clean compile says so too: "did it work?" has an answer without rung compile
