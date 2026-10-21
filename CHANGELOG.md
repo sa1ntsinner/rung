@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-21
 
 **Online with the PLC**
 - S7CommPlus over TLS (S7-1500 firmware 2.9 and later), without the PLC's web server: live values next to the code, in the declarations table and the ladder view, TIA watch tables live, CPU state and cycle time, alarms and the diagnostic buffer; subscriptions shared by every editor and agent of the workspace through one broker. The PLC's certificate is pinned by its SHA-256 (`rung live trust`). Modify, RUN and STOP only behind a typed confirmation and a per-PLC opt-in; force tables stay read-only. Checked on PLCSIM Advanced and, read-only, on a CPU 1516 of a machine.
@@ -13,7 +13,7 @@
 **Project assets**
 - Hardware settings beyond IP addresses (any writable setting, catalogue modules), library types and master copies (release, update, import), alarm text lists, technology object parameters, HMI Basic/Comfort panels in `rung views`, safety observed read-only; each through a preview and an apply against the revision it was previewed on. `rung retrieve` and `rung upgrade` open `.zapNN` archives and older projects.
 
-**Before 0.3**
+**Smaller things**
 - `rung report` and *rung: Report a Problem…* in VS Code: versions, this PC's checks and the workspace's shape for a bug report, without the project's code, names, paths or addresses (shown in an editor before it is copied).
 - `rung confirm-delete` takes several files: the blocks only another git branch had, after switching back.
 - The Environment view marks what TIA Portal sync cannot do without (the Openness group, the whitelist) in red as *needed*, apart from optional tools that are *not installed*.

@@ -111,7 +111,7 @@ function nearestPath(given: string, candidates: readonly string[]): string | und
 const meant = (near: string | undefined) => (near ? `: did you mean ${near}?` : "");
 
 export function createMcpServer(ctx: McpContext): McpServer {
-  const server = new McpServer({ name: "rung", version: "0.1.0" }, { instructions: SAFETY_RULES });
+  const server = new McpServer({ name: "rung", version: "0.3.0" }, { instructions: SAFETY_RULES });
   let cache: { at: number; index: WorkspaceIndex; graph: CodeGraph } | undefined;
   const model = async () => {
     if (!cache || Date.now() - cache.at > 2000) {
