@@ -11,7 +11,7 @@
 | Support | | ✓ | ✓ |
 | SLA and onboarding, training, your own review rules, offline installation | | | ✓ |
 
-Ask about Pro or Enterprise: smile0murr@gmail.com.
+Ask about Pro or Enterprise: rungprojectplc@gmail.com.
 
 rung does not replace your engineering tools: TIA Portal (with Openness) and CODESYS need their own licences.
 

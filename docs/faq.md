@@ -38,7 +38,7 @@ TIA Portal answers one request at a time, so `rung watch` waits between passes t
 V20, V19 and V21 (pull, sync and compile tested on a generated project of each; V19 has no SIMATIC SD, so blocks that would be `.s7dcl` stay SimaticML `.xml`, and it cannot rename tag tables). `rung init` picks the bridge from the project file (`.ap19`, `.ap20`, `.ap21`).
 
 **What does it cost?**
-The editor extensions, grammar and workspace format are MIT. The rung core is source-available under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to 3 users. Larger teams subscribe to rung Pro, €49 per user and month: the commercial license, plus change review that knows PLCs (interface per variable, attributes, logic per region and LAD/FBD network, what the change affects), a policy gate in your own CI, FAT/SAT change records and support (smile0murr@gmail.com). Every version becomes Apache-2.0 three years after its release.
+The editor extensions, grammar and workspace format are MIT. The rung core is source-available under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to 3 users. Larger teams subscribe to rung Pro, €49 per user and month: the commercial license, plus change review that knows PLCs (interface per variable, attributes, logic per region and LAD/FBD network, what the change affects), a policy gate in your own CI, FAT/SAT change records and support (rungprojectplc@gmail.com). Every version becomes Apache-2.0 three years after its release.
 
 **Is rung affiliated with Siemens?**
 No. SIMATIC, TIA Portal and related names are trademarks of Siemens AG, used here only to describe compatibility.
