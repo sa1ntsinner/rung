@@ -290,7 +290,7 @@ describe("PLC commands", () => {
     expect(await t.run(["download", "--allow", "stop-cpu"])).toBe(0);
     expect(t.db().downloads![1]!.allow).toEqual(["stop-cpu"]);
     expect(t.questions).toEqual([]);
-    const audit = readFileSync(join(t.dir, ".rung", "agent-actions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const audit = readFileSync(join(t.dir, ".rung", "agent-actions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(line => line.outcome !== "started");
     expect(audit.map(line => line.outcome)).toEqual([3, 0]);
     expect(audit.every(line => line.mode === "auto" && line.allowedBy === "mode")).toBe(true);
   });

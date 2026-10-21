@@ -12,6 +12,15 @@ import { withAgentPermission, withAgentPreparation, type DialogRunner } from "..
 import { assertHuman, commandAction, commandTokens, guardCommand, guardHook } from "../src/guard.js";
 import { main } from "../src/main.js";
 
+/** The one record of how an action ended; its "started" record, when there is one, carries the same id. */
+async function finalRecord(root: string) {
+  const lines = (await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8")).trim().split(/\r?\n/).map(line => JSON.parse(line));
+  const ended = lines.filter(line => line.outcome !== "started");
+  expect(ended).toHaveLength(1);
+  for (const started of lines.filter(line => line.outcome === "started")) expect(started.id).toBe(ended[0].id);
+  return ended[0];
+}
+
 async function fixture(mode: AgentMode, actions?: string[]) {
   const parent = await mkdtemp(join(tmpdir(), "rung-modes-"));
   const root = join(parent, "workspace");
@@ -30,13 +39,13 @@ describe("agent permission execution", () => {
   it("keeps manual refusal text and never invokes a dialog", async () => {
     const { io, root } = await fixture("manual");
     await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/download belongs to the person/);
-    expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ mode: "manual", action: "download", outcome: 1, allowedBy: "refused" });
+    expect(await finalRecord(root)).toMatchObject({ mode: "manual", action: "download", outcome: 1, allowedBy: "refused" });
   });
   it.each(["auto", "bypass"] as const)("allows %s once within the execution scope and audits the exit code", async mode => {
     const { io, root } = await fixture(mode);
     expect(await withAgentPermission(root, "download", "PLC_1", io, async () => { assertHuman(io.env); return 7; }, async () => { throw new Error("dialog called"); })).toBe(7);
     expect(() => assertHuman(io.env)).toThrow(/ask the person/i);
-    expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ agent: "RUNG_AGENT", plc: "PLC_1", action: "download", mode, allowedBy: "mode", outcome: 7 });
+    expect(await finalRecord(root)).toMatchObject({ agent: "RUNG_AGENT", plc: "PLC_1", action: "download", mode, allowedBy: "mode", outcome: 7 });
   });
   it("audits only actions on a PLC, not the commands that read (status, pull)", async () => {
     const { io, root } = await fixture("bypass");
@@ -64,14 +73,14 @@ describe("agent permission execution", () => {
       config.plc.PLC_1 = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, readOnly: true };
       await saveConfig(root, config);
       await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/read-only lock/);
-      expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ outcome: 2 });
+      expect(await finalRecord(root)).toMatchObject({ outcome: 2 });
     }
   });
   it("audits a thrown command and dialog refusal", async () => {
     const { io, root } = await fixture("ask");
     await expect(withAgentPermission(root, "write", "PLC_1", io, async () => { throw new Error("failed"); }, async () => ({ answer: "PLC_1" }))).rejects.toThrow("failed");
     await expect(withAgentPermission(root, "write", "PLC_1", io, async () => 0, async () => ({ reason: "Native dialog expired after 120 seconds" }))).rejects.toThrow(/expired/);
-    const lines = (await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    const lines = (await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line)).filter(line => line.outcome !== "started");
     expect(lines).toHaveLength(2);
     expect(lines.every(line => line.outcome === 1)).toBe(true);
   });
@@ -85,7 +94,7 @@ describe("agent permission execution", () => {
   it("audits live commands rejected before a broker or dialog is started", async () => {
     const { io, root } = await fixture("auto");
     expect(await main(["live", "run", "unexpected-argument"], io)).toBe(1);
-    expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ action: "run-stop", mode: "auto", outcome: 1 });
+    expect(await finalRecord(root)).toMatchObject({ action: "run-stop", mode: "auto", outcome: 1 });
   });
   it("agents may inspect modes but never change them or confirm on stdin", async () => {
     const { root, io } = await fixture("bypass");
@@ -155,7 +164,7 @@ describe("agent permission execution", () => {
       expect(dialogs).toBe(1);
       expect(calls.filter(c => c === "online.commit")).toHaveLength(1);
       await expect(broker.commit("agent", prepared.operationId, prepared.preview, true)).rejects.toThrow(/expired/);
-      expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ agent: "CODEX_TEST", allowedBy: "dialog", outcome: outcome === "acknowledged" ? 0 : 2 });
+      expect(await finalRecord(root)).toMatchObject({ agent: "CODEX_TEST", allowedBy: "dialog", outcome: outcome === "acknowledged" ? 0 : 2 });
     } finally { await broker.close(); hostMock.mockRestore(); }
   });
   it.each([["download", "download"], ["live modify X true", "write"], ["live unforce", "force"], ["live stop", "run-stop"], ["live reset", "alarm-ack"], ["init --writes", "writes-on"], ["setup openness", "openness-setup"], ["bridge", "bridge"]])("classifies %s as %s", (line, action) => {

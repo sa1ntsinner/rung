@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { randomUUID } from "node:crypto";
 import { AGENT_ACTIONS, AGENT_MODES, activeAgentEntry, agentModesPath, assertPlcWritable, formatAgentModes, loadConfig, readAgentModes, workspaceAgentModes, workspaceModeKey, WorkspaceError, writeFileAtomic,
   type AgentAction, type AgentMode, type AgentModeEntry, type RungConfig } from "@rung/core";
 import { findWorkspace, type Io } from "./common.js";
@@ -81,7 +82,7 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
     targets.push(effectiveAgentMode(await readAgentModes(io.env), root, plc ?? "", config));
   }
   if (action === "download" && targets.some(p => p.source === "simulator" && !config.plc[p.plc])) throw new WorkspaceError("NO_TARGET", "rung simulate does not support TIA downloads; configure an explicit PLC connection first");
-  const records = targets.map(policy => ({ time: new Date().toISOString(), agent: marker, plc: policy.plc, action, mode: policy.mode,
+  const records = targets.map(policy => ({ id: randomUUID(), time: new Date().toISOString(), agent: marker, plc: policy.plc, action, mode: policy.mode,
     allowedBy: policy.mode === "manual" ? "refused" : policy.mode === "bypass" || policy.mode === "auto" && policy.actions.includes(action) ? "mode" : "dialog", command }));
   const audit = async (outcome: number) => {
     // the command around this approval (runAgentCommand) must not record the same action again
@@ -96,6 +97,9 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
       const result = await dialog({ plc: record.plc, action, agent: marker, command, timeoutMs: 120000 });
       if (result.answer !== record.plc) throw new WorkspaceError("AGENT_REFUSED", result.reason ?? "Native approval refused or cancelled: PLC name did not match");
     }
+    // recorded before it runs: an action whose process is killed still leaves a trace ("started" without an end)
+    await mkdir(join(root, ".rung"), { recursive: true });
+    await appendFile(join(root, ".rung", "agent-actions.jsonl"), records.map(record => JSON.stringify({ ...record, outcome: "started" }) + "\n").join(""));
     return { scope: { env: io.env, root, plc: plc ?? (targets.length === 1 ? targets[0]!.plc : undefined), action, command }, finish: audit };
   } catch (error) { await audit(1); throw error; }
 }

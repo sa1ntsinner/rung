@@ -56,7 +56,7 @@ In `auto` and `bypass`, permission replaces the agent's typed PLC-name confirmat
 
 Read-only always wins: `read_only = true` for a PLC, `RUNG_READ_ONLY=1`, and the other existing read-only locks refuse a change with their usual message in every mode. Modes do not remove object protection, connection permissions or other command checks.
 
-Each PLC command an agent runs, including a refusal in `manual`, appends to `.rung/agent-actions.jsonl`: time, agent marker, PLC, action, mode, whether permission came from the mode or dialog, and outcome as an exit code. Keep this record with the workspace when investigating a change.
+Each PLC command an agent runs, including a refusal in `manual`, appends to `.rung/agent-actions.jsonl`: time, agent marker, PLC, action, mode, whether permission came from the mode or dialog, and outcome as an exit code. A permitted action is written twice with one `id`: `"outcome": "started"` before it runs, then its exit code, so an action whose process was killed still shows (Activity says "did not finish"). Keep this record with the workspace when investigating a change.
 
 ## Editors and MCP
 

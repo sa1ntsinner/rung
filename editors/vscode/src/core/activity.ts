@@ -82,13 +82,18 @@ export class Activity {
   /** Reload the audit snapshot without duplicating records or changing the save-loop status. */
   agentActions(text: string): void {
     this.entries = this.entries.filter(e => e.kind !== "agent");
+    const records: Record<string, unknown>[] = [];
     for (const line of text.split(/\r?\n/).filter(Boolean)) {
-      try {
-        const r = JSON.parse(line);
-        const at = Date.parse(r.time);
-        if (!Number.isFinite(at) || typeof r.plc !== "string" || typeof r.action !== "string" || typeof r.mode !== "string" || typeof r.allowedBy !== "string" || typeof r.outcome !== "number") continue;
-        this.entries.push({ at, kind: "agent", label: r.plc + ": agent " + r.action + " (" + r.mode + ", " + r.allowedBy + "), exit " + r.outcome });
-      } catch { /* An interrupted append may leave an incomplete line. */ }
+      try { records.push(JSON.parse(line)); } catch { /* An interrupted append may leave an incomplete line. */ }
+    }
+    // an action is recorded when it starts and when it ends (same id): a start without an end did not finish
+    const ended = new Set(records.filter(r => typeof r.outcome === "number" && typeof r.id === "string").map(r => r.id));
+    for (const r of records) {
+      const at = Date.parse(String(r.time));
+      const started = r.outcome === "started";
+      if (!Number.isFinite(at) || typeof r.plc !== "string" || typeof r.action !== "string" || typeof r.mode !== "string" || typeof r.allowedBy !== "string" || (typeof r.outcome !== "number" && !started)) continue;
+      if (started && ended.has(r.id)) continue;
+      this.entries.push({ at, kind: "agent", label: r.plc + ": agent " + r.action + " (" + r.mode + ", " + r.allowedBy + "), " + (started ? "did not finish" : "exit " + r.outcome) });
     }
     this.entries.sort((a, b) => b.at - a.at);
     this.entries.length = Math.min(this.entries.length, MAX);

@@ -150,3 +150,10 @@ it("shows persisted agent actions once, with permission and outcome, ignoring in
   a.agentActions("");
   expect(a.entries).toHaveLength(0);
 });
+
+it("shows an agent action that started and never ended as not finished, and a finished one once", () => {
+  const a = new Activity();
+  const rec = (id: string, outcome: number | string, time = "2026-10-22T10:00:00Z") => JSON.stringify({ id, time, agent: "RUNG_AGENT", plc: "PLC_1", action: "download", mode: "auto", allowedBy: "mode", outcome });
+  a.agentActions([rec("a", "started"), rec("a", 0, "2026-10-22T10:01:00Z"), rec("b", "started", "2026-10-22T10:02:00Z")].join("\n"));
+  expect(a.entries.map((e) => e.label)).toEqual(["PLC_1: agent download (auto, mode), did not finish", "PLC_1: agent download (auto, mode), exit 0"]);
+});
