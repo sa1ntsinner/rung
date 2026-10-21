@@ -16,8 +16,21 @@ export function validateRemoteProject(project: string): string | undefined {
 
 export type Preflight = { ok: true; whitelist?: true } | { ok: false; message: string };
 
+/** What TIA sync cannot do without (the rest of rung check is optional: other PLCs, editors, agents). */
+const TIA_NEEDS = ["tia", "openness", "openness-group", "whitelist"];
+
+/** A row of the Environment view: a must-have for TIA Portal that is missing looks unlike an optional tool. */
+export function envLook(i: CheckItem): { icon: "pass" | "warning" | "error" | "circle-large-outline"; description: string } {
+  if (i.status === "ok") return { icon: "pass", description: i.detail ?? "" };
+  // TIA Portal on Linux or macOS: not a fault here, it is reached over ssh
+  if (i.status === "na") return { icon: "circle-large-outline", description: i.detail ?? "not available here" };
+  if (TIA_NEEDS.includes(i.id)) return { icon: "error", description: "needed for TIA Portal" };
+  if (i.status === "warn") return { icon: "warning", description: i.detail ?? "needs attention" };
+  return { icon: "circle-large-outline", description: "not installed" };
+}
+
 export function tiaReadiness(items: CheckItem[] | undefined): { ok: boolean; message: string } {
-  const missing = ["tia", "openness", "openness-group", "whitelist"].filter(id => items?.find(i => i.id === id)?.status !== "ok");
+  const missing = TIA_NEEDS.filter(id => items?.find(i => i.id === id)?.status !== "ok");
   return missing.length ? { ok: false, message: `TIA sync needs: ${missing.map(id => items?.find(i => i.id === id)?.name ?? id).join(", ")}` } : { ok: true, message: "TIA sync ready" };
 }
 

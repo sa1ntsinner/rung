@@ -35,7 +35,10 @@ export function printReport(io: Io, r: SyncReport) {
   const compiled = r.diagnostics.filter((d) => d.code === "COMPILE");
   if (compiled.length) io.stdout(`compile: ${compiled.filter((d) => d.severity === "error").length} error(s), ${compiled.filter((d) => d.severity === "warning").length} warning(s)\n`);
   // a clean compile says so too: "did it work?" has an answer without rung compile
-  else if (r.compiled?.length) io.stdout(`compiled in TIA Portal: ${r.compiled.map((a) => (a.startsWith("plc:") ? parseAddress(a).name : a)).join(", ")}: ok\n`);
+  else if (r.compiled?.length) {
+    const names = r.compiled.map((a) => (a.startsWith("plc:") ? parseAddress(a).name : a));
+    io.stdout(`compiled in TIA Portal: ${names.slice(0, 8).join(", ")}${names.length > 8 ? ` and ${names.length - 8} more` : ""}: ok\n`);
+  }
 }
 
 const exitCode = (r: SyncReport) => (r.conflicts || r.diagnostics.some((d) => d.severity === "error") ? 2 : r.warnings.some((w) => !isNotice(w.code)) ? 2 : 0);

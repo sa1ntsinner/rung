@@ -32,6 +32,9 @@ rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text 
 | **Two-way sync** | Save a file: rung imports it through Openness, compiles it and writes TIA's version back. Changes made in TIA Portal come back. Both sides changed: a three-way merge, SCL by line, LAD and FBD by network. |
 | **An editor for SCL** | A language server for VS Code, Zed and Neovim: completion, definitions through DBs, UDTs and instances, references, rename through TIA Portal, any block or tag by name, TIA's compile errors on their line, live values. |
 | **Tests without a PLC** | `rung test` runs YAML tests on an offline simulator: SCL, LAD, FBD, STL and structured text, with virtual time. Any CI runner, Linux too, no TIA Portal or PLCSIM. |
+| **TIA Portal in the background** | rung opens the project in a TIA Portal without window and keeps it open; **Open in TIA Portal** brings the window up on the object you are on. A `.zap` archive opens too. |
+| **Online** | Live values next to the code over S7CommPlus (TLS) or the Web API, TIA watch tables, trace, a reconstructed program status per SCL line, and a backup of a running PLC that is checked against it. A read-only lock for machines that must not be touched. |
+| **A debugger for PLC code** | Breakpoints, step back, Why? for any value, coverage, and the same tests run on another git revision to show what behaves differently. |
 | **Coding agents** | An MCP server and skills. Agents edit the files, rung carries the change into TIA Portal, a person starts every download. |
 | **Change review** <sub>Pro</sub> | Interfaces, attributes, logic per region and network, and what a change affects. A gate in your CI and a FAT/SAT record. |
 
@@ -63,7 +66,7 @@ One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `netw
 
 | Two 20-minute runs, two people, syncs killed at random | One production program | Tests |
 |---|---|---|
-| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([evidence](docs/evidence.md)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 37/37 bridge tests on TIA Portal V20, 850+ TypeScript and 243 .NET tests, Windows and Linux |
+| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([evidence](docs/evidence.md)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 1800+ TypeScript and 370+ .NET tests, live suites against TIA Portal V19, V20 and V21, PLCSIM Advanced and a real S7-1500, Windows and Linux |
 
 ## Quick start
 
@@ -74,7 +77,7 @@ rung writes on                          # when you want your edits to go to TIA 
 rung watch                              # keep both sides in sync
 ```
 
-Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md) covers the setup, including the Openness group your Windows user has to be in.
+Install the **rung** extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rung-scl) or [Open VSX](https://open-vsx.org/extension/sa1ntsinner/rung-scl) (it brings rung with it) and run **rung: Open TIA Project…**; or take rung from the [releases](https://github.com/sa1ntsinner/rung/releases) or npm (`npm i -g @rung-plc/cli`). The [quickstart](docs/quickstart.md) covers the setup, including the Openness group your Windows user has to be in. What rung does and where TIA Portal is still needed: [capabilities](docs/capabilities.md).
 
 [Going online](docs/online.md): find the PLC, choose another address, supply a password and check a TLS certificate.
 
@@ -82,7 +85,7 @@ Pre-release: there is no public release yet. The [quickstart](docs/quickstart.md
 
 | | Sync | Editor | `rung test` |
 |---|:---:|:---:|:---:|
-| Siemens TIA Portal V20 | ✓ | ✓ | ✓ |
+| Siemens TIA Portal V19, V20, V21 | ✓ | ✓ | ✓ |
 | CODESYS V3.5 | ✓ | ✓ | ✓ |
 | TwinCAT 3 sources | files already | ✓ | ✓ |
 
@@ -95,6 +98,7 @@ rung works through your own licensed TIA Portal and does not replace it or its l
 - Only Siemens Openness talks to TIA Portal; rung never opens project files itself.
 - Failsafe, know-how protected, system and GRAPH blocks and library instances stay read-only. Deleting a file never deletes a block: `rung confirm-delete` does.
 - A person starts every [download](docs/downloads.md). Agents never do.
+- `RUNG_READ_ONLY=1` locks rung to reading for a machine that must not be changed: no download, write, force or RUN/STOP, refused before anything reaches the PLC.
 
 ## License
 

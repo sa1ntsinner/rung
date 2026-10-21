@@ -231,7 +231,7 @@ export interface CheckItem {
   id: string;
   group: string;
   name: string;
-  status: "ok" | "warn" | "missing";
+  status: "ok" | "warn" | "missing" | "na";
   detail?: string;
   enables?: string;
   fix?: string;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from "vitest";
 import { Args, type CheckItem } from "../src/core/args";
-import { mirrorFolderFor, preflight, tiaReadiness, tiaVersionOf, validateRemoteProject } from "../src/core/firstUse";
+import { envLook, mirrorFolderFor, preflight, tiaReadiness, tiaVersionOf, validateRemoteProject } from "../src/core/firstUse";
 
 const item = (id: string, status: CheckItem["status"], detail?: string, fix?: string): CheckItem => ({ id, group: "plc", name: id, status, ...(detail ? { detail } : {}), ...(fix ? { fix } : {}) });
 const good = [item("tia", "ok", "V20, V21"), item("openness", "ok", "V20, V21"), item("openness-group", "ok"), item("whitelist", "ok")];
@@ -61,4 +61,12 @@ describe("first use: Open TIA Project", () => {
     expect(Args.init("C:\\P\\L.ap20")).toEqual(["init", "--project", "C:\\P\\L.ap20"]);
     expect(Args.init("C:\\P\\L.ap20", "C:\\W")).toEqual(["init", "C:\\W", "--project", "C:\\P\\L.ap20"]);
   });
+});
+
+it("the Environment view tells a missing must-have for TIA Portal from an optional tool", () => {
+  expect(envLook(item("whitelist", "missing"))).toEqual({ icon: "error", description: "needed for TIA Portal" });
+  expect(envLook(item("openness-group", "missing"))).toEqual({ icon: "error", description: "needed for TIA Portal" });
+  expect(envLook(item("codesys", "missing"))).toEqual({ icon: "circle-large-outline", description: "not installed" });
+  expect(envLook(item("tia", "ok", "V20"))).toEqual({ icon: "pass", description: "V20" });
+  expect(envLook(item("node", "warn"))).toEqual({ icon: "warning", description: "needs attention" });
 });

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+**Online with the PLC**
+- S7CommPlus over TLS (S7-1500 firmware 2.9 and later), without the PLC's web server: live values next to the code, in the declarations table and the ladder view, TIA watch tables live, CPU state and cycle time, alarms and the diagnostic buffer; subscriptions shared by every editor and agent of the workspace through one broker. The PLC's certificate is pinned by its SHA-256 (`rung live trust`). Modify, RUN and STOP only behind a typed confirmation and a per-PLC opt-in; force tables stay read-only. Checked on PLCSIM Advanced and, read-only, on a CPU 1516 of a machine.
+- **Program status, reconstructed**: the inputs of one cycle of an FB called from OB1 (up to four levels down, multi-instances, structures, arrays, timers and counters as the PLC has them) replayed by the simulator; every SCL line shows the values it computed, marked *reconstructed*, with any difference to what the PLC wrote. Not TIA Portal's exact status, and labelled so.
+- **Trace**: `rung trace record` samples PLC signals over S7CommPlus, `rung trace import` reads TIA Portal's long-term trace CSV, and VS Code plots both (zoom, cursors, scales, gaps shown as gaps).
+
+**LAD and FBD**
+- LAD blocks drawn as ladders (`rung: Show as Ladder`), in the editor's theme, with live values: power from the rail in green, coils and boxes in their operands' state, compare values beside their operands.
+
+**Project assets**
+- Hardware settings beyond IP addresses (any writable setting, catalogue modules), library types and master copies (release, update, import), alarm text lists, technology object parameters, HMI Basic/Comfort panels in `rung views`, safety observed read-only; each through a preview and an apply against the revision it was previewed on. `rung retrieve` and `rung upgrade` open `.zapNN` archives and older projects.
+
+**Before 0.3**
+- `rung report` and *rung: Report a Problem…* in VS Code: versions, this PC's checks and the workspace's shape for a bug report, without the project's code, names, paths or addresses (shown in an editor before it is copied).
+- `rung confirm-delete` takes several files: the blocks only another git branch had, after switching back.
+- The Environment view marks what TIA Portal sync cannot do without (the Openness group, the whitelist) in red as *needed*, apart from optional tools that are *not installed*.
+- A clean compile of hundreds of blocks names the first eight and a count instead of all of them on one line.
+- The command palette no longer lists commands that belong to one view's toolbar.
+- Measured on a 624-object project: a saved FB is compiled in TIA Portal about a second later; switching git branches with 57 changed files is synced in about 40 s; creating 600 blocks takes 7 minutes.
+
 - A read-only lock (`RUNG_READ_ONLY=1` or per-PLC `read_only = true`) blocks PLC changes and TIA imports across the CLI, hosts and VS Code. Watch exports only, and protected-address reads require the lock. `rung init --from-plc` still works under it, into a new project only.
 - `rung backup --from-plc <ip> --out <folder>`: everything rung can read from a running S7-1500 in one folder, the PLC only read: station upload into a new project and its archive, the online compare proving the copy complete, the program as text, CPU identity, state and certificate, alarms, every data block's values, a manifest and SHA-256 sums; `rung backup verify` and `rung backup diff` for later. Measured on a CPU 1516 over a VPN: 4 minutes, 185 objects, 2395 values, cycle time unchanged.
 - Found on a real S7-1500: the upload answers the certificate question of a PLC with secure communication (`--trust-certificate`, else a clear refusal) and reports a failed upload as failed even when a station came; `rung live watch --file` of an instance or UDT-typed DB shows its values (it showed none); a user constant of a tag table is no longer read from the PLC; the live broker replaces a host that exited and subscribes again, and a watch without live values for 60 s stops (`--reconnect-timeout`); `rung trace record` does not count connecting as recording time (`connectMs`); `rung live trust --expect-sha256` pins without a terminal; `rung retrieve` and `rung upgrade` refuse at once a `RUNG_BRIDGE` that TIA Portal's Openness whitelist does not know, instead of waiting 15 minutes on a question no window shows; a failed go-online names the interface it used.

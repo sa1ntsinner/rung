@@ -145,6 +145,10 @@ describe("two-way CLI", () => {
     printReport({ cwd: t.dir, env: {}, stdout: (s) => out.push(s), stderr: () => {} }, { exported: 1000, imported: 0, created: 0, merged: 0, conflicts: 0, pendingDeletes: 0, removed: 0, unchanged: 0, warnings: [], diagnostics: [], changes: Array.from({ length: 1000 }, (_, i) => ({ path: `plc/PLC_1/blocks/F${i}.scl`, action: "export" as const })) });
     expect(out.join("").match(/← TIA/g)).toHaveLength(8);
     expect(out.join("")).toContain("992 more files (1000 moved");
+    // a clean compile of hundreds of new blocks names a few, not all of them on one line
+    const compiled: string[] = [];
+    printReport({ cwd: t.dir, env: {}, stdout: (s) => compiled.push(s), stderr: () => {} }, { exported: 0, imported: 0, created: 600, merged: 0, conflicts: 0, pendingDeletes: 0, removed: 0, unchanged: 0, warnings: [], diagnostics: [], compiled: Array.from({ length: 600 }, (_, i) => `plc:PLC_1/blocks/FB_${i}`) });
+    expect(compiled.join("")).toContain("compiled in TIA Portal: FB_0, FB_1, FB_2, FB_3, FB_4, FB_5, FB_6, FB_7 and 592 more: ok");
   });
 
   it("sync refuses a tag table on its missing-address and address-size lines, before import", async () => {
@@ -315,6 +319,23 @@ describe("two-way CLI", () => {
     expect(t.db().objects).toHaveLength(1);
     expect(await t.run(["confirm-delete", MOTOR])).toBe(0);
     expect(t.db().objects).toHaveLength(0);
+  });
+
+  it("confirm-delete takes several files at once (blocks another git branch added)", async () => {
+    const t = setup();
+    const db = t.db();
+    db.objects.push({ address: "plc:PLC_1/blocks/Fx_Pump", content: 'FUNCTION_BLOCK "Fx_Pump"\nbegin\n  #a := 1;\nEND_FUNCTION_BLOCK\n' });
+    writeFileSync(t.objects, JSON.stringify(db));
+    await t.run(["init", "--writes"]);
+    await t.run(["pull"]);
+    unlinkSync(t.file(...motorFile));
+    unlinkSync(t.file("plc", "PLC_1", "blocks", "Fx_Pump.scl"));
+    await t.run(["sync"]);
+    expect(t.db().objects).toHaveLength(2);
+    t.out.length = 0;
+    expect(await t.run(["confirm-delete", join(...motorFile), "plc/PLC_1/blocks/Fx_Pump.scl"])).toBe(0);
+    expect(t.db().objects).toHaveLength(0);
+    expect(t.out.join("")).toMatch(/deleted .*Fx_Motor.*\n.*deleted .*Fx_Pump/s);
   });
 
   it("resolve --theirs ends a conflict with the TIA version", async () => {

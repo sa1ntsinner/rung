@@ -54,6 +54,7 @@ import { cmdProgramStatus } from "./program-status.js";
 import { cmdImpact } from "./impact.js";
 import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
+import { cmdReport } from "./report.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
 import { cmdWho } from "./who.js";
@@ -69,6 +70,7 @@ Usage:
              [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
   rung check [--host <ssh-destination>] [--json]  what is installed (TIA, PLCSIM, TwinCAT, CODESYS, editors, agents) and how to get the rest
+  rung report [dir]                    versions, this PC and the workspace's shape for a bug report (no code, names, paths or addresses)
   rung format [dir|file] [--check]     format SCL code as TIA Portal writes it, so a sync and a pull bring it back unchanged
   rung xref <file|plc:object-address> [--json] [--fresh]
                                        TIA Portal's cross-reference of an object: who uses it, HMI and alarms included
@@ -96,7 +98,7 @@ Usage:
   rung backup diff <a> <b>             what changed between two backups of a PLC: program files, values, CPU
   rung resolve <file> --ours|--theirs|--merged
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
-  rung confirm-delete <file|address> [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
+  rung confirm-delete <file|address>... [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] [--device <PLC>] [--transport s7commplus|webapi] [--json]
@@ -422,6 +424,7 @@ function initHint(code: string, project: boolean): string | undefined {
 export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["host", "json"], positionals: 0 },
+  report: { options: [], positionals: 1 },
   format: { options: ["check"], positionals: 1 },
   xref: { options: ["json", "fresh"], positionals: 1 },
   why: { options: ["instance", "json"], positionals: 2 },
@@ -437,7 +440,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   status: { options: [], positionals: 1 },
   resolve: { options: ["ours", "theirs", "merged"], positionals: 1 },
   restore: { options: [], positionals: 1 },
-  "confirm-delete": { options: ["dir", "force"], positionals: 1 },
+  "confirm-delete": { options: ["dir", "force"], positionals: Infinity },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
   live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture", "expect-sha256", "reconnect-timeout"], positionals: Infinity },
@@ -846,6 +849,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await cmdFormat(dir, !!v.check, io);
       case "check":
         return await cmdCheck(v, io);
+      case "report":
+        return await cmdReport(dir, io);
       case "simulate":
         return await cmdSimulate(dir, v, io);
       case "setup":
@@ -958,10 +963,15 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "confirm-delete":
         if (!target) {
-          io.stderr("rung: usage: rung confirm-delete <file|address> [--force] [--dir <workspace>]\n");
+          io.stderr("rung: usage: rung confirm-delete <file|address>... [--force] [--dir <workspace>]\n");
           return 1;
         }
-        return await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), target, io, !!v.force);
+        // several at once: the blocks a git branch added, gone after switching back; the first refusal stops the rest
+        for (const what of positionals.slice(1)) {
+          const code = await cmdConfirmDelete(resolve(io.cwd, (v.dir as string | undefined) ?? "."), what, io, !!v.force);
+          if (code !== 0) return code;
+        }
+        return 0;
       default:
         {
           const near = nearest(cmd, [...Object.keys(COMMANDS).filter((c) => c !== "codesys-bridge"), "bridge"]);

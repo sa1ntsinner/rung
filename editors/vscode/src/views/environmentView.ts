@@ -4,7 +4,7 @@
 import * as vscode from "vscode";
 import { onPath } from "../bundled";
 import { parseCheck, type CheckItem } from "../core/args";
-import { tiaReadiness } from "../core/firstUse";
+import { envLook, tiaReadiness } from "../core/firstUse";
 import { findExecutable } from "../core/exec";
 import { RungCli } from "../runner/cli";
 import { isFile } from "../workspace";
@@ -79,13 +79,10 @@ export class EnvironmentView implements vscode.TreeDataProvider<Node>, vscode.Di
     }
     const i = n.item;
     const t = new vscode.TreeItem(i.name);
-    t.description = i.status === "ok" ? i.detail ?? "" : i.status === "warn" ? i.detail ?? "needs attention" : "not installed";
-    t.iconPath =
-      i.status === "ok"
-        ? new vscode.ThemeIcon("pass", new vscode.ThemeColor("testing.iconPassed"))
-        : i.status === "warn"
-          ? new vscode.ThemeIcon("warning", new vscode.ThemeColor("list.warningForeground"))
-          : new vscode.ThemeIcon("circle-large-outline");
+    const look = envLook(i);
+    t.description = look.description;
+    const color = { pass: "testing.iconPassed", warning: "list.warningForeground", error: "list.errorForeground" }[look.icon as string];
+    t.iconPath = new vscode.ThemeIcon(look.icon, color ? new vscode.ThemeColor(color) : undefined);
     const md = new vscode.MarkdownString(`**${i.name}**${i.detail ? ` · ${i.detail}` : ""}\n\n${i.enables ? `For ${i.enables}.` : ""}${i.fix ? `\n\n${i.fix}` : ""}${i.link ? `\n\n${i.link}` : ""}`);
     t.tooltip = md;
     t.contextValue = `env.${i.status}${FIXES[i.id] ? ".fixable" : ""}${i.link ? ".link" : ""}`;

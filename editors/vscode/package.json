@@ -522,6 +522,12 @@
         "category": "rung"
       },
       {
+        "command": "rung.report",
+        "title": "Report a Problem…",
+        "category": "rung",
+        "icon": "$(report)"
+      },
+      {
         "command": "rung.restartServer",
         "title": "Restart Language Server",
         "category": "rung"
@@ -969,6 +975,42 @@
         {
           "command": "rung.changes.sync",
           "when": "rung.workspace && !rung.readOnly"
+        },
+        {
+          "command": "rung.why.copy",
+          "when": "rung.why.shown"
+        },
+        {
+          "command": "rung.changes.refresh",
+          "when": "false"
+        },
+        {
+          "command": "rung.monitor.stop",
+          "when": "rung.monitoring"
+        },
+        {
+          "command": "rung.test.openTable",
+          "when": "resourceFilename =~ /\\.test\\.ya?ml$/"
+        },
+        {
+          "command": "rung.udt.openTable",
+          "when": "resourceExtname == .udt"
+        },
+        {
+          "command": "rung.live.bookmark",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.live.export",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.live.exportTest",
+          "when": "rung.workspace"
+        },
+        {
+          "command": "rung.live.clear",
+          "when": "rung.workspace"
         }
       ],
       "view/title": [

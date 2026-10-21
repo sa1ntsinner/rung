@@ -2,6 +2,13 @@
 
 rung turns a Siemens TIA Portal project into a folder of text files that stays in sync with TIA Portal, so you can work on it in VS Code, Zed or Neovim and keep it in git.
 
+**In five minutes, in VS Code:** install the **rung** extension (it brings rung with it) → the rung view's **Environment** section checks this
+PC; do what it says once (the Openness group, `rung setup openness`) → **rung: Open TIA Project…** →
+choose your `.ap20` (or `.ap19`, `.ap21`, a `.zap` archive) and an empty folder. rung opens the project in a TIA Portal
+without window, mirrors it into the folder and starts watching. Look around; when you want your edits to go to TIA
+Portal, turn on *Writes to TIA Portal* in the PLC view. The rest of this page is the same, step by step and from the
+command line.
+
 ## 1. Install and check
 
 - Windows with a licensed **TIA Portal V19, V20 or V21** and the Openness option (installed with TIA Portal). rung uses your TIA Portal and its licence; it does not replace either. rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
@@ -52,18 +59,7 @@ git init && git add -A && git commit -m "baseline"
 
 `rung init` also writes `.gitignore` (`.rung/` is machine state) and `.gitattributes` (`* text=auto eol=lf`, so git for Windows does not check the files out with CRLF; a file that differs only in line endings is never sent to TIA Portal anyway). A colleague who clones the folder runs `rung pull` there, not `rung init`.
 
-If the project is not open, rung opens it in a TIA Portal without window (`[tia] start = "headless"` in `rung.toml`; `"never"` turns that off). A keeper holds it open for every command and editor of the project, so only the first one waits for it. It closes after 10 minutes with no clients attached, unless the project has unsaved changes. Set `RUNG_KEEPER_IDLE_S` to a positive number of seconds on the TIA Portal PC before starting the keeper to change that limit. The keeper never saves the project itself.
-
-**Open in TIA Portal** (`rung open <file>`) moves the project into a TIA Portal window and shows the object there. If the background project has unsaved changes, VS Code offers **Save and Open**; the CLI needs `rung open <file> --save`. After you close the window, the next command or watch pass opens it in the background again. Over SSH, opening a window needs an interactive desktop on the Windows PC; see [remote setup](remote.md).
-
-```sh
-rung session                  # existing TIA Portal, mode, holder and attached sessions; starts none
-rung session --release        # stops watch and closes the project held by rung's keeper
-rung session --release --save # save unsaved changes before releasing
-rung session --release --discard # lose unsaved TIA changes and close without saving
-```
-
-Release refuses a TIA Portal window, a session held by another program, or a keeper with other clients still attached. `--discard` explicitly loses unsaved TIA changes, overrides save-after-import for this close, and cannot be combined with `--save`. It requires a bridge and watch owner that support discard; older versions refuse it. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
+If the project is not open, rung opens it in a TIA Portal without window and keeps it open for the next command (details in [TIA Portal in the background](#tia-portal-in-the-background)). **Open in TIA Portal** (`rung open <file>`) shows the object you are on in a TIA Portal window. Without `--project`, `rung init` binds the project that is open. A CODESYS project (`.project`) works through a CODESYS without window: see [CODESYS](codesys.md).
 
 ## 4. Work two-way
 
@@ -91,6 +87,8 @@ The right is kept in `.rung/`, never in git, and names the project: a colleague 
 - Tag tables are text, one tag per line: `plc/<PLC>/tags/<table>.tags.st` holds `Start AT %I0.0 : Bool;  // start button` in a `VAR_GLOBAL` list and constants in `VAR_GLOBAL CONSTANT`. The editor and sync check for a missing address, a type that does not fit it, two tags on one line and a name used twice. Sync refuses the table until these are fixed; TIA Portal itself can accept a mismatched type and show the tag red. A table whose comments are in several languages stays SimaticML (`.tags.xml`). Watch tables (`plc/<PLC>/watch/*.xml`) are SimaticML and go both ways too; force tables, know-how protected, fail-safe, system and GRAPH blocks and instances of library types are mirrored read-only.
 - `plc/<PLC>/hardware/network.yaml` holds the IP address, subnet mask, router and PROFINET device name of every Ethernet interface of the PLC and of its IO devices. Change a value, save, and rung sets it in TIA Portal and compiles the hardware; a value TIA Portal refuses is reported with its line and nothing is changed. `rung download --hw` takes the settings to the devices.
 
+**Git branches.** Switch branches with watch running and TIA Portal follows: the changed files go in, in dependency order, compiled (measured: 57 files of a 624-object project in 37 s, no conflicts). A block that only the other branch has becomes a pending delete when you switch away from it, and comes back when you switch back; if you mean to drop it, `rung confirm-delete <file> <file>…` deletes them in TIA Portal. Merging branches in git uses rung's merge driver for SCL and DB files (`.gitattributes`, written by `rung init`), so two declarations added on both sides do not conflict.
+
 `rung sync` does one pass instead of watching. Sync and watch print `→ TIA  <file>` for a send and `← TIA  <file>` for a file brought from TIA Portal, with created, merged or removed where needed. Large passes show the first eight files and a count; `rung sync --json` lists all. `rung status` compares disk hashes with the last recorded TIA version and lists edited files that have not been sent, with the reason when known; it does not contact TIA Portal. For scripts and CI: `rung sync` exits 0 when the pass is done (writes off with edits waiting too), 2 when something needs a person (a conflict, a refused import, a compile error), 1 when rung could not run; `rung <command> --help` gives each command's codes.
 
 ## 5. Test without a PLC
@@ -117,6 +115,22 @@ In VS Code, the PLC picker puts the last PLC you chose first the next time; it s
 - `rung init --from-plc <ip> --project <new .ap20>`: no project file, only a running PLC? rung makes a new project from it (TIA's upload device as new station) and binds the folder to it ([downloads](downloads.md#uploading-from-a-plc)).
 - `rung assignments`: TIA Portal's assignment list, every input, output, bit memory, timer and counter address in use with its tag and where the code uses it, and overlapping accesses (exit 2 when two cross).
 - `rung views`: read-only YAML views of hardware, HMI, technology objects, the project library and the software units with their relations; a Basic/Comfort panel's tag tables, screens, templates and text lists also as TIA Portal's XML (`views/hmi/<panel>/`). HMI objects are not editable in Rung; see the [capability map](capabilities.md).
-- `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. All over the S7-1500 Web API, read-only.
+- `rung live watch --file <block>`: TIA Portal's monitoring for one block, the values of every line twice a second (VS Code shows them in the editor: the eye button). `rung live read`, `rung live diag`: single values and the diagnostic buffer. Over S7CommPlus (TLS) or the S7-1500 Web API; see [Going online](online.md). `rung backup --from-plc <ip> --out <folder>` saves everything of a running PLC, read-only.
+- `rung report`: what a bug report needs, without your project's code, names, paths or addresses.
 - `rung agents`: refreshes the project summary in `AGENTS.md`.
 - `rung --help` lists every command; `rung sync --help` (or any command’s `--help`) shows its options and an example.
+
+## TIA Portal in the background
+
+`[tia] start = "headless"` in `rung.toml` (the default) lets rung open the project in a TIA Portal without window; `"never"` turns that off. A keeper holds it open for every command and editor of the project, so only the first one waits for it. It closes after 10 minutes with no clients attached, unless the project has unsaved changes (`RUNG_KEEPER_IDLE_S` on the TIA Portal PC changes the limit). The keeper never saves the project itself.
+
+**Open in TIA Portal** moves the project into a TIA Portal window and shows the object there. If the background project has unsaved changes, VS Code offers **Save and Open**; the CLI needs `rung open <file> --save`. After you close the window, the next command or watch pass opens it in the background again. Over SSH, opening a window needs an interactive desktop on the Windows PC; see [remote setup](remote.md).
+
+```sh
+rung session                     # existing TIA Portal, mode, holder and attached sessions; starts none
+rung session --release           # stops watch and closes the project held by rung's keeper
+rung session --release --save    # save unsaved changes before releasing
+rung session --release --discard # lose unsaved TIA changes and close without saving
+```
+
+Release refuses a TIA Portal window, a session held by another program, or a keeper with other clients still attached. `--discard` cannot be combined with `--save`.

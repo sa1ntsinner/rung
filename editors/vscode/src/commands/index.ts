@@ -393,6 +393,16 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   reg("rung.restartServer", () => s.lsp.restart());
   reg("rung.init", () => initCommand(ws, cli, context));
   reg("rung.openDocs", () => vscode.env.openExternal(vscode.Uri.parse(DOCS)));
+  // rung report in an editor first: the person reads what goes out before it is pasted into an issue
+  reg("rung.report", async () => {
+    const r = await cli.capture(["report"], { progress: "rung: collecting a report…" });
+    if (r.code !== 0) return;
+    const text = r.output.slice(r.output.indexOf("## rung report"));
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: "markdown", content: text }));
+    await vscode.env.clipboard.writeText(text);
+    const pick = await vscode.window.showInformationMessage("The report is copied. Paste it into a new issue once you have read it.", "Open a New Issue");
+    if (pick) await vscode.env.openExternal(vscode.Uri.parse("https://github.com/sa1ntsinner/rung/issues/new"));
+  });
   reg("rung.quickPick", () => quickPick(ws, watch));
 }
 

@@ -475,6 +475,14 @@ describe("rung extension on a fake-bridge workspace", function () {
       const labels = api.environment.getChildren(node).map((n) => api.environment.getTreeItem(n).label);
       assert.ok(labels.includes("Node.js"), labels.join(", "));
     });
+
+    it("Report a Problem shows the report in an editor before it goes anywhere, without the project's path", async () => {
+      void vscode.commands.executeCommand("rung.report");
+      const doc = await waitFor("the report in an editor", () => vscode.workspace.textDocuments.find((t) => t.isUntitled && t.getText().startsWith("## rung report")), 60_000);
+      assert.match(doc.getText(), /### Workspace/);
+      assert.ok(!doc.getText().includes("RungE2E"), "the project name is in the report");
+      assert.equal(await vscode.env.clipboard.readText(), doc.getText());
+    });
   });
 
   describe("sync, pull, status", () => {
@@ -973,9 +981,11 @@ describe("rung extension on a fake-bridge workspace", function () {
 
   describe("every palette command", () => {
     // Commands with their own tests above that start long-running things are left out here.
-    const OWN_TEST = new Set(["rung.watch.start", "rung.watch.toggle", "rung.watch.stop"]);
+    // rung simulate runs a virtual PLC until it is stopped, like watch
+    const OWN_TEST = new Set(["rung.watch.start", "rung.watch.toggle", "rung.watch.stop", "rung.simulate", "rung.report"]);
 
-    it("runs without throwing when every dialog is dismissed", async () => {
+    it("runs without throwing when every dialog is dismissed", async function () {
+      this.timeout(300_000);
       const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "package.json"), "utf8")) as { contributes: { commands: { command: string }[] } };
       await openDoc(PUMP);
       const failures: string[] = [];
@@ -983,7 +993,11 @@ describe("rung extension on a fake-bridge workspace", function () {
         if (OWN_TEST.has(command)) continue;
         d.reset();
         try {
-          await vscode.commands.executeCommand(command);
+          // a picker made with createQuickPick (Pin a Value) is not one of the stubbed dialogs: Escape closes it
+          const running = Promise.resolve(vscode.commands.executeCommand(command));
+          const done = await Promise.race([running.then(() => true), sleep(1500).then(() => false)]);
+          if (!done) await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+          await running;
         } catch (e) {
           failures.push(`${command}: ${(e as Error).message}`);
         }
