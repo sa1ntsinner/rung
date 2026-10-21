@@ -13,6 +13,20 @@ import type { Io } from "./common.js";
 import type { BackendOptions, liveSelection } from "./liveServer.js";
 import type { Readable } from "node:stream";
 import { assertPlcWritable, loadConfig } from "@rung/core";
+import { randomUUID } from "node:crypto";
+import { runningSimulator } from "./simulate.js";
+
+/** One JSON-RPC call to this workspace's rung simulate (loopback, any login). */
+async function simulatorCall(url: string, method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const rpc = async (body: unknown, token?: string) => {
+    const res = await fetch(new URL("/api/jsonrpc", url), { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-auth-token": token } : {}) }, body: JSON.stringify(body) });
+    const reply = await res.json() as { result?: unknown; error?: { message: string } };
+    if (reply.error) throw new BridgeError("REJECTED", reply.error.message);
+    return reply.result;
+  };
+  const login = await rpc({ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: "simulator" } }) as { token: string };
+  return await rpc({ jsonrpc: "2.0", id: 2, method, params }, login.token) as Record<string, unknown>;
+}
 
 /** Editor replies must echo the exact prepared operation over this process's private stdin. */
 export async function frontendConfirmation(input: Readable, operation: OnlinePreparedWrite): Promise<boolean> {
@@ -36,15 +50,15 @@ export async function frontendConfirmation(input: Readable, operation: OnlinePre
 
 /** Pending hosts hold read connections only. The host creates a writer only after commit. */
 export function liveMutations(root: string, env: Io["env"], select: (options: BackendOptions) => ReturnType<typeof liveSelection>, dialog?: DialogRunner) {
-  const pending = new Map<string, { clientId: string; policy: MutationPolicy; host: BridgeClient; device: string; action: AgentAction; approval?: AgentApproval; timer: ReturnType<typeof setTimeout> }>();
+  const pending = new Map<string, { clientId: string; commit: (preview: string, confirmed: boolean) => Promise<OnlineWriteResult>; close: () => Promise<void>; device: string; action: AgentAction; approval?: AgentApproval; timer: ReturnType<typeof setTimeout> }>();
   const brokerEnv = env;
   let preparing = 0;
   let closed = false;
   const revision = async () => createHash("sha256").update(await readFile(join(root, "rung.toml"))).digest("hex");
   async function discard(id: string) {
     const operation = pending.get(id); if (!operation) return;
-    pending.delete(id); clearTimeout(operation.timer); operation.policy.invalidate();
-    try { await operation.host.close(); } finally { await operation.approval?.finish(1); }
+    pending.delete(id); clearTimeout(operation.timer);
+    try { await operation.close(); } finally { await operation.approval?.finish(1); }
   }
   return {
     async prepare(clientId: string, options: BackendOptions, action: MutationAction, credentials: { user?: string; password?: string }, clientAgent?: string, command?: string) {
@@ -57,6 +71,24 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
       assertPlcWritable(await loadConfig(root), options.device, env);
       if (closed || pending.size + preparing >= 128) throw new BridgeError("RESOURCE_LIMIT", "Too many pending confirmations or broker is closed");
       const selected = await select(options);
+      // rung simulate is no PLC: a value changes there without allow_writes or a certificate, after the same preview
+      const sim = selected.transport === "webapi" ? await runningSimulator(root) : undefined;
+      if (sim && sim.url === selected.target.webapi?.url) {
+        if (action.action !== "modify") throw new BridgeError("UNSUPPORTED_CAPABILITY", "rung simulate has no RUN/STOP: it runs until you stop it (Ctrl+C)");
+        const params = { var: action.name, literal: action.literal };
+        const seen = await simulatorCall(sim.url, "Rung.Modify", params);
+        const operationId = randomUUID(), expiresAt = Date.now() + 120_000;
+        const preview = `rung simulate (${selected.device}): ${action.name} ${JSON.stringify(seen.old)} -> ${JSON.stringify(seen.value)}`;
+        const timer = setTimeout(() => void discard(operationId).catch(() => {}), 120_000);
+        timer.unref();
+        pending.set(operationId, { clientId, device: selected.device, action: permissionAction, approval, timer, close: async () => {},
+          commit: async (shown, confirmed) => {
+            if (shown !== preview || !confirmed || Date.now() >= expiresAt) throw new BridgeError("STALE_PREPARATION", "Confirm the prepared operation");
+            await simulatorCall(sim.url, "Rung.Modify", { ...params, commit: true });
+            return { outcome: "acknowledged" };
+          } });
+        return { operationId, preview, expiresAt };
+      }
       validateLiveAddress(selected.target.address);
       if (selected.transport !== "s7commplus") throw new BridgeError("UNSUPPORTED_CAPABILITY", "Confirmed mutations require s7commplus");
       if (selected.target.allowWrites !== true) throw new BridgeError("WRITES_DISABLED", "Enable allow_writes for the selected PLC");
@@ -86,7 +118,9 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
         const timer = setTimeout(() => void discard(operation.operationId).catch(() => {}), Math.max(0, operation.expiresAt - Date.now()));
         timer.unref();
         if (closed) { clearTimeout(timer); throw new BridgeError("BRIDGE_EXITED", "Broker closed during preparation"); }
-        pending.set(operation.operationId, { clientId, policy, host, device: selected.device, action: permissionAction, approval, timer });
+        pending.set(operation.operationId, { clientId, device: selected.device, action: permissionAction, approval, timer,
+          commit: (shown, confirmed) => policy.commit(operation.operationId, shown, confirmed),
+          close: async () => { policy.invalidate(); await activeHost.close(); } });
         return { operationId: operation.operationId, preview: operation.preview, expiresAt: operation.expiresAt };
       } catch (error) { await host?.close().catch(() => {}); throw error; }
       finally { preparing--; }
@@ -103,9 +137,9 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
       pending.delete(id); clearTimeout(operation.timer);
       try {
       assertPlcWritable(await loadConfig(root), operation.device, env);
-      const result = await operation.policy.commit(id, preview, confirmed); outcome = result.outcome === "acknowledged" ? 0 : 2; return result;
+      const result = await operation.commit(preview, confirmed); outcome = result.outcome === "acknowledged" ? 0 : 2; return result;
       } catch (error) { if ((error as { code?: string }).code === "PLC_READ_ONLY") outcome = 2; throw error; }
-      finally { operation.policy.invalidate(); await operation.host.close().catch(() => {}); await operation.approval?.finish(outcome); }
+      finally { await operation.close().catch(() => {}); await operation.approval?.finish(outcome); }
       };
       return operation.approval ? agentPermission.run(operation.approval.scope, commit) : commit();
     },

@@ -298,6 +298,11 @@ the configuration, certificate, identity, epoch, program and scalar type again.
 The writer uses a separate short-lived TLS session and sends once. A timeout
 after sending reports `unknown`; it never retries. `acknowledged` means the PLC
 accepted the operation; subsequent logic can overwrite a modified value.
+
+`rung live modify` also changes a value in this workspace's `rung simulate`, which is not a PLC: no `allow_writes` or
+certificate, the same preview and confirmation, and the value checked like a test's `set:` (a number in a BOOL, 40000
+in an INT are refused). It has no RUN/STOP.
+
 By default a person starts downloads and live changes. A person may set an
 [agent mode](agents/modes.md) that permits selected actions. Real PLCs default to
 `manual`; reliably identified simulators default to `auto`. Noninteractive CLI

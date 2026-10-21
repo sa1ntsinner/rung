@@ -8,7 +8,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { WorkspaceIndex } from "@rung/lsp";
-import { Simulator, parseBody, type Instance, type Value } from "@rung/sim";
+import { Simulator, checkKind, checkType, parseBody, type Instance, type Value } from "@rung/sim";
 import { WorkspaceError } from "@rung/core";
 import { findWorkspace, type Io } from "./common.js";
 
@@ -109,6 +109,26 @@ export async function startVirtualPlc(root: string, opts: { host: string; port: 
           return ok(true);
         } catch (e) {
           return err(200, `Address does not exist: ${(e as Error).message}`);
+        }
+      case "Rung.Modify":
+        // rung live modify on the virtual PLC (a PLC has no such method): one value from an SCL literal, checked like a
+        // test's set:, previewed first, written with commit
+        try {
+          const name = String(r.params?.var ?? "");
+          const target = ref(name);
+          if (target.root.kind === "global") sim.read({ root: target.root, path: [], start: 0 }, null);
+          const old = sim.read(target, null);
+          if (old !== null && typeof old === "object") throw new Error(`${name} is not a single value: modify one member or element`);
+          const [s] = parseBody(`#__value := ${String(r.params?.literal ?? "")};`);
+          if (s?.k !== "assign") throw new Error("not an SCL literal");
+          const value = sim.eval(s.value, null);
+          checkKind(name, old, value);
+          const d = sim.declOf(target, null);
+          if (d) checkType(name, d.typeRef ?? d.type, value);
+          if (r.params?.commit === true) sim.write(target, value, null);
+          return ok({ old: plain(old), value: plain(r.params?.commit === true ? sim.read(target, null) : value) });
+        } catch (e) {
+          return err(200, (e as Error).message);
         }
       case "PlcProgram.Browse":
         return ok(globals.filter((g) => g.kind === "DB" || g.kind === "TAG").map((g) => ({ name: g.name, db_number: 0, datatype: g.kind === "DB" ? "DB" : g.tag?.dataType ?? "" })));

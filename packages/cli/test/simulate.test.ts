@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { WebApiClient } from "@rung/live";
 import { startVirtualPlc } from "../src/simulate.js";
 import { main } from "../src/main.js";
+import { liveMutations } from "../src/liveMutation.js";
+import { liveSelection } from "../src/liveServer.js";
 
 const MAIN = `ORGANIZATION_BLOCK "Main"
 VERSION : 0.1
@@ -82,6 +84,29 @@ describe("rung simulate (virtual S7-1500)", () => {
       await plc.close();
       const owner = join(dir, ".rung", "live-owner.json");
       if (existsSync(owner)) process.kill(JSON.parse(readFileSync(owner, "utf8")).pid);
+    }
+  });
+  it("live modify changes a value in rung simulate after the preview, checked like a test's set:", async () => {
+    const dir = workspace();
+    const plc = await startVirtualPlc(dir, { host: "127.0.0.1", port: 0, cycleMs: 5 });
+    writeFileSync(join(dir, "rung.toml"), 'format = 1\ndevices = ["PLC_1"]\n[project]\npath = "fixture.ap20"\ntiaVersion = "V20"\n');
+    mkdirSync(join(dir, ".rung"), { recursive: true });
+    writeFileSync(join(dir, ".rung", "simulate.json"), JSON.stringify({ url: plc.url, pid: process.pid }));
+    const env = { RUNG_HOME: undefined };
+    const m = liveMutations(dir, env, (o) => liveSelection(dir, o, env));
+    try {
+      const op = await m.prepare("c", {}, { action: "modify", name: '"Plant".setpoint', literal: "8.0" }, {});
+      expect(op.preview).toBe('rung simulate (PLC_1): "Plant".setpoint 4 -> 8');
+      await expect(m.commit("c", op.operationId, "something else", true)).rejects.toThrow(/Confirm the prepared operation/);
+      const again = await m.prepare("c", {}, { action: "modify", name: '"Plant".setpoint', literal: "8.0" }, {});
+      expect(await m.commit("c", again.operationId, again.preview, true)).toEqual({ outcome: "acknowledged" });
+      await sleep(50);
+      expect((await new WebApiClient({ url: plc.url, user: "any", password: "x" }).read(['"Plant".speed']))[0]).toMatchObject({ value: 20 });
+      await expect(m.prepare("c", {}, { action: "modify", name: '"Plant".lamp', literal: "5" }, {})).rejects.toThrow(/lamp expects a BOOL/);
+      await expect(m.prepare("c", {}, { action: "stop" }, {})).rejects.toThrow(/rung simulate has no RUN\/STOP/);
+    } finally {
+      await m.close();
+      await plc.close();
     }
   });
   it("runs the cyclic OB and serves changing values over the Web API", async () => {

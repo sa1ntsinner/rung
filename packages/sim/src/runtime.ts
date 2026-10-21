@@ -1004,7 +1004,7 @@ export class Simulator {
   }
 
   /** Declared type of a reference, when the workspace knows it. */
-  private declOf(ref: LRef, frame: Frame | null): Decl | undefined {
+  declOf(ref: LRef, frame: Frame | null): Decl | undefined {
     let d: Decl | undefined;
     const name = ref.root.name.toUpperCase();
     let path = ref.path;
