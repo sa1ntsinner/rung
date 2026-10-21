@@ -267,6 +267,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .tile .nm { font-size: var(--step-lead); font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; margin-bottom: auto; padding-bottom: 20px; }
 .tile p:not(.nm) { margin: 0; color: var(--muted); font-size: var(--step-small); }
 .tile .brand { width: 44px; height: 44px; fill: currentColor; margin-bottom: auto; }
+.tile .brand.wide { width: 132px; height: 26px; margin-top: 9px; }
 .tile .nm.small { font-size: var(--step-body); font-weight: 600; letter-spacing: -0.01em; margin: 24px 0 4px; padding: 0; }
 .tile.head { grid-column: span 2; background: var(--accent); color: var(--accent-ink); }
 .tile.head h2 { font-size: clamp(2rem, 1.2rem + 2.6vw, 3.5rem); }
@@ -340,6 +341,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
   .tiles .tile + .tile:not(.head) { box-shadow: inset 0 1px 0 var(--bg); } /* taste-skill-ignore: a row divider in the ground colour */
   .tiles .tile.head { grid-column: 1 / -1; display: block; padding: 28px 24px; }
   .tiles .tile .brand { width: 32px; height: 32px; grid-row: span 2; margin: 2px 0 0; }
+  .tiles .tile .brand.wide { width: 40px; height: 8px; margin-top: 10px; }
   .tiles .tile .nm, .tiles .tile .nm.small { grid-column: 2; margin: 0 0 2px; padding: 0; font-size: var(--step-body); }
   .tiles .tile p:not(.nm) { grid-column: 2; }
   .foot .board { grid-template-columns: repeat(2, 1fr); }
