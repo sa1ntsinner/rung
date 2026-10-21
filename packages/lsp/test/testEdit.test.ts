@@ -90,6 +90,18 @@ describe("planTestEdit: values and keys", () => {
   it("a duplicate key is refused", () => {
     expect(plan(SRC, { op: "addEntry", case: 0, step: 0, part: "set", key: "start", value: "1" })).toMatchObject({ ok: false });
   });
+  it.each(["a", "b"])("removing %s keeps comments around and inside maps", (key) => {
+    for (const body of [
+      "        expect: { a: 1, b: 2 } # note\n",
+      "        expect: { a: 1, # inside\n          b: 2 } # note\n",
+      "        expect: # note\n          # inside\n          a: 1 # a note\n          b: 2 # b note\n",
+    ]) {
+      const src = "block: Fx\ncases:\n  - name: comments\n    steps:\n      - cycle: 1\n        # before\n" + body + "        # after\n";
+      const out = apply(src, { op: "removeEntry", case: 0, step: 0, part: "expect", key });
+      expect(out.match(/#[^\r\n]*/g)).toEqual(src.match(/#[^\r\n]*/g));
+      expect(testModel(out).cases[0]!.steps[0]!.expect!.entries.map(e => e.key)).toEqual([key === "a" ? "b" : "a"]);
+    }
+  });
 });
 
 describe("planTestEdit: steps and cases", () => {

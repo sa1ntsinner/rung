@@ -263,8 +263,15 @@ export function planTestEdit(text: string, model: TestModel, op: TestOp, opts: {
   const i = map.entries.indexOf(e);
   if (map.entries.length === 1) return removePart(op.part);
   if (map.flow) {
-    if (i < map.entries.length - 1) return ok(edit(e.pairRange.start, map.entries[i + 1]!.pairRange.start, ""));
-    return ok(edit(map.entries[i - 1]!.pairRange.end, e.pairRange.end, ""));
+    // Gaps contain only separators, whitespace and comments. Keep their comments when the comma goes.
+    const gap = (start: number, end: number) => {
+      const t = text.slice(start, end);
+      return t.includes("#") ? t.replace(/^[^#\r\n]*/gm, s => s.replace(/,/g, "")) : "";
+    };
+    if (i < map.entries.length - 1) return ok(edit(e.pairRange.start, map.entries[i + 1]!.pairRange.start, gap(e.pairRange.end, map.entries[i + 1]!.pairRange.start)));
+    return ok(edit(map.entries[i - 1]!.pairRange.end, e.pairRange.end, gap(map.entries[i - 1]!.pairRange.end, e.pairRange.start)));
   }
-  return ok(edit(lineStart(text, e.keyRange.start), lineEnd(text, e.valueRange.end - 1), ""));
+  const end = lineEnd(text, e.valueRange.end - 1);
+  const tail = text.slice(e.valueRange.end, end);
+  return ok(edit(lineStart(text, e.keyRange.start), end, tail.includes("#") ? indentAt(text, e.keyRange.start) + tail.trimStart() : ""));
 }
