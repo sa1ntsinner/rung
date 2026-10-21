@@ -133,9 +133,14 @@ export function orderedParams(callee: CallSite["callee"]): CallParam[] {
 }
 
 /** Parameters an FC call must supply but does not: TIA Portal wants every input, in/out and output of an FC (named calls only). */
+/** IEC timers: TIA Portal refuses a call without IN or PT ("Parameter 'PT' has to be used"), a reset call too. */
+const TIMER = /^(TON|TOF|TP|TONR)(_L?TIME)?$/i;
+
 export function missingParams(site: CallSite): CallParam[] {
-  if (site.callee.kind !== "FC" || site.args.some((a) => !a.name)) return [];
+  if (site.args.some((a) => !a.name)) return [];
   const given = new Set(site.args.map((a) => a.name!.toUpperCase()));
+  if (site.callee.kind === "std" && TIMER.test(site.callee.name)) return site.callee.params.filter((p) => (p.name === "IN" || p.name === "PT") && !given.has(p.name));
+  if (site.callee.kind !== "FC") return [];
   return site.callee.params.filter((p) => !given.has(p.name.toUpperCase()));
 }
 

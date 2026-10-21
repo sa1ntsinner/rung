@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { BlobStore, Journal, StateStore, defaultConfig, sha256, type RungConfig } from "@rung/core";
 import { BridgeError, type CompileMessage, type ExportResult } from "@rung/bridge-client";
 import { pull, syncOnce, syncQuick, confirmDelete, resolveConflict, restoreFile } from "../src/index.js";
-import { withoutLayout } from "../src/sync.js";
+import { referencedNames, withoutLayout } from "../src/sync.js";
 import { FakeBridge } from "./fake-bridge.js";
 
 /** TIA stand-in with import/compile/delete. `canon` models TIA re-formatting imported source. */
@@ -1711,5 +1711,13 @@ describe("an archive before the first write of the day", () => {
     off.write(pA, srcA.replace("#x := 1;", "#x := 10;"));
     expect((await off.sync(day(5, 10))).imported).toBe(1);
     expect(off.bridge.archives).toEqual([]);
+  });
+});
+
+describe("what a source refers to", () => {
+  it("takes quoted names from the code, not from comments or strings", () => {
+    const fb = '// instantiate it as "DB_Carrefour"\nFUNCTION_BLOCK "FB_Carrefour"\n(* see "Other" *)\nBEGIN\n  #t := \'a "Quoted" text\';\n  "Global".x := "Motor\'s DB".y;\nEND_FUNCTION_BLOCK\n';
+    expect(referencedNames([fb], "FB_Carrefour").sort()).toEqual(["Global", "Motor's DB"]);
+    expect(referencedNames(['<Member Name="x" Datatype="&quot;Udt&quot;" />'], "Self")).toContain("x");
   });
 });

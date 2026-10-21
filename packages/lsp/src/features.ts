@@ -242,7 +242,7 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
       out.push({ start: a.nameStart!, end: a.nameEnd!, severity: "error", message: `${a.name} is not a parameter of ${site.callee.name} (quick fix: remove it)`, code: "UNKNOWN_PARAMETER" });
     const missing = missingParams(site);
     if (missing.length)
-      out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input, in/out and output${missing.some((p) => p.section !== "Output") ? " (quick fix: add the inputs)" : ""}`, code: "MISSING_PARAMETER" });
+      out.push({ start: site.ref.start, end: site.ref.end, severity: "error", message: site.callee.kind === "std" ? `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(" and ")}: TIA Portal needs IN and PT on every call of a timer, a reset with IN := FALSE too` : `This call of ${site.callee.name} leaves out ${missing.map((p) => p.name).join(", ")}: an FC gets every input, in/out and output${missing.some((p) => p.section !== "Output") ? " (quick fix: add the inputs)" : ""}`, code: "MISSING_PARAMETER" });
   }
   if (/\.scl$/i.test(uri)) out.push(...argumentMismatches(index, uri));
   for (const block of doc.parsed.blocks) {
@@ -252,7 +252,8 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
         // the start values of a DB of an FB or UDT the workspace does not have (a library or system FB): no verdict
         if (!known && block.kind === "DB" && block.dbOf && !index.membersOfType(block.dbOf).length) continue;
         if (!known) {
-          out.push({ start: ref.start, end: ref.end, severity: "warning", message: `#${ref.name} is not declared in ${block.name}`, code: "UNDECLARED" });
+          // the whole interface of an FB, FC or OB is in its file: TIA Portal stops the compile ("Tag #x not defined")
+          out.push({ start: ref.start, end: ref.end, severity: /\.scl$/i.test(uri) && ["FB", "FC", "OB"].includes(block.kind) ? "error" : "warning", message: `#${ref.name} is not declared in ${block.name}`, code: "UNDECLARED" });
           continue;
         }
       }

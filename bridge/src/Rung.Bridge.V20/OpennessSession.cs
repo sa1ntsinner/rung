@@ -1839,6 +1839,7 @@ namespace Rung.Bridge.V20
             {
                 // a DirectoryInfo from .Parent keeps a relative original path, which TIA Portal refuses
                 var project = create ? portal.Projects.Create(new DirectoryInfo(file.Directory.Parent.FullName), name) : portal.Projects.Open(file);
+                if (create) NewStation.Add(portal, project, args);
                 var pid = TiaPortal.GetProcesses().FirstOrDefault(p => p.Mode == TiaPortalMode.WithoutUserInterface && p.ProjectPath != null && string.Equals(p.ProjectPath.FullName, file.FullName, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
                 SweepWorkDirs();
                 emit("tia-started", new { project = file.FullName, pid });

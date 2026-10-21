@@ -70,6 +70,7 @@ describe("workspace features", () => {
 
   it("reports undeclared locals, unknown members and unknown globals, nothing else", () => {
     const d = diagnostics(idx, user()).map((x) => [x.code, idx.docs.get(user())!.text.slice(x.start, x.end)]);
+    expect(diagnostics(idx, user()).find((x) => x.code === "UNDECLARED")?.severity).toBe("error");
     expect(d).toEqual([
       ["UNDECLARED", "#nope"],
       ["UNKNOWN_MEMBER", "Missing"],

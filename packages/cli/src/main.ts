@@ -53,6 +53,7 @@ import { cmdXref } from "./xref.js";
 import { cmdWhy } from "./why.js";
 import { cmdProgramStatus } from "./program-status.js";
 import { cmdImpact } from "./impact.js";
+import { cmdLint } from "./lint.js";
 import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
 import { cmdReport } from "./report.js";
@@ -84,11 +85,14 @@ Usage:
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
+  rung lint [dir] [--file <f>]... [--json]  the language server's checks of the files, in the terminal or CI (no TIA Portal); exit 1 on errors
   rung review [base..head] [--base <rev>] [--head <rev>] [--json|--md]  offline change report for the person reviewing it; default: working tree against HEAD
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>] [--trust-certificate]
                                        a new project from a running PLC (TIA's "Upload device as new station")
+  rung init [dir] --new --project <dir>/<name>/<name>.ap20 --cpu <order number> [--device PLC_1]
+                                       a new, empty project with one CPU (writes start on: nothing in it is anyone's yet)
   rung init [dir] --host <user@windows-pc> --project <path there>   on Linux or macOS: TIA Portal on another PC, over ssh
   rung bridge [--tia V21] ...          on that Windows PC: the bridge itself (rung starts it over ssh)
   rung pull [dir] [--force] [--verbose]  TIA → files (never overwrites local edits without --force)
@@ -246,7 +250,17 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   const locked = !!fromPlc && !!plcReadOnly(await loadConfig(dir, { raw: true }).catch(() => undefined), undefined, io.env);
   if (locked && (await exists(resolve(io.cwd, String(v.project)))))
     throw new WorkspaceError("PLC_READ_ONLY", `under the read-only lock rung init --from-plc only creates a new project, and ${String(v.project)} exists`);
-  const create = fromPlc ? ["--create-project", "--allow-import", ...(locked ? ["--scratch-upload"] : [])] : [];
+  // --new: an empty project with one CPU, made by this command; writes start on, since nothing in it is anyone's yet
+  const fresh = !!v.new;
+  if (fresh && (fromPlc || codesys || v.host !== undefined || !v.project || !/\.ap\d\d$/i.test(String(v.project)) || !v.cpu))
+    throw new WorkspaceError("BAD_ARGUMENT", "rung init --new needs --project <new folder>/<name>/<name>.ap20 and --cpu <order number>, such as 6ES7 516-3AN02-0AB0");
+  if (fresh && (await exists(resolve(io.cwd, String(v.project))))) throw new WorkspaceError("BAD_ARGUMENT", `${String(v.project)} exists; rung init --new makes a new project (rung init --project binds an existing one)`);
+  const newDevice = ((v.device as string[] | undefined) ?? [])[0];
+  const create = fromPlc
+    ? ["--create-project", "--allow-import", ...(locked ? ["--scratch-upload"] : [])]
+    : fresh
+      ? ["--create-project", "--new-cpu", String(v.cpu), ...(newDevice ? ["--new-device", newDevice] : [])]
+      : [];
   const args = codesys ? bridge.args : [...bridge.args, ...(v.project ? ["--project", String(v.project), "--open-headless", ...create] : [])];
   // --host: TIA Portal runs on another PC (this one is Linux or macOS); the bridge starts there over ssh
   const host = v.host as string | undefined;
@@ -294,7 +308,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     try {
       await saveConfig(dir, config);
       // writes into the project start off unless asked for: a rebind to another project or host leaves the old right behind
-      if (v.writes) await grantWrites(dir, config);
+      if (v.writes || fresh) await grantWrites(dir, config);
     } finally {
       await state.close();
     }
@@ -437,9 +451,10 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   why: { options: ["instance", "json"], positionals: 2 },
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
+  lint: { options: ["file", "json"], positionals: 1 },
   review: { options: ["base", "head", "json", "md"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
-  init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
+  init: { options: ["project", "tia", "device", "rebind", "new", "cpu", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
   backup: { options: ["from-plc", "out", "use", "mode", "number", "trust-certificate", "expect-sha256", "no-values", "device"], positionals: 3 },
   pull: { options: ["force", "verbose"], positionals: 1 },
@@ -605,6 +620,8 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         transport: { type: "string" },
         ip: { type: "string" },
         "from-plc": { type: "string" },
+        new: { type: "boolean" },
+        cpu: { type: "string" },
         host: { type: "string" },
         writes: { type: "boolean" },
         preview: { type: "boolean" },
@@ -879,6 +896,8 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         return await cmdMergeDriver(positionals.slice(1), io);
       case "impact":
         return await cmdImpact(target, !!v.json, io);
+      case "lint":
+        return await cmdLint(target, (v.file as string[] | undefined) ?? [], !!v.json, io);
       case "xref":
         return await cmdXref(target, !!v.json, io, !!v.fresh);
       case "format":

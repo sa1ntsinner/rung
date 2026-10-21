@@ -73,6 +73,7 @@ namespace Rung.Bridge.V20
                 KeeperFile.Write(file, record);
                 var fi = new FileInfo(project);
                 opened = args.CreateProject ? portal.Projects.Create(new DirectoryInfo(fi.Directory.Parent.FullName), Path.GetFileNameWithoutExtension(fi.Name)) : OpenWhenFree(portal, fi);
+                if (args.CreateProject) NewStation.Add(portal, opened, args);
                 record.State = KeeperRecord.Ready;
                 KeeperFile.Write(file, record);
             }
@@ -284,7 +285,7 @@ namespace Rung.Bridge.V20
         static void Spawn(BridgeArgs args, string project)
         {
             var exe = Process.GetCurrentProcess().MainModule.FileName;
-            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "") + (args.ScratchUpload ? " --scratch-upload" : "") + (ReadOnlyPolicy.Locked ? " --read-only" : "");
+            var cmd = Quote(exe) + " --keep --project " + Quote(project) + (args.CreateProject ? " --create-project" : "") + (string.IsNullOrEmpty(args.NewCpu) ? "" : " --new-cpu " + Quote(args.NewCpu) + (string.IsNullOrEmpty(args.NewDevice) ? "" : " --new-device " + Quote(args.NewDevice))) + (args.ScratchUpload ? " --scratch-upload" : "") + (ReadOnlyPolicy.Locked ? " --read-only" : "");
             using (var cls = new ManagementClass("Win32_Process"))
             using (var startup = new ManagementClass("Win32_ProcessStartup"))
             {

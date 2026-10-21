@@ -18,6 +18,9 @@ namespace Rung.Bridge.V20
         public bool OpenHeadless;
         /// <summary>With OpenHeadless: create the project when its file does not exist yet (rung init --from-plc).</summary>
         public bool CreateProject;
+        /// <summary>With CreateProject: a CPU of this order number goes into the new project (rung init --new).</summary>
+        public string NewCpu;
+        public string NewDevice;
         /// <summary>--scratch-upload: the new project exists only to receive an upload; allowed under the read-only lock.</summary>
         public bool ScratchUpload;
         /// <summary>
@@ -66,6 +69,14 @@ namespace Rung.Bridge.V20
                         break;
                     case "--create-project":
                         a.CreateProject = true;
+                        break;
+                    case "--new-cpu":
+                        if (i + 1 >= args.Length) throw new ArgumentException("--new-cpu needs an order number");
+                        a.NewCpu = args[++i];
+                        break;
+                    case "--new-device":
+                        if (i + 1 >= args.Length) throw new ArgumentException("--new-device needs a name");
+                        a.NewDevice = args[++i];
                         break;
                     case "--allow-download":
                         a.AllowDownload = true;

@@ -205,6 +205,13 @@ describe("what TIA Portal would refuse, while typing", () => {
     expect(diagnostics(index, uri).find((d) => d.code === "MISSING_PARAMETER")?.message).toBe("This call of FC_Out leaves out o: an FC gets every input, in/out and output");
   });
 
+  it("a timer call without PT, as a reset written for CODESYS", () => {
+    const index = workspace();
+    const uri = u("blocks/FB_Lights.scl");
+    index.set(uri, 'FUNCTION_BLOCK "FB_Lights"\n   VAR\n      t : TON;\n   END_VAR\nBEGIN\n   #t(IN := TRUE, PT := T#2S);\n   #t(IN := FALSE);\nEND_FUNCTION_BLOCK\n', 0);
+    expect(diagnostics(index, uri).filter((d) => d.code === "MISSING_PARAMETER").map((d) => d.message)).toEqual(["This call of TON leaves out PT: TIA Portal needs IN and PT on every call of a timer, a reset with IN := FALSE too"]);
+  });
+
   it("a misspelt member, with the name it meant and a quick fix", () => {
     const { found, index, uri } = check('   #Out1 := "Plant_DB".MaxSpeeed > 1.0;\n');
     const d = found.find((x) => x.code === "UNKNOWN_MEMBER")!;

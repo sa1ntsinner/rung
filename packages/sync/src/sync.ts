@@ -331,10 +331,14 @@ function interfaceOf(form: string, text: string | undefined): string | undefined
   return undefined;
 }
 
-/** Quoted identifiers a source refers to (its own name excluded). */
-function referencedNames(texts: string[], self: string): string[] {
+/**
+ * Quoted identifiers a source refers to (its own name excluded). In SCL, DB and tag sources a name in a comment or
+ * a '…' string refers to nothing: a header comment naming the instance DB must not make the FB wait for it.
+ */
+export function referencedNames(texts: string[], self: string): string[] {
   const names = new Set<string>();
-  for (const t of texts) for (const m of t.matchAll(/"([^"\r\n]+)"/g)) if (m[1] !== self) names.add(m[1]!);
+  const code = (t: string) => (t.trimStart().startsWith("<") ? t : t.replace(/"[^"\r\n]*"|\/\/[^\n]*|\(\*[\s\S]*?\*\)|\/\*[\s\S]*?\*\/|'(?:\$.|[^'$])*'/g, (m) => (m.startsWith('"') ? m : " ")));
+  for (const t of texts) for (const m of code(t).matchAll(/"([^"\r\n]+)"/g)) if (m[1] !== self) names.add(m[1]!);
   return [...names];
 }
 
@@ -548,7 +552,17 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     const st = state.get(address);
     const primary = st ? list.find((f) => f.path === st.path) : list.length === 1 ? list[0] : undefined;
     for (const f of list)
-      if (f !== primary) warn(f.path, "IGNORED_FILE", st ? `a second file for ${parseAddress(address).name}; rung mirrors it as ${st.path}` : `${list.map((x) => x.path).join(" and ")} are the same object; keep one`);
+      if (f !== primary)
+        warn(
+          f.path,
+          "IGNORED_FILE",
+          !st
+            ? `${list.map((x) => x.path).join(" and ")} are the same object; keep one`
+            : !primary
+              ? // the mirrored file is gone and another language took its place
+                `${parseAddress(address).name} is in TIA Portal as ${st.path}, deleted here; to write it in this file's language: rung confirm-delete ${st.path}, then rung sync creates it from ${f.path}`
+              : `a second file for ${parseAddress(address).name}; rung mirrors it as ${st.path}`,
+        );
     if (primary) local.set(address, primary);
   }
   const bound = (a: string) => {
@@ -1093,7 +1107,7 @@ async function syncPass(root: string, bridge: SyncBridge, state: StateStore, opt
     const blockedBy = job.deps.map((d) => byName.get(d)).find((d) => d && (failed.has(d.address) || cyclic.has(d.address)));
     if (cyclic.has(job.address) || blockedBy) {
       failed.add(job.address);
-      diag({ address: job.address, path: primaryPath, severity: "error", code: "DEPENDENCY_BLOCKED", message: cyclic.has(job.address) ? "Cyclic dependency between changed objects; import them together with rung sync --batch (not automatic)" : `Waiting for ${blockedBy!.address}, which could not be imported` });
+      diag({ address: job.address, path: primaryPath, severity: "error", code: "DEPENDENCY_BLOCKED", message: cyclic.has(job.address) ? `Cyclic dependency between changed objects (${queue.filter((q) => cyclic.has(q.address) && q.address !== job.address).map((q) => q.name).join(", ")}): rung cannot tell which to import first. Move one aside, sync, then put it back and sync again` : `Waiting for ${blockedBy!.address}, which could not be imported` });
       continue;
     }
     if (job.form === "tags.st" && opts.validateTags) {

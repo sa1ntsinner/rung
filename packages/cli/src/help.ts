@@ -23,7 +23,7 @@ const VALUES: Record<string, string> = {
   project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", coverage: "lcov file", filter: "text", case: "file#n", file: "file", plc: "name",
   allow: "answer", agents: "names", skills: "names", editors: "names", platforms: "names", scope: "project|global",
   address: "ip", port: "number", cycle: "ms", block: "name", use: "PG/PC interface", mode: "mode", number: "n", target: "interface",
-  instance: "DB", interval: "ms", ip: "address", "from-plc": "ip", host: "user@windows-pc",
+  instance: "DB", interval: "ms", ip: "address", "from-plc": "ip", cpu: "order number", host: "user@windows-pc",
   args: "encoded arguments",
   capture: "cycle.json",
   why: "member",
@@ -64,7 +64,7 @@ const DETAIL: Record<string, string> = {
   grant: "let your user update the whitelist later without administrator rights", stdio: "speak LSP on stdin/stdout",
   block: "the FB or FC to run", cycle: "cycle time in ms", address: "address to listen on", port: "port to listen on",
   instance: "the instance DB to read an FB through", interval: "how often to read, in ms", ip: "the PLC's address",
-  "from-plc": "make a new project from the PLC at this address", verbose: "every notice, also those shown on the last pull", host: "run the bridge on a Windows PC over ssh", off: "turn it off",
+  "from-plc": "make a new project from the PLC at this address", new: "make a new, empty project with one CPU", cpu: "order number of that CPU, such as 6ES7 516-3AN02-0AB0", verbose: "every notice, also those shown on the last pull", host: "run the bridge on a Windows PC over ssh", off: "turn it off",
 };
 /** What the exit code means, for the commands scripts and CI read it from. */
 const EXIT: Record<string, string> = {
