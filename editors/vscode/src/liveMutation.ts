@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import type { LiveAccess } from "./liveAccess";
+import { SIMULATOR_LOGIN } from "./liveAccess";
 import type { RungCli } from "./runner/cli";
 import { humanConfirmedEnv } from "./core/agentEnv";
 import { killTree } from "./runner/terminal";
@@ -101,7 +102,7 @@ async function modifySimulator(ws: RungWorkspace, device: string, url: string, n
     return (await r.json()) as { result?: unknown; error?: { message?: string } }[];
   };
   try {
-    const [login] = await rpc([{ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: "simulator" } }]);
+    const [login] = await rpc([{ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: SIMULATOR_LOGIN } }]);
     const token = (login?.result as { token?: string } | undefined)?.token;
     if (!allowPlcWrite(ws.config, device)) return;
     const [write] = await rpc([{ jsonrpc: "2.0", id: 2, method: "PlcProgram.Write", params: { var: name, value: simulatorLiteral(draft) } }], token);

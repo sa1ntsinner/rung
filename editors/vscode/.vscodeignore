@@ -9,3 +9,6 @@ package-lock.json
 test-e2e/**
 .vscode-test/**
 DEVELOPMENT.md
+out/**
+!out/extension.js
+!out/webview/**

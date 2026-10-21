@@ -6,6 +6,9 @@ import type { RungWorkspace } from "./workspace";
 import type { LivePlc } from "./core/rungToml";
 import { plcPasswordKey } from "./core/connect";
 
+// rung simulate takes any password; this one only fills the field
+export const SIMULATOR_LOGIN = "simulator";
+
 export interface LiveConnection { device: string; target: LivePlc | { transport: "codesys"; address: string }; key: string; workspace: string; simulator?: string }
 
 /** The workspace's running `rung simulate` (its marker in .rung, and its process still there). */
@@ -43,7 +46,7 @@ export class LiveAccess {
     const { target, key } = connection;
     if (target.transport === "codesys") return {};
     // rung simulate takes any password
-    if (connection.simulator) return { RUNG_WEBAPI_PASSWORD: "simulator" };
+    if (connection.simulator) return { RUNG_WEBAPI_PASSWORD: SIMULATOR_LOGIN };
     const variable = target.transport === "s7commplus" ? "RUNG_PLC_PASSWORD" : "RUNG_WEBAPI_PASSWORD";
     let user = target.transport === "s7commplus" ? process.env.RUNG_PLC_USER ?? target.user ?? await this.secrets.get(`${key}|user`) : undefined;
     const password = ask ? undefined : process.env[variable] ?? await this.secrets.get(key);
