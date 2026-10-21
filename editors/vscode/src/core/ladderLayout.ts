@@ -10,6 +10,17 @@ export type LadderElement =
   | { k: "compare"; op: string; type?: string; in1: string; in2: string }
   | { k: "box"; name: string; instance?: string; flowIn?: string; flowOut?: string; inputs: Pin[]; outputs: Pin[] }
   | { k: "par"; branches: LadderElement[][]; merge: boolean };
+/** Spoken network elements, including series and parallel connections. */
+export function describeRung(rung: LadderElement[]): string {
+  return rung.map(e => {
+    if (e.k === "contact") return (e.negated ? "not " : "") + e.operand + (e.edge ? " (" + e.edge + " edge)" : "");
+    if (e.k === "coil") return "coil " + e.operand + (e.kind ? " (" + e.kind + ")" : "") + (e.negated ? " inverted" : "");
+    if (e.k === "par") return "(" + e.branches.map(describeRung).join(" or ") + ")";
+    if (e.k === "compare") return e.in1 + " " + e.op + " " + e.in2;
+    return "call " + (e.instance ?? e.name) + ": " + [...e.inputs, ...e.outputs].map(p => p.pin + " " + p.operand).join(", ");
+  }).join(", and ");
+}
+
 export interface Pin {
   pin: string;
   operand: string;

@@ -27,7 +27,7 @@ describe("rung test --against", () => {
     expect(text).toMatch(/^behaviour against HEAD \(5 cases\):/);
     expect(text).toContain("a contactor that does not answer within 2 s is a fault until reset (passed then, failed now)");
     expect(text).toMatch(/step \d+: Motor FALSE → TRUE/);
-    expect(text).toMatch(/1 case behaves differently, 4 the same/);
+    expect(text).toMatch(/1 case has differences in observed values, 4 have no differences in the observed values/);
     // the same from the folder's short 8.3 name (a temp folder of a long user name, as on CI runners)
     if (process.platform === "win32") {
       const short = spawnSync("cmd", ["/d", "/c", `for %I in ("${dir}") do @echo %~sI`], { encoding: "utf8", windowsVerbatimArguments: true }).stdout.trim();
@@ -43,7 +43,16 @@ describe("rung test --against", () => {
     git(dir, "mv", "blocks/FB_Conveyor.scl", "blocks/FB_Belt.scl");
     out.length = 0;
     expect(await main(["test", "--against", "HEAD"], io)).toBe(0);
-    expect(out.join("")).toMatch(/every case behaves as it did/);
+    expect(out.join("")).toMatch(/no differences in the observed values/);
+    expect(out.join("")).toMatch(/Not observed: globals.*arrays.*nesting.*between steps/);
+    out.length = 0;
+    expect(await main(["test", "--against", "HEAD", "--json"], io)).toBe(0);
+    expect(JSON.parse(out.join("")).observation).toMatchObject({ arrayLimit: 32, depthLimit: 2, globals: false, betweenSteps: false });
+    writeFileSync(join(dir, "blocks", "FB_Belt.scl"), readFileSync(join(dir, "blocks", "FB_Belt.scl"), "utf8").replace("Stop : Bool;", "Gone : Bool;"));
+    out.length = 0;
+    expect(await main(["test", "--against", "HEAD"], io)).toBe(2);
+    expect(out.join("")).toMatch(/no differences in the observed values/);
+    expect(out.join("")).toMatch(/changed test verdict/);
     out.length = 0;
     const plain = mkdtempSync(join(tmpdir(), "rung-nogit-"));
     cpSync(conveyor, plain, { recursive: true });

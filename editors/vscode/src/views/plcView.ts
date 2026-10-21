@@ -101,7 +101,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
       if (!frame) return [this.detail(d, this.alarmErrors.get(d) ?? "Reading PLC alarms…")];
       // ponytail: tree shows 200 rows; the CLI JSON snapshot exposes the complete bounded set.
       const rows = frame.alarms.slice(0, 200).map(a => this.detail(d, `${a.active ? "ACTIVE" : "CLEARED"} ${a.id} · ${a.text}`, `CPU: ${a.cpuTimestamp ?? "unavailable"}\nReceived: ${new Date(a.receivedAt).toLocaleString()}\n${frame.scope.address} · ${frame.connectionState ?? "connected"}`));
-      return [this.detail(d, `${frame.connectionState ?? "connected"} · ${frame.scope.address}`), ...(rows.length ? rows : [this.detail(d, "No active alarms")]), ...(frame.alarms.length > 200 ? [this.detail(d, `${frame.alarms.length - 200} more; use rung live alarms --json`)] : [])];
+      return [this.detail(d, `${frame.connectionState ?? "connected"} · ${frame.scope.address}`), ...(rows.length ? rows : [this.detail(d, "No active alarms")]), ...(frame.alarms.length > 200 ? [this.detail(d, `${frame.alarms.length - 200} more alarms are not shown in this view`)] : [])];
     }
     return [];
   }

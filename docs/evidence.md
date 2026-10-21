@@ -97,8 +97,8 @@ What this does not show: other CPUs and firmware, FBD and STL, ULInt and LWord b
 |---|---|
 | Bridge integration tests against TIA Portal V20 | 37 of 37 |
 | End to end against TIA Portal, S7-PLCSIM and CODESYS | pass |
-| TypeScript tests | 850+ |
-| .NET tests | 243 |
+| TypeScript tests | Vitest suites in packages/ and editors/ |
+| .NET tests | Bridge core test suites |
 | CI runners | Windows and Linux |
 
 The tests against TIA Portal, PLCSIM and CODESYS run on a PC with those tools installed, not on the CI runners; CI runs the rest on every push.

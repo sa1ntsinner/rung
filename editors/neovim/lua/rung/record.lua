@@ -34,33 +34,39 @@ local function target(model, line)
 end
 
 --- Applies one rung/testEdit operation to the buffer as it is now.
-local function apply(buf, op)
+local function apply(buf, op, join, cb)
   local client = lsp.client(buf)
-  local plan, why = lsp.request(buf, "rung/testEdit", { textDocument = { uri = vim.uri_from_bufnr(buf), version = vim.lsp.util.buf_versions[buf] }, op = op })
-  if not plan then return false, why end
-  if not plan.ok then return false, plan.reason end
-  local edits = vim.tbl_map(function(e) return { range = e.range, newText = e.newText } end, plan.edits)
-  vim.lsp.util.apply_text_edits(edits, buf, client.offset_encoding)
-  return true
+  lsp.request(buf, "rung/testEdit", { textDocument = { uri = vim.uri_from_bufnr(buf), version = vim.lsp.util.buf_versions[buf] }, op = op }, function(plan, why)
+    if not plan then return cb(false, why) end
+    if not plan.ok then return cb(false, plan.reason) end
+    local edits = vim.tbl_map(function(e) return { range = e.range, newText = e.newText } end, plan.edits)
+    vim.api.nvim_buf_call(buf, function()
+      if join then vim.cmd("undojoin") end
+      vim.lsp.util.apply_text_edits(edits, buf, client.offset_encoding)
+    end)
+    cb(true)
+  end)
 end
 
 --- Writes the picked { key, value } into the step's expect:, one undo step for all.
-function M.write(buf, case, step, picked)
-  local expected = {}
+function M.write(buf, case, step, picked, cb)
+  local expected, ops = {}, {}
   for _, e in ipairs(step.expect and step.expect.entries or {}) do expected[e.key:upper()] = e end
-  local first = true
   for _, p in ipairs(picked) do
     local has = expected[p.key:upper()]
     if not (has and has.text == p.value) then
-      if not first then vim.api.nvim_buf_call(buf, function() vim.cmd("undojoin") end) end
-      first = false
-      local op = has and { op = "setValue", case = case.index, step = step.index, part = "expect", key = has.key, value = p.value }
-        or { op = "addEntry", case = case.index, step = step.index, part = "expect", key = p.key, value = p.value }
-      local ok, why = apply(buf, op)
-      if not ok then return false, p.key .. " was not written: " .. tostring(why) end
+      table.insert(ops, has and { op = "setValue", case = case.index, step = step.index, part = "expect", key = has.key, value = p.value }
+        or { op = "addEntry", case = case.index, step = step.index, part = "expect", key = p.key, value = p.value })
     end
   end
-  return true
+  local function next_op(i)
+    if not ops[i] then return cb(true) end
+    apply(buf, ops[i], i > 1, function(ok, why)
+      if not ok then return cb(false, tostring(why)) end
+      next_op(i + 1)
+    end)
+  end
+  next_op(1)
 end
 
 --- A floating list to pick from: <Space> or x toggles, <CR> writes, q or <Esc> cancels.
@@ -117,55 +123,62 @@ function M.record(buf, choose, cb)
     vim.api.nvim_buf_call(buf, function() vim.cmd("silent write") end)
     vim.notify("rung: saved " .. vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ":t") .. ": the case runs from the file")
   end
-  local file, why = lsp.request(buf, "rung/testModel", { textDocument = { uri = vim.uri_from_bufnr(buf) } })
-  if not file then
-    vim.notify("rung: " .. tostring(why), vim.log.levels.WARN)
-    return
-  end
+  local tick = vim.api.nvim_buf_get_changedtick(buf)
   local line = vim.api.nvim_buf_call(buf, function() return vim.api.nvim_win_get_cursor(0)[1] - 1 end)
-  local case, step, into = target(file.model, line)
-  if not case then
-    vim.notify("rung: " .. step, vim.log.levels.WARN)
-    return
-  end
-  cli.capture({ "test", "--json", "--observe", "--case", rel .. "#" .. case.index }, {}, function(r)
-    local results, err = cli.json(r)
-    local c = results and results.files and results.files[1] and results.files[1].cases and results.files[1].cases[1]
-    local values, statics = nil, {}
-    for _, o in ipairs(c and c.observed or {}) do
-      if o.step == step.index + 1 then
-        values = o.values
-        for _, s in ipairs(o.statics or {}) do statics[s] = true end
+  lsp.request(buf, "rung/testModel", { textDocument = { uri = vim.uri_from_bufnr(buf) } }, function(file, why)
+    if not file then
+      vim.notify("rung: " .. tostring(why), vim.log.levels.WARN)
+      return
+    end
+    local case, step, into = target(file.model, line)
+    if not case then
+      vim.notify("rung: " .. step, vim.log.levels.WARN)
+      return
+    end
+    cli.capture({ "test", "--json", "--observe", "--case", rel .. "#" .. case.index }, {}, function(r)
+      local results, err = cli.json(r)
+      local c = results and results.files and results.files[1] and results.files[1].cases and results.files[1].cases[1]
+      local values, statics = nil, {}
+      for _, o in ipairs(c and c.observed or {}) do
+        if o.step == step.index + 1 then
+          values = o.values
+          for _, s in ipairs(o.statics or {}) do statics[s] = true end
+        end
       end
-    end
-    if not values then
-      local reason = err or (results and results.files[1] and results.files[1].error) or (c and c.error) or "the case did not get there"
-      vim.notify(("rung: no values after step %d: %s"):format(step.index + 1, reason), vim.log.levels.WARN)
-      return cb and cb(false)
-    end
-    local expected = {}
-    for _, e in ipairs(into.expect and into.expect.entries or {}) do expected[e.key:upper()] = e.text end
-    local items = {}
-    for key, v in pairs(values) do
-      local now = expected[key:upper()]
-      -- statics are the block's memory, not its results: offered, not picked
-      local on = now ~= nil and now ~= shown(v) or (now == nil and not statics[key])
-      local note = now and (now == shown(v) and "expected already" or ("expected now: " .. now)) or (statics[key] and "static" or nil)
-      table.insert(items, { key = key, value = shown(v), on = on, note = note })
-    end
-    table.sort(items, function(a, b) return a.key < b.key end)
-    if #items == 0 then
-      vim.notify("rung: the block has no outputs or statics with plain values", vim.log.levels.INFO)
-      return cb and cb(false)
-    end
-    local function finish(picked)
-      if not picked or #picked == 0 then return cb and cb(false) end
-      local ok, problem = M.write(buf, case, into, picked)
-      if not ok then vim.notify("rung: " .. problem, vim.log.levels.WARN) end
-      if cb then cb(ok) end
-    end
-    if choose then return finish(choose(items)) end
-    pick(("expect after step %d of %s"):format(step.index + 1, case.name and case.name.value or ("case " .. (case.index + 1))), items, finish)
+      if not values then
+        local reason = err or (results and results.files[1] and results.files[1].error) or (c and c.error) or "the case did not get there"
+        vim.notify(("rung: no values after step %d: %s"):format(step.index + 1, reason), vim.log.levels.WARN)
+        return cb and cb(false)
+      end
+      local expected = {}
+      for _, e in ipairs(into.expect and into.expect.entries or {}) do expected[e.key:upper()] = e.text end
+      local items = {}
+      for key, v in pairs(values) do
+        local now = expected[key:upper()]
+        -- statics are the block's memory, not its results: offered, not picked
+        local on = now ~= nil and now ~= shown(v) or (now == nil and not statics[key])
+        local note = now and (now == shown(v) and "expected already" or ("expected now: " .. now)) or (statics[key] and "static" or nil)
+        table.insert(items, { key = key, value = shown(v), on = on, note = note })
+      end
+      table.sort(items, function(a, b) return a.key < b.key end)
+      if #items == 0 then
+        vim.notify("rung: the block has no outputs or statics with plain values", vim.log.levels.INFO)
+        return cb and cb(false)
+      end
+      local function finish(picked)
+        if not picked or #picked == 0 then return cb and cb(false) end
+        if not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_buf_get_changedtick(buf) ~= tick then
+          vim.notify("rung: the buffer changed while recording; record again", vim.log.levels.WARN)
+          return cb and cb(false)
+        end
+        M.write(buf, case, into, picked, function(ok, problem)
+          if not ok then vim.notify("rung: " .. problem, vim.log.levels.WARN) end
+          if cb then cb(ok) end
+        end)
+      end
+      if choose then return finish(choose(items)) end
+      pick(("expect after step %d of %s"):format(step.index + 1, case.name and case.name.value or ("case " .. (case.index + 1))), items, finish)
+    end)
   end)
 end
 

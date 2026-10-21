@@ -26,6 +26,12 @@ describe.skipIf(!ready)("rung.nvim", () => {
     expect(r.status).toBe(0);
   }, 300_000);
 
+  it("requests language-server results without blocking and rejects stale replies", () => {
+    const r = run("tests/lsp.lua");
+    expect(r.out).toContain("all passed");
+    expect(r.status).toBe(0);
+  });
+
   it("streams a watch table", () => {
     const r = run("tests/watch-table.lua");
     expect(r.out).not.toMatch(/FAIL|Error/);

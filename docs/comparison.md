@@ -20,4 +20,4 @@ Where rung is different:
 - Tests run without the engineering software or a PLC licence, in seconds, so every pull request can run them: SCL, LAD, FBD, STL and structured text, with a list of what the simulator does not model instead of a guess.
 - It does not pick your editor, your agent or your Git host. The workspace is plain files in an open format.
 
-What rung is not: a replacement for TIA Portal or CODESYS, or a way around their licences. Downloads to a PLC are always started by a person.
+What rung is not: a replacement for TIA Portal or CODESYS, or a way around their licences. By default a person starts downloads and live changes. A person may set an [agent mode](agents/modes.md) that permits selected actions. `RUNG_READ_ONLY` and read-only locks always win.

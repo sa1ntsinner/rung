@@ -120,7 +120,9 @@ vim.fn.writefile({ "block: FB_Conveyor", "cases:", "  - name: recorded", "    st
 vim.cmd("edit tests/rec.test.yaml")
 local rec = vim.api.nvim_get_current_buf()
 if wait("language server on the test file", function() return require("rung.lsp").client(rec) ~= nil end, 60000) then
-  wait("test model", function() return (require("rung.lsp").request(rec, "rung/testModel", { textDocument = { uri = vim.uri_from_bufnr(rec) } })) ~= nil end, 30000)
+  local model
+  require("rung.lsp").request(rec, "rung/testModel", { textDocument = { uri = vim.uri_from_bufnr(rec) } }, function(result) model = result end)
+  wait("test model", function() return model ~= nil end, 30000)
   vim.api.nvim_win_set_cursor(0, { 6, 8 })
   local offered, ok
   require("rung.record").record(rec, function(items)
@@ -157,10 +159,8 @@ local conv = vim.api.nvim_get_current_buf()
 local row = vim.iter(ipairs(vim.api.nvim_buf_get_lines(conv, 0, -1, false))):find(function(_, l) return l:match("^%s*Start%s*:") end)
 vim.api.nvim_buf_set_lines(conv, row - 1, row, false, { (vim.api.nvim_buf_get_lines(conv, row - 1, row, false)[1]:gsub("Start", "Go", 1)) })
 local imp
-wait("impact", function()
-  imp = require("rung.impact").show(conv)
-  return imp and #imp.changes > 0
-end, 30000)
+require("rung.impact").show(conv, function(r) imp = r end)
+wait("impact", function() return imp and #imp.changes > 0 end, 30000)
 check("impact of a rename", imp and imp.changes[1].kind == "renamed" and imp.changes[1].to == "Go", imp)
 check("tests that name it", imp and vim.iter(imp.tests):any(function(t) return #t.problems > 0 end), imp and imp.tests)
 check("impact quickfix", vim.fn.getqflist({ title = 0 }).title == "rung impact: FB_Conveyor")

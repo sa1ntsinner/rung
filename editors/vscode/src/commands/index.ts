@@ -171,7 +171,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
       const t = await fileTarget(ws, arg, undefined, "a mirrored block file");
       if (!t) return;
       if (!ws.objectAt(t.uri.fsPath)) {
-        void vscode.window.showWarningMessage(`${t.rel} is not a mirrored object yet. Run rung sync first.`);
+        void vscode.window.showWarningMessage(`${t.rel} is not a mirrored object yet. Use Sync Now first.`);
         return;
       }
       await saveIfDirty(t.uri);

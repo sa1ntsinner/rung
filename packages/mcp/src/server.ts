@@ -14,7 +14,7 @@ import { OwnerClient, cachedXref, confirmDelete, placeCompileMessages, renameObj
 import { WorkspaceIndex, sourceStamp, assignmentList, baseText, interfaceImpact, nearest, diagnostics as parseDiagnostics, uriOf, workspaceTests } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient, plainHttpRefusal, type OnlineReadResult, type OnlineStateResult, type OnlineAlarmResult } from "@rung/live";
-import { explainStatic, runTests } from "@rung/sim";
+import { explainStatic, requireAssertions, runTests } from "@rung/sim";
 import type { CompareOutcome, ConnectionTarget, XRefEntry } from "@rung/bridge-client";
 import { handover } from "./handover.js";
 import { reviewChanges } from "./review.js";
@@ -167,9 +167,11 @@ function nearestPath(given: string, candidates: readonly string[]): string | und
 const meant = (near: string | undefined) => (near ? `: did you mean ${near}?` : "");
 
 /** Identity of the sources a result was computed from: equal hashes, same file contents. */
-const sourceHash = (index: WorkspaceIndex) => {
+const sourceHash = async (root: string, index: WorkspaceIndex) => {
   const h = createHash("sha256");
   for (const uri of [...index.docs.keys()].sort()) h.update(uri).update("\0").update(index.docs.get(uri)!.text).update("\0");
+  for (const file of (await workspaceTests(root)).sort((a, b) => a.uri.localeCompare(b.uri))) h.update(file.uri).update("\0").update(file.text).update("\0");
+  h.update("rung.toml\0").update(await readFile(join(root, "rung.toml"), "utf8").catch(e => { if (e.code === "ENOENT") return ""; throw e; }));
   return "sha256:" + h.digest("hex").slice(0, 16);
 };
 
@@ -189,8 +191,9 @@ export function createMcpServer(ctx: McpContext): McpServer {
     if (cache?.stamp !== stamp) {
       const index = new WorkspaceIndex();
       await index.load(ctx.root);
-      cache = { stamp, index, graph: CodeGraph.fromIndex(index), source: sourceHash(index) };
+      cache = { stamp, index, graph: CodeGraph.fromIndex(index), source: "" };
     }
+    cache.source = await sourceHash(ctx.root, cache.index);
     return cache;
   };
   const withOwner = async <T>(fn: (o: OwnerClient) => Promise<T>): Promise<T | undefined> => {
@@ -697,10 +700,17 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_test",
-    { ...toolInfo("rung_test"), description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs; { within: 2s, expect: … }, always, never for timing) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed. observe: true adds the block's outputs and statics after every step that runs cycles (to write expectations from; check them with the person before they become a test).", inputSchema: { ...paging, filter: z.string().optional(), observe: z.boolean().optional(), verbose: z.boolean().optional(), stepOffset: z.number().int().min(0).optional(), observationLimit: z.number().int().min(1).max(10).optional(), valueOffset: z.number().int().min(0).optional(), valueLimit: z.number().int().min(1).max(50).optional() } },
-    async ({ filter, observe, verbose, offset, limit, stepOffset, observationLimit, valueOffset, valueLimit }) => {
+    { ...toolInfo("rung_test"), description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs; { within: 2s, expect: … }, always, never for timing) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed. observe: true adds the block's outputs and statics after every step that runs cycles (to write expectations from; check them with the person before they become a test).", inputSchema: { ...paging, case: z.string().optional().describe("One case as tests/motor.test.yaml#0 (case number from 0), same as rung test --case"), strict: z.boolean().optional().describe("Fail cases that check nothing"), filter: z.string().optional(), observe: z.boolean().optional(), verbose: z.boolean().optional(), stepOffset: z.number().int().min(0).optional(), observationLimit: z.number().int().min(1).max(10).optional(), valueOffset: z.number().int().min(0).optional(), valueLimit: z.number().int().min(1).max(50).optional() } },
+    async ({ case: selectedCase, strict, filter, observe, verbose, offset, limit, stepOffset, observationLimit, valueOffset, valueLimit }) => {
       const { index, source } = await model();
-      const results = await runTests(ctx.root, index, filter, undefined, observe ? { observe: true } : {});
+      const selector = selectedCase ? /^(.+)#(\d+)$/.exec(selectedCase) : undefined;
+      if (selectedCase && filter) return fail("give case or filter, not both");
+      if (selectedCase !== undefined && !selector) return fail("case: write it as <test file>#<case number from 0>, e.g. tests/motor.test.yaml#0");
+      let results;
+      try {
+        results = await runTests(ctx.root, index, filter, selector ? { file: selector[1]!, index: Number(selector[2]) } : undefined, observe ? { observe: true } : {});
+      } catch (error) { return fail((error as Error).message); }
+      if (strict) results = requireAssertions(results);
       if (!results.length && filter) {
         const all = (await runTests(ctx.root, index)).length;
         if (all) return text(`No tests match "${filter}" (by file path, block name or case name); tests/**/*.test.yaml has ${all} file${all === 1 ? "" : "s"}.`);
@@ -790,7 +800,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
   server.registerTool(
     "rung_download_request",
     { ...toolInfo("rung_download_request"),
-      description: "Prepare a download for a person: changed files, compile state, what TIA Portal will likely ask (stop CPU, reinitialise DBs), connection and a machine test plan. Written to .rung/download-request.md. Agents never download.",
+      description: "Prepare a download for a person: changed files, compile state, what TIA Portal will likely ask (stop CPU, reinitialise DBs), connection and a machine test plan. Written to .rung/download-request.md. This MCP tool never downloads.",
       inputSchema: {
         device: z.string().optional(),
         summary: z.string().optional().describe("what changed and why, for the person who downloads"),
@@ -808,8 +818,15 @@ export function createMcpServer(ctx: McpContext): McpServer {
       const conn = config.plc[dev];
       // no diagnostics file: rung never synced or compiled here, which is not the same as no errors
       const recorded = existsSync(join(ctx.root, ".rung", "diagnostics.json"));
-      const errors = (await syncDiagnostics(ctx.root)).filter((d) => d.severity === "error" && !/^Compiling finished/.test(d.message));
-      const objects = (await stateSnapshot(ctx.root)).filter((s) => parseAddress(s.address).device === dev).map((s) => ({ path: s.path, status: s.status }));
+      const compileErrors = (await syncDiagnostics(ctx.root)).filter(d => d.code === "COMPILE" && d.severity === "error" && (d.path?.startsWith("plc/" + dev + "/") || d.address?.startsWith("plc:" + encodeURIComponent(dev) + "/")));
+      const states = (await stateSnapshot(ctx.root)).filter(s => parseAddress(s.address).device === dev);
+      const objects: { path: string; status: string; baseId?: string }[] = states.map(s => ({ path: s.path, status: s.status, baseId: s.baseId }));
+      const known = new Set(states.flatMap(s => s.files.map(f => f.path)));
+      const { index } = await model();
+      for (const uri of index.docs.keys()) {
+        const path = pathOf(uri);
+        if (path.startsWith("plc/" + dev + "/") && !known.has(path)) objects.push({ path, status: "not imported" });
+      }
       return text(
         await handover({
           root: ctx.root,
@@ -819,7 +836,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
           ...(interfaceChanges ? { interfaceChanges } : {}),
           ...(conn ? { connection: { pcInterface: conn.pcInterface, ...(conn.targetInterface ? { targetInterface: conn.targetInterface } : {}) } } : {}),
           objects,
-          ...(recorded ? { compileErrors: errors.map((e) => ({ path: e.path, ...(e.line ? { line: e.line } : {}), message: e.message })) } : {}),
+          ...(recorded ? { compileErrors: compileErrors.map(e => ({ path: e.path, ...(e.line ? { line: e.line } : {}), message: e.message })) } : {}),
         }),
       );
     },

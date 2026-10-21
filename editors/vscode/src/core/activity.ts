@@ -3,7 +3,7 @@
 // when the editor connects) become what is happening now (one status bar phrase) and a short history (the Activity
 // view). No VS Code here.
 
-export type ActivityKind = "import" | "create" | "export" | "merge" | "remove" | "restore" | "refused" | "error";
+export type ActivityKind = "import" | "create" | "export" | "merge" | "remove" | "restore" | "refused" | "error" | "agent";
 
 export interface ActivityEntry {
   at: number;
@@ -24,7 +24,7 @@ interface Diagnostic { path?: string; address?: string; severity: string; code?:
 interface Report {
   conflicts: number;
   diagnostics: Diagnostic[];
-  changes?: { path: string; action: Exclude<ActivityKind, "error" | "refused"> }[];
+  changes?: { path: string; action: Exclude<ActivityKind, "error" | "refused" | "agent"> }[];
   compiled?: string[];
 }
 
@@ -51,7 +51,7 @@ const NOT_REFUSALS = new Set(["COMPILE", "CONFLICT", "DELETE_PENDING"]);
 /** "plc/PLC_1/blocks/Station/FB_Batch.scl" -> "FB_Batch"; "UDT_Recipe.udt.xml" -> "UDT_Recipe" */
 export const objectName = (path: string) => path.replace(/^.*[\\/]/, "").replace(/(\.(scl|db|udt|awl|st|xml|s7dcl|s7res|yaml|tags))+$/i, "");
 
-const WHAT: Record<Exclude<ActivityKind, "error" | "refused">, string> = {
+const WHAT: Record<Exclude<ActivityKind, "error" | "refused" | "agent">, string> = {
   import: "sent to TIA",
   create: "created in TIA",
   export: "updated from TIA",
@@ -78,6 +78,21 @@ export class Activity {
   private readonly plcs = new Set<string>();
 
   constructor(private readonly clock: () => number = Date.now) {}
+
+  /** Reload the audit snapshot without duplicating records or changing the save-loop status. */
+  agentActions(text: string): void {
+    this.entries = this.entries.filter(e => e.kind !== "agent");
+    for (const line of text.split(/\r?\n/).filter(Boolean)) {
+      try {
+        const r = JSON.parse(line);
+        const at = Date.parse(r.time);
+        if (!Number.isFinite(at) || typeof r.plc !== "string" || typeof r.action !== "string" || typeof r.mode !== "string" || typeof r.allowedBy !== "string" || typeof r.outcome !== "number") continue;
+        this.entries.push({ at, kind: "agent", label: r.plc + ": agent " + r.action + " (" + r.mode + ", " + r.allowedBy + "), exit " + r.outcome });
+      } catch { /* An interrupted append may leave an incomplete line. */ }
+    }
+    this.entries.sort((a, b) => b.at - a.at);
+    this.entries.length = Math.min(this.entries.length, MAX);
+  }
 
   /** A watch (re)connected: forget the last one's state; until its first pass nothing is known. */
   reset(): void {

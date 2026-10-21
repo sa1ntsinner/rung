@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BlobStore, sha256 } from "@rung/core";
 import { changedFiles, handover, risks } from "../src/handover.js";
 
 describe("download handover", () => {
@@ -37,17 +38,28 @@ describe("download handover", () => {
   it("measures against what TIA Portal has, not git, and says unknown where rung has no evidence", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-handover-"));
     mkdirSync(join(root, ".rung"));
-    // committed long ago, never synced: git is clean, TIA Portal does not have it
-    const objects = [{ path: "plc/PLC_1/blocks/FC_A.scl", status: "synced" }, { path: "plc/PLC_1/blocks/DB_Recipe.db", status: "fileDirty" }];
+    mkdirSync(join(root, "plc", "PLC_1", "blocks"), { recursive: true });
+    const blobs = new BlobStore(root);
+    const objects = await Promise.all(["FC_A.scl", "DB_Recipe.db"].map(async name => {
+      const path = "plc/PLC_1/blocks/" + name;
+      writeFileSync(join(root, path), "base\n");
+      return { path, status: "synced", baseId: await blobs.put(JSON.stringify([{ path, role: "primary", hash: sha256("base\n") }])) };
+    }));
+    writeFileSync(join(root, objects[1]!.path), "edited after sync\n");
     const md = await handover({ root, device: "PLC_1", objects });
     expect(md).toMatch(/1 object\(s\) differ between the files and TIA Portal/);
-    expect(md).toMatch(/- plc\/PLC_1\/blocks\/DB_Recipe\.db \(fileDirty\)/);
+    expect(md).toMatch(/- plc\/PLC_1\/blocks\/DB_Recipe\.db \(synced\)/);
     expect(md).toMatch(/reinit-db/); // its risks count although git shows no change
     expect(md).toMatch(/TIA Portal and the PLC\n\nUnknown: rung keeps no record of what the PLC runs/);
-    expect(md).toMatch(/Not compiled through rung \(no compile record\): unknown/);
+    expect(md).toMatch(/No source-bound compile record: current compile state is unknown/);
     expect(md).not.toMatch(/No compile errors/);
     expect(await handover({ root, device: "PLC_1" })).toMatch(/Unknown: nothing of this PLC is mirrored yet/);
-    expect(await handover({ root, device: "PLC_1", objects, compileErrors: [] })).toMatch(/No compile errors in the last record, but it predates/);
+    expect(await handover({ root, device: "PLC_1", objects, compileErrors: [] })).toMatch(/No compile errors in the last record.*does not prove/);
+    writeFileSync(join(root, objects[1]!.path), "base\n");
+    objects[1]!.status = "fileDirty";
+    const reverted = await handover({ root, device: "PLC_1", objects });
+    expect(reverted).not.toMatch(/object\(s\) differ/);
+    expect(reverted).toMatch(/Files match the last base.*TIA Portal agreement is unknown/);
   });
 
   it("says so when the workspace is not a git repository", async () => {

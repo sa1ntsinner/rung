@@ -77,7 +77,7 @@ export async function renameCommand(ws: RungWorkspace, cli: RungCli, out: Output
   const t = await fileTarget(ws, arg, undefined, "a block, PLC data type or tag table file");
   if (!t?.name) return;
   if (!ws.objectAt(t.uri.fsPath)) {
-    void vscode.window.showWarningMessage(`${t.rel} is not a mirrored object yet. Run rung sync first.`);
+    void vscode.window.showWarningMessage(`${t.rel} is not a mirrored object yet. Use Sync Now first.`);
     return;
   }
   const current = t.name;

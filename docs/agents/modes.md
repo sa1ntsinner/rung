@@ -46,6 +46,8 @@ The store lives outside the workspace: `%APPDATA%\rung\agent-modes.toml` on Wind
 | `openness-setup` | `rung setup openness` |
 | `bridge` | Raw `rung bridge` |
 
+Force and alarm acknowledgement are permission names. This release does not expose these operations; force tables remain read-only.
+
 The `ask` dialog shows the action, PLC, agent marker and command line. Windows uses a PowerShell native dialog, macOS uses `osascript`, and Linux uses `zenity` or `kdialog`. If neither Linux dialog program is available, rung refuses and says why. Cancel, a different name, or 120 seconds without an answer refuses the action. The answer comes from the dialog child process, never the agent's stdin.
 
 In `auto` and `bypass`, permission replaces the agent's typed PLC-name confirmation for download, live write and RUN/STOP. A person running the same command still confirms as before. Downloads answer TIA Portal's questions only as `--allow` permits: a mode does not approve STOP, DB reinitialisation or other TIA questions.
@@ -54,7 +56,7 @@ In `auto` and `bypass`, permission replaces the agent's typed PLC-name confirmat
 
 Read-only always wins: `read_only = true` for a PLC, `RUNG_READ_ONLY=1`, and the other existing read-only locks refuse a change with their usual message in every mode. Modes do not remove object protection, connection permissions or other command checks.
 
-Each PLC command an agent runs under `ask`, `auto` or `bypass` appends to `.rung/agent-actions.jsonl`: time, agent marker, PLC, action, mode, whether permission came from the mode or dialog, and outcome as an exit code. Keep this record with the workspace when investigating a change.
+Each PLC command an agent runs, including a refusal in `manual`, appends to `.rung/agent-actions.jsonl`: time, agent marker, PLC, action, mode, whether permission came from the mode or dialog, and outcome as an exit code. Keep this record with the workspace when investigating a change.
 
 ## Editors and MCP
 

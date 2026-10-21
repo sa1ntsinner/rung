@@ -8,7 +8,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { WorkspaceIndex } from "@rung/lsp";
-import { runTests, type FileResult } from "@rung/sim";
+import { OBSERVATION, runTests, type FileResult } from "@rung/sim";
 
 const run = promisify(execFile);
 
@@ -98,7 +98,7 @@ export function divergences(before: FileResult[], after: FileResult[]): Divergen
 const shown = (v: unknown) => (v === undefined ? "—" : typeof v === "boolean" ? (v ? "TRUE" : "FALSE") : typeof v === "string" ? v : JSON.stringify(v));
 
 /** Runs the scenarios on both and says what behaves differently. */
-export async function behaviourAgainst(ws: string, current: WorkspaceIndex, rev: string, filter?: string): Promise<{ divergences: Divergence[]; cases: number; text: string; worse: boolean }> {
+export async function behaviourAgainst(ws: string, current: WorkspaceIndex, rev: string, filter?: string): Promise<{ divergences: Divergence[]; cases: number; text: string; worse: boolean; observation: typeof OBSERVATION }> {
   const base = await indexAt(ws, current, rev);
   const [then, now] = [await runTests(ws, base, filter, undefined, { observe: true }), await runTests(ws, current, filter, undefined, { observe: true })];
   const d = divergences(then, now);
@@ -109,9 +109,13 @@ export async function behaviourAgainst(ws: string, current: WorkspaceIndex, rev:
     const first = x.differences[0];
     if (first) lines.push(`     step ${first.step}: ${first.name} ${shown(first.before)} → ${shown(first.after)}${x.differences.length > 1 ? ` (first of ${x.differences.length} differences)` : ""}`);
   }
-  lines.push(d.length ? `${d.length} case${d.length === 1 ? " behaves" : "s behave"} differently, ${cases - d.length} the same` : "every case behaves as it did");
+  const changedValues = d.filter(x => x.differences.length).length;
+  const changedVerdicts = d.filter(x => x.verdict).length;
+  lines.push(changedValues ? `${changedValues} case${changedValues === 1 ? " has" : "s have"} differences in observed values, ${cases - changedValues} have no differences in the observed values` : "no differences in the observed values");
+  if (changedVerdicts) lines.push(`${changedVerdicts} case(s) changed test verdict.`);
+  lines.push(OBSERVATION.description);
   // a case that passed then and does not now: a CI step can stop on it
   const worse = d.some((x) => x.verdict?.before === "passed" && x.verdict.after !== "passed");
   if (!cases) lines.splice(1, 0, "  no test case ran now (a filter that matches nothing, or the tested blocks are gone)");
-  return { divergences: d, cases, worse, text: lines.join("\n") + "\n" };
+  return { divergences: d, cases, worse, observation: OBSERVATION, text: lines.join("\n") + "\n" };
 }

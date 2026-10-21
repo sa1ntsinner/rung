@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, unlinkSync, statSync, utimesSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -146,9 +146,62 @@ describe("rung mcp", () => {
     expect((await call("rung_sync")).isError).toBe(true);
     expect((await call("rung_compile")).isError).toBe(true);
     const req = (await call("rung_download_request", { device: "PLC_1", summary: "Faster valve close" })).text;
-    expect(req).toMatch(/never download/);
+    expect(req).toMatch(/MCP server never downloads/);
     expect(req).toMatch(/Faster valve close/);
     expect(req).toMatch(/rung download/);
+  });
+
+  it("checks current disk content against the imported base and keeps deployment risk unknown", async () => {
+    const file = join(root, "plc", "PLC_1", "blocks", "Fx_Motor.scl");
+    const was = readFileSync(file, "utf8");
+    try {
+      writeFileSync(file, MOTOR);
+      const clean = (await call("rung_download_request", { device: "PLC_1" })).text;
+      expect(clean).toMatch(/TIA Portal has the files as they are/);
+      expect(clean).not.toMatch(/Probably nothing/);
+      expect(clean).toMatch(/Unknown.*deployment baseline/);
+      writeFileSync(file, MOTOR.replace("Start : Bool", "Start : DInt"));
+      const dirty = (await call("rung_download_request", { device: "PLC_1" })).text;
+      expect(dirty).toMatch(/1 object\(s\) differ/);
+      expect(dirty).not.toMatch(/TIA Portal has the files as they are/);
+      const added = join(root, "plc", "PLC_1", "blocks", "New.scl");
+      try {
+        writeFileSync(file, MOTOR);
+        writeFileSync(added, 'FUNCTION "New" : Void\nBEGIN\nEND_FUNCTION\n');
+        expect((await call("rung_download_request", { device: "PLC_1" })).text).toMatch(/New.scl \(not imported\)/);
+        unlinkSync(file);
+        expect((await call("rung_download_request", { device: "PLC_1" })).text).toMatch(/2 object\(s\) differ/);
+      } finally { unlinkSync(added); }
+    } finally { writeFileSync(file, was); }
+  });
+
+  it("identifies test definitions, stubs and config and refreshes equal-metadata sources", async () => {
+    mkdirSync(join(root, "tests"), { recursive: true });
+    const testFile = join(root, "tests", "identity.test.yaml");
+    const configFile = join(root, "rung.toml");
+    const config = readFileSync(configFile, "utf8");
+    const file = join(root, "plc", "PLC_1", "blocks", "Fx_Motor.scl");
+    const was = readFileSync(file, "utf8");
+    const hash = async () => (await call("rung_test")).data as { sourceHash: string };
+    try {
+      writeFileSync(testFile, 'block: Fx_Motor\ncases: [{ name: identity, steps: [{ expect: { Start: false } }] }]\n');
+      const first = await hash();
+      writeFileSync(testFile, readFileSync(testFile, "utf8").replace("Start: false", "Start: true"));
+      const second = await hash();
+      expect(second.sourceHash).not.toBe(first.sourceHash);
+      writeFileSync(testFile, readFileSync(testFile, "utf8") + 'stubs: {}\n');
+      const third = await hash();
+      expect(third.sourceHash).not.toBe(second.sourceHash);
+      writeFileSync(configFile, config + "\n# configuration change\n");
+      const fourth = await hash();
+      expect(fourth.sourceHash).not.toBe(third.sourceHash);
+      const stamp = statSync(file);
+      writeFileSync(file, was.replace("Start : Bool", "Other : Bool"));
+      utimesSync(file, stamp.atime, stamp.mtime);
+      expect((await hash()).sourceHash).not.toBe(fourth.sourceHash);
+    } finally {
+      writeFileSync(file, was); writeFileSync(configFile, config); unlinkSync(testFile);
+    }
   });
 
   it("serves the graph resource", async () => {

@@ -31,12 +31,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm install -g @rung-plc/cli@0.1   # the CLI for any OS (Node.js 22+); pin the version you tested with
+      - run: npm install -g @rung-plc/cli@0.3   # the CLI for any OS (Node.js 22+); pin the version you tested with
       - run: rung test --junit plc-tests.xml
+      - run: rung review --base origin/main > review.md
       - run: rung-pro check . --git origin/main      # rung Pro: rung.policy.toml gate
-      - run: rung-pro review . --git origin/main --out review.md
       - uses: actions/upload-artifact@v4
         with: { name: plc-review, path: "review.md\nplc-tests.xml" }
 
@@ -49,6 +50,8 @@ jobs:
       - run: rung sync
       - run: rung status
 ```
+
+The free `rung review` creates an offline change report from the files and git. It does not run tests or compile. The Pro policy gate is separate. Fetch the base branch before reviewing it.
 
 `rung sync` exits with code 2 when there are warnings, compile errors or conflicts, so the job fails visibly.
 

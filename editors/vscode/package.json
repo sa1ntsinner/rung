@@ -242,7 +242,7 @@
       },
       {
         "command": "rung.monitor.toggle",
-        "title": "Monitor Values (Live)",
+        "title": "Live Values",
         "category": "rung",
         "icon": "$(eye)"
       },
@@ -354,7 +354,7 @@
       },
       {
         "command": "rung.views",
-        "title": "Write Read-Only Views (Hardware, HMI, Tags)",
+        "title": "Refresh Project Views",
         "category": "rung"
       },
       {
@@ -609,7 +609,7 @@
       },
       {
         "command": "rung.usages.pick",
-        "title": "Who Writes This? (Quick Pick)",
+        "title": "Who Writes This?",
         "category": "rung"
       },
       {

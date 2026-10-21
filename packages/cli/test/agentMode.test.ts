@@ -30,6 +30,7 @@ describe("agent permission execution", () => {
   it("keeps manual refusal text and never invokes a dialog", async () => {
     const { io, root } = await fixture("manual");
     await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/PLC changes and enabling writes belong to the person/);
+    expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ mode: "manual", action: "download", outcome: 1, allowedBy: "refused" });
   });
   it.each(["auto", "bypass"] as const)("allows %s once within the execution scope and audits the exit code", async mode => {
     const { io, root } = await fixture(mode);
@@ -63,7 +64,7 @@ describe("agent permission execution", () => {
       config.plc.PLC_1 = { mode: "PN/IE", pcInterface: "Ethernet", pcInterfaceNumber: 1, readOnly: true };
       await saveConfig(root, config);
       await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/read-only lock/);
-      if (mode !== "manual") expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ outcome: 2 });
+      expect(JSON.parse(await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8"))).toMatchObject({ outcome: 2 });
     }
   });
   it("audits a thrown command and dialog refusal", async () => {

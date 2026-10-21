@@ -183,3 +183,33 @@ describe("rung mcp tools", () => {
     });
   });
 });
+
+it("rung_test selects one case and strict fails cases that check nothing", async () => {
+  const { root } = await workspace();
+  mkdirSync(join(root, "tests"));
+  writeFileSync(join(root, "tests", "motor.test.yaml"), 'block: Fx_Motor\ncases:\n  - name: unchecked\n    steps: [{ set: { Start: true } }]\n  - name: checked\n    steps: [{ expect: { Start: false } }]\n');
+  const call = await connect(root);
+  const selected = JSON.parse((await call("rung_test", { case: "tests/motor.test.yaml#1", strict: true, verbose: true })).text);
+  expect(selected).toMatchObject({ totalCases: 1, passed: 1, failed: 0, assertions: 1, items: [{ index: 1, name: "checked" }] });
+  const unchecked = JSON.parse((await call("rung_test", { case: "tests/motor.test.yaml#0", strict: true })).text);
+  expect(unchecked).toMatchObject({ totalCases: 1, passed: 0, failed: 1, failures: [{ name: "unchecked", error: expect.stringContaining("checks nothing") }] });
+  expect(JSON.parse((await call("rung_test", { case: "tests/motor.test.yaml#0" })).text)).toMatchObject({ passed: 1, failed: 0 });
+  for (const args of [{ case: "bad" }, { case: "tests/motor.test.yaml#9" }, { case: "../outside.test.yaml#0" }, { case: "tests/motor.test.yaml#1", filter: "checked" }]) {
+    expect((await call("rung_test", args)).isError).toBe(true);
+  }
+});
+
+it("handover keeps compile errors separate from import state and other PLCs", async () => {
+  const { root } = await workspace();
+  const call = await connect(root);
+  const diagnostic = { code: "COMPILE", severity: "error", message: "broken in other PLC", path: "plc/Other/blocks/X.scl" };
+  writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ items: [diagnostic] }));
+  expect((await call("rung_download_request")).text).not.toContain("broken in other PLC");
+  diagnostic.path = "plc/PLC_1/blocks/Fx_Motor.scl";
+  diagnostic.message = "broken in selected PLC";
+  writeFileSync(join(root, ".rung", "diagnostics.json"), JSON.stringify({ items: [diagnostic] }));
+  const request = (await call("rung_download_request")).text;
+  expect(request).toContain("TIA Portal has the files as they are");
+  expect(request).toContain("1 compile error(s): do not download");
+  expect(request).toContain("broken in selected PLC");
+});
