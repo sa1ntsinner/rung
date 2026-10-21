@@ -109,7 +109,11 @@ export class Monitor implements vscode.Disposable {
       void vscode.commands.executeCommand("setContext", "rung.monitoring", true);
       this.render(); this.changed.fire();
       return details.why;
-    } catch (error) { void vscode.window.showWarningMessage(`Reconstruction unavailable: ${error instanceof Error ? error.message : String(error)}`); }
+    } catch (error) {
+      // what rung cannot reconstruct, TIA Portal's own monitoring shows exactly
+      void vscode.window.showWarningMessage(`Reconstruction unavailable: ${error instanceof Error ? error.message : String(error)}`, "Open in TIA Portal")
+        .then((pick) => pick && vscode.commands.executeCommand("rung.openInTia", target));
+    }
     finally { if (generation === this.generation) this.replayPending = false; }
   }
   get plan(): MonitorPlan | undefined {
