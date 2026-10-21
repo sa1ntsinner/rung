@@ -278,6 +278,23 @@ describe("PLC commands", () => {
     expect(t.out.join("")).toMatch(/download: Success/);
   });
 
+  it("a simulator agent skips the typed name but TIA questions still need --allow", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.env.RUNG_AGENT = "1";
+    const settings = mkdtempSync(join(tmpdir(), "rung-agent-settings-"));
+    t.env.APPDATA = settings; t.env.XDG_CONFIG_HOME = settings;
+    expect(await t.run(["download"])).toBe(3);
+    expect(t.db().downloads![0]!.allow).toEqual([]);
+    expect(await t.run(["download", "--allow", "stop-cpu"])).toBe(0);
+    expect(t.db().downloads![1]!.allow).toEqual(["stop-cpu"]);
+    expect(t.questions).toEqual([]);
+    const audit = readFileSync(join(t.dir, ".rung", "agent-actions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    expect(audit.map(line => line.outcome)).toEqual([3, 0]);
+    expect(audit.every(line => line.mode === "auto" && line.allowedBy === "mode")).toBe(true);
+  });
+
   it("what the download says about the PLC follows the phase: before the transfer, after it, or unknown", async () => {
     const t = setup();
     await t.run(["init"]);

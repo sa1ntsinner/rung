@@ -25,6 +25,8 @@ export interface CaseResult {
   index?: number;
   passed: boolean;
   failures: TestFailure[];
+  /** Names its expect: steps checked; 0: it ran and checked nothing. */
+  assertions?: number;
   error?: string;
   ms: number;
   line?: number;

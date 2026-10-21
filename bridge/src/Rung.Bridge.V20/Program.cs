@@ -128,6 +128,8 @@ namespace Rung.Bridge.V20
             var dir = Environment.GetEnvironmentVariable("RUNG_OPENNESS_DIR");
 #if TIA_V21
             if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("21.0", @"net48\Siemens.Engineering.Base") ?? @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
+#elif TIA_V18
+            if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("18.0", "Siemens.Engineering") ?? @"C:\Program Files\Siemens\Automation\Portal V18\PublicAPI\V18";
 #elif TIA_V19
             if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("19.0", "Siemens.Engineering") ?? @"C:\Program Files\Siemens\Automation\Portal V19\PublicAPI\V19";
 #else

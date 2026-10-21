@@ -9,6 +9,13 @@ import type { RungWorkspace } from "./workspace";
 import { allowPlcWrite } from "./plcReadOnly";
 import { plcReadOnly } from "./core/rungToml";
 
+/** How each change to a running PLC is asked and reported: TIA Portal's words, the PLC named, the button saying what it does. */
+const ACTION: Record<"modify" | "run" | "stop", { what: string; ask: (device: string) => string; button: (device: string) => string; done: string }> = {
+  modify: { what: "Modifying a value", ask: (d) => `Write a new value to ${d}?`, button: () => "Write value", done: "value written" },
+  run: { what: "RUN", ask: (d) => `Put ${d} in RUN?`, button: (d) => `RUN ${d}`, done: "RUN" },
+  stop: { what: "STOP", ask: (d) => `Put ${d} in STOP?`, button: (d) => `STOP ${d}`, done: "STOP" },
+};
+
 /** Uses the CLI's private confirmation pipe; source declarations are never changed here. */
 export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAccess, action: "modify" | "run" | "stop",
   name?: string, draft?: string, device?: string): Promise<void> {
@@ -16,7 +23,7 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
   if (!connection || !ws.root) return;
   if (!allowPlcWrite(ws.config, connection.device)) return;
   if (connection.simulator && action === "modify") return modifySimulator(ws, connection.device, connection.simulator, name, draft);
-  if (connection.target.transport !== "s7commplus") { void vscode.window.showWarningMessage("PLC modification requires a configured s7commplus target."); return; }
+  if (connection.target.transport !== "s7commplus") { void vscode.window.showWarningMessage(`${ACTION[action].what} on ${connection.device} needs transport = "s7commplus" in [live.plc.${connection.device}] of rung.toml. Nothing was sent to the PLC.`); return; }
   if (action === "modify") {
     name ??= await vscode.window.showInputBox({ title: "Modify current PLC value", prompt: "PLC symbolic name or verified absolute address" });
     if (!name) return;
@@ -45,20 +52,21 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
       prepared = true;
       const operation = frame.prepared;
       void (async () => {
-        const answer = await vscode.window.showWarningMessage(`Confirm ${action} on ${connection.device}?`, { modal: true, detail: operation.preview }, "Confirm");
+        const yes = ACTION[action].button(connection.device);
+        const answer = await vscode.window.showWarningMessage(ACTION[action].ask(connection.device), { modal: true, detail: operation.preview }, yes);
         await ws.reload();
-        confirmed = answer === "Confirm" && !plcReadOnly(ws.config, connection.device) && connection.workspace === access.scope && Date.now() < operation.expiresAt && child.exitCode === null;
+        confirmed = answer === yes &&!plcReadOnly(ws.config, connection.device) && connection.workspace === access.scope && Date.now() < operation.expiresAt && child.exitCode === null;
         child.stdin.on("error", () => {});
         if (!child.stdin.destroyed) child.stdin.end(JSON.stringify({ operationId: operation.operationId, preview: operation.preview, confirmed }) + "\n");
       })().catch(() => killTree(child));
     }
   });
   child.stderr.on("data", (chunk: Buffer) => { if (errors.length < 16_384) errors += chunk.toString("utf8"); });
-  child.on("error", () => void vscode.window.showErrorMessage("Could not start the PLC confirmation command."));
+  child.on("error", () => void vscode.window.showErrorMessage(`Could not start rung to reach ${connection.device}. Nothing was sent to the PLC.`));
   await new Promise<void>(resolve => child.once("close", code => {
     clearTimeout(timer); changed.dispose();
-    if (code === 0) void vscode.window.showInformationMessage("PLC operation acknowledged. Live monitoring shows subsequent values.");
-    else if (confirmed) void vscode.window.showWarningMessage(output.trim() || "PLC operation outcome is unknown. Observe the PLC before preparing another operation.");
+    if (code === 0) void vscode.window.showInformationMessage(`${connection.device} acknowledged: ${ACTION[action].done}. Live values show what follows.`);
+    else if (confirmed) void vscode.window.showWarningMessage(output.trim() || `The outcome on ${connection.device} is unknown. Check the PLC before you try again.`);
     else if (errors && !/cancelled/i.test(errors)) void vscode.window.showWarningMessage(errors.trim());
     resolve();
   }));

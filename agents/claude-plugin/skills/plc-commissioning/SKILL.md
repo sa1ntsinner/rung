@@ -5,7 +5,7 @@ description: Use when a PLC change is ready to go to a machine, when diagnosing 
 
 # From a finished change to a running machine
 
-You prepare; a person downloads and tests on the machine. Your job is to make their part short and safe.
+Check `rung_status` for the PLC's effective agent mode before an action. `manual` leaves changes to the person; `ask` requires a native dialog; `auto` permits listed actions and asks for others; `bypass` permits every action. Read-only locks always win. Never change a mode or its external store; when refused, ask the person. The person tests the result on the machine.
 
 ## Before the person downloads
 
@@ -20,7 +20,7 @@ You prepare; a person downloads and tests on the machine. Your job is to make th
 - First `rung_compare` (or `rung compare`): does the PLC run what the files say? A block that differs means the machine runs other code than the one you are reading; say which, and read the differing blocks with that in mind.
 - `rung_live_state`, `rung_live_alarms` and `rung_live_read` read CPU state, alarms and values through the configured read-only connection. `rung_live_diag` reads the diagnostic buffer when the PLC's Web API is configured. Start from the symptom: which output is (not) set, then walk back through the logic to the input or state that decides it.
 - Compare what the code expects with what the values say, one condition at a time; quote the values you read in your explanation.
-- Never write values, force, or change operating mode. If the fix needs a change, make it in the files and go back to the steps above.
+- Keep diagnosis read-only. If the fix needs a change, describe it, check the effective mode and go back to the preparation steps above. A mode does not replace the requested scope or the person's machine checks.
 
 ## Without hardware
 

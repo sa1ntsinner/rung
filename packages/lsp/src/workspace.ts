@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Workspace-wide symbol index: blocks, data blocks, UDTs and PLC tags, with member resolution.
 import { HmiIndex } from "./hmi.js";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseDocument } from "yaml";
@@ -323,6 +323,35 @@ export class WorkspaceIndex {
  * A rung workspace has `rung.toml` next to an exactly-named `plc/` folder, or `plc/<Device>/{blocks,types,tags}`.
  * Anything else (TwinCAT `PLC/` folders, CODESYS trees with a `plc` folder of .st files) is loaded in IEC mode.
  */
+/**
+ * A cheap stamp of what load(root) would read: path, size and modification time of every candidate file. Two equal
+ * stamps mean an index loaded at the first is still current at the second.
+ */
+export async function sourceStamp(root: string): Promise<string> {
+  const rung = await isRungLayout(root);
+  const out: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".") || (!rung && SKIP_DIRS.has(e.name))) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (rung || TWINCAT_FILE.test(e.name) || IEC_SOURCE.test(e.name) || SOURCE.test(e.name) || XML.test(e.name)) {
+        const s = await stat(p).catch(() => undefined);
+        if (s) out.push(`${p}\t${s.size}\t${s.mtimeMs}`);
+      }
+    }
+  };
+  if (rung) for (const d of ["plc", "views"]) await walk(join(root, d));
+  else await walk(root);
+  return out.sort().join("\n");
+}
+
 async function isRungLayout(root: string): Promise<boolean> {
   let top;
   try {

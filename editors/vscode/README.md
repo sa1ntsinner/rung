@@ -39,7 +39,7 @@ For a protected PLC, VS Code asks for a password, and a user too when its user m
 
 ## Setup
 
-You need a licensed TIA Portal (V19, V20 or V21, with Openness) on Windows: rung works through it and does not replace it. The editor features and `rung test` run without it.
+You need a licensed TIA Portal (V18, V19, V20 or V21, with Openness) on Windows: rung works through it and does not replace it. The editor features and `rung test` run without it.
 
 Nothing else to install: when no rung is on PATH, the extension uses the one it brings and runs it with VS Code's Node.js. It keeps that copy in its own storage folder, where it stays across updates. To use rung in a terminal too, run **rung: Put rung on PATH** (or click it in the Environment view); that asks first.
 

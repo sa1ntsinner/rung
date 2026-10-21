@@ -2,6 +2,8 @@
 
 rung gives agents two things: the TIA Portal project as plain files (read and edit them directly) and a small MCP server for actions (`rung mcp`).
 
+[Agent permission modes](modes.md) let the person choose `manual`, `ask`, `auto` or `bypass` per workspace or PLC. Read-only locks always win.
+
 ## Claude Code
 
 ```
@@ -11,11 +13,11 @@ rung gives agents two things: the TIA Portal project as plain files (read and ed
 
 The plugin registers the `rung` MCP server and adds `/rung-status` and the skills: `rung-workflow`, `rung-safety`, `rung-review`, `plc-engineer`, `scl-craft`, `lad-in-text`, `plc-data-design`, `plc-testing`, `plc-commissioning` and `iec-st-portable` (TwinCAT and CODESYS).
 
-Version 0.3.1 also starts the SCL language server for `.scl`, `.db`, `.udt`, `.s7dcl`, `.awl` and `.st`, so diagnostics arrive after edits. The `plc-reviewer` subagent reads a change and its affected code; `plc-diagnostician` reads online state, alarms and the diagnostic buffer and traces observations to code. Both have explicit lists of read tools and no shell or file editing tools. A PreToolUse hook checks shell commands and configuration edits with `rung guard --claude-hook`.
+Since 0.3.1 it also starts the SCL language server for `.scl`, `.db`, `.udt`, `.s7dcl`, `.awl` and `.st`, so diagnostics arrive after edits. The `plc-reviewer` subagent reads a change and its affected code; `plc-diagnostician` reads online state, alarms and the diagnostic buffer and traces observations to code. Both have explicit lists of read tools and no shell or file editing tools. A PreToolUse hook checks shell commands and configuration edits with `rung guard --claude-hook`.
 
 Install the plugin from the release's `agents` folder. The release includes its CLI and companion hosts inside the plugin, so copying it into Claude Code's cache keeps MCP, LSP and hooks working without a `rung` shell shim. This duplicates the runtime, its licences and corresponding source in the archive; the launcher prefers the original release CLI when it is still beside the plugin. In a source checkout, build rung first. Release packaging sets the plugin version to the CLI version.
 
-The cached runtime's TIA bridge has a different path from the original installation. A person must register it with Openness from their own terminal, or configure the existing whitelisted bridge through `RUNG_BRIDGE` or `bridge.command`. The agent cannot run `rung setup openness`. Offline tools and the S7 read backend do not need that Openness registration.
+The cached runtime's TIA bridge has a different path from the original installation. A person can register it with Openness from their own terminal, or configure the existing whitelisted bridge through `RUNG_BRIDGE` or `bridge.command`. For agents, `rung setup openness` requires permission for the `openness-setup` action. Offline tools and the S7 read backend do not need that Openness registration.
 
 Without the plugin:
 
@@ -47,7 +49,7 @@ args = ["mcp"]
 
 | Tool | Purpose |
 |---|---|
-| `rung_status` | conflicts, pending deletes, recovery items, watcher state |
+| `rung_status` | conflicts, pending deletes, recovery items, watcher state, effective agent modes and allowed actions per PLC |
 | `rung_sync` | one two-way pass: import edits, export TIA changes, compile |
 | `rung_sync_preview` | read-only plan with short unified diffs; show the person before sending |
 | `rung_diagnostics` | SCL checks + TIA compile errors per file |
@@ -77,8 +79,8 @@ Tests return totals and failures by default; `verbose:true` includes passing cas
 
 Every workspace also gets an `AGENTS.md` (regenerate with `rung agents`). Started outside a workspace, `rung mcp` still answers `rung_check`, `rung_test` and the code tools; the others say how a person binds the folder (`rung init`).
 
-rung refuses downloads, live writes, force, alarm acknowledgement and CPU mode changes when its environment identifies an agent. It also refuses `rung writes on`, `rung init --writes`, `rung setup openness` and `--confirm-stdin`. The error asks the person to run the command in their own terminal; `rung_download_request` prepares the handover. No workspace setting disables this guard. A VS Code session inherited from an agent terminal must be restarted from the person's terminal before confirming a PLC change.
+rung defaults to `manual` for real PLCs: downloads, live writes, force, alarm acknowledgement, CPU mode changes, enabling writes and Openness setup are refused under an agent marker. A person can choose another [agent permission mode](modes.md) outside the agent; the agent checks it and asks the person when refused. `--confirm-stdin` and changing the mode remain refused for agents. Read-only locks always win. A person confirming a PLC change in VS Code can still perform it when the editor inherited an agent environment.
 
-`rung setup --dry-run` shows the additional deny rules before installing them: Claude Code PreToolUse hooks and permissions, Cursor beforeShellExecution, Codex forbidden prefix rules, Gemini shell exclusions, OpenCode permissions, Copilot preToolUse hooks and Zed tool permissions. Existing hooks and deny lists are kept. Claude Code, Copilot, OpenCode and Zed also deny edits to `rung.toml`; the shell hooks reject common commands that rewrite its safety settings.
+`rung setup --dry-run` shows the additional deny rules before installing them: Claude Code PreToolUse hooks and permissions, Cursor beforeShellExecution, Codex forbidden prefix rules, Gemini shell exclusions, OpenCode permissions, Copilot preToolUse hooks and Zed tool permissions. Existing hooks and deny lists are kept. Claude Code, Copilot, OpenCode and Zed also deny edits to `rung.toml`; the shell hooks reject common commands that rewrite its safety settings. The guard also denies editing or writing the external `rung/agent-modes.toml` store. Client deny rules may be stricter than a mode; a mode does not remove them.
 
 The guard recognises `CLAUDECODE`, `CODEX_*`, `CURSOR_*`, `GEMINI_CLI`, `OPENCODE`, Copilot markers, `AI_AGENT` and other agent markers. Agent launchers without a marker should set `RUNG_AGENT=1`. Environment detection and client rules are defence in depth, not a sandbox: markers can be absent or removed, clients can disable hooks, and a program running as your Windows user can call Openness directly. Where a PLC must stay out of reach, keep `download.enabled = false` and run the agent as a Windows user outside the "Siemens TIA Openness" group ([downloads](../downloads.md)).

@@ -90,7 +90,9 @@ describe("rung mcp tools", () => {
     expect(two).toEqual({ isError: true, text: "The project has several PLCs (Line_A, Line_B); pass device." });
     const request = await (await connect(empty))("rung_download_request");
     expect(request).toEqual({ isError: true, text: "Nothing is mirrored yet, so rung cannot tell which PLC; pass device." });
-    expect((await (await connect(root))("rung_download_request")).text).toMatch(/PLC_1/);
+    const handed = (await (await connect(root))("rung_download_request")).text;
+    expect(handed).toMatch(/PLC_1/);
+    expect(handed).toMatch(/TIA Portal has the files as they are: all 1 mirrored objects are synced/);
   });
 
   it("take workspace paths with backslashes, and refuse one that is not a file of the workspace", async () => {
@@ -116,6 +118,20 @@ describe("rung mcp tools", () => {
     expect((await call("rung_confirm_delete", { address: typo })).isError).toBe(true);
     expect((await call("rung_explain", { name: "Fx_Motr" })).text).toBe("Fx_Motr is not in the workspace: did you mean Fx_Motor?");
     expect((await call("rung_find_usages", { name: "PLC_1/Fx_Mootor" })).text).toBe("PLC_1/Fx_Mootor is not in the workspace graph: did you mean PLC_1/Fx_Motor?");
+  });
+
+  it("check the files as they are right after an edit, and name the sources they checked", async () => {
+    const { root } = await workspace();
+    const call = await connect(root);
+    const file = join(root, "plc", "PLC_1", "blocks", "Fx_Motor.scl");
+    const before = JSON.parse((await call("rung_diagnostics", { path: "plc/PLC_1/blocks/Fx_Motor.scl" })).text);
+    expect(before.source).toEqual([expect.objectContaining({ code: "UNDECLARED" })]);
+    writeFileSync(file, MOTOR.replace("#nope := 1;", "")); // well inside any time window a cache might keep
+    const after = JSON.parse((await call("rung_diagnostics", { path: "plc/PLC_1/blocks/Fx_Motor.scl" })).text);
+    expect(after.source).toEqual([]);
+    expect(after.sourceHash).toMatch(/^sha256:[0-9a-f]{16}$/);
+    expect(after.sourceHash).not.toBe(before.sourceHash);
+    expect(JSON.parse((await call("rung_diagnostics")).text).sourceHash).toBe(after.sourceHash);
   });
 
   it("diagnostics give workspace paths as written, spaces and all", async () => {

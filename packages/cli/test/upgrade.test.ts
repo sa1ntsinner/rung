@@ -15,8 +15,9 @@ describe("rung upgrade: an older project upgraded next to it", () => {
     expect(() => upgradePlan("Line.zap18", "V20", 1)).toThrow(/rung retrieve/);
     expect(() => upgradePlan("Line.txt", "V20", 1)).toThrow(/project file/);
   });
-  it("tells rung init what to do with a project older than V19", () => {
-    expect(olderProjectHint("D:/plc/Line/Line.ap18")).toMatch(/TIA Portal V18 project.*rung upgrade/s);
+  it("tells rung init what to do with a project older than V18, and opens V18 itself", () => {
+    expect(olderProjectHint("D:/plc/Line/Line.ap17")).toMatch(/TIA Portal V17 project.*rung upgrade/s);
+    expect(olderProjectHint("D:/plc/Line/Line.ap18")).toBeUndefined();
     expect(olderProjectHint("D:/plc/Line/Line.ap20")).toBeUndefined();
   });
 });

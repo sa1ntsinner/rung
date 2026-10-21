@@ -405,6 +405,24 @@ describe("rung CLI", () => {
     expect(t.out.join("")).toContain("::error file=tests/run.test.yaml,line=10,title=rung test%3A Fx_Run%3A typo::step 2: Strat does not exist (did you mean Start?)\n");
   });
 
+  it("test counts what each case checked, and --strict fails a case that checked nothing", async () => {
+    const t = setup();
+    mkdirSync(join(t.dir, "plc", "PLC_1", "blocks"), { recursive: true });
+    mkdirSync(join(t.dir, "tests"), { recursive: true });
+    writeFileSync(join(t.dir, "plc", "PLC_1", "blocks", "Fx_Run.scl"), 'FUNCTION_BLOCK "Fx_Run"\n   VAR_INPUT\n      Start : Bool;\n   END_VAR\n   VAR_OUTPUT\n      Running : Bool;\n   END_VAR\nBEGIN\n   #Running := #Start;\nEND_FUNCTION_BLOCK\n');
+    writeFileSync(join(t.dir, "tests", "run.test.yaml"), "block: Fx_Run\ncases:\n  - name: runs\n    steps:\n      - set: { Start: true }\n      - { cycle: 1, expect: { Running: true } }\n      - { within: 1s, expect: { Running: true, Start: true } }\n  - name: only runs\n    steps:\n      - cycle: 1\n");
+    expect(await t.run("test")).toBe(0);
+    expect(t.out.join("")).toContain("ok   Fx_Run: runs\n");
+    expect(t.out.join("")).toContain("ok   Fx_Run: only runs (checks nothing)\n");
+    expect(t.out.join("")).toContain("2/2 passed, 3 checks; 1 passed without checking anything (rung test --strict fails them)");
+    t.out.length = 0;
+    expect(await t.run("test", "--strict")).toBe(2);
+    expect(t.out.join("")).toContain("Fx_Run: only runs — checks nothing: add an expect: step (--strict)\n");
+    t.out.length = 0;
+    expect(await t.run("test", "--json")).toBe(0);
+    expect(JSON.parse(t.out.join("")).files[0].cases.map((c: { assertions: number }) => c.assertions)).toEqual([3, 0]);
+  });
+
   it("test says so when there are no tests instead of 0/0 passed", async () => {
     const t = setup();
     expect(await t.run("test")).toBe(3);

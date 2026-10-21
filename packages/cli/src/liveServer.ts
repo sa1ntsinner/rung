@@ -13,7 +13,9 @@ import type { LiveReader } from "./live.js";
 import { rungCommand } from "./paths.js";
 import { liveMutations } from "./liveMutation.js";
 import { runningSimulator } from "./simulate.js";
-import { assertHuman } from "./guard.js";
+import { agentMarker, agentPermission, assertHuman } from "./guard.js";
+import { commandAction } from "./guard.js";
+import { withAgentPreparation } from "./agentMode.js";
 
 // rung simulate takes any password; this one only fills the field
 const SIMULATOR_LOGIN = "simulator";
@@ -83,7 +85,7 @@ export async function startLiveServer(root: string, env: Io["env"], options: { b
     prepare: async (p, c) => {
       touch(c.clientId);
       const key = await bind(p);
-      const operation = await mutations.prepare(c.clientId, JSON.parse(key), p.action as Parameters<typeof mutations.prepare>[2], credentials.get(key)!);
+      const operation = await mutations.prepare(c.clientId, JSON.parse(key), p.action as Parameters<typeof mutations.prepare>[2], credentials.get(key)!, typeof p.agent === "string" ? p.agent : undefined, typeof p.command === "string" ? p.command : undefined);
       if (!consumers.has(c.clientId) || closed) { await mutations.cancel(c.clientId, operation.operationId); throw new BridgeError("BRIDGE_EXITED", "Client disconnected during preparation"); }
       return operation;
     },
@@ -194,6 +196,8 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
     if (event === "values" && listeners.has(p.id)) { latest.set(p.id, p.frame); listeners.get(p.id)!(p.frame); }
   });
   const readFrame = (names: string[]) => client.request<OnlineReadResult>("read", { key, names, credentials });
+  const preparedActions = new Map<string, string>();
+  const mutationIo: Io = { cwd: root, env, stdout: () => {}, stderr: () => {} };
   return {
     capture: async (block, instance, scope) => {
       if (closed) throw new BridgeError("BRIDGE_EXITED", "Live reader is closed");
@@ -210,8 +214,19 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
       if (closed) { alarmListeners.delete(id); alarmLatest.delete(id); await release(id).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
       return { close: async () => { alarmLatest.delete(id); if (!alarmListeners.delete(id) || closed) return; try { await release(id); } catch (error) { if ((error as { code?: string }).code !== "OWNER_GONE") throw error; } } };
     },
-    prepare: action => { assertHuman(env); return client.request("prepare", { key, action, credentials }); },
-    commit: (operationId, preview, confirmed) => { assertHuman(env); return client.request("commit", { operationId, preview, confirmed }); },
+    prepare: action => withAgentPreparation(root, commandAction(["live", action.action], [])!, selected.device, mutationIo, async () => {
+      const prepared = await client.request<import("@rung/bridge-client").OnlinePreparedWrite>("prepare", { key, action, credentials, agent: agentMarker(env), command: agentPermission.getStore()?.command });
+      const audit = agentPermission.getStore()?.audit;
+      if (audit) audit.delegated = true;
+      preparedActions.set(prepared.operationId, action.action);
+      return prepared;
+    }),
+    commit: async (operationId, preview, confirmed) => {
+      const action = preparedActions.get(operationId);
+      if (!action) { assertHuman(env); throw new BridgeError("STALE_PREPARATION", "Prepare this operation first"); }
+      preparedActions.delete(operationId);
+      return withAgentPreparation(root, commandAction(["live", action], [])!, selected.device, mutationIo, () => client.request("commit", { operationId, preview, confirmed }));
+    },
     cancel: operationId => client.request("cancel", { operationId }),
     readFrame, read: async (names) => (await readFrame(names)).items,
     subscribe: async (labels, cycleMs, cb) => {

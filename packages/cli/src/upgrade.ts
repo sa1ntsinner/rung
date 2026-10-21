@@ -26,15 +26,15 @@ export function upgradePlan(file: string, to: TiaVersion, nonce: number) {
 }
 
 /**
- * Where an archive is retrieved: a folder named after it, next to it (Line3.zap20 -> Line3/). An archive of V19-V21
+ * Where an archive is retrieved: a folder named after it, next to it (Line3.zap20 -> Line3/). An archive of V18-V21
  * is retrieved by that TIA Portal; an older one by `to` (V20 unless --tia says otherwise), with upgrade.
  */
 export function retrievePlan(archive: string, tia: TiaVersion | undefined) {
   const m = /\.zap(\d+)$/i.exec(archive);
   if (!m) throw new WorkspaceError("BAD_ARGUMENT", "rung retrieve needs a TIA Portal archive (.zap19, .zap20, …)");
   const from = Number(m[1]);
-  if (from > 21) throw new WorkspaceError("BAD_ARGUMENT", `${basename(archive)} is an archive of TIA Portal V${from}; rung works with V19, V20 and V21`);
-  const to = tia ?? (from >= 19 ? (`V${from}` as TiaVersion) : "V20");
+  if (from > 21) throw new WorkspaceError("BAD_ARGUMENT", `${basename(archive)} is an archive of TIA Portal V${from}; rung works with V18, V19, V20 and V21`);
+  const to = tia ?? (from >= 18 ? (`V${from}` as TiaVersion) : "V20");
   if (Number(to.slice(1)) < from) throw new WorkspaceError("BAD_ARGUMENT", `TIA Portal ${to} cannot retrieve an archive of V${from}`);
   return { from, to, upgrade: Number(to.slice(1)) > from, target: join(dirname(archive), basename(archive).replace(/\.zap\d+$/i, "")) };
 }
@@ -167,8 +167,8 @@ export async function cmdRetrieve(target: string | undefined, v: Record<string, 
 /** rung init on a project rung cannot open: what to run instead. */
 export function olderProjectHint(file: string): string | undefined {
   const m = /\.ap(\d+)$/i.exec(file);
-  if (!m || Number(m[1]) >= 19) return undefined;
-  return `${basename(file)} is a TIA Portal V${m[1]} project; rung works with V19, V20 and V21. rung upgrade ${file} makes an upgraded project next to it (the original stays as it is), then rung init --project <that project>`;
+  if (!m || Number(m[1]) >= 18) return undefined;
+  return `${basename(file)} is a TIA Portal V${m[1]} project; rung works with V18, V19, V20 and V21. rung upgrade ${file} makes an upgraded project next to it (the original stays as it is), then rung init --project <that project>`;
 }
 
 /** TIA Portals running now (their main process: background helpers carry -Name=). */

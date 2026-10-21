@@ -3,7 +3,7 @@ import { cpSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 export function installedTiaVersions(programFiles) {
-  return ["V20", ...["V19", "V21"].filter(v => existsSync(join(programFiles, "Siemens", "Automation", `Portal ${v}`, "PublicAPI", v, ...(v === "V21" ? ["net48", "Siemens.Engineering.Base.dll"] : ["Siemens.Engineering.dll"]))))];
+  return ["V20", ...["V18", "V19", "V21"].filter(v => existsSync(join(programFiles, "Siemens", "Automation", `Portal ${v}`, "PublicAPI", v, ...(v === "V21" ? ["net48", "Siemens.Engineering.Base.dll"] : ["Siemens.Engineering.dll"]))))];
 }
 
 export function stageBridges(root, stage, versions) {

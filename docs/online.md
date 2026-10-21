@@ -1,6 +1,6 @@
 # Going online
 
-TIA Portal V19, V20 or V21 with Openness must be installed on the Windows PC that runs the bridge. It can be your PC or [another PC over ssh](remote.md). rung reuses the TIA Portal that has the project open, or starts one without window.
+TIA Portal V18, V19, V20 or V21 with Openness must be installed on the Windows PC that runs the bridge. It can be your PC or [another PC over ssh](remote.md). rung reuses the TIA Portal that has the project open, or starts one without window.
 
 ## Read-only lock
 

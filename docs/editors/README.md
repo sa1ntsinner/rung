@@ -61,7 +61,7 @@ TwinCAT and CODESYS `.st` files: install the **Structured Text** extension as we
 
 Zed extensions cannot add their own side panels or buttons, so there is no rung sidebar in Zed; VS Code has one.
 
-The language server is `rung` from PATH; without one, the extension installs `@rung-plc/cli` from npm into its own folder and runs it with Zed's Node.js (updated once a session). The tasks run `rung` in a terminal, so they need it on PATH. To point the language server somewhere else, see below. If `.scl` files open as another language, map them in settings: `"file_types": { "SCL": ["scl", "db", "udt"] }`.
+The language server is `rung` from PATH; without one, the extension installs `@rung-plc/cli` from npm into its own folder and runs it with Zed's Node.js (updated once a session). The tasks run `rung` in a terminal, so they need it on PATH (`npm install -g @rung-plc/cli`, or the release folder): a Zed task cannot run the copy the extension installed. Tasks that read the files (sync, preview, watch, compile, test, impact, who, why) save every edited buffer first, so they never act on an older text than the one on screen; resolve with my file saves the current one; the others save nothing. To point the language server somewhere else, see below. If `.scl` files open as another language, map them in settings: `"file_types": { "SCL": ["scl", "db", "udt"] }`.
 
 ```json
 {

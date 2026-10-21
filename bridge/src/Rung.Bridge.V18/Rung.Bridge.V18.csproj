@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPDX-License-Identifier: BUSL-1.1 -->
+  <!--
+    TIA Portal V18 adapter: the V20 sources compiled against the V18 Openness assembly (PublicAPI\V18), with the
+    V19 paths (TIA_V19) and what V18 lacks besides (TIA_V18).
+    Not part of Rung.Bridge.sln so machines without V18 keep building.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>rung-bridge-v18</AssemblyName>
+    <RootNamespace>Rung.Bridge.V20</RootNamespace>
+    <DefineConstants>$(DefineConstants);TIA_V19;TIA_V18</DefineConstants>
+    <Version>0.3.2</Version>
+    <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V18\PublicAPI\V18</RungOpennessDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Rung.Bridge.V20\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Siemens.Engineering">
+      <HintPath>$(RungOpennessDir)\Siemens.Engineering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Management" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Rung.Bridge.Core\Rung.Bridge.Core.csproj" />
+  </ItemGroup>
+  <PropertyGroup>
+    <RungOpennessWhitelistVersion>18.0</RungOpennessWhitelistVersion>
+  </PropertyGroup>
+  <Import Project="../../../tools/openness/Openness.Whitelist.targets" />
+</Project>

@@ -17,6 +17,8 @@ import type { OnlinePreparedWrite } from "@rung/bridge-client";
 import type { OnlineAlarmResult, OnlineNativeCapture, LiveScope } from "@rung/bridge-client";
 import { createInterface } from "node:readline/promises";
 import { frontendConfirmation } from "./liveMutation.js";
+import { agentMarker, commandAction } from "./guard.js";
+import { withAgentPreparation } from "./agentMode.js";
 import { nativeGlobalReads, reconstructionRevision } from "@rung/sim";
 import { reconstructNativeSample, steadyReads } from "./liveReconstruction.js";
 
@@ -93,26 +95,29 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
     } finally { try { await lease?.close(); } finally { await reader.close(); } }
   }
   if (sub === "modify" || sub === "run" || sub === "stop") {
+    return withAgentPreparation(dir, commandAction(["live", sub], [])!, opts.device, io, async () => {
     assertPlcWritable(undefined, undefined, io.env);
-    if (!opts.confirmStdin && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "PLC mutation requires an interactive confirmation");
+    if (opts.confirmStdin && agentMarker(io.env)) throw new WorkspaceError("AGENT_REFUSED", "--confirm-stdin is refused for agents");
+    if (!agentMarker(io.env) && !opts.confirmStdin && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "PLC mutation requires an interactive confirmation");
     if (sub === "modify" ? args.length !== 2 : args.length !== 0) throw new WorkspaceError("BAD_ARGUMENT", "Use live modify <name> <SCL-literal>, live run or live stop");
     const ws = await findWorkspace(dir);
     assertPlcWritable(await loadConfig(ws), opts.device, io.env);
     const selected = await liveSelection(ws, opts, io.env);
     const reader = await brokerReader(ws, io.env, opts);
     let operation: OnlinePreparedWrite | undefined;
-    const rl = io.prompt || opts.confirmStdin ? undefined : createInterface({ input: process.stdin, output: process.stdout });
+    const rl = agentMarker(io.env) || io.prompt || opts.confirmStdin ? undefined : createInterface({ input: process.stdin, output: process.stdout });
     try {
       operation = await reader.prepare!({ action: sub, ...(sub === "modify" ? { name: args[0]!, literal: args[1]! } : {}) });
       io.stdout(opts.confirmStdin ? JSON.stringify({ prepared: operation }) + "\n" : operation.preview.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "") + "\n");
       const question = `To confirm this PLC operation, type ${selected.device}: `;
-      const confirmed = opts.confirmStdin ? await frontendConfirmation(process.stdin, operation)
+      const confirmed = agentMarker(io.env) ? true : opts.confirmStdin ? await frontendConfirmation(process.stdin, operation)
         : await (io.prompt ? io.prompt(question) : rl!.question(question)) === selected.device;
       if (!confirmed) { await reader.cancel!(operation.operationId); io.stderr("PLC operation cancelled\n"); return 1; }
       const result = await reader.commit!(operation.operationId, operation.preview, true);
       io.stdout(opts.json ? JSON.stringify(result) + "\n" : `PLC operation ${result.outcome}\n`);
       return result.outcome === "acknowledged" ? 0 : 2;
     } finally { rl?.close(); if (operation) await reader.cancel!(operation.operationId).catch(() => {}); await reader.close(); }
+    });
   }
   if (sub !== "read" && sub !== "diag" && sub !== "watch") {
     io.stderr('rung: usage: rung live read "<DB>".<member> ... | rung live watch --file <block> [--instance <DB>] | rung live watch "<DB>".<member> ... | rung live diag\n');

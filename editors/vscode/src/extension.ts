@@ -28,6 +28,7 @@ import { TerminalPool } from "./runner/terminal";
 import { WatchController } from "./runner/watch";
 import { readSettings } from "./settings";
 import { StatusBar } from "./statusBar";
+import { AgentMode } from "./agentMode";
 import { Activity } from "./core/activity";
 import { OwnerEvents } from "./ownerEvents";
 import { ActivityView } from "./views/activityView";
@@ -157,6 +158,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<RungEx
     }),
   );
   const statusBar = new StatusBar(ws, watch, online, activity, events);
+  context.subscriptions.push(new AgentMode(ws, cli));
   const activityView = new ActivityView(ws, activity, events);
   const changes = new ChangesView(ws, cli, events);
   const decorations = new ObjectDecorations(ws);

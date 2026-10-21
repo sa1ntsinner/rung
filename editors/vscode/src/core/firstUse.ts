@@ -3,15 +3,15 @@
 import { posix, win32 } from "node:path";
 import type { CheckItem } from "./args";
 
-/** The TIA Portal a project (or archive) needs: an archive older than V19 is retrieved by V20, with upgrade. */
+/** The TIA Portal a project (or archive) needs: an archive older than V18 is retrieved by V20, with upgrade. */
 export function tiaVersionOf(project: string): string | undefined {
   const m = /\.(z?)ap(\d\d)$/i.exec(project);
   if (!m) return undefined;
-  return m[1] && Number(m[2]) < 19 ? "V20" : `V${m[2]}`;
+  return m[1] && Number(m[2]) < 18 ? "V20" : `V${m[2]}`;
 }
 
 export function validateRemoteProject(project: string): string | undefined {
-  return /\.ap(19|20|21)$/i.test(project) ? undefined : "Enter the Windows project path ending in .ap19, .ap20 or .ap21.";
+  return /\.ap(18|19|20|21)$/i.test(project) ? undefined : "Enter the Windows project path ending in .ap18, .ap19, .ap20 or .ap21.";
 }
 
 export type Preflight = { ok: true; whitelist?: true } | { ok: false; message: string };

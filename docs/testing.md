@@ -11,6 +11,7 @@ rung test --filter Fx_Motor     # only the tests of the block Fx_Motor
 rung test --filter stuck        # only the cases whose name contains "stuck"
 rung test --case tests/drives/motor.test.yaml#2   # exactly the third case of that file (cases count from 0)
 rung test --junit report.xml    # JUnit XML for CI
+rung test --strict              # a case that checks nothing fails (for CI)
 rung test --json                # every result with the line of its case, of each failing step and of the step an error stopped in (VS Code's Testing view uses it)
 ```
 
@@ -42,6 +43,7 @@ cases:
 - `expect` compares with a small tolerance for reals; TIME values accept the same durations as `advance` (`500ms`, `T#500ms`, `2s`).
 - `advance` needs a unit (`200ms`, not `200`). It runs whole cycles, rounded up, at least one: at `cycle: 10ms`, `15ms` runs two cycles and `0ms` runs one.
 - `--case <file>#<n>` runs one case and nothing else: the file is still read and checked as a whole, the other cases do not run. A number past the file's cases, or a file that is not there, is an error, never "all cases". `--json` gives every case its `index` in the file.
+- Every case counts its checks: each name in an `expect:`, and in a `within`/`always`/`never` step once. A case without any passes by running and says `(checks nothing)`; the totals say how many did. `--strict` fails those cases, so CI cannot report a test that only ran as one that checked behaviour. `--json`, the VS Code Testing view and `rung_test` give the count as `assertions`.
 - `--filter` matches a path substring or the exact `block:` name, case-insensitively on every platform. Paths accept `/` or `\\`. Otherwise it runs the cases whose name contains it (`--filter stuck`).
 - One step may combine several keys, e.g. `- { set: { Start: true }, cycle: 1, expect: { Running: true } }`. They always run in the order `set`, `cycle`, `advance`, `expect`, whatever order they are written in. Unknown keys are rejected.
 - A step runs at most 10 000 000 cycles: `advance: T#1d` at the default 10 ms is 8 640 000. For longer times, set a longer `cycle:` at the top of the file.

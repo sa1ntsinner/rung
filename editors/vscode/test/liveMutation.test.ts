@@ -42,7 +42,7 @@ it("cancels a live confirmation if read-only is enabled while the dialog is open
   let reply: any;
   child.stdin.end.mockImplementation(text => { reply = JSON.parse(text); setTimeout(() => child.emit("close", 1), 0); });
   vi.mocked(spawn).mockImplementation(() => { setTimeout(() => child.stdout.emit("data", Buffer.from(JSON.stringify({ prepared: operation }) + "\n")), 0); return child as never; });
-  vi.mocked(vscode.window.showWarningMessage).mockImplementation(async () => { vi.stubEnv("RUNG_READ_ONLY", "1"); return "Confirm" as never; });
+  vi.mocked(vscode.window.showWarningMessage).mockImplementation(async () => { vi.stubEnv("RUNG_READ_ONLY", "1"); return "STOP A" as never; });
   const ws = { root: "C:/fixture", reload: async () => {}, onDidChange: () => ({ dispose() {} }) };
   const access = { scope: "fixture", select: async () => ({ device: "A", target: { transport: "s7commplus" }, workspace: "fixture" }), environment: async () => ({}) };
   await mutateLive(ws as never, { invocation: () => ({ file: "fixture", args: [] }) } as never, access as never, "stop");
@@ -67,11 +67,11 @@ it("shows the host's exact preview and cancels an editor confirmation after reta
     child.stdin.end.mockImplementation(text => { reply = JSON.parse(text); setTimeout(() => child.emit("close", reply.confirmed ? 0 : 1), 0); });
     vi.mocked(spawn).mockImplementation(() => { setTimeout(() => child.stdout.emit("data", Buffer.from(JSON.stringify({ prepared: operation }) + "\n")), 0); return child as never; });
     const access = { scope: "original", select: async () => ({ device: "A", target: { transport: "s7commplus" }, workspace: "original" }), environment: async () => ({ RUNG_PLC_PASSWORD: "secret" }) };
-    vi.mocked(vscode.window.showWarningMessage).mockImplementation(async () => { if (retarget) access.scope = "changed"; return "Confirm" as never; });
+    vi.mocked(vscode.window.showWarningMessage).mockImplementation(async () => { if (retarget) access.scope = "changed"; return "STOP A" as never; });
     const ws = { root: "C:/fixture", reload: async () => {}, onDidChange: () => ({ dispose() {} }) };
     const cli = { invocation: vi.fn(() => ({ file: "node", args: ["cli.js"], shell: false })) };
     await mutateLive(ws as never, cli as never, access as never, "stop", undefined, undefined, "A");
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("Confirm stop on A?", { modal: true, detail: operation.preview }, "Confirm");
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("Put A in STOP?", { modal: true, detail: operation.preview }, "STOP A");
     expect(reply).toEqual({ operationId: "one", preview: operation.preview, confirmed: !retarget });
     expect(cli.invocation.mock.calls[0]?.[0]).not.toContain("secret");
   }

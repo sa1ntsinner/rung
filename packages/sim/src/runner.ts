@@ -41,6 +41,8 @@ export interface CaseResult {
   index?: number;
   passed: boolean;
   failures: TestFailure[];
+  /** Names checked by expect: and within/always/never steps (a temporal step counts each name once). 0: the case ran, nothing was checked. */
+  assertions?: number;
   error?: string;
   ms: number;
   /** Line of the case in the test file (from 1). */
@@ -553,6 +555,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
     sim.hardwareIds = hardware;
     hooks.simulator?.(sim);
     const failures: TestFailure[] = [];
+    let assertions = 0;
     const isFb = g.block.kind === "FB" || g.block.kind === "PRG";
     const inOuts = g.block.vars.filter((v) => v.section === "InOut");
     let inst: Instance | undefined;
@@ -763,6 +766,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
               if (!("expect" in step)) throw new SimError(`${op}: name what to check with expect:, e.g. { ${op}: 2s, expect: { Motor: true } }`);
               if (TEMPORAL.filter((k) => k in step).length > 1) throw new SimError("a step has one of within, always and never");
               if (!plain(step.expect)) throw new SimError("expect: write names and values, e.g. { Raw: 1 }");
+              assertions += Object.keys(step.expect as Record<string, unknown>).length;
               // the time as advance: reads it, its errors in this step's words
               let n: number;
               try {
@@ -794,19 +798,20 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
             }
             case "expect":
               if (TEMPORAL.some((k) => k in step)) break; // checked every cycle above
+              assertions += Object.keys(arg as Record<string, unknown>).length;
               failures.push(...expectNow(arg as Record<string, unknown>, si));
               break;
           }
         }
         if (hooks.observe && ["cycle", "advance", ...TEMPORAL].some((k) => k in step)) observe(si + 1);
       }
-      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, ms: Date.now() - t0, ...(hooks.observe ? { observed } : {}) });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: failures.length === 0, failures, assertions, ms: Date.now() - t0, ...(hooks.observe ? { observed } : {}) });
     } catch (err) {
       // an FC input the test misspelt shows when the FC is called
       const input = err instanceof SimError ? /^(\S+) is not an input of (.+)$/.exec(err.message) : null;
       const e = input && input[2] === g.block.name ? hinted(err, index, g, input[1]!, "set") : err;
       const where = e instanceof SimError && e.block ? ` (in ${e.block}${e.offset !== undefined && !/\(line \d+\)/.test(e.message) ? `, line ${sim.lineOf(e.block, e.offset) ?? "?"}` : ""})` : "";
-      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: false, failures, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0, ...(current ? { errorStep: current } : {}) });
+      results.push({ name: c.name ?? `case ${ci + 1}`, index: ci, passed: false, failures, assertions, error: e instanceof SimError ? `${e.message}${where}` : String(e), ms: Date.now() - t0, ...(current ? { errorStep: current } : {}) });
     }
     for (const [k, n] of sim.stubCalls) stubCalls.set(k, (stubCalls.get(k) ?? 0) + n);
   }
@@ -908,6 +913,11 @@ async function runOneCase(root: string, index: WorkspaceIndex, only: CaseSelecto
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** rung test --strict: a case that passed without checking anything fails. */
+export function requireAssertions(results: FileResult[]): FileResult[] {
+  return results.map((f) => ({ ...f, cases: f.cases.map((c) => (c.passed && !c.assertions ? { ...c, passed: false, error: "checks nothing: add an expect: step (--strict)" } : c)) }));
+}
 
 export function toJUnit(results: FileResult[]): string {
   const cases = results.flatMap((f) => (f.error ? [{ f, c: { name: "(file)", passed: false, failures: [], error: f.error, ms: 0 } as CaseResult }] : f.cases.map((c) => ({ f, c }))));

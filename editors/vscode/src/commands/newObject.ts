@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// New object…: a short native wizard (kind, PLC, folder, name, an FC's return type) for an FB, FC, DB, UDT or tag
+// New object…: a short native wizard (kind, PLC, folder, name, an FC's return type) for an FB, FC, OB, DB, UDT or tag
 // table. The language server gives the path and the text TIA Portal exports for it (rung/newObject); the file is
 // written only at the end, never over another, and opened. Cancelling at any step writes nothing.
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import type { Lsp } from "../lsp";
 import type { RungWorkspace } from "../workspace";
 
-type Kind = "FB" | "FC" | "DB" | "UDT" | "TAGS";
+type Kind = "FB" | "FC" | "OB" | "DB" | "UDT" | "TAGS";
 interface Request {
   kind: Kind;
   name: string;
@@ -21,12 +21,15 @@ type Answer = { path: string; text: string } | { reason: string };
 const KINDS: { kind: Kind; label: string; detail: string; icon: string; dir: string }[] = [
   { kind: "FB", label: "Function block", detail: "FB: code with its own memory (an instance per use)", icon: "symbol-class", dir: "blocks" },
   { kind: "FC", label: "Function", detail: "FC: code without memory, called with its parameters", icon: "symbol-method", dir: "blocks" },
+  { kind: "OB", label: "Program cycle OB", detail: "OB: called by the PLC every cycle, like Main (interrupt and startup OBs are made in TIA Portal)", icon: "sync", dir: "blocks" },
   { kind: "DB", label: "Global data block", detail: "DB: data every block can use", icon: "database", dir: "blocks" },
   { kind: "UDT", label: "PLC data type", detail: "UDT: a structure to declare variables with", icon: "symbol-structure", dir: "types" },
   { kind: "TAGS", label: "PLC tag table", detail: "Tags at inputs, outputs and memory", icon: "tag", dir: "tags" },
 ];
 
-const RETURN_TYPES = ["Void", "Bool", "Int", "DInt", "Real", "LReal", "Word", "DWord", "Time", "String"];
+// every elementary type an FC can return; a PLC data type or another type is typed in (Other type)
+const RETURN_TYPES = ["Void", "Bool", "Byte", "Word", "DWord", "LWord", "SInt", "Int", "DInt", "LInt", "USInt", "UInt", "UDInt", "ULInt", "Real", "LReal", "Time", "LTime", "S5Time", "Date", "Time_Of_Day", "LTime_Of_Day", "Date_And_Time", "LDT", "DTL", "Char", "WChar", "String", "WString"];
+const OTHER_TYPE = "Other type…";
 
 /** A folder name as the workspace writes it (%2F for "/", docs/format/README.md) back to the name it stands for. */
 const unescape = (segment: string) => segment.replace(/%([0-9A-F]{2})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
@@ -43,8 +46,9 @@ async function folders(dir: vscode.Uri, prefix: string[] = []): Promise<string[]
   return out;
 }
 
-async function pick<T extends vscode.QuickPickItem>(items: T[], options: vscode.QuickPickOptions & { step: number; steps: number }): Promise<T | undefined> {
-  return vscode.window.showQuickPick(items, { ...options, title: `New object (${options.step}/${options.steps})`, ignoreFocusOut: true });
+/** Each step names what it asks: the number of steps depends on the answers (one PLC or several, an FC's return type). */
+async function pick<T extends vscode.QuickPickItem>(items: T[], options: vscode.QuickPickOptions & { title: string }): Promise<T | undefined> {
+  return vscode.window.showQuickPick(items, { ...options, ignoreFocusOut: true });
 }
 
 /** Creates a file with its text, or refuses when the file exists: never a check and then a write. */
@@ -60,20 +64,21 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
     return undefined;
   }
   const root = vscode.Uri.file(ws.root);
-  const steps = 4;
+  // a workspace without a PLC is told so before the first question, not after it
+  const plcs = (await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(root, "plc")).then((e) => e, () => [])).filter(([, t]) => t === vscode.FileType.Directory).map(([n]) => n);
+  if (!plcs.length) {
+    void vscode.window.showWarningMessage("This workspace has no PLC yet. Pull from TIA Portal first.");
+    return undefined;
+  }
   const kind = await pick(
     KINDS.map((k) => ({ label: `$(${k.icon}) ${k.label}`, detail: k.detail, k })),
-    { step: 1, steps, placeHolder: "What to make" },
+    { title: "New object: what to make", placeHolder: "What to make" },
   );
   if (!kind) return undefined;
   const k = kind.k;
+  const what = `New ${k.label.toLowerCase().replace(/^plc /, "PLC ").replace(/ ob$/, " OB")}`;
 
   // the PLC (and its software unit), when the workspace has more than one place for it
-  const plcs = (await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(root, "plc")).then((e) => e, () => [])).filter(([, t]) => t === vscode.FileType.Directory).map(([n]) => n);
-  if (!plcs.length) {
-    void vscode.window.showWarningMessage("This workspace has no PLC yet: rung pull mirrors the TIA Portal project first.");
-    return undefined;
-  }
   // folder names as written (for the paths) and the names they stand for (for people and the language server)
   const places: { label: string; plc: string; unit?: string; dir: string[] }[] = [];
   for (const raw of plcs) {
@@ -82,14 +87,14 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
     const units = await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(root, "plc", raw, "units")).then((e) => e, () => []);
     for (const [u, t] of units) if (t === vscode.FileType.Directory) places.push({ label: `${plc} / ${unescape(u)}`, plc, unit: unescape(u), dir: ["plc", raw, "units", u] });
   }
-  const place = places.length === 1 ? places[0] : await pick(places.map((p) => ({ ...p, description: p.unit ? "software unit" : "PLC" })), { step: 2, steps, placeHolder: "Where: the PLC, or one of its software units" });
+  const place = places.length === 1 ? places[0] : await pick(places.map((p) => ({ ...p, description: p.unit ? "software unit" : "PLC" })), { title: `${what}: where`, placeHolder: "The PLC, or one of its software units" });
   if (!place) return undefined;
 
   // the folder: one that exists, the top, or one typed in (Line/Valves)
   const base = vscode.Uri.joinPath(root, ...place.dir, k.dir);
   const existing = await folders(base);
   const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { groups: string[] }>();
-  qp.title = `New object (3/${steps})`;
+  qp.title = `${what}: folder`;
   qp.placeholder = "Folder: pick one, or type a new path (Line/Valves)";
   qp.ignoreFocusOut = true;
   const listed = [{ label: "$(root-folder) Top level", groups: [] as string[] }, ...existing.map((g) => ({ label: `$(folder) ${g.join(" / ")}`, groups: g }))];
@@ -109,7 +114,7 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
   const request = (name: string): Request => ({ kind: k.kind, name, plc: place.plc, ...(place.unit ? { unit: place.unit } : {}), groups: folder.groups });
   const ask = (r: Request) => lsp.request<Answer>("rung/newObject", r).catch(() => ({ reason: "The rung language server is not running." }) as Answer);
   const name = await vscode.window.showInputBox({
-    title: `New object (4/${steps})`,
+    title: `${what}: name`,
     prompt: `Name of the ${k.label.toLowerCase()}`,
     ignoreFocusOut: true,
     validateInput: async (v) => {
@@ -121,9 +126,18 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
   if (!name) return undefined;
   let returnType: string | undefined;
   if (k.kind === "FC") {
-    const rt = await vscode.window.showQuickPick(RETURN_TYPES, { title: "New object: the function's return type", placeHolder: "Void: the function returns nothing", ignoreFocusOut: true });
+    const rt = await vscode.window.showQuickPick([...RETURN_TYPES, OTHER_TYPE], { title: `${what}: return type`, placeHolder: "Void: the function returns nothing", ignoreFocusOut: true });
     if (!rt) return undefined;
-    returnType = rt;
+    // a PLC data type ("T_Pos") or an array: the language server says when it is not a type
+    returnType = rt === OTHER_TYPE
+      ? await vscode.window.showInputBox({ title: `${what}: return type`, prompt: 'A data type, e.g. "T_Pos"', ignoreFocusOut: true,
+        validateInput: async (v) => {
+          if (!v.trim()) return undefined;
+          const a = await ask({ ...request(name), returnType: v });
+          return a && "reason" in a ? a.reason : undefined;
+        } })
+      : rt;
+    if (!returnType) return undefined;
   }
   const answer = await ask({ ...request(name), ...(returnType ? { returnType } : {}) });
   if (!answer || "reason" in answer) {
@@ -138,6 +152,6 @@ export async function newObjectCommand(lsp: Lsp, ws: RungWorkspace): Promise<vsc
   }
   if (k.kind === "UDT") await vscode.commands.executeCommand("vscode.openWith", file, "rung.udtTable");
   else await vscode.window.showTextDocument(file, { preview: false });
-  void vscode.window.setStatusBarMessage(`rung: ${answer.path} created; rung sync (or rung watch) brings it into TIA Portal`, 5000);
+  void vscode.window.setStatusBarMessage(`rung: ${answer.path} created. It goes to TIA Portal with the next sync.`, 5000);
   return file;
 }

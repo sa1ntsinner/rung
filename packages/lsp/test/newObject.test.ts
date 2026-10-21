@@ -19,6 +19,11 @@ describe("newObject", () => {
     expect(newObject({ kind: "UDT", name: "T_Pos", plc: "PLC_1", unit: "Conveyor" }, none)).toMatchObject({ path: "plc/PLC_1/units/Conveyor/types/T_Pos.udt", text: expect.stringContaining("   STRUCT\n      Tag_1 : Bool;\n   END_STRUCT;\n") });
     expect(newObject({ kind: "TAGS", name: "Inputs", plc: "PLC_1" }, none)).toMatchObject({ path: "plc/PLC_1/tags/Inputs.tags.st", text: expect.stringMatching(/^\/\/ PLC tag table Inputs in TIA Portal;[^\n]*\n[\s\S]*\nVAR_GLOBAL\nEND_VAR\n$/) });
   });
+  it("a program cycle OB, whose name the blocks share; an FC returning any elementary type or a data type", () => {
+    expect(newObject({ kind: "OB", name: "Line_Cycle", plc: "PLC_1" }, none)).toEqual({ path: "plc/PLC_1/blocks/Line_Cycle.scl", text: "ORGANIZATION_BLOCK \"Line_Cycle\"\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_ORGANIZATION_BLOCK\n\n" });
+    expect(newObject({ kind: "OB", name: "main", plc: "PLC_1" }, { ...none, names: new Set(["main"]) })).toEqual({ reason: "PLC_1 already has a block main." });
+    for (const t of ["LTime", "Date_And_Time", "WString", "ULInt", '"T_Pos"']) expect(newObject({ kind: "FC", name: "F", plc: "PLC_1", returnType: t }, none)).toMatchObject({ text: expect.stringMatching(new RegExp(`^FUNCTION "F" : ${t}\\n`)) });
+  });
   it("a name any file system holds: escaped in the path, as written in the header", () => {
     expect(newObject({ kind: "FB", name: "Motor/1: Ü", plc: "PLC_1" }, none)).toMatchObject({ path: "plc/PLC_1/blocks/Motor%2F1%3A Ü.scl", text: expect.stringMatching(/^FUNCTION_BLOCK "Motor\/1: Ü"\n/) });
   });

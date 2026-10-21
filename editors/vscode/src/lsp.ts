@@ -8,14 +8,23 @@ import type { RungWorkspace } from "./workspace";
 
 export class Lsp implements vscode.Disposable {
   private client: LanguageClient | undefined;
+  /** The workspace the running server indexes. */
+  private root: string | undefined;
+  private readonly sub: vscode.Disposable;
 
   constructor(
     private readonly ws: RungWorkspace,
     private readonly cli: RungCli,
     private readonly out: Output,
-  ) {}
+  ) {
+    // another folder chosen (or the chosen one gone): the server follows, so it never answers for a different project
+    this.sub = ws.onDidChange(() => {
+      if (this.client && ws.root !== this.root) void this.restart();
+    });
+  }
 
   async start(): Promise<void> {
+    this.root = this.ws.root;
     const inv = this.cli.invocation(["lsp", "--stdio"]);
     // No `transport`: stdio is the default, and TransportKind.stdio would append a second "--stdio"
     // after the verbatim cmd.exe line of a rung.cmd shim.
@@ -36,7 +45,8 @@ export class Lsp implements vscode.Disposable {
       synchronize: { fileEvents: vscode.workspace.createFileSystemWatcher("**/{plc/**/*.{scl,db,udt,awl,s7dcl,xml},*.{st,TcPOU,TcDUT,TcGVL,TcIO}}") },
       outputChannel: this.out.channel,
       // Monitor Values draws its own line ends here; the server's inlay hints are for editors without that
-      initializationOptions: { monitor: false },
+      // the folder chosen with rung: Choose Workspace, not the window's first one
+      initializationOptions: { monitor: false, ...(this.ws.root ? { root: this.ws.root } : {}) },
     };
     this.out.debug(`language server: ${inv.display}`);
     try {
@@ -68,6 +78,7 @@ export class Lsp implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.sub.dispose();
     void this.stop();
   }
 }

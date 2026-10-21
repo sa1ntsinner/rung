@@ -36,6 +36,8 @@ namespace Rung.Bridge.V20
 
 #if TIA_V21
         const int OwnVersion = 21;
+#elif TIA_V18
+        const int OwnVersion = 18;
 #elif TIA_V19
         const int OwnVersion = 19;
 #else

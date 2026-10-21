@@ -28,7 +28,7 @@ namespace Rung.Bridge.V20
         public LibraryImportPreview PreviewLibrary(LibraryPackage package, string device)
         {
 #if TIA_V19
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA Portal V19 Openness has no library document import or export");
+            throw new RpcException(ErrorCodes.UnsupportedCapability, $"TIA Portal {TiaVersion.Name} Openness has no library document import or export");
 #else
             Alive();
             using (var access = _portal.ExclusiveAccess("rung: library import preview"))
@@ -119,7 +119,7 @@ namespace Rung.Bridge.V20
         public LibraryReleasePreview PreviewLibraryRelease(LibraryReleaseRequest request)
         {
 #if TIA_V19
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library version release");
+            throw new RpcException(ErrorCodes.UnsupportedCapability,$"TIA Portal {TiaVersion.Name} Openness has no library version release");
 #else
             Alive();using(var access=_portal.ExclusiveAccess("rung: library release preview")) {
                 ReleaseTarget(request);var state=LibraryReadState(request.TypeGuid);
@@ -132,7 +132,7 @@ namespace Rung.Bridge.V20
         {
             ReadOnlyPolicy.RefuseMutation();
 #if TIA_V19
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library version release");
+            throw new RpcException(ErrorCodes.UnsupportedCapability,$"TIA Portal {TiaVersion.Name} Openness has no library version release");
 #else
             Alive();FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
             using(var access=_portal.ExclusiveAccess("rung: library release")) {
@@ -204,7 +204,7 @@ namespace Rung.Bridge.V20
         {
             ReadOnlyPolicy.RefuseMutation();
 #if TIA_V19
-            throw new RpcException(ErrorCodes.UnsupportedCapability,"TIA Portal V19 Openness has no library document import or export");
+            throw new RpcException(ErrorCodes.UnsupportedCapability,$"TIA Portal {TiaVersion.Name} Openness has no library document import or export");
 #else
             Alive();
             FixtureGuard.CheckImport(_args.AllowImport,_args.AllowFixtureImport,_project.Path.FullName);
@@ -255,7 +255,7 @@ namespace Rung.Bridge.V20
         public IReadOnlyDictionary<string, byte[]> ExportLibrary(string typeGuid, string versionGuid, string targetDir)
         {
 #if TIA_V19
-            throw new RpcException(ErrorCodes.UnsupportedCapability, "TIA Portal V19 Openness has no library document import or export");
+            throw new RpcException(ErrorCodes.UnsupportedCapability, $"TIA Portal {TiaVersion.Name} Openness has no library document import or export");
 #else
             Alive();
             using (var access = _portal.ExclusiveAccess("rung: library export"))

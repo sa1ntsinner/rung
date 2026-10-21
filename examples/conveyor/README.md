@@ -14,7 +14,7 @@ ok   FB_Conveyor: a contactor that does not answer within 2 s is a fault until r
 ok   FB_Conveyor: a part waiting at the end stops the belt, taking it away lets it start again
 ok   FB_Conveyor: counts every part once
 
-5/5 passed (offline simulation — not a PLCSIM run)
+5/5 passed, 16 checks (offline simulation — not a PLCSIM run)
 ```
 
 Now break it: in [blocks/FB_Conveyor.scl](blocks/FB_Conveyor.scl), take `OR #Fault` out of the line that stops the motor and run the tests again:

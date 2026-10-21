@@ -22,12 +22,13 @@ export async function play(file: string, source: string, yaml: string): Promise<
   const lines: PlayResult["lines"] = [];
   if (result.error) lines.push({ text: `FAIL ${result.file}: ${result.error}`, kind: "fail" });
   for (const c of result.cases) {
-    lines.push({ text: `${c.passed ? "ok  " : "FAIL"} ${result.block}: ${c.name}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}`, kind: c.passed ? "ok" : "fail" });
+    lines.push({ text: `${c.passed ? "ok  " : "FAIL"} ${result.block}: ${c.name}${c.passed && !c.assertions ? " (checks nothing)" : ""}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}`, kind: c.passed ? "ok" : "fail" });
     for (const x of c.failures) lines.push({ text: `       step ${x.step}: ${x.name} expected ${JSON.stringify(x.expected)} got ${JSON.stringify(x.actual)}`, kind: "fail" });
   }
   for (const w of result.warnings ?? []) lines.push({ text: `       warning: ${w}`, kind: "note" });
   const total = result.error ? 1 : result.cases.length;
   const failed = result.error ? 1 : result.cases.filter((c) => !c.passed).length;
-  if (total) lines.push({ text: `\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)`, kind: "note" });
+  const checks = result.cases.reduce((n, c) => n + (c.assertions ?? 0), 0);
+  if (total) lines.push({ text: `\n${total - failed}/${total} passed, ${checks} ${checks === 1 ? "check" : "checks"} (offline simulation — not a PLCSIM run)`, kind: "note" });
   return { result, lines, positions: testPositions(yaml), ms };
 }

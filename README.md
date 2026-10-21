@@ -97,7 +97,7 @@ Only Siemens Openness talks to TIA Portal. Deleting a file never deletes a block
 ## Common questions
 
 **Do I still need TIA Portal?**  
-Yes, your own licensed TIA Portal V19, V20 or V21 for sync, hardware and download. The language server, the simulator and `rung test` work without it.
+Yes, your own licensed TIA Portal V18, V19, V20 or V21 for sync, hardware and download. The language server, the simulator and `rung test` work without it.
 
 **Does it run on Linux or macOS?**  
 The editor and the tests do. Sync needs Windows; rung can reach a Windows PC [over ssh](docs/remote.md).

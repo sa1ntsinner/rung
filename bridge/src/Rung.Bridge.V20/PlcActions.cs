@@ -72,6 +72,7 @@ namespace Rung.Bridge.V20
             {
                 switch (c)
                 {
+#if !TIA_V18 // PLC user management came with V19
                     case Siemens.Engineering.Online.Configurations.OnlineAuthenticationConfiguration auth:
                     {
                         // the PLC's user management: a user type it supports is chosen, like in TIA Portal's dialog;
@@ -90,6 +91,7 @@ namespace Rung.Bridge.V20
                         auth.OnlineCredentials.SetPassword(Secure(_given.Password));
                         break;
                     }
+#endif
                     case Siemens.Engineering.Online.Configurations.OnlinePasswordConfiguration pw:
                         PasswordAsked = true;
                         if (!string.IsNullOrEmpty(_given?.Password)) pw.SetPassword(Secure(_given.Password));
@@ -330,12 +332,16 @@ namespace Rung.Bridge.V20
                     if (scan)
                     {
                         info.Accessible = new List<AccessibleDeviceInfo>();
+#if TIA_V18
+                        info.ScanError = "TIA Portal V18 cannot list reachable devices through Openness (V19 and later can)";
+#else
                         try
                         {
                             foreach (var d in pc.GetAccessibleDevices())
                                 info.Accessible.Add(new AccessibleDeviceInfo { Name = d.Name, Address = d.Address, DeviceSeries = d.DeviceSeries, MacAddress = d.MACAddress });
                         }
                         catch (EngineeringException e) { info.ScanError = TiaText.Clean(e.Message); } // interface not usable right now (cable, driver)
+#endif
                     }
                     m.PcInterfaces.Add(info);
                 }
@@ -377,7 +383,7 @@ namespace Rung.Bridge.V20
 #else
                 var result = request.Target.DownloadAt(false,
                     () => provider.Download(target, pre, post, options),
-                    address => throw new RpcException(ErrorCodes.BadRequest, "TIA Portal V19/V20 require the project address"));
+                    address => throw new RpcException(ErrorCodes.BadRequest, $"TIA Portal {TiaVersion.Name} requires the project address"));
 #endif
                 outcome.Errors = result.ErrorCount;
                 outcome.Warnings = result.WarningCount;

@@ -14,8 +14,11 @@ export interface HandoverInput {
   summary?: string;
   testPlan?: string;
   connection?: { pcInterface: string; targetInterface?: string };
-  compileErrors: { path?: string; line?: number; message: string }[];
+  /** The last compile record's errors; undefined when rung has none (never compiled through rung). */
+  compileErrors?: { path?: string; line?: number; message: string }[];
   interfaceChanges?: string[];
+  /** The device's mirrored objects as the state store has them (path and sync status). */
+  objects?: { path: string; status: string }[];
 }
 
 /** Files under plc/ that differ from the last git commit, or null when the workspace is not a git repository. */
@@ -50,18 +53,33 @@ export async function handover(i: HandoverInput): Promise<string> {
   lines.push(`# Download request: ${i.device}`, "");
   lines.push("rung and agents never download. A person reviews this, then runs `rung download` (it asks them to type the PLC name and answers TIA's questions only as they allow).", "");
   if (i.summary) lines.push("## What changed and why", "", i.summary.trim(), "");
-  lines.push("## Changed files", "");
-  if (files === null) lines.push("The workspace is not a git repository, so rung cannot list the changes since the last known-good state; review rung_status and the diffs.");
-  else if (!files.length) lines.push("No uncommitted changes under plc/ (compared with the last git commit).");
+  // three different baselines: what TIA Portal has (the state store), what the PLC runs (rung keeps no record of
+  // it), and git (what was committed, which says nothing about either)
+  const objects = i.objects ?? [];
+  const notInTia = objects.filter((o) => o.status !== "synced");
+  lines.push("## Files and TIA Portal", "");
+  if (!objects.length) lines.push("Unknown: nothing of this PLC is mirrored yet (rung pull), so rung cannot tell what TIA Portal has.");
+  else if (!notInTia.length) lines.push(`TIA Portal has the files as they are: all ${objects.length} mirrored objects are synced.`);
+  else {
+    lines.push(`**${notInTia.length} object(s) differ between the files and TIA Portal**: sync first, or TIA Portal downloads its own version, not the files.`);
+    for (const o of notInTia) lines.push(`- ${o.path} (${o.status})`);
+  }
+  lines.push("");
+  lines.push("## TIA Portal and the PLC", "");
+  lines.push("Unknown: rung keeps no record of what the PLC runs. Before downloading, compare online (rung compare, or TIA Portal's online/offline comparison) to see which blocks the download replaces.", "");
+  lines.push("## Changed since the last git commit", "");
+  if (files === null) lines.push("The workspace is not a git repository.");
+  else if (!files.length) lines.push("Nothing uncommitted under plc/. A committed change may still be missing on the PLC.");
   else for (const f of files) lines.push(`- ${f}`);
   lines.push("");
   lines.push("## Compile", "");
-  if (i.compileErrors.length) {
+  if (i.compileErrors === undefined) lines.push("Not compiled through rung (no compile record): unknown. Compile (rung compile) before downloading.");
+  else if (i.compileErrors.length) {
     lines.push(`**${i.compileErrors.length} compile error(s): do not download.**`);
     for (const e of i.compileErrors) lines.push(`- ${e.path ?? ""}${e.line ? `:${e.line}` : ""} ${e.message}`);
-  } else lines.push("No compile errors reported by the last sync.");
+  } else lines.push(notInTia.length ? "No compile errors in the last record, but it predates the objects above that TIA Portal does not have yet: compile again after the sync." : "No compile errors in the last compile record.");
   lines.push("");
-  const r = risks(files ?? [], i.interfaceChanges);
+  const r = risks([...new Set([...(files ?? []), ...notInTia.map((o) => o.path)])], i.interfaceChanges);
   lines.push("## What TIA Portal will likely ask", "");
   if (r.length) for (const x of r) lines.push(`- ${x}`);
   else lines.push("- Probably nothing beyond a normal download of changed blocks (no DB, UDT, interface or hardware change detected).");

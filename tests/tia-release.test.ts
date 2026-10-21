@@ -8,12 +8,12 @@ it("discovers optional adapters at the installed Openness framework paths", asyn
   const { installedTiaVersions } = await import("../tools/release/bridges.mjs");
   const programs = mkdtempSync(join(tmpdir(), "rung-tia-api-"));
   expect(installedTiaVersions(programs)).toEqual(["V20"]);
-  for (const [version, framework] of [["V19", ""], ["V21", "net48"]]) {
+  for (const [version, framework] of [["V18", ""], ["V19", ""], ["V21", "net48"]]) {
     const api = join(programs, "Siemens", "Automation", `Portal ${version}`, "PublicAPI", version!, framework!);
     mkdirSync(api, { recursive: true });
     writeFileSync(join(api, version === "V21" ? "Siemens.Engineering.Base.dll" : "Siemens.Engineering.dll"), "installed API");
   }
-  expect(installedTiaVersions(programs)).toEqual(["V20", "V19", "V21"]);
+  expect(installedTiaVersions(programs)).toEqual(["V20", "V18", "V19", "V21"]);
 });
 
 it("stages each selected TIA adapter, its config and shared dependencies", async () => {
@@ -32,5 +32,5 @@ it("stages each selected TIA adapter, its config and shared dependencies", async
   stageBridges(root, stage, ["V19", "V20", "V21"]);
   for (const version of ["V19", "V20", "V21"]) expect(readFileSync(join(stage, "bridge", `rung-bridge-${version.toLowerCase()}.exe`), "utf8")).toBe(version);
   expect(existsSync(join(stage, "bridge", "debug.pdb"))).toBe(false);
-  expect(() => stageBridges(root, stage, ["V18"])).toThrow(/adapter/);
+  expect(() => stageBridges(root, stage, ["V17"])).toThrow(/adapter/);
 });

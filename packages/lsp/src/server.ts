@@ -177,7 +177,9 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
     progressSupport = params.capabilities.window?.workDoneProgress === true;
     // an editor with monitoring of its own (rung's VS Code extension) turns this one off
     if ((params.initializationOptions as { monitor?: boolean } | undefined)?.monitor === false) monitor = undefined;
-    const folder = params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? undefined;
+    // the folder the editor chose (rung's VS Code extension, in a window of several folders), else the first one
+    const chosen = (params.initializationOptions as { root?: string } | undefined)?.root;
+    const folder = chosen ? pathToFileURL(chosen).href : params.workspaceFolders?.[0]?.uri ?? params.rootUri ?? undefined;
     if (folder) {
       root = fileURLToPath(folder);
       await index.load(root);
@@ -203,7 +205,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
         executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
       },
-      serverInfo: { name: "rung", version: "0.3.1" },
+      serverInfo: { name: "rung", version: "0.3.2" },
     };
   });
 

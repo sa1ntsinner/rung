@@ -8,6 +8,7 @@ local terminal = function(args) return function(rest) cli.terminal(vim.list_exte
 
 M.commands = {
   status = terminal({ "status" }),
+  ["agent-mode"] = terminal({ "agent-mode" }),
   pull = terminal({ "pull" }),
   sync = terminal({ "sync" }),
   preview = terminal({ "sync", "--preview" }),

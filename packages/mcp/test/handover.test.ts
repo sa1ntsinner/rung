@@ -34,6 +34,22 @@ describe("download handover", () => {
     expect(readFileSync(join(root, ".rung", "download-request.md"), "utf8")).toBe(md);
   }, 60_000); // starts git: slow on a busy Windows runner
 
+  it("measures against what TIA Portal has, not git, and says unknown where rung has no evidence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rung-handover-"));
+    mkdirSync(join(root, ".rung"));
+    // committed long ago, never synced: git is clean, TIA Portal does not have it
+    const objects = [{ path: "plc/PLC_1/blocks/FC_A.scl", status: "synced" }, { path: "plc/PLC_1/blocks/DB_Recipe.db", status: "fileDirty" }];
+    const md = await handover({ root, device: "PLC_1", objects });
+    expect(md).toMatch(/1 object\(s\) differ between the files and TIA Portal/);
+    expect(md).toMatch(/- plc\/PLC_1\/blocks\/DB_Recipe\.db \(fileDirty\)/);
+    expect(md).toMatch(/reinit-db/); // its risks count although git shows no change
+    expect(md).toMatch(/TIA Portal and the PLC\n\nUnknown: rung keeps no record of what the PLC runs/);
+    expect(md).toMatch(/Not compiled through rung \(no compile record\): unknown/);
+    expect(md).not.toMatch(/No compile errors/);
+    expect(await handover({ root, device: "PLC_1" })).toMatch(/Unknown: nothing of this PLC is mirrored yet/);
+    expect(await handover({ root, device: "PLC_1", objects, compileErrors: [] })).toMatch(/No compile errors in the last record, but it predates/);
+  });
+
   it("says so when the workspace is not a git repository", async () => {
     const root = mkdtempSync(join(tmpdir(), "rung-handover-"));
     expect(await changedFiles(root)).toBeNull();

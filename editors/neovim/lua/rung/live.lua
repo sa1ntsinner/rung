@@ -3,7 +3,18 @@
 -- second while the split is open, each with its age and a short history (`rung live watch <names> --json`,
 -- read-only). :Rung live add "DB".x pins one (the word under the cursor without a name), :Rung live remove unpins.
 local cli = require("rung.cli")
-local M = { names = {}, seen = {} }
+-- pins belong to a workspace: M.root is the one shown, M.saved keeps the others' pins while another one is
+local M = { names = {}, seen = {}, saved = {} }
+
+--- Makes the workspace of the current buffer the one shown, with its own pins.
+local function follow()
+  local root = cli.root()
+  if root == M.root then return end
+  if M.root then M.saved[M.root] = M.names end
+  M.root, M.names, M.seen = root, root and M.saved[root] or {}, {}
+  M.tableFile, M.table, M.labels, M.comments, M.pinned = nil, nil, nil, nil, nil
+end
+M.follow = follow
 
 local BARS = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 
@@ -79,7 +90,7 @@ local function start()
   local partial, err = "", {}
   local generation = M.generation
   M.job = vim.fn.jobstart(cli.argv(args), {
-    cwd = cli.root(),
+    cwd = M.root or cli.root(),
     on_stdout = function(_, data)
       if generation ~= M.generation then return end
       data[1] = partial .. data[1]
@@ -133,6 +144,7 @@ function M.toggle()
     vim.api.nvim_win_close(M.win, true)
     return
   end
+  follow()
   M.buf = vim.api.nvim_create_buf(false, true)
   vim.bo[M.buf].bufhidden = "wipe"
   vim.api.nvim_buf_set_name(M.buf, "rung://live")
@@ -152,6 +164,7 @@ function M.toggle()
 end
 
 function M.add(name)
+  follow()
   name = name and name ~= "" and name or vim.fn.expand("<cWORD>"):gsub("[;,]$", "")
   if name == "" or vim.tbl_contains(M.names, name) then return end
   if name:sub(1, 1) == "#" then
@@ -177,6 +190,7 @@ function M.command(rest)
   if rest[1] == "table" then
     local file = table.concat(vim.list_slice(rest, 2), " ")
     if file == "" then file = vim.api.nvim_buf_get_name(0) end
+    follow()
     if not M.tableFile then M.pinned = vim.deepcopy(M.names) end
     M.tableFile, M.names, M.seen = file, {}, {}
     if not (M.win and vim.api.nvim_win_is_valid(M.win)) then M.toggle() else start() end

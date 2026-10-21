@@ -33,7 +33,7 @@ cases:
       - expect: { fault: true, motorOn: false }
 ```
 
-Steps: `set` (inputs, statics, `"DB".member`, `arr[2].x`), `cycle: n`, `advance: <time>`, `expect`. Several keys in one step run in the order set, cycle, advance, expect. Run with `rung_test` (or `rung test --filter FB_Conveyor`); JUnit output with `--junit`.
+Steps: `set` (inputs, statics, `"DB".member`, `arr[2].x`), `cycle: n`, `advance: <time>`, `expect`. Several keys in one step run in the order set, cycle, advance, expect. Run with `rung_test` (or `rung test --filter FB_Conveyor`); JUnit output with `--junit`. A case without `expect` only runs: `rung_test` lists it under `passedWithoutChecks`, and `rung test --strict` fails it. Do not report such a pass as tested behaviour.
 
 ## What to test
 

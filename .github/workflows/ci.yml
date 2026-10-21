@@ -46,3 +46,29 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx tree-sitter generate && git diff --exit-code src/
       - run: npx tree-sitter test
+  neovim:
+    # rung.nvim against a pinned Neovim and the plugins its debugger and neotest checks use: never skipped here
+    runs-on: ubuntu-latest
+    env:
+      RUNG_REQUIRE_NVIM: "1"
+      NVIM_DAP: ${{ github.workspace }}/../nvim-deps/nvim-dap
+      NEOTEST_DEPS: ${{ github.workspace }}/../nvim-deps
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Neovim 0.11.4
+        run: |
+          curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-x86_64.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+      - name: nvim-dap, neotest and what neotest needs
+        run: |
+          mkdir -p ../nvim-deps && cd ../nvim-deps
+          git clone -q --depth 1 --branch 0.10.0 https://github.com/mfussenegger/nvim-dap
+          git clone -q --depth 1 --branch v5.20.0 https://github.com/nvim-neotest/neotest
+          git clone -q --depth 1 --branch v0.1.4 https://github.com/nvim-lua/plenary.nvim
+          git clone -q --depth 1 --branch v1.10.1 https://github.com/nvim-neotest/nvim-nio
+      - run: nvim --version && npx vitest run tests/editors

@@ -40,6 +40,10 @@ require("rung.commands").commands["program-status"]({ "first.scl" })
 require("rung.commands").commands["program-status"]({ "second.scl" })
 cli_module.terminal = original_terminal
 check("repeated program-status uses fresh arguments", #invocations[2] == 2 and invocations[2][2] == "second.scl", invocations)
+cli_module.terminal = function(args) table.insert(invocations, vim.deepcopy(args)) end
+require("rung.commands").commands["agent-mode"]({ "ask", "--plc", "PLC_1" })
+cli_module.terminal = original_terminal
+check("agent-mode uses a terminal", vim.deep_equal(invocations[3], { "agent-mode", "ask", "--plc", "PLC_1" }), invocations[3])
 
 -- cases and the case under the cursor
 vim.cmd("edit tests/conveyor.test.yaml")
@@ -75,6 +79,29 @@ local d = vim.diagnostic.get(buf, { namespace = tests.ns })
 check("failure on its line", #d == 1 and d[1].lnum == 9 and d[1].message:find("Motor expected false, got true", 1, true) ~= nil, d)
 check("quickfix", #vim.fn.getqflist() == 1)
 vim.cmd("silent! undo | silent write")
+
+-- two runs in a row: only the newer one's result is shown, the older one hears it was superseded
+local first, second
+tests.run("case", buf, function(r, why) first = r or why end)
+tests.run("case", buf, function(r) second = r or false end)
+wait("two rung test runs", function() return first ~= nil and second ~= nil end)
+check("older run superseded", first == "superseded", first)
+check("newer run shown", type(second) == "table" and #vim.diagnostic.get(buf, { namespace = tests.ns }) == 0, second)
+
+-- live pins belong to their workspace: another project's buffer shows its own, coming back restores them
+local live = require("rung.live")
+local other = vim.fs.normalize(vim.fn.tempname())
+vim.fn.mkdir(other, "p")
+vim.fn.writefile({}, other .. "/rung.toml")
+live.follow()
+live.names = { '"Line_DB".Speed' }
+vim.cmd("edit " .. other .. "/x.scl")
+live.follow()
+check("other workspace, no pins", #live.names == 0, live.names)
+vim.cmd("edit " .. ws .. "/tests/conveyor.test.yaml")
+live.follow()
+check("pins come back with their workspace", live.names[1] == '"Line_DB".Speed', live.names)
+live.names = {}
 
 -- coverage: signs on the SCL lines
 local cov = require("rung.coverage")
@@ -147,6 +174,10 @@ vim.fn.writefile({ vim.json.encode({ objects = { a = { status = "conflicted" }, 
 vim.fn.writefile({ vim.json.encode({ items = { { severity = "error" }, { severity = "error" }, { severity = "warning" } } }) }, ws .. "/.rung/diagnostics.json")
 vim.fn.writefile({ vim.json.encode({ pid = vim.fn.getpid() }) }, ws .. "/.rung/owner.json")
 check("status", status.compute(ws) == "rung ● watch · 1 conflict · 2 errors", status.compute(ws))
+check("manual mode hidden", not status.compute(ws, { plcs = { { mode = "manual" } } }):find("agent", 1, true))
+for _, mode in ipairs({ "ask", "auto", "bypass" }) do
+  check("status agent " .. mode, status.compute(ws, { plcs = { { mode = mode }, { mode = mode } } }) == "rung ● watch · 1 conflict · 2 errors · agent " .. mode)
+end
 vim.fn.delete(ws .. "/rung.toml")
 
 -- the debugger's configuration

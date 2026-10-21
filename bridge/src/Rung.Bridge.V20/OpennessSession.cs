@@ -1267,8 +1267,11 @@ namespace Rung.Bridge.V20
                 case "hmi":
                     foreach (var d in AllDevices())
                         foreach (var sw in SoftwareOf(d.DeviceItems))
+#if !TIA_V18 // V18's Openness has no Unified HMI in its public API
                             if (sw is Siemens.Engineering.HmiUnified.HmiSoftware hmi) Add("HmiUnified", Node(hmi, allowed, 0, ref count, budget));
-                            else if (sw is Siemens.Engineering.Hmi.HmiTarget panel) Add("HmiPanels", PanelNode(panel, d.Name, ref count, budget));
+                            else
+#endif
+                            if (sw is Siemens.Engineering.Hmi.HmiTarget panel) Add("HmiPanels", PanelNode(panel, d.Name, ref count, budget));
                     break;
                 case "techobjects":
                     foreach (var plc in Plcs()) Add("Plcs", Node(plc.TechnologicalObjectGroup, allowed, 0, ref count, budget, plc.Name));
@@ -1557,7 +1560,7 @@ namespace Rung.Bridge.V20
                             case PlcBlock b: b.Name = newName; break;
                             case PlcType t: t.Name = newName; break;
 #if TIA_V19
-                            case PlcTagTable _: throw new RpcException(ErrorCodes.UnsupportedObject, "TIA Portal V19 cannot rename a tag table through Openness (V20 can)");
+                            case PlcTagTable _: throw new RpcException(ErrorCodes.UnsupportedObject, $"TIA Portal {TiaVersion.Name} cannot rename a tag table through Openness (V20 can)");
 #else
                             case PlcTagTable tt: tt.Name = newName; break;
 #endif
@@ -1764,7 +1767,7 @@ namespace Rung.Bridge.V20
                 case "s7dcl":
                 {
 #if TIA_V19
-                    throw new RpcException(ErrorCodes.UnsupportedObject, "SIMATIC SD (.s7dcl) needs TIA Portal V20 or later; with V19, keep this block as SimaticML XML (.xml)");
+                    throw new RpcException(ErrorCodes.UnsupportedObject, $"SIMATIC SD (.s7dcl) needs TIA Portal V20 or later; with {TiaVersion.Name}, keep this block as SimaticML XML (.xml)");
 #else
                     var dir = new DirectoryInfo(Path.GetDirectoryName(path));
                     var stem = Path.GetFileNameWithoutExtension(path);

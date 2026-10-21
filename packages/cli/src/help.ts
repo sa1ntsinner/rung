@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Command help uses the same usage lines and option list as argument validation.
 const EXAMPLES: Record<string, string> = {
+  "agent-mode": "agent-mode auto --plc PLC_1 --for 8h",
   setup: "setup --dry-run", check: "check --json", init: "init --project Line.ap20",
   writes: "writes off", backup: "backup", pull: "pull", sync: "sync --preview", watch: "watch", status: "status",
   session: "session --release --save",
@@ -18,6 +19,7 @@ const EXAMPLES: Record<string, string> = {
   "program-status": "program-status plc/PLC_1/blocks/Counter.scl --capture cycle.json --instance Counter_DB --json",
 };
 const VALUES: Record<string, string> = {
+  actions: "a,b", for: "duration",
   project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", coverage: "lcov file", filter: "text", case: "file#n", file: "file", plc: "name",
   allow: "answer", agents: "names", skills: "names", editors: "names", platforms: "names", scope: "project|global",
   address: "ip", port: "number", cycle: "ms", block: "name", use: "PG/PC interface", mode: "mode", number: "n", target: "interface",
@@ -27,6 +29,8 @@ const VALUES: Record<string, string> = {
   why: "member",
 };
 const DETAIL: Record<string, string> = {
+  actions: "auto mode actions allowed without a dialog (default: download,write,run-stop)",
+  for: "expire this agent mode after a duration such as 8h; otherwise it lasts until changed",
   "hardware.apply": "apply allowlisted offline hardware changes under revision and transaction guards; no PLC download",
   capture: "replay complete pre-cycle state and compare observed results from a historical JSON capture; stays offline",
   why: "explain the last captured write using recorded operands and controls; no live connection",
@@ -47,14 +51,14 @@ const DETAIL: Record<string, string> = {
   "compile.hw": "compile the hardware configuration instead of the program",
   "setup.yes": "skip the questions", args: "the bridge's own arguments, encoded (editors and agents pass them)",
   dir: "the workspace (default: the current folder)", file: "a workspace file", project: "the TIA Portal project (.ap20)",
-  tia: "TIA Portal version (V19, V20, V21; default: the project file's)", device: "mirror only this PLC (repeat for more)", rebind: "bind the folder to another project",
+  tia: "TIA Portal version (V18, V19, V20, V21; default: the project file's)", device: "mirror only this PLC (repeat for more)", rebind: "bind the folder to another project",
   plc: "the PLC (when the project has several)", pick: "choose among the connections that answer", use: "the PG/PC interface (rung interfaces lists them)",
   mode: "PN/IE, PROFIBUS, …", number: "the interface number", target: "the PLC's interface, e.g. 1 X1", scan: "also look for reachable devices",
   state: "only say whether the PLC is online", hw: "download the hardware configuration too", "no-hw": "software only",
   "trust-certificate": "trust the certificate TIA Portal shows for this connection, for this run only",
   "no-sw": "hardware only", "all-blocks": "download every block, not only the changed ones", allow: "a TIA question download may answer yes (e.g. stop-cpu, reset-module)",
   "no-start": "leave the CPU stopped afterwards", yes: "skip the typed confirmation (scripts; never for agents)",
-  junit: "write a JUnit report (CI)", check: "only list what would change; exit 1 when something would", against: "run the same tests on the code at this git revision too, and show what behaves differently", coverage: "write which SCL lines ran, as lcov (CI, editors)", observe: "with --json: the block's values after each step that runs cycles (record to test)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
+  junit: "write a JUnit report (CI)", strict: "fail a case that checks nothing (CI)", check: "only list what would change; exit 1 when something would", against: "run the same tests on the code at this git revision too, and show what behaves differently", coverage: "write which SCL lines ran, as lcov (CI, editors)", observe: "with --json: the block's values after each step that runs cycles (record to test)", "dry-run": "say what would change, change nothing", scope: "project (this folder) or global (your user)",
   agents: "claude, codex, cursor, gemini, opencode, copilot, zed", editors: "vscode, zed, neovim", skills: "which PLC engineering skills to copy",
   platforms: "tia, twincat, codesys", offline: "from the files only, no TIA Portal", fixture: "against the generated test fixture project",
   grant: "let your user update the whitelist later without administrator rights", stdio: "speak LSP on stdin/stdout",

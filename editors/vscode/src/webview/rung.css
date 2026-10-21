@@ -23,10 +23,14 @@
   min-width: 0;
   flex: 1;
 }
+/* the block's name is the view's h1: a heading for screen readers, the same line as before for the eye */
 .rg-title-name {
+  margin: 0;
+  min-width: 4ch;
   font-family: var(--rg-code);
   font-size: calc(var(--rg-code-size) + 1px);
   font-weight: 600;
+  line-height: normal;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -40,6 +44,9 @@
   line-height: 16px;
 }
 .rg-crumbs {
+  /* a narrow panel cuts the folder path before the block's name: it only takes the room the name leaves */
+  flex: 1 1 0;
+  min-width: 0;
   color: var(--rg-muted);
   font-size: 12px;
   white-space: nowrap;
@@ -85,14 +92,16 @@
   border-color: var(--rg-focus);
 }
 .rg-presets,
-.rg-tools {
+.rg-tools,
+.rg-plc {
   display: flex;
   gap: var(--rg-s1);
 }
 .rg-tools {
   margin-left: auto;
 }
-.rg-icon-btn:disabled {
+.rg-icon-btn:disabled,
+.rg-text-btn:disabled {
   opacity: 0.4;
   cursor: default;
   background: transparent;
@@ -159,6 +168,12 @@
 }
 .rg-icon-btn[aria-pressed="true"] {
   background: var(--rg-btn-hover);
+}
+/* high contrast has no hover fill: a pressed toggle (a preset, Yes or No, Monitor) draws the active border there */
+.rg-icon-btn[aria-pressed="true"]:not(:focus-visible),
+.rg-text-btn[aria-pressed="true"]:not(:focus-visible) {
+  outline: 1px solid var(--rg-contrast-active);
+  outline-offset: -1px;
 }
 .rg-primary {
   height: 26px;
@@ -554,6 +569,29 @@
   color: var(--rg-warn);
   font-size: 14px;
 }
+/* a failed run's error keeps the error colour */
+.rg-refusal .codicon.rg-fail {
+  color: var(--vscode-testing-iconFailed, var(--rg-error));
+}
+/* what the status line says about the table: read-only, monitoring, values not current */
+.rg-status-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rg-s1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rg-status-note .codicon {
+  font-size: 14px;
+}
+.rg-warn-note {
+  color: var(--rg-fg);
+}
+.rg-warn-note .codicon {
+  color: var(--rg-warn);
+}
 
 /* ---------- paste preview ---------- */
 .rg-dialog {
@@ -688,6 +726,11 @@
   background: var(--rg-sel-bg);
   color: var(--rg-sel-fg);
 }
+/* the keyboard's place in the list, as VS Code's lists draw it (the only mark in high contrast) */
+.rg-cases ul:focus-visible .rg-case.rg-selected {
+  outline: 1px solid var(--vscode-list-focusOutline, var(--rg-focus));
+  outline-offset: -1px;
+}
 .rg-case-name {
   flex: 1;
   min-width: 0;
@@ -730,6 +773,7 @@
 }
 .rg-add-step {
   display: inline-flex;
+  align-items: center;
   gap: 0;
 }
 .rg-step-no {
@@ -752,6 +796,21 @@
 }
 .rg-fail > span:not(.codicon) {
   color: var(--rg-fg);
+}
+/* a long error in the Last run column ends in an ellipsis; the cell's tooltip has all of it */
+.rg-cell .rg-fail {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+.rg-cell .rg-fail > span:not(.codicon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rg-add-label {
+  padding: 0 var(--rg-s1);
+  font-size: 12px;
 }
 
 /* narrow editor groups: the cases go above the steps */
@@ -801,15 +860,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.rg-trace { padding: 16px; }
-.rg-trace h1 { font-size: 18px; }
-.rg-trace h2 { font-size: 14px; overflow-wrap: anywhere; }
-.rg-trace-toolbar, .rg-trace fieldset { display: flex; flex-wrap: wrap; gap: 12px; }
-.rg-trace fieldset { margin: 12px 0; }
-.rg-trace fieldset label { overflow-wrap: anywhere; }
-.rg-trace input[type=range] { width: 100%; }
+/* Trace view: the editor's own controls and colours, never the browser's */
+.rg-trace { padding: var(--rg-s4); }
+.rg-trace h1 { font-size: 18px; font-weight: 600; margin: 0 0 var(--rg-s2); overflow-wrap: anywhere; }
+.rg-trace h2 { font-family: var(--rg-code); font-size: var(--rg-code-size); font-weight: 600; margin: var(--rg-s4) 0 var(--rg-s1); overflow-wrap: anywhere; }
+.rg-trace p { margin: var(--rg-s1) 0; }
+.rg-trace-toolbar, .rg-trace fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: var(--rg-s2) var(--rg-s3); }
+.rg-trace-toolbar { margin: var(--rg-s3) 0 var(--rg-s2); }
+.rg-trace fieldset { margin: var(--rg-s3) 0; padding: var(--rg-s2) var(--rg-s3); border: 1px solid var(--rg-line); border-radius: var(--rg-radius); }
+.rg-trace legend { padding: 0 var(--rg-s1); color: var(--rg-muted); }
+.rg-trace fieldset label { display: inline-flex; align-items: center; gap: var(--rg-s1); font-family: var(--rg-code); overflow-wrap: anywhere; }
+.rg-trace input[type=checkbox], .rg-trace input[type=range] { accent-color: var(--vscode-focusBorder); }
+.rg-trace input:focus-visible { outline: 1px solid var(--rg-focus); outline-offset: 1px; }
+.rg-trace-cursor-label { display: block; color: var(--rg-muted); }
+.rg-trace input[type=range] { display: block; width: 100%; margin: var(--rg-s1) 0 0; }
+.rg-trace details { margin: var(--rg-s2) 0; color: var(--rg-muted); }
+.rg-trace summary { cursor: pointer; }
 .rg-trace-plot { width: 100%; height: 150px; background: var(--vscode-editor-background); }
-.rg-trace-plot text { fill: var(--vscode-foreground); font-size: 10px; }
+.rg-trace-plot text { fill: var(--vscode-foreground); font-size: 11px; }
 .rg-trace-plot polyline { stroke: var(--vscode-charts-blue, #3794ff); stroke-width: 1.5; }
 .rg-trace-plot circle { fill: var(--vscode-charts-blue, #3794ff); }
 .rg-trace-cursor { stroke: var(--vscode-editorCursor-foreground); stroke-dasharray: 4 4; }
@@ -819,10 +887,10 @@ rg-ladder { display: block; }
 .lad { padding: var(--rg-s4) var(--rg-s5) var(--rg-s5); max-width: 100%; box-sizing: border-box; }
 .lad-block h1 { font-size: 1.3em; font-weight: 600; margin: 0 0 var(--rg-s1); display: flex; gap: var(--rg-s2); align-items: center; }
 .lad-badge { font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-.lad-tools { display: flex; gap: var(--rg-s3); align-items: center; margin: var(--rg-s3) 0 var(--rg-s2); position: sticky; top: 0; z-index: 1; padding: var(--rg-s2) 0; background: var(--rg-bg); }
+.lad-tools { display: flex; flex-wrap: wrap; gap: var(--rg-s2) var(--rg-s3); align-items: center; margin: var(--rg-s3) 0 var(--rg-s2); position: sticky; top: 0; z-index: 1; padding: var(--rg-s2) 0; background: var(--rg-bg); }
 .lad-filter { flex: 0 1 360px; min-width: 120px; height: 24px; box-sizing: border-box; padding: 0 var(--rg-s2); background: var(--rg-input-bg); color: var(--rg-input-fg); border: 1px solid var(--rg-input-border); border-radius: var(--rg-radius); font: inherit; }
 .lad-filter:focus { outline: 1px solid var(--rg-focus); outline-offset: -1px; }
-.lad-count { color: var(--rg-muted); flex: 1; }
+.lad-count { color: var(--rg-muted); flex: 1; white-space: nowrap; }
 .lad-net { border-top: 1px solid var(--rg-line); padding: var(--rg-s3) 0 var(--rg-s2); }
 .lad-head { display: flex; gap: var(--rg-s3); align-items: baseline; }
 .lad-num { font-weight: 600; white-space: nowrap; }

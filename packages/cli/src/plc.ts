@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { assertHuman } from "./guard.js";
+import { withAgentPermission } from "./agentMode.js";
+import { agentMarker } from "./guard.js";
 // rung compile / online / interfaces / download / open (docs/downloads.md).
 import { readFile } from "node:fs/promises";
 import { isIPv4 } from "node:net";
@@ -357,6 +359,10 @@ async function ask(io: Io, question: string): Promise<string> {
 }
 
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  return withAgentPermission(dir, "download", v.plc as string | undefined, io, () => download(dir, v, io));
+}
+
+async function download(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
   assertHuman(io.env);
   const { ws, config, link } = await workspace(dir, io, true);
   assertPlcWritable(config, v.plc as string | undefined, io.env);
@@ -383,7 +389,7 @@ export async function cmdDownload(dir: string, v: Record<string, unknown>, io: I
   const what = [hardware ? "hardware" : "", software ? (onlyChanges ? "software (changes)" : "software (all blocks)") : ""].filter(Boolean).join(" + ");
   io.stdout(`\nDownload ${what} to ${device}${target.address ? ` at ${target.address}` : ""} via ${target.pcInterface}${target.targetInterface ? ` / ${target.targetInterface}` : ""}.\n`);
   if (allow.length) io.stdout(`Allowed answers: ${allow.join(", ")}\n`);
-  if (!v.yes) {
+  if (!v.yes && !agentMarker(io.env)) {
     const answer = (await ask(io, config.download.confirm === "yes-no" ? "Continue? [y/N] " : `Type the PLC name (${device}) to download: `)).trim();
     const ok = config.download.confirm === "yes-no" ? /^y(es)?$/i.test(answer) : answer === device;
     if (!ok) {

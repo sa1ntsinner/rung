@@ -37,7 +37,7 @@ import { cmdLibrary } from "./library.js";
 import { cmdProjectArtifact,cmdSafety } from "./project-artifact.js";
 import { brokerReader, startLiveServer } from "./liveServer.js";
 import { agentsTemplatePath, bridgeExecutable, tiaOf, tiaOfProject, type TiaVersion } from "./paths.js";
-import { Coverage, runTests, toJUnit } from "@rung/sim";
+import { Coverage, requireAssertions, runTests, toJUnit } from "@rung/sim";
 import { commandHelp } from "./help.js";
 import { githubAnnotations } from "./annotate.js";
 import { WorkspaceIndex, assignmentList, nearest } from "@rung/lsp";
@@ -59,15 +59,18 @@ import { cmdReport } from "./report.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
 import { cmdWho } from "./who.js";
-import { agentMarker, assertHuman, cmdGuard, guardCommand, AGENT_REFUSAL } from "./guard.js";
+import { assertHuman, cmdGuard, commandAction } from "./guard.js";
+import { cmdAgentMode, runAgentCommand } from "./agentMode.js";
 
 export type { Io } from "./common.js";
 
-export const VERSION = "0.3.1";
+export const VERSION = "0.3.2";
 
 export const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
 Usage:
+  rung agent-mode [manual|ask|auto|bypass|reset] [--plc <name>] [--actions a,b] [--for 8h] [--json]
+                                       show agent permissions; a person changes them in their terminal
   rung setup [dir] [--dry-run] [-y] [--agents claude,codex,...] [--skills all|a,b] [--editors vscode,zed] [--scope project|global]
              [--platforms tia,twincat,codesys]
                                        set up rung for your agents and editors (asks, shows the plan, then writes)
@@ -103,7 +106,7 @@ Usage:
   rung restore <file>                  TIA Portal's version of one file back (yours is kept in .rung/recovery)
   rung confirm-delete <file|address>... [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
-  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
+  rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--strict] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
   rung live read <var>... [--dir <ws>] [--device <PLC>] [--transport s7commplus|webapi] [--json]
                                      read values from the selected PLC backend (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--reconnect-timeout 60] [--json]
@@ -225,7 +228,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   }
   // checked before anything starts: --from-plc changes the project, so a bad argument must stop rung before that
   const wanted = v.tia as string | undefined;
-  if (wanted !== undefined && !ENGINEERING_VERSIONS.includes(wanted as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${wanted} (V19, V20, V21 or CODESYS)`);
+  if (wanted !== undefined && !ENGINEERING_VERSIONS.includes(wanted as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${wanted} (V18, V19, V20, V21 or CODESYS)`);
   // a .project file is CODESYS: rung relays to its bridge script inside CODESYS (codesys.ts)
   const codesys = !!v.project && /\.project$/i.test(String(v.project)) && !io.env.RUNG_BRIDGE;
   // the bridge of the project's own TIA Portal opens it: a .ap19 needs V19's Openness
@@ -262,7 +265,7 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
   try {
     let info = await client.projectInfo();
     const tia = wanted ?? info.tiaVersion;
-    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V19, V20, V21 or CODESYS)`);
+    if (!ENGINEERING_VERSIONS.includes(tia as EngineeringVersion)) throw new WorkspaceError("BAD_ARGUMENT", `unsupported version ${tia} (V18, V19, V20, V21 or CODESYS)`);
     if (tia !== info.tiaVersion) throw new WorkspaceError("BAD_ARGUMENT", `--tia ${tia} does not match: ${info.path} is open in TIA Portal ${info.tiaVersion}`);
     const devices = (v.device as string[] | undefined) ?? [];
     const checkDevices = () => {
@@ -425,6 +428,7 @@ function initHint(code: string, project: boolean): string | undefined {
 
 /** Options and positionals (after the command) each command takes: anything else is a typo worth stopping for. */
 export const COMMANDS: Record<string, { options: string[]; positionals: number }> = {
+  "agent-mode": { options: ["dir", "plc", "actions", "for", "json"], positionals: 1 },
   setup: { options: ["dry-run", "yes", "agents", "skills", "editors", "platforms", "scope", "grant"], positionals: 1 },
   check: { options: ["host", "json"], positionals: 0 },
   report: { options: [], positionals: 1 },
@@ -446,7 +450,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   restore: { options: [], positionals: 1 },
   "confirm-delete": { options: ["dir", "force"], positionals: Infinity },
   rename: { options: ["dir"], positionals: 2 },
-  test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against"], positionals: 1 },
+  test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against", "strict"], positionals: 1 },
   live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture", "expect-sha256", "reconnect-timeout"], positionals: Infinity },
   "live-server": { options: [], positionals: 1 },
   trace:{options:["device","out","duration","interval","dir","json","parent-stdio"],positionals:Infinity},
@@ -495,11 +499,11 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
 }
 
 export async function main(argv: string[], io: Io): Promise<number> {
+  return runAgentCommand(argv, io, () => mainCommand(argv, io));
+}
+
+async function mainCommand(argv: string[], io: Io): Promise<number> {
   if (argv[0] === "guard") return cmdGuard(argv.slice(1), io);
-  if (agentMarker(io.env) && !guardCommand("rung " + argv.join(" ")).allowed) {
-    io.stderr(`rung: AGENT_REFUSED: ${AGENT_REFUSAL}\n`);
-    return 1;
-  }
   // the Windows end of a workspace on Linux or macOS (rung over ssh): the bridge itself, its arguments untouched
   if (argv[0] === "bridge") {
     if (argv.includes("--help") || argv.includes("-h")) {
@@ -546,6 +550,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         coverage: { type: "string" },
         against: { type: "string" },
         observe: { type: "boolean" },
+        strict: { type: "boolean" },
         capture: { type: "string" },
         why: { type: "string" },
         filter: { type: "string" },
@@ -558,6 +563,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         allow: { type: "string", multiple: true },
         yes: { type: "boolean", short: "y" },
         plc: { type: "string" },
+        actions: { type: "string" },
+        for: { type: "string" },
         file: { type: "string", multiple: true },
         off: { type: "boolean" },
         "trust-certificate": { type: "boolean" },
@@ -657,9 +664,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
-    if (cmd === "download" || cmd === "writes" && target === "on" || cmd === "init" && v.writes
-      || cmd === "setup" && target === "openness" || cmd === "live" && ["modify", "write", "run", "stop", "force", "unforce", "ack", "acknowledge", "reset"].includes(target ?? "")
-      || v["confirm-stdin"]) assertHuman(io.env);
+    if (commandAction(positionals, argv) || v["confirm-stdin"]) assertHuman(io.env);
     const mutating = ["download", "upload", "confirm-delete", "rename"].includes(cmd)
       || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
       || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply
@@ -673,6 +678,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
       assertPlcWritable(config, (v.plc as string | undefined) ?? (v.device as string[] | undefined)?.[0], io.env);
     }
     switch (cmd) {
+      case "agent-mode":
+        return await cmdAgentMode(resolve(io.cwd, v.dir ?? "."), target, { plc: v.plc, actions: v.actions, for: v.for, json: !!v.json }, io);
       case "review":
         return await cmdReview(target, { base: v.base, head: v.head, json: !!v.json, md: !!v.md }, io);
       case "trace":
@@ -739,6 +746,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.stderr(`rung: ${(e as Error).message}\n`);
           return 1;
         }
+        // --strict: a case that checks nothing fails (for CI)
+        if (v.strict) results = requireAssertions(results);
         if (v.junit) await writeFileAtomic(resolve(io.cwd, v.junit as string), toJUnit(results));
         // no test ran: no coverage file, rather than one that says nothing ran
         if (coverage && results.some((f) => f.cases.length)) {
@@ -764,7 +773,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
             continue;
           }
           for (const c of f.cases) {
-            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${c.passed ? "" : `${f.file}:${c.line ?? 1} `}${f.block}: ${c.name}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}\n`);
+            // a case that ran without expect: passes by running: said, so it is not taken for a checked one
+            const unchecked = c.passed && !c.assertions ? " (checks nothing)" : "";
+            io.stdout(`${c.passed ? "ok  " : "FAIL"} ${c.passed ? "" : `${f.file}:${c.line ?? 1} `}${f.block}: ${c.name}${unchecked}${c.error ? ` — ${c.errorStep ? `step ${c.errorStep}: ` : ""}${c.error}` : ""}\n`);
             for (const x of c.failures) {
               // expect: { Running: "true" } is the text "true", never the BOOL the block has
               const quoted = typeof x.expected === "string" && ((typeof x.actual === "boolean" && /^(true|false)$/i.test(x.expected)) || (typeof x.actual === "number" && x.expected.trim() !== "" && Number.isFinite(Number(x.expected))));
@@ -791,7 +802,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
           io.stdout(`no tests${what}: rung test runs tests/**/*.test.yaml (docs/testing.md)${hint}\n`);
           return 3;
         }
-        io.stdout(`\n${total - failed}/${total} passed (offline simulation — not a PLCSIM run)\n${covered}`);
+        const cases = results.flatMap((f) => f.cases);
+        const checks = cases.reduce((n, c) => n + (c.assertions ?? 0), 0);
+        const idle = cases.filter((c) => c.passed && !c.assertions).length;
+        const tally = `${checks} ${checks === 1 ? "check" : "checks"}${idle ? `; ${idle} passed without checking anything (rung test --strict fails them)` : ""}`;
+        io.stdout(`\n${total - failed}/${total} passed, ${tally} (offline simulation — not a PLCSIM run)\n${covered}`);
         return failed ? 2 : total ? 0 : 1;
       }
       case "live":

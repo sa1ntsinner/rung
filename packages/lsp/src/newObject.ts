@@ -5,7 +5,7 @@
 // member (a structure without components does not compile).
 import { addressToPath, findCaseCollisions, type ObjectKind, type TextForm } from "@rung/core";
 
-export type NewKind = "FB" | "FC" | "DB" | "UDT" | "TAGS";
+export type NewKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "TAGS";
 
 export interface NewObjectRequest {
   kind: NewKind;
@@ -29,6 +29,7 @@ export interface Existing {
 const KIND: Record<NewKind, { kind: ObjectKind; form: TextForm }> = {
   FB: { kind: "block", form: "scl" },
   FC: { kind: "block", form: "scl" },
+  OB: { kind: "block", form: "scl" },
   DB: { kind: "block", form: "db" },
   UDT: { kind: "type", form: "udt" },
   TAGS: { kind: "tagtable", form: "tags.st" },
@@ -41,6 +42,9 @@ function template(kind: NewKind, name: string, returnType?: string): string {
       return `FUNCTION_BLOCK ${q}\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_FUNCTION_BLOCK\n\n`;
     case "FC":
       return `FUNCTION ${q} : ${returnType?.trim() || "Void"}\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_FUNCTION\n\n`;
+    case "OB":
+      // a program cycle OB: an SCL source carries no event class, and TIA Portal numbers it (123 and up)
+      return `ORGANIZATION_BLOCK ${q}\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\n\nBEGIN\nEND_ORGANIZATION_BLOCK\n\n`;
     case "DB":
       return `DATA_BLOCK ${q}\n{ S7_Optimized_Access := 'TRUE' }\nVERSION : 0.1\nNON_RETAIN\n   VAR \n      Tag_1 : Bool;\n   END_VAR\n\n\nBEGIN\n\nEND_DATA_BLOCK\n\n`;
     case "UDT":
@@ -64,7 +68,7 @@ export function newObject(req: NewObjectRequest, existing: Existing): { path: st
   if (/[\u0000-\u001f\u007f]/.test(name)) return { reason: "A name cannot contain control characters." };
   if (name.length > 125) return { reason: "TIA Portal names are at most 125 characters." };
   const key = name.toLowerCase();
-  if ((req.kind === "FB" || req.kind === "FC" || req.kind === "DB") && existing.names.has(key)) return { reason: `${req.plc} already has a block ${name}.` };
+  if ((req.kind === "FB" || req.kind === "FC" || req.kind === "OB" || req.kind === "DB") && existing.names.has(key)) return { reason: `${req.plc} already has a block ${name}.` };
   if (req.kind === "UDT" && existing.types.has(key)) return { reason: `${req.plc} already has a data type ${name}.` };
   if (req.kind === "TAGS" && existing.tables.has(key)) return { reason: `${req.plc} already has a tag table ${name}.` };
   if (req.kind === "FC" && req.returnType && !/^("[^"]+"|[A-Za-z_]\w*(\s*\[[^\]]+\])?)$/.test(req.returnType.trim())) return { reason: `"${req.returnType}" is not a data type.` };

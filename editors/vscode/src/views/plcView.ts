@@ -30,6 +30,9 @@ const STATE_ICON: Readonly<Record<string, [string, string | undefined]>> = {
   Protected: ["lock", "list.warningForeground"],
 };
 
+/** A CPU memory size as a person reads it: 512 KB, 4.0 MB (the exact bytes are in the tooltip). */
+const memory = (bytes: number) => (bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+
 export class PlcItem extends vscode.TreeItem {
   constructor(
     readonly node: Node,
@@ -117,7 +120,7 @@ export class PlcView implements vscode.TreeDataProvider<PlcItem>, vscode.Disposa
       const frame = JSON.parse(result.output) as { scope: { address: string }; identity: { plcName: string; cpu: string; serial: string }; state: { mode: string; cycleMs?: number; memory?: { name: string; usedBytes: number; totalBytes: number }[] } };
       return [this.detail(device, `${frame.state.mode} · ${frame.scope.address}`), this.detail(device, `${frame.identity.plcName} · ${frame.identity.cpu} · ${frame.identity.serial}`),
         this.detail(device, frame.state.cycleMs == null ? "Cycle unavailable" : `Cycle: ${frame.state.cycleMs} ms`),
-        ...(frame.state.memory?.map(m => this.detail(device, `${m.name}: ${m.usedBytes}/${m.totalBytes} bytes`)) ?? [this.detail(device, "Memory unavailable")])];
+        ...(frame.state.memory?.map(m => this.detail(device, `${m.name}: ${memory(m.usedBytes)} of ${memory(m.totalBytes)}${m.totalBytes ? ` (${Math.round((100 * m.usedBytes) / m.totalBytes)}%)` : ""}`, `${m.name}: ${m.usedBytes.toLocaleString()} of ${m.totalBytes.toLocaleString()} bytes`)) ?? [this.detail(device, "Memory unavailable")])];
     } catch { return [this.detail(device, "CPU diagnostics unavailable; see rung output")]; }
   }
   private async startAlarms(device: string): Promise<void> {

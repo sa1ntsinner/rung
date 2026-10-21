@@ -225,6 +225,8 @@ export class RungTests implements vscode.Disposable {
       const id = `${w.file.id}#${c.index ?? i}`;
       const t = w.file.children.get(id) ?? this.ctrl.createTestItem(id, c.name, uri);
       t.label = c.name;
+      // a pass that checked nothing only ran: shown next to the name (a CLI older than 0.3.2 does not count)
+      t.description = c.assertions === undefined ? undefined : c.assertions ? `${c.assertions} ${c.assertions === 1 ? "check" : "checks"}` : "checks nothing";
       if (c.line) t.range = new vscode.Range(c.line - 1, 0, c.line - 1, 0);
       return t;
     });

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // rung mcp: a small, agent-native tool surface. Agents read and edit the mirrored files directly;
 // the tools cover what files cannot tell: sync, compile, diagnostics, graph, conflicts and safety.
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
@@ -8,9 +9,9 @@ import { fileURLToPath } from "node:url";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { diffIndices } from "node-diff3";
-import { BlobStore, loadConfig, normalizeText, parseAddress, realProbes, runChecks, StateStore, type ObjectState, type Probes } from "@rung/core";
+import { AGENT_ACTIONS, BlobStore, loadConfig, normalizeText, parseAddress, plcReadOnly, realProbes, runChecks, StateStore, workspaceAgentModes, type ObjectState, type Probes } from "@rung/core";
 import { OwnerClient, cachedXref, confirmDelete, placeCompileMessages, renameObject, resolveConflict, syncOnce, type Diagnostic, type RenameReport, type SyncBridge, type SyncReport } from "@rung/sync";
-import { WorkspaceIndex, assignmentList, baseText, interfaceImpact, nearest, diagnostics as parseDiagnostics, uriOf, workspaceTests } from "@rung/lsp";
+import { WorkspaceIndex, sourceStamp, assignmentList, baseText, interfaceImpact, nearest, diagnostics as parseDiagnostics, uriOf, workspaceTests } from "@rung/lsp";
 import { CodeGraph } from "@rung/graph";
 import { WebApiClient, plainHttpRefusal, type OnlineReadResult, type OnlineStateResult, type OnlineAlarmResult } from "@rung/live";
 import { explainStatic, runTests } from "@rung/sim";
@@ -95,7 +96,7 @@ export const SAFETY_RULES = `rung makes a TIA Portal project available as plain 
 rung safety rules for agents
 1. Edit the mirrored files under plc/ directly; changes reach TIA Portal through rung sync / rung watch.
 2. Never edit read-only objects: *.protected.yaml (know-how protected), failsafe (F_*) blocks, system blocks, GRAPH blocks. rung refuses to import them.
-3. Never download to a PLC, never run rung download, rung live modify/run/stop/force, acknowledge alarms or turn writes on. Never use --yes or --confirm-stdin to approve a PLC change. Prepare the download with rung_download_request; the person downloads after reviewing the change (rung download asks them to type the PLC name).
+3. Check rung_status agentModes before a PLC action. manual refuses changes; ask requires the person in a native dialog; auto allows only its listed actions without asking; bypass allows all actions, including force. Read-only locks always win. Never change rung agent-mode or its external agent-modes.toml store, remove agent markers, or use --confirm-stdin to approve your own action. When refused, ask the person; do not work around the refusal. Prepare downloads with rung_download_request; TIA questions still require the person's explicit --allow choices.
 4. Resolve conflicts only with rung_resolve (keep the file, take TIA's version, or save a merged file first).
 5. Run rung_find_usages before changing an interface (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout): every caller and instance DB is affected. After the change, rung_impact tells what breaks against the version TIA Portal has; fix it before the sync.
 6. After a sync, read rung_diagnostics; compile errors come from TIA Portal itself.`;
@@ -165,8 +166,15 @@ function nearestPath(given: string, candidates: readonly string[]): string | und
 /** ": did you mean X?" when something is close. */
 const meant = (near: string | undefined) => (near ? `: did you mean ${near}?` : "");
 
+/** Identity of the sources a result was computed from: equal hashes, same file contents. */
+const sourceHash = (index: WorkspaceIndex) => {
+  const h = createHash("sha256");
+  for (const uri of [...index.docs.keys()].sort()) h.update(uri).update("\0").update(index.docs.get(uri)!.text).update("\0");
+  return "sha256:" + h.digest("hex").slice(0, 16);
+};
+
 export function createMcpServer(ctx: McpContext): McpServer {
-  const server = new McpServer({ name: "rung", version: "0.3.1" }, { instructions: SAFETY_RULES });
+  const server = new McpServer({ name: "rung", version: "0.3.2" }, { instructions: SAFETY_RULES });
   let lastSync: SyncReport | undefined;
   const syncResult = (report: SyncReport) => {
     lastSync = report;
@@ -174,12 +182,14 @@ export function createMcpServer(ctx: McpContext): McpServer {
     result.content.push({ type: "resource_link", name: "Last sync report", uri: "rung://sync/0", description: "Read additional report pages without repeating the sync. Next sync replaces this snapshot." });
     return result;
   };
-  let cache: { at: number; index: WorkspaceIndex; graph: CodeGraph } | undefined;
+  let cache: { stamp: string; index: WorkspaceIndex; graph: CodeGraph; source: string } | undefined;
+  /** The workspace as the files are now: reloaded whenever a source changed on disk since the last load. */
   const model = async () => {
-    if (!cache || Date.now() - cache.at > 2000) {
+    const stamp = await sourceStamp(ctx.root);
+    if (cache?.stamp !== stamp) {
       const index = new WorkspaceIndex();
       await index.load(ctx.root);
-      cache = { at: Date.now(), index, graph: CodeGraph.fromIndex(index) };
+      cache = { stamp, index, graph: CodeGraph.fromIndex(index), source: sourceHash(index) };
     }
     return cache;
   };
@@ -253,17 +263,23 @@ export function createMcpServer(ctx: McpContext): McpServer {
 
   server.registerTool(
     "rung_status",
-    { ...toolInfo("rung_status"), inputSchema: paging, description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, whether rung watch is running, whether writes to TIA Portal are on (the person turns them on; never you)." },
+    { ...toolInfo("rung_status"), inputSchema: paging, description: "Sync status of the workspace: object counts, conflicts, pending deletes, recovery items, watcher, writes to TIA Portal, and effective agent mode per PLC with actions allowed unattended, actions requiring a dialog, source, expiry and read-only locks." },
     async ({ offset, limit }) => {
       const none = noWorkspace();
       if (none) return none;
       const config = await loadConfig(ctx.root).catch(() => undefined);
+      const agentModes = !config ? [] : (await workspaceAgentModes(ctx.root, config, ctx.env)).map(entry => {
+        const readOnly = plcReadOnly(config, entry.plc, ctx.env);
+        const allowedActions = readOnly ? [] : entry.mode === "bypass" ? [...AGENT_ACTIONS] : entry.mode === "auto" ? entry.actions : [];
+        const asksFor = readOnly || entry.mode === "manual" || entry.mode === "bypass" ? [] : AGENT_ACTIONS.filter(action => !allowedActions.includes(action));
+        return { ...entry, allowedActions, asksFor, ...(readOnly ? { readOnly } : {}) };
+      });
       const writes = !config ? undefined : config.writesOff ? "off: the person turns them on with rung writes on" : config.sync.import === "auto" ? "on" : "off (sync.import = manual)";
       const live = await withOwner((o) => o.request("status"));
-      if (live) return json(details({ watching: true, writes, ...(live as object) }, offset, limit));
+      if (live) return json(details({ watching: true, writes, ...(live as object), agentModes }, offset, limit));
       const all = await stateSnapshot(ctx.root);
       const by = (s: string) => all.filter((o) => o.status === s).map((o) => o.path);
-      return json(details({ watching: false, writes, objects: all.length, conflicted: by("conflicted"), fileDirty: by("fileDirty"), pendingDelete: by("pendingDelete"), recoveryRequired: by("recoveryRequired"), readOnly: all.filter((o) => o.readOnly).map((o) => o.path) }, offset, limit));
+      return json(details({ watching: false, writes, agentModes, objects: all.length, conflicted: by("conflicted"), fileDirty: by("fileDirty"), pendingDelete: by("pendingDelete"), recoveryRequired: by("recoveryRequired"), readOnly: all.filter((o) => o.readOnly).map((o) => o.path) }, offset, limit));
     },
   );
 
@@ -321,7 +337,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     "rung_diagnostics",
     { ...toolInfo("rung_diagnostics"), description: "Problems for one file or the whole workspace: SCL syntax/semantic checks plus TIA Portal compile errors and sync conflicts from the last sync.", inputSchema: { ...paging, path: z.string().optional().describe("workspace-relative file, e.g. plc/PLC_1/blocks/Fx_Motor.scl") } },
     async ({ path: given, offset, limit }) => {
-      const { index } = await model();
+      const { index, source } = await model();
       const path = given === undefined ? undefined : workspacePath(ctx.root, given);
       // a mistyped path would look like a file without problems
       if (path !== undefined && !index.docs.has(uriOf(join(ctx.root, ...path.split("/")))) && !existsSync(join(ctx.root, ...path.split("/"))))
@@ -334,7 +350,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
         return parseDiagnostics(index, uri).map((d) => ({ path: pathOf(uri), line: doc.lines.position(d.start).line + 1, severity: d.severity, code: d.code, message: d.message }));
       });
       const syncPage = diagnosticPage(sync, offset, limit), sourcePage = diagnosticPage(parsed, offset, limit);
-      return json({ sync: syncPage.items, source: sourcePage.items, counts: { sync: sync.length, source: parsed.length },
+      return json({ sourceHash: source, sync: syncPage.items, source: sourcePage.items, counts: { sync: sync.length, source: parsed.length },
         syncPaging: { ...syncPage, items: undefined }, sourcePaging: { ...sourcePage, items: undefined } });
     },
   );
@@ -452,16 +468,16 @@ export function createMcpServer(ctx: McpContext): McpServer {
     async ({ path, offset, limit }) => {
       const none = noWorkspace();
       if (none) return none;
-      const { index } = await model();
+      const { index, source } = await model();
       const uri = uriOf(isAbsolute(path) ? path : join(ctx.root, path));
       const before = await baseText(ctx.root, uri);
       if (before === undefined) return fail(`${path} is not in TIA Portal yet (never synced): nothing uses it there`);
-      // the file as the agent just wrote it (the model may be up to 2 s old)
+      // the file as the agent just wrote it
       const now = await readFile(fileURLToPath(uri), "utf8").catch(() => undefined);
       if (now === undefined) return fail(`${path} does not exist`);
       index.set(uri, now, 0);
       const r = interfaceImpact(index, uri, before, await workspaceTests(ctx.root));
-      return r ? json(details(r, offset, limit)) : fail(`${path} holds no FB, FC or PLC data type`);
+      return r ? json({ sourceHash: source, ...(details(r, offset, limit) as object) }) : fail(`${path} holds no FB, FC or PLC data type`);
     },
   );
 
@@ -683,7 +699,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
     "rung_test",
     { ...toolInfo("rung_test"), description: "Run the workspace unit tests (tests/**/*.test.yaml: set inputs, run cycles, advance virtual time, expect outputs; { within: 2s, expect: … }, always, never for timing) on rung's offline simulator (SCL, LAD, FBD, STL, structured text). Not a PLCSIM run: good for logic, not for timing-exact or system-instruction behaviour. A file's stubs: map stands in for what the simulator does not model (communication, diagnostics, motion, missing blocks, technology objects); results list what was stubbed. observe: true adds the block's outputs and statics after every step that runs cycles (to write expectations from; check them with the person before they become a test).", inputSchema: { ...paging, filter: z.string().optional(), observe: z.boolean().optional(), verbose: z.boolean().optional(), stepOffset: z.number().int().min(0).optional(), observationLimit: z.number().int().min(1).max(10).optional(), valueOffset: z.number().int().min(0).optional(), valueLimit: z.number().int().min(1).max(50).optional() } },
     async ({ filter, observe, verbose, offset, limit, stepOffset, observationLimit, valueOffset, valueLimit }) => {
-      const { index } = await model();
+      const { index, source } = await model();
       const results = await runTests(ctx.root, index, filter, undefined, observe ? { observe: true } : {});
       if (!results.length && filter) {
         const all = (await runTests(ctx.root, index)).length;
@@ -699,7 +715,9 @@ export function createMcpServer(ctx: McpContext): McpServer {
           ...((valueOffset ?? 0) + (valueLimit ?? 10) < Object.keys(values).length ? { nextValueOffset: (valueOffset ?? 0) + (valueLimit ?? 10) } : {}),
           ...(statics ? { statics: statics.filter((name) => Object.keys(values).slice(valueOffset ?? 0, (valueOffset ?? 0) + (valueLimit ?? 10)).includes(name)) } : {})
         })), stepOffset, observationLimit ?? 5) } : {}) }));
-      return json({ files: results.length, totalCases: cases.length, passed: cases.filter((c) => c.passed).length, failed: failures.length,
+      return json({ sourceHash: source, files: results.length, totalCases: cases.length, passed: cases.filter((c) => c.passed).length, failed: failures.length,
+        // a pass with no expect: only ran; the person should know which passes checked nothing
+        assertions: cases.reduce((n, c) => n + (c.assertions ?? 0), 0), passedWithoutChecks: cases.filter((c) => c.passed && !c.assertions).map((c) => `${c.file}: ${c.name}`),
         errors: results.filter((f) => f.error).map(({ cases: _cases, ...f }) => f), failures,
         ...page(selected, offset, limit ?? 5),
         stubs: page(results.flatMap((f) => (f.stubbed ?? []).map((s) => ({ file: f.file, ...s }))), offset, limit ?? 10) });
@@ -788,7 +806,10 @@ export function createMcpServer(ctx: McpContext): McpServer {
       if ("problem" in chosen) return fail(chosen.problem);
       const dev = chosen.device;
       const conn = config.plc[dev];
+      // no diagnostics file: rung never synced or compiled here, which is not the same as no errors
+      const recorded = existsSync(join(ctx.root, ".rung", "diagnostics.json"));
       const errors = (await syncDiagnostics(ctx.root)).filter((d) => d.severity === "error" && !/^Compiling finished/.test(d.message));
+      const objects = (await stateSnapshot(ctx.root)).filter((s) => parseAddress(s.address).device === dev).map((s) => ({ path: s.path, status: s.status }));
       return text(
         await handover({
           root: ctx.root,
@@ -797,7 +818,8 @@ export function createMcpServer(ctx: McpContext): McpServer {
           ...(testPlan ? { testPlan } : {}),
           ...(interfaceChanges ? { interfaceChanges } : {}),
           ...(conn ? { connection: { pcInterface: conn.pcInterface, ...(conn.targetInterface ? { targetInterface: conn.targetInterface } : {}) } } : {}),
-          compileErrors: errors.map((e) => ({ path: e.path, ...(e.line ? { line: e.line } : {}), message: e.message })),
+          objects,
+          ...(recorded ? { compileErrors: errors.map((e) => ({ path: e.path, ...(e.line ? { line: e.line } : {}), message: e.message })) } : {}),
         }),
       );
     },

@@ -78,7 +78,7 @@ export const WHITELIST_HINT =
 export function bridgesHere(env: Record<string, string | undefined>): { exe: string; version: string }[] {
   if (env.RUNG_BRIDGE) return [{ exe: env.RUNG_BRIDGE, version: `${/rung-bridge-v(\d\d)\.exe$/i.exec(basename(env.RUNG_BRIDGE))?.[1] ?? "20"}.0` }];
   const programs = env.ProgramFiles ?? "C:\\Program Files";
-  const found = (["V19", "V20", "V21"] as const)
+  const found = (["V18", "V19", "V20", "V21"] as const)
     .map((tia) => ({ tia, exe: bridgeExecutable(env, tia) }))
     .filter((b) => existsSync(b.exe) && existsSync(join(programs, "Siemens", "Automation", `Portal ${b.tia}`)));
   return (found.length ? found : [{ tia: "V20" as const, exe: bridgeExecutable(env) }]).map((b) => ({ exe: b.exe, version: `${b.tia.slice(1)}.0` }));

@@ -52,6 +52,7 @@ describe("archives: rung retrieve, and rung init on an archive", () => {
   it("plans the version: an archive of V19-V21 by its own TIA Portal, an older one upgraded by V20", () => {
     expect(retrievePlan(join("D:", "a", "Line.ZAP21"), undefined)).toEqual({ from: 21, to: "V21", upgrade: false, target: join("D:", "a", "Line") });
     expect(retrievePlan("Line.zap17", undefined)).toMatchObject({ to: "V20", upgrade: true });
+    expect(retrievePlan("Line.zap18", undefined)).toMatchObject({ from: 18, to: "V18", upgrade: false });
     expect(() => retrievePlan("Line.zap22", undefined)).toThrow(/V19, V20 and V21/);
     expect(() => retrievePlan("Line.zap21", "V20")).toThrow(/cannot retrieve/);
     expect(() => retrievePlan("Line.ap20", undefined)).toThrow(/archive/);

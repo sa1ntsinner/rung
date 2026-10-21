@@ -42,16 +42,16 @@ export function rungCommand(args: string[], env: Record<string, string | undefin
   return { command: process.execPath, args: [...(entry ? [entry] : []), ...args], ...(electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}) };
 }
 
-export type TiaVersion = "V19" | "V20" | "V21";
+export type TiaVersion = "V18" | "V19" | "V20" | "V21";
 
 /** The TIA Portal a version names (a project's tiaVersion, --tia); V20 when it names none. */
 export function tiaOf(v: unknown): TiaVersion {
-  return v === "V19" || v === "V21" ? v : "V20";
+  return v === "V18" || v === "V19" || v === "V21" ? v : "V20";
 }
 
-/** The TIA Portal a project file belongs to, by its extension (.ap19, .ap20, .ap21). */
+/** The TIA Portal a project file belongs to, by its extension (.ap18, .ap19, .ap20, .ap21). */
 export function tiaOfProject(path: string): TiaVersion | undefined {
-  const m = /\.ap(19|20|21)$/i.exec(path);
+  const m = /\.ap(18|19|20|21)$/i.exec(path);
   return m ? (`V${m[1]}` as TiaVersion) : undefined;
 }
 

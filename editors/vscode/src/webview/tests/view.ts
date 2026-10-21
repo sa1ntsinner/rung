@@ -214,7 +214,7 @@ export class RgTests extends LitElement {
       const t = this.resultText(row);
       if (!t) return nothing;
       const bad = t !== "ok";
-      return html`<span class=${bad ? "rg-fail" : "rg-pass"}><span class="codicon ${bad ? "codicon-error" : "codicon-pass"}"></span>${t === "ok" ? nothing : html`<span>${t}</span>`}</span>`;
+      return html`<span class=${bad ? "rg-fail" : "rg-pass"} title=${bad ? t : "passed"}><span class="codicon ${bad ? "codicon-error" : "codicon-pass"}"></span>${t === "ok" ? nothing : html`<span>${t}</span>`}</span>`;
     }
     return this.cellText(row, column);
   }
@@ -289,7 +289,7 @@ export class RgTests extends LitElement {
     return html`<header class="rg-header">
       <div class="rg-title">
         <span class="codicon codicon-beaker rg-title-icon"></span>
-        <span class="rg-title-name">${m.block?.value ?? "Test"}</span>
+        <h1 class="rg-title-name">${m.block?.value ?? "Test"}</h1>
         ${m.cycle ? html`<span class="rg-kind" title="Cycle time">${m.cycle.value}</span>` : nothing}
         <span class="rg-crumbs">${this.context?.file ?? ""}</span>
         ${this.file!.noBlock ? html`<span class="rg-refusal"><span class="codicon codicon-warning"></span>${this.file!.noBlock}</span>` : nothing}
@@ -317,9 +317,9 @@ export class RgTests extends LitElement {
     };
     return html`<nav class="rg-cases" aria-label="Cases">
       <div class="rg-pane-title">Cases</div>
-      <ul role="listbox" aria-label="Cases" tabindex="0" @keydown=${(e: KeyboardEvent) => this.casesKey(e, cases)}>
+      <ul role="listbox" aria-label="Cases" tabindex="0" aria-activedescendant=${cases.length ? `rg-case-${this.selected}` : nothing} @keydown=${(e: KeyboardEvent) => this.casesKey(e, cases)}>
         ${cases.map(
-          (c) => html`<li role="option" aria-selected=${c.index === this.selected ? "true" : "false"} class="rg-case ${c.index === this.selected ? "rg-selected" : ""}" data-case=${c.index} @click=${() => this.select(c.index)} @dblclick=${() => (this.renaming = c.index)}>
+          (c) => html`<li id=${`rg-case-${c.index}`} role="option" aria-selected=${c.index === this.selected ? "true" : "false"} class="rg-case ${c.index === this.selected ? "rg-selected" : ""}" data-case=${c.index} @click=${() => this.select(c.index)} @dblclick=${() => (this.renaming = c.index)}>
             ${this.caseIcon(c.index)}
             ${this.renaming === c.index
               ? html`<input class="rg-input rg-case-input" aria-label="Case name" .value=${name(c)} @keydown=${(e: KeyboardEvent) => this.renameKey(e, c.index)} @blur=${(e: Event) => this.renameDone(c.index, (e.target as HTMLInputElement).value)} />`
@@ -397,7 +397,8 @@ export class RgTests extends LitElement {
         ${run && !run.passed && run.error ? html`<span class="rg-refusal" title=${run.error}><span class="codicon codicon-error rg-fail"></span>${run.errorStep ? `step ${run.errorStep}: ` : ""}${run.error}</span>` : nothing}
         <span class="rg-spacer"></span>
         <span class="rg-add-step" role="group" aria-label="Add a step">
-          <button class="rg-text-btn" data-action="add-set" @click=${() => add("set")}><span class="codicon codicon-add"></span>Set</button>
+          <span class="rg-muted rg-add-label" aria-hidden="true">Add step</span>
+          <button class="rg-text-btn" data-action="add-set" @click=${() => add("set")}>Set</button>
           <button class="rg-text-btn" data-action="add-cycle" @click=${() => add("cycle")} title="Add a step that runs PLC cycles">Cycles</button>
           <button class="rg-text-btn" data-action="add-advance" @click=${() => add("advance")}>Advance</button>
           <button class="rg-text-btn" data-action="add-expect" @click=${() => add("expect")}>Expect</button>

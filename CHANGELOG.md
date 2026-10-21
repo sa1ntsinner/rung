@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.2 — 2026-10-21
+
+- TIA Portal V18: init, pull, sync, compile, cross-reference and views through a V18 bridge, with `.ap18` and `.zap18` opened as they are instead of upgraded. What V18's Openness lacks (Unified HMI, PLC users, the scan for reachable devices, library documents, SIMATIC SD) is refused with a message that names V18.
+
+- Agent permission modes per workspace and PLC: `manual`, native-dialog `ask`, selected-action `auto` and `bypass`, with expiry, action records and editor controls. Read-only locks always win; only the person changes the mode.
+
+- Test cases count what they check. A case without `expect` passes by running and now says *checks nothing*; the totals, `--json`, the VS Code Testing view and `rung_test` show the counts. `rung test --strict` fails such cases, for CI.
+- MCP tools check the files as they are on disk right after an edit, and `rung_test`, `rung_diagnostics` and `rung_impact` return a hash of the sources they used.
+- The download handover compares the files with what TIA Portal has, not with the last git commit. It says plainly when rung cannot know something: what the PLC runs, or whether the project was compiled.
+- In a VS Code window with several rung folders, the language server follows the folder chosen with *rung: Choose Workspace*.
+- New Object makes program cycle OBs, and an FC can return any elementary type or a PLC data type.
+- Zed tasks save edited buffers before they read the files.
+- Neovim: a test result arriving after a newer run, or after its buffer closed, is dropped, and live pins belong to their workspace. CI now runs the Neovim checks, including the debugger and neotest, against a pinned Neovim.
+- VS Code says what a PLC action does: *Put PLC_1 in STOP?* with a *STOP PLC_1* button instead of *Confirm*, *Modify value…* as a labelled button next to Monitor, a refused write ends with *Nothing was sent to the PLC*, and a declarations table that lost its PLC says the values are not current. Pressed toggles show in high-contrast themes, the trace view takes the editor's theme and reads as a recording, narrow panels keep the block name and the ladder toolbar in view, and New Object names each step.
+- Zed has a task to turn writes to TIA Portal off again.
+- Pricing and licence pages say what the free `rung review` covers, what Pro adds, and who needs Pro, with examples.
+
 ## 0.3.1 — 2026-10-21
 
 - Agents cannot download, write PLC values, force, acknowledge alarms, switch RUN/STOP or enable writes through the CLI. `rung setup` installs shell deny rules alongside the existing skills and MCP registration. A refusal asks the person to run the command in their own terminal.

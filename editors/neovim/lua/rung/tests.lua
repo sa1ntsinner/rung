@@ -5,6 +5,8 @@ local cli = require("rung.cli")
 local M = {}
 
 M.ns = vim.api.nvim_create_namespace("rung.tests")
+-- the newest run of each buffer: a result of an older run, or for a buffer closed meanwhile, is dropped
+local runs = {}
 
 --- The cases of a test buffer as written: { line (0-based), name }.
 function M.cases(buf)
@@ -113,7 +115,10 @@ function M.run(what, buf, cb)
   else
     vim.list_extend(args, { "--filter", rel })
   end
+  local run = (runs[buf] or 0) + 1
+  runs[buf] = run
   cli.capture(args, {}, function(r)
+    if runs[buf] ~= run or not vim.api.nvim_buf_is_valid(buf) then return cb and cb(nil, "superseded") end
     local results, why = cli.json(r)
     if not results then
       vim.notify("rung test: " .. why, vim.log.levels.ERROR)

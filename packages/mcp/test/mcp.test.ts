@@ -48,7 +48,7 @@ describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_impact", "rung_list", "rung_live_alarms", "rung_live_diag", "rung_live_read", "rung_live_state", "rung_rename", "rung_resolve", "rung_review", "rung_rules", "rung_status", "rung_sync", "rung_sync_preview", "rung_test", "rung_why", "rung_xref"]);
-    expect(client.getInstructions()).toMatch(/Never download to a PLC/);
+    expect(client.getInstructions()).toMatch(/Check rung_status agentModes before a PLC action/);
   });
 
   it("reports status without a running watch and lists read-only objects", async () => {
@@ -194,4 +194,3 @@ describe("rung mcp with two PLCs that have objects of the same name", () => {
     expect(explained.path).toBe("plc/PLC_B/blocks/Motor_DB.db");
   });
 });
-

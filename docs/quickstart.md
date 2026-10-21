@@ -11,7 +11,7 @@ command line.
 
 ## 1. Install and check
 
-- Windows with a licensed **TIA Portal V19, V20 or V21** and the Openness option (installed with TIA Portal). rung uses your TIA Portal and its licence; it does not replace either. rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
+- Windows with a licensed **TIA Portal V18, V19, V20 or V21** and the Openness option (installed with TIA Portal). rung uses your TIA Portal and its licence; it does not replace either. rung.exe brings its own Node.js; the VS Code extension brings rung itself. On Linux or macOS: a Windows PC or VM with it, reached over ssh ([Linux and macOS](remote.md)).
 - Unzip `rung-<version>-win-x64.zip` and add the folder to `PATH`. Or install only the rung extension in VS Code: it brings rung with it, and **rung: Put rung on PATH** makes it a command in terminals too. With Node.js 22 or newer, `npm install -g @rung-plc/cli` gives the same rung (bridge included) on Windows, and the language server, `rung test` and the ssh bridge on Linux and macOS.
 - rung is not code-signed. To check a download, compare `Get-FileHash rung-<version>-win-x64.zip` with its line in `SHA256SUMS.txt` on the release page. If Windows shows "Windows protected your PC" for rung.exe, choose **More info → Run anyway**; files unzipped from a download can be unblocked at once with `Get-ChildItem -Recurse | Unblock-File` in the rung folder. With Smart App Control turned on, Windows does not start unsigned programs at all.
 - Run `rung check`. It lists what is installed (TIA Portal, Openness, PLCSIM, TwinCAT, CODESYS, editors, agents) and says how to get what is missing:

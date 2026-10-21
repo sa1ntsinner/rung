@@ -13,7 +13,7 @@ Call `rung_check` once at the start of a session (or when something fails for a 
 
 ## Loop
 
-1. **Orient.** `rung_status` (conflicts? compile errors? watcher running? writes to TIA Portal on?) and read `AGENTS.md`. For an object you have not seen, `rung_explain <name>` gives its file, interface and users.
+1. **Orient.** `rung_status` (conflicts? compile errors? watcher running? writes to TIA Portal on? effective agent mode and allowed actions for the PLC?) and read `AGENTS.md`. Never change the mode or its external store. When refused, ask the person. For an object you have not seen, `rung_explain <name>` gives its file, interface and users.
 2. **Before changing an interface** (VAR_INPUT/OUTPUT/IN_OUT, UDT members, DB layout) run `rung_impact` and read the callers; update every caller in the same change.
 3. **Edit the files** with normal file tools, in the house style of the file you are in (see the `scl-craft` skill).
 4. **New block?** Create `plc/<Device>/blocks/<Folder>/<Name>.scl` with a header matching the file name (`FUNCTION "Name" : Void`, `FUNCTION_BLOCK "Name"`, `DATA_BLOCK "Name"`). UDTs go to `types/<Name>.udt`. Names are unique per PLC across all folders: rung refuses a second block with the same name elsewhere (NAME_TAKEN). To move a block to another folder, the person moves it in TIA Portal. To rename a block, UDT or tag table, use `rung_rename`: TIA keeps every call and instance DB, and rung updates the files and tests that use it. Never rename by editing the header; that creates a second block.

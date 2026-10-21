@@ -2,7 +2,7 @@
 
 rung works on the TIA Portal project you already have. TIA Portal itself (licensed, on Windows, with Openness) does the
 compiling and downloading in the background; editing, tests and the simulator need no TIA Portal at all.
-Supported: TIA Portal V19, V20 and V21, S7-1500 and S7-1200 projects. CODESYS projects through rung's CODESYS bridge.
+Supported: TIA Portal V18, V19, V20 and V21, S7-1500 and S7-1200 projects. V18 syncs, compiles and cross-references like the others; what its Openness lacks is refused with a message: Unified HMI, PLC users for going online, the scan for reachable devices, library documents and version release, SIMATIC SD (LAD and FBD blocks stay SimaticML XML). CODESYS projects through rung's CODESYS bridge.
 
 | Workflow | What rung does | Where it stops |
 |---|---|---|

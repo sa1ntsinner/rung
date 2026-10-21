@@ -12,7 +12,7 @@ local function json(path)
 end
 
 --- The text for this workspace's state, e.g. "rung ● watch · 1 conflict · 2 errors"; "" outside a rung workspace.
-function M.compute(root)
+function M.compute(root, modes)
   if not root or vim.fn.filereadable(root .. "/rung.toml") == 0 then return "" end
   local parts = { "rung" }
   local owner = json(root .. "/.rung/owner.json")
@@ -29,13 +29,32 @@ function M.compute(root)
     if d.severity == "error" then errors = errors + 1 end
   end
   if errors > 0 then table.insert(parts, errors .. (errors == 1 and " error" or " errors")) end
+  local seen = {}
+  for _, plc in ipairs(modes and modes.plcs or {}) do
+    if plc.mode ~= "manual" and not seen[plc.mode] then
+      seen[plc.mode] = true
+      table.insert(parts, "agent " .. plc.mode)
+    end
+  end
   return table.concat(parts, " · ")
 end
 
 function M.get()
   local root = cli.root()
   local now = vim.uv.now()
-  if root ~= cache.root or now - cache.at > 2000 then cache = { at = now, root = root, text = M.compute(root) } end
+  if root ~= cache.root or now - cache.at > 2000 then
+    local modes = root == cache.root and cache.modes or nil
+    cache = { at = now, root = root, text = M.compute(root, modes), modes = modes }
+    local current = cache
+    if root and vim.fn.filereadable(root .. "/rung.toml") == 1 then
+      cli.capture({ "agent-mode", "--json" }, { cwd = root }, function(r)
+        if cache ~= current then return end
+        current.modes = r.code == 0 and cli.json(r) or nil
+        current.text = M.compute(root, current.modes)
+        vim.cmd("redrawstatus")
+      end)
+    end
+  end
   return cache.text
 end
 

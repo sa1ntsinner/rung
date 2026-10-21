@@ -291,7 +291,7 @@ export class RgDeclarations extends LitElement {
     const pinned = this.context?.pinned ?? false;
     return html`<header class="rg-header">
       <div class="rg-title">
-        <span class="rg-title-name">${block?.name ?? "Declarations"}</span>
+        <h1 class="rg-title-name">${block?.name ?? "Declarations"}</h1>
         ${block ? html`<span class="rg-kind">${block.kind}</span>` : nothing}
         <span class="rg-crumbs">${folder}</span>
       </div>
@@ -365,11 +365,11 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
             </div>`
           : nothing}
         ${monitorable
-          ? html`<button class="rg-icon-btn" data-action="monitor" aria-pressed=${monitored ? "true" : "false"} title=${watching} aria-label=${watching} @click=${() => this.post({ v: 1, kind: "monitor" })}><span class="codicon codicon-eye"></span></button>`
+          ? html`<div class="rg-plc" role="group" aria-label="PLC">
+              <button class="rg-icon-btn" data-action="monitor" aria-pressed=${monitored ? "true" : "false"} title=${watching} aria-label=${watching} @click=${() => this.post({ v: 1, kind: "monitor" })}><span class="codicon codicon-eye"></span></button>
+              ${monitored ? this.renderModify(model, picked?.row, monitored.state) : nothing}
+            </div>`
           : nothing}
-        ${monitored ? html`<button class="rg-icon-btn" data-action="modify" title="Modify current PLC value" aria-label="Modify current PLC value"
-          ?disabled=${!picked || picked.row.kind !== "plain" || monitored.state !== "live"}
-          @click=${() => picked && this.post({ v: 1, kind: "modify", uri: model.uri, version: model.version, rowId: picked.row.id })}><span class="codicon codicon-edit"></span></button>` : nothing}
         <div class="rg-presets" role="group" aria-label="Columns">
           ${offered.map(
             (p) => html`<button class="rg-text-btn" data-preset=${p} aria-pressed=${p === shownPreset ? "true" : "false"} @click=${() => {
@@ -422,10 +422,26 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
         ${this.notice
           ? html`<span class="rg-refusal" role="alert"><span class="codicon codicon-warning"></span>${this.notice}</span>`
           : html`<span>${total} ${total === 1 ? "declaration" : "declarations"}</span>`}
-        ${model.editable ? nothing : html`<span>${model.reason ?? "Read only"}</span>`}
+        ${model.editable ? nothing : html`<span class="rg-status-note"><span class="codicon codicon-lock"></span>${model.reason ?? "Read only"}</span>`}
+        ${monitored ? this.renderMonitorState(monitored) : nothing}
         <span class="rg-spacer"></span>
         ${this.context?.dirty ? html`<span class="rg-dirty">Edited, not saved</span>` : nothing}
       </div>`;
+  }
+
+  /** Modify value…: writes to the running PLC, so it is said in words and its tooltip says why it is off. */
+  private renderModify(model: DeclModel, row: DeclRow | undefined, state: string | undefined) {
+    const why = !row ? "Select a declaration to modify its value on the PLC" : row.kind !== "plain" ? "Only a single value can be modified, not a struct, array or instance" : state !== "live" ? "The PLC connection is not live" : undefined;
+    const title = why ?? `Write a new current value of ${row!.name} to the PLC`;
+    return html`<button class="rg-text-btn" data-action="modify" title=${title} aria-label=${title} ?disabled=${!!why}
+      @click=${() => row && this.post({ v: 1, kind: "modify", uri: model.uri, version: model.version, rowId: row.id })}>Modify value…</button>`;
+  }
+
+  /** While monitoring, the status line says what is read, and says plainly when the values are not current. */
+  private renderMonitorState(m: NonNullable<RgDeclarations["monitor"]>) {
+    if (m.state && m.state !== "live")
+      return html`<span class="rg-status-note rg-warn-note" role="status"><span class="codicon codicon-warning"></span>${m.state === "stale" ? "No fresh values from the PLC: the values are not current." : "PLC connection lost: the values are not current."}</span>`;
+    return html`<span class="rg-status-note" role="status"><span class="codicon codicon-eye"></span>Monitoring${m.instance ? ` through ${m.instance}` : ""} (read-only)</span>`;
   }
 
   /** A cell's own drawing, underlined with its problem when the language server reports one. */
@@ -454,7 +470,8 @@ ${this.context?.fixed ? nothing : html`      <button class="rg-icon-btn" aria-pr
     }
     if (column === "type" && row.kind === "struct") return html`<span class="rg-muted">Struct · ${row.children?.length ?? 0}</span>`;
     if (column === "comment") return html`<span class="rg-muted">${row.comment ?? ""}</span>`;
-    if (column === "monitor") return this.text(row, column);
+    // values that are not current are drawn quietly, never like live ones
+    if (column === "monitor") return this.monitor?.state && this.monitor.state !== "live" ? html`<span class="rg-muted">${this.text(row, column)}</span>` : this.text(row, column);
     return cellText(row, column);
   }
 

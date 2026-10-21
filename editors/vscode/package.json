@@ -2,7 +2,7 @@
   "name": "rung-scl",
   "displayName": "rung: SCL and TIA Portal sync",
   "description": "Siemens SCL language support and two-way TIA Portal sync, compile, online and download through the rung CLI.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "sa1ntsinner",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -223,6 +223,11 @@
       }
     ],
     "commands": [
+      {
+        "command": "rung.agentMode",
+        "title": "Agent Mode…",
+        "category": "rung"
+      },
       {
         "command": "rung.session.release",
         "title": "Release the Project (close rung's background TIA Portal)",

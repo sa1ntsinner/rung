@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { assertHuman } from "./guard.js";
+import { agentMarker, agentPermission, assertHuman } from "./guard.js";
+import { approveAgentAction, type AgentApproval, type DialogRunner } from "./agentMode.js";
+import { commandAction } from "./guard.js";
+import type { AgentAction } from "@rung/core";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,17 +35,24 @@ export async function frontendConfirmation(input: Readable, operation: OnlinePre
 }
 
 /** Pending hosts hold read connections only. The host creates a writer only after commit. */
-export function liveMutations(root: string, env: Io["env"], select: (options: BackendOptions) => ReturnType<typeof liveSelection>) {
-  const pending = new Map<string, { clientId: string; policy: MutationPolicy; host: BridgeClient; timer: ReturnType<typeof setTimeout> }>();
+export function liveMutations(root: string, env: Io["env"], select: (options: BackendOptions) => ReturnType<typeof liveSelection>, dialog?: DialogRunner) {
+  const pending = new Map<string, { clientId: string; policy: MutationPolicy; host: BridgeClient; device: string; action: AgentAction; approval?: AgentApproval; timer: ReturnType<typeof setTimeout> }>();
+  const brokerEnv = env;
   let preparing = 0;
   let closed = false;
   const revision = async () => createHash("sha256").update(await readFile(join(root, "rung.toml"))).digest("hex");
   async function discard(id: string) {
     const operation = pending.get(id); if (!operation) return;
-    pending.delete(id); clearTimeout(operation.timer); operation.policy.invalidate(); await operation.host.close();
+    pending.delete(id); clearTimeout(operation.timer); operation.policy.invalidate();
+    try { await operation.host.close(); } finally { await operation.approval?.finish(1); }
   }
   return {
-    async prepare(clientId: string, options: BackendOptions, action: MutationAction, credentials: { user?: string; password?: string }) {
+    async prepare(clientId: string, options: BackendOptions, action: MutationAction, credentials: { user?: string; password?: string }, clientAgent?: string, command?: string) {
+      const env = clientAgent ? { ...brokerEnv, [agentMarker({ [clientAgent]: "1" }) ?? "RUNG_AGENT"]: "1" } : brokerEnv;
+      const io: Io = { cwd: root, env, stdout: () => {}, stderr: () => {} };
+      const permissionAction = commandAction(["live", action.action], [])!;
+      const approval = await approveAgentAction(root, permissionAction, options.device, io, dialog, command ?? `rung live ${action.action}`);
+      const prepare = async () => {
       assertHuman(env);
       assertPlcWritable(await loadConfig(root), options.device, env);
       if (closed || pending.size + preparing >= 128) throw new BridgeError("RESOURCE_LIMIT", "Too many pending confirmations or broker is closed");
@@ -76,19 +86,28 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
         const timer = setTimeout(() => void discard(operation.operationId).catch(() => {}), Math.max(0, operation.expiresAt - Date.now()));
         timer.unref();
         if (closed) { clearTimeout(timer); throw new BridgeError("BRIDGE_EXITED", "Broker closed during preparation"); }
-        pending.set(operation.operationId, { clientId, policy, host, timer });
+        pending.set(operation.operationId, { clientId, policy, host, device: selected.device, action: permissionAction, approval, timer });
         return { operationId: operation.operationId, preview: operation.preview, expiresAt: operation.expiresAt };
       } catch (error) { await host?.close().catch(() => {}); throw error; }
       finally { preparing--; }
+      };
+      try { return await (approval ? agentPermission.run(approval.scope, prepare) : prepare()); }
+      catch (error) { await approval?.finish(1); throw error; }
     },
     async commit(clientId: string, id: string, preview: string, confirmed: boolean) {
-      assertHuman(env);
-      assertPlcWritable(await loadConfig(root), undefined, env);
       const operation = pending.get(id);
+      if (!operation) assertHuman(env);
       if (!operation || operation.clientId !== clientId) throw new BridgeError("STALE_PREPARATION", "Preparation belongs to another client or expired");
+      const commit = async () => {
+      let outcome = 1;
       pending.delete(id); clearTimeout(operation.timer);
-      try { return await operation.policy.commit(id, preview, confirmed); }
-      finally { operation.policy.invalidate(); await operation.host.close().catch(() => {}); }
+      try {
+      assertPlcWritable(await loadConfig(root), operation.device, env);
+      const result = await operation.policy.commit(id, preview, confirmed); outcome = result.outcome === "acknowledged" ? 0 : 2; return result;
+      } catch (error) { if ((error as { code?: string }).code === "PLC_READ_ONLY") outcome = 2; throw error; }
+      finally { operation.policy.invalidate(); await operation.host.close().catch(() => {}); await operation.approval?.finish(outcome); }
+      };
+      return operation.approval ? agentPermission.run(operation.approval.scope, commit) : commit();
     },
     async cancel(clientId: string, id: string) { if (pending.get(id)?.clientId === clientId) await discard(id); return {}; },
     async disconnect(clientId: string) { await Promise.allSettled([...pending].filter(([, p]) => p.clientId === clientId).map(([id]) => discard(id))); },

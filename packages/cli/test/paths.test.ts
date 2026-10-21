@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installRoot, tiaOf, tiaOfProject, onlineExecutable } from "../src/paths.js";
+import { bridgeExecutable, installRoot, tiaOf, tiaOfProject, onlineExecutable } from "../src/paths.js";
 
 describe("installRoot", () => {
   it("finds the installed online host and honors its explicit override", () => {
@@ -38,6 +38,7 @@ describe("installRoot", () => {
 describe("TIA Portal versions", () => {
   it("come from the project file's extension, and V20 is the default", () => {
     expect([tiaOfProject("D:/P/Line.ap19"), tiaOfProject("Line.AP21"), tiaOfProject("x.ap20"), tiaOfProject("x.project")]).toEqual(["V19", "V21", "V20", undefined]);
+    expect([tiaOfProject("D:/P/Line.ap18"), tiaOf("V18"), bridgeExecutable({}, "V18").endsWith("rung-bridge-v18.exe")]).toEqual(["V18", "V18", true]);
     expect([tiaOf("V19"), tiaOf("V21"), tiaOf("CODESYS"), tiaOf(undefined)]).toEqual(["V19", "V21", "V20", "V20"]);
   });
 });

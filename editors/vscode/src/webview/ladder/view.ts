@@ -97,7 +97,7 @@ export class RgLadder extends LitElement {
       const l = layoutRung(n.rung, width, values);
       return html`<section class="lad-net">${head}${comment}<div class="lad-scroll"><svg class="lad-svg" width=${l.width} height=${l.height} viewBox="0 0 ${l.width} ${l.height}" role="img" aria-label=${`Network ${n.index}`}>${l.shapes.map((s) => this.shape(s))}</svg></div></section>`;
     }
-    const why = n.note === "empty network" ? html`<p class="lad-note">Empty network</p>` : n.note ? html`<p class="lad-note">${n.note}${n.text ? ": shown as the SCL rung runs for it" : ""}</p>` : nothing;
+    const why = n.note === "empty network" ? html`<p class="lad-note">Empty network</p>` : n.note ? html`<p class="lad-note">${n.note}${n.text ? ": shown as the SCL that rung runs for it" : ""}</p>` : nothing;
     return html`<section class="lad-net">${head}${comment}${why}${n.text ? html`<pre class="lad-text">${n.text}</pre>` : nothing}</section>`;
   }
 
