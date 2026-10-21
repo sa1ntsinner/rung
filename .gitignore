@@ -17,3 +17,4 @@ site/assets/play-worker.js
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+.taste-skill/
