@@ -223,26 +223,45 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .clip figcaption { margin-top: 14px; font-size: var(--step-small); color: var(--muted); }
 
 /* why: the picture, then the argument */
-.why { align-items: center; }
-.why-pic { grid-column: 1 / span 6; margin: 0; }
-/* where the code goes: boxes on wires, the main line down the left, git and CI beside it */
-.flow { display: grid; grid-template-columns: 1fr 1fr; column-gap: clamp(24px, 4vw, 56px); grid-template-areas: "ed ." "save ." "rung git-w" "tia-w git" "tia ci-w" "plc-w ci" "plc ."; }
-.flow .node { background: var(--card); border-radius: 14px; padding: 16px 18px; }
+.why { align-items: end; }
+.why-pic { grid-column: 1 / -1; grid-row: 2; margin: 56px 0 0; }
+/* where the code goes: a block diagram. The sync path runs left to right on your PC, the download crosses
+   to the machine, git and CI sit on their own server under the editor. Zones are dashed outlines; every wire
+   is one weight with one arrowhead, green where rung keeps two sides in step. */
+.flow { display: grid; grid-template-columns: 1fr 64px 1fr 64px 1fr 96px 1fr; grid-template-rows: auto 80px auto; padding: 14px 0 0; }
+.flow .zone { position: relative; display: grid; grid-template-columns: subgrid; padding: 22px 18px; border: 1.5px dashed color-mix(in srgb, var(--soft) 45%, transparent); border-radius: var(--r); }
+.flow .zl { position: absolute; top: -0.75em; left: 14px; margin: 0; padding: 0 8px; background: var(--bg); font: 500 0.75rem/1.5 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--soft); }
+.flow .z-pc { grid-column: 1 / 6; grid-row: 1; }
+.flow .z-plc { grid-column: 7; grid-row: 1; }
+.flow .z-srv { grid-column: 1 / 4; grid-row: 3; }
+.flow .z-srv .zl { left: auto; right: 14px; }
+.flow .mk { --accent-on-field: #4ec27a; flex: none; }
+.flow .node { padding: 16px 18px; background: var(--card); border: 1px solid var(--surface-2); border-radius: 12px; }
 .flow .node p { margin: 0; font-size: var(--step-small); color: var(--muted); }
-.flow .node .nm { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: var(--step-body); font-weight: 600; color: var(--ink); }
-.flow .n-rung { background: var(--field); }
+.flow .node .nm { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; font-size: var(--step-body); font-weight: 600; color: var(--ink); }
+.flow .n-rung { background: var(--field); border-color: var(--accent); }
 .flow .n-rung .nm { color: var(--field-ink); }
 .flow .n-rung p { color: var(--field-muted); }
-.flow .wire { position: relative; margin: 0; padding: 12px 0 12px 32px; font-size: var(--step-small); color: var(--muted); }
-.flow .wire::before { content: ""; position: absolute; left: 22px; top: 0; bottom: 0; width: 3px; background: var(--ink); border-radius: 2px; }
-.flow .w-save::before, .flow .w-tia::before { background: var(--accent); }
-.flow .w-git { align-self: center; padding: 0 0 0 4px; }
-.flow .w-git::before { left: auto; right: calc(100% + 2px); top: 50%; bottom: auto; width: clamp(24px, 4vw, 56px); height: 3px; }
-.flow .n-ed { grid-area: ed; } .flow .w-save { grid-area: save; } .flow .n-rung { grid-area: rung; } .flow .w-tia { grid-area: tia-w; }
-.flow .n-tia { grid-area: tia; } .flow .w-plc { grid-area: plc-w; } .flow .n-plc { grid-area: plc; }
-.flow .w-git { grid-area: git-w; } .flow .n-git { grid-area: git; } .flow .w-ci { grid-area: ci-w; } .flow .n-ci { grid-area: ci; }
-.why-text { grid-column: 8 / -1; }
-.why-text h2 { margin-bottom: 32px; }
+.flow .w { --wire: var(--soft); position: relative; z-index: 1; align-self: center; height: 40px; margin: 0; font: 500 var(--step-small)/1 var(--sans); color: var(--muted); }
+.flow .w.on { --wire: var(--accent); }
+.flow .w::before { content: ""; position: absolute; left: 0; right: 4px; top: 50%; height: 2px; margin-top: -1px; background: var(--wire); }
+.flow .w::after { content: ""; position: absolute; right: 0; top: 50%; margin-top: -5px; border-left: 8px solid var(--wire); border-block: 5px solid transparent; }
+.flow .w span { position: absolute; left: -8px; right: -8px; bottom: calc(50% + 7px); text-align: center; white-space: nowrap; }
+.flow .w-dl { grid-column: 6; grid-row: 1; margin-inline: -18px; }
+/* git push drops from the editor to git: both sit 18px inside their zones */
+.flow .w-push { grid-column: 1; grid-row: 2; align-self: stretch; height: auto; margin: -22px 0; }
+.flow .w-push::before { left: 48px; right: auto; top: 0; bottom: 4px; width: 2px; height: auto; margin: 0 0 0 -1px; }
+.flow .w-push::after { left: 48px; right: auto; top: auto; bottom: 0; margin: 0 0 0 -5px; border: 0; border-top: 8px solid var(--wire); border-inline: 5px solid transparent; }
+.flow .w-push span { left: 62px; right: auto; top: 50%; bottom: auto; transform: translateY(-50%); text-align: left; }
+.flow .legend { grid-column: 5 / -1; grid-row: 3; align-self: end; justify-self: end; display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--step-small); color: var(--muted); }
+.flow .legend .k { width: 28px; height: 2px; background: var(--soft); }
+.flow .legend .k.on { background: var(--accent); }
+.flow .legend .k:not(:first-child) { margin-left: 14px; }
+.why-text { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; column-gap: clamp(16px, 2vw, 32px); align-items: end; }
+.why-text h2 { grid-row: 1 / span 3; align-self: end; }
+.why-text p { grid-column: 2; }
+.why-text h2 { margin-bottom: 0; }
+.why-text p:last-child { margin-bottom: 0; }
 
 /* what's new */
 .new { align-items: start; }
@@ -329,8 +348,8 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
   .stage { grid-column: 7 / -1; padding: 14px; }
   .play-text, .online-text, .new-head, .pricing-text { grid-column: 1 / -1; }
   .test, .clip, .tabs-box, .price { grid-column: 1 / -1; margin-top: 40px; }
-  .why-pic { grid-column: 1 / -1; }
-  .why-text { grid-column: 1 / span 10; margin-top: 40px; }
+  .why-text { grid-column: 1 / span 10; display: block; }
+  .why-text h2 { margin-bottom: 32px; }
   .notes.left { grid-column: 1 / span 4; }
   .side { grid-column: 5 / span 4; }
   .notes.right { grid-column: 9 / -1; }
@@ -347,6 +366,24 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
   .foot .board { grid-template-columns: repeat(2, 1fr); }
   .foot .tile, .foot nav.tile, .foot .mail { grid-column: span 1; }
   .foot .say, .foot .word, .foot .go { grid-column: 1 / -1; }
+}
+/* narrower, the diagram turns into one column: the wires point down, the git push wire is left out (the
+   server's own label carries it) */
+@media (max-width: 900px) {
+  .flow { display: flex; flex-direction: column; }
+  .flow .zone { display: flex; flex-direction: column; }
+  .flow .w, .flow .w-dl { align-self: stretch; height: 52px; margin: 0; }
+  .flow .w-dl { margin: -22px 0; height: 96px; }
+  .flow .w::before { left: 40px; right: auto; top: 0; bottom: 4px; width: 2px; height: auto; margin: 0 0 0 -1px; }
+  .flow .w::after { left: 40px; right: auto; top: auto; bottom: 0; margin: 0 0 0 -5px; border: 0; border-top: 8px solid var(--wire); border-inline: 5px solid transparent; }
+  .flow .w span { left: 54px; right: auto; top: 50%; bottom: auto; transform: translateY(-50%); text-align: left; }
+  .flow .w-push { display: none; }
+  /* the download wire sits between the zones, 18px further left than the wires inside them */
+  .flow .w-dl::before, .flow .w-dl::after { left: 58px; }
+  .flow .w-dl span { left: 72px; }
+  .flow .zl, .flow .z-srv .zl { left: auto; right: 14px; }
+  .flow .z-srv { margin-top: 40px; }
+  .flow .legend { justify-self: auto; align-self: flex-start; flex-wrap: wrap; margin-top: 24px; }
 }
 
 /* phone: its own composition */

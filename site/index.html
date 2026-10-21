@@ -226,24 +226,31 @@
 
     <!-- why text: the world it comes from -->
     <section class="why grid" aria-labelledby="why-h">
-      <figure class="why-pic flow" data-ui aria-label="Your editor saves to rung, rung writes to TIA Portal, TIA Portal downloads to the S7-1500; git push sends the files to git, and CI on Linux tests each push">
-        <div class="node n-ed"><p class="nm">Your editor</p><p>FB_Batch.scl, FB_Batch.test.yaml</p></div>
-        <p class="wire w-save">save</p>
-        <div class="node n-rung"><p class="nm"><img src="assets/logo.svg" width="20" height="20" alt="">rung</p><p>watch, sync, tests</p></div>
-        <p class="wire w-tia">Openness</p>
-        <div class="node n-tia"><p class="nm">TIA Portal</p><p>compiles, hardware, download</p></div>
-        <p class="wire w-plc">download</p>
-        <div class="node n-plc"><p class="nm">S7-1500</p><p>runs the machine</p></div>
-        <p class="wire w-git">git push</p>
-        <div class="node n-git"><p class="nm">git</p><p>history, branches, review</p></div>
-        <p class="wire w-ci">each push</p>
-        <div class="node n-ci"><p class="nm">CI on Linux</p><p>rung test, format check</p></div>
-      </figure>
       <div class="why-text">
         <h2 id="why-h" class="two"><span>Git and CI</span> <span class="soft">for PLC code.</span></h2>
         <p>Your blocks live as files in a git repository. You see who changed which line and why, review a change before it reaches the machine, and let CI run the tests on each push. Agents such as Claude Code read the same files.</p>
         <p>Hardware configuration and download stay in TIA Portal.</p>
       </div>
+      <figure class="why-pic flow" data-ui aria-label="On your PC, your editor saves to rung and rung writes to TIA Portal over Openness; TIA Portal downloads to the S7-1500. git push sends the files to a git server, where CI on Linux runs the tests on each push">
+        <div class="zone z-pc"><p class="zl">Your PC</p>
+          <div class="node n-ed"><p class="nm">Your editor</p><p>FB_Batch.scl and its test</p></div>
+          <p class="w on"><span>save</span></p>
+          <div class="node n-rung"><p class="nm"><svg class="mk" viewBox="0 0 100 100" width="18" height="18" aria-hidden="true"><g fill="var(--accent-on-field)"><rect x="8" y="8" width="12" height="84" rx="6"/><rect x="14" y="44" width="21" height="12"/><rect x="31" y="28" width="12" height="44" rx="6"/></g><g fill="currentColor"><rect x="80" y="8" width="12" height="84" rx="6"/><rect x="63" y="44" width="23" height="12"/><rect x="57" y="28" width="12" height="44" rx="6"/></g></svg>rung</p><p>watch, sync, tests</p></div>
+          <p class="w on"><span>Openness</span></p>
+          <div class="node n-tia"><p class="nm">TIA Portal</p><p>compile, hardware</p></div>
+        </div>
+        <p class="w w-dl"><span>download</span></p>
+        <div class="zone z-plc"><p class="zl">The machine</p>
+          <div class="node n-plc"><p class="nm">S7-1500</p><p>runs the program</p></div>
+        </div>
+        <p class="w w-push"><span>git push</span></p>
+        <div class="zone z-srv"><p class="zl">Git server</p>
+          <div class="node n-git"><p class="nm">git</p><p>history, review</p></div>
+          <p class="w"><span>on push</span></p>
+          <div class="node n-ci"><p class="nm">CI on Linux</p><p>rung test</p></div>
+        </div>
+        <p class="legend"><span class="k on"></span>kept in step by rung <span class="k"></span>your own tools</p>
+      </figure>
     </section>
 
     <!-- what 0.3 brought, in tabs -->
