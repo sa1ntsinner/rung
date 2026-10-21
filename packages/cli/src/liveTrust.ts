@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertHuman } from "./guard.js";
 import { createInterface } from "node:readline/promises";
 import { assertPlcWritable, plcReadOnly, loadConfig, saveConfig, WorkspaceError } from "@rung/core";
 import { BridgeClient, type OnlineWriterConfiguration } from "@rung/bridge-client";
@@ -10,7 +11,7 @@ interface Certificate { address: string; certificateSha256: string; details: str
 
 /** Release packaging will supply the bundled path; a separately installed host can be selected now. */
 export async function onlineHost(env: Io["env"], policy?: OnlineWriterConfiguration): Promise<BridgeClient> {
-  if (policy) assertPlcWritable(undefined, undefined, env);
+  if (policy) { assertHuman(env); assertPlcWritable(undefined, undefined, env); }
   const host = onlineExecutable(env);
   const args = ["--stdio", ...(policy ? ["--writer-policy-stdin"] : [])];
   return BridgeClient.spawn({ command: host.endsWith(".dll") ? "dotnet" : host, args: host.endsWith(".dll") ? [host, ...args] : args, ...(plcReadOnly(undefined, undefined, env) ? { env: { RUNG_READ_ONLY: "1" } } : {}), ...(policy ? { bootstrap: { ...policy } } : {}) });

@@ -18,7 +18,7 @@ You prepare; a person downloads and tests on the machine. Your job is to make th
 ## Diagnosing a running machine (read-only)
 
 - First `rung_compare` (or `rung compare`): does the PLC run what the files say? A block that differs means the machine runs other code than the one you are reading; say which, and read the differing blocks with that in mind.
-- `rung online --state` and `rung live read '"DB".member' ...` read values from the PLC's Web API; `rung live diag` reads the diagnostic buffer. Start from the symptom: which output is (not) set, then walk back through the logic to the input or state that decides it.
+- `rung_live_state`, `rung_live_alarms` and `rung_live_read` read CPU state, alarms and values through the configured read-only connection. `rung_live_diag` reads the diagnostic buffer when the PLC's Web API is configured. Start from the symptom: which output is (not) set, then walk back through the logic to the input or state that decides it.
 - Compare what the code expects with what the values say, one condition at a time; quote the values you read in your explanation.
 - Never write values, force, or change operating mode. If the fix needs a change, make it in the files and go back to the steps above.
 

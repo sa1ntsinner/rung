@@ -1,0 +1,14 @@
+{
+  "rung": {
+    "command": "node",
+    "args": ["${CLAUDE_PLUGIN_ROOT}/bin/rung.cjs", "lsp", "--stdio"],
+    "extensionToLanguage": {
+      ".scl": "scl",
+      ".db": "scl",
+      ".udt": "scl",
+      ".s7dcl": "scl",
+      ".awl": "scl",
+      ".st": "structured-text"
+    }
+  }
+}

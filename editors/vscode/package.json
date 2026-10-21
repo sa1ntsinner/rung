@@ -2,7 +2,7 @@
   "name": "rung-scl",
   "displayName": "rung: SCL and TIA Portal sync",
   "description": "Siemens SCL language support and two-way TIA Portal sync, compile, online and download through the rung CLI.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "sa1ntsinner",
   "license": "MIT",
   "icon": "media/icon.png",

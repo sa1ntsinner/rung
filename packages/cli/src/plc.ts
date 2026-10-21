@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertHuman } from "./guard.js";
 // rung compile / online / interfaces / download / open (docs/downloads.md).
 import { readFile } from "node:fs/promises";
 import { isIPv4 } from "node:net";
@@ -356,6 +357,7 @@ async function ask(io: Io, question: string): Promise<string> {
 }
 
 export async function cmdDownload(dir: string, v: Record<string, unknown>, io: Io): Promise<number> {
+  assertHuman(io.env);
   const { ws, config, link } = await workspace(dir, io, true);
   assertPlcWritable(config, v.plc as string | undefined, io.env);
   if (!config.download.enabled) throw new WorkspaceError("CONFIG_INVALID", "downloads are turned off for this workspace (download.enabled = false in rung.toml)");

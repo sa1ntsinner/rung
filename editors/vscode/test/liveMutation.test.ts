@@ -76,3 +76,24 @@ it("shows the host's exact preview and cancels an editor confirmation after reta
     expect(cli.invocation.mock.calls[0]?.[0]).not.toContain("secret");
   }
 });
+
+it("starts a confirmed live change without the markers an agent sets, keeping the rest of the environment", async () => {
+  vi.stubEnv("RUNG_READ_ONLY", "0");
+  vi.stubEnv("CLAUDECODE", "1");
+  vi.stubEnv("CURSOR_TRACE_ID", "x");
+  vi.stubEnv("RUNG_FIXTURE_KEEP", "kept");
+  vi.mocked(spawn).mockClear();
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), exitCode: null, stdin: { destroyed: false, on: vi.fn(), end: vi.fn() } });
+  const operation = { operationId: "one", preview: "fixture STOP", expiresAt: Date.now() + 30_000 };
+  child.stdin.end.mockImplementation(() => { setTimeout(() => child.emit("close", 1), 0); });
+  vi.mocked(spawn).mockImplementation(() => { setTimeout(() => child.stdout.emit("data", Buffer.from(JSON.stringify({ prepared: operation }) + "\n")), 0); return child as never; });
+  vi.mocked(vscode.window.showWarningMessage).mockImplementation(async () => "Cancel" as never);
+  const ws = { root: "C:/fixture", reload: async () => {}, onDidChange: () => ({ dispose() {} }) };
+  const access = { scope: "fixture", select: async () => ({ device: "A", target: { transport: "s7commplus" }, workspace: "fixture" }), environment: async () => ({}) };
+  await mutateLive(ws as never, { invocation: () => ({ file: "fixture", args: [] }) } as never, access as never, "stop");
+  const env = (vi.mocked(spawn).mock.calls[0]![2] as { env: Record<string, string | undefined> }).env;
+  expect(env.CLAUDECODE).toBeUndefined();
+  expect(env.CURSOR_TRACE_ID).toBeUndefined();
+  expect(env.RUNG_FIXTURE_KEEP).toBe("kept");
+  vi.unstubAllEnvs();
+});

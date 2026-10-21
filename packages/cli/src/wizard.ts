@@ -75,7 +75,8 @@ export interface Choices {
 
 export type Action =
   | { kind: "copy-skill"; skill: string; from: string; to: string }
-  | { kind: "json"; file: string; path: string[]; value: unknown; why: string }
+  | { kind: "json"; file: string; path: string[]; value: unknown; why: string; append?: boolean }
+  | { kind: "text"; file: string; content: string; why: string }
   | { kind: "toml-table"; file: string; table: string; body: string; why: string }
   | { kind: "run"; command: string; args: string[]; why: string }
   | { kind: "note"; text: string };
@@ -88,6 +89,10 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
   const skills = bundledSkills(env).filter((s) => c.skills.includes(s.name));
   const skillDirs = new Set<string>();
   const at = (proj: string, glob: string) => (c.scope === "project" ? join(c.root, proj) : join(home, glob));
+  const shell = ["download", "live modify", "live write", "live run", "live stop", "live force", "live unforce", "live acknowledge", "writes on", "init --writes", "setup openness", "bridge"];
+  const quote = (word: string) => `"${word.replace(/"/g, '\\"')}"`;
+  const hook = (protocol: string) => [mcp.command, ...mcp.args, "guard", `--${protocol}-hook`].map(quote).join(" ");
+  const safety = (file: string, path: string[], value: unknown, why: string, append = true) => actions.push({ kind: "json", file, path, value, why, append });
   for (const a of c.agents) {
     switch (a) {
       case "claude":
@@ -123,6 +128,38 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
         if (c.scope === "project") actions.push({ kind: "json", file: join(c.root, ".zed", "settings.json"), path: ["context_servers", "rung"], value: { command: mcp.command, args: mcpArgs, env: {} }, why: "Zed agent: rung MCP server for this project" });
         else actions.push({ kind: "note", text: `Zed agent: add to Zed's settings (zed: open settings): "context_servers": { "rung": { "command": ${JSON.stringify(mcp.command)}, "args": ${JSON.stringify(mcpArgs)} } }` });
         break;
+    }
+  }
+  for (const agent of c.agents) {
+    if (agent === "claude") {
+      const file = at(".claude/settings.json", ".claude/settings.json");
+      safety(file, ["hooks", "PreToolUse"], [{ matcher: "Bash|PowerShell|Write|Edit", hooks: [{ type: "command", command: hook("claude") }] }], "Claude Code: deny PLC shell changes and configuration edits");
+      safety(file, ["permissions", "deny"], [...shell.map(cmd => `Bash(rung ${cmd}:*)`), "Edit(**/rung.toml)", "Write(**/rung.toml)"], "Claude Code: PLC deny rules");
+    }
+    if (agent === "cursor") {
+      const file = at(".cursor/hooks.json", ".cursor/hooks.json");
+      safety(file, ["version"], 1, "Cursor: guard hook version", false);
+      safety(file, ["hooks", "beforeShellExecution"], [{ command: hook("cursor") }], "Cursor: deny PLC shell changes");
+    }
+    if (agent === "codex") {
+      const prefixes = [...shell.map(cmd => ["rung", ...cmd.split(" ")]), ...shell.map(cmd => [mcp.command, ...mcp.args, ...cmd.split(" ")])];
+      actions.push({ kind: "text", file: join(home, ".codex/rules/rung.rules"), content: prefixes.map(prefix => `prefix_rule(pattern=${JSON.stringify(prefix)}, decision="forbidden", justification="PLC changes belong to the person")`).join("\n") + "\n", why: "Codex: deny PLC shell changes" });
+    }
+    if (agent === "gemini") safety(at(".gemini/settings.json", ".gemini/settings.json"), ["tools", "exclude"], [...shell.map(cmd => `run_shell_command(rung ${cmd})`), "run_shell_command(rung live --confirm-stdin)", "write_file(rung.toml)", "replace(rung.toml)"], "Gemini CLI: deny PLC shell changes (excludeTools)");
+    if (agent === "opencode") {
+      const file = at("opencode.json", ".config/opencode/opencode.json");
+      for (const cmd of shell) safety(file, ["permission", "bash", `*rung ${cmd}*`], "deny", "OpenCode: deny PLC shell changes", false);
+      safety(file, ["permission", "edit", "*rung.toml"], "deny", "OpenCode: deny PLC configuration edits", false);
+    }
+    if (agent === "copilot") {
+      const file = at(".github/hooks/rung.json", ".copilot/hooks/rung.json");
+      safety(file, ["version"], 1, "Copilot: guard hook version", false);
+      safety(file, ["hooks", "preToolUse"], [{ type: "command", bash: hook("copilot"), powershell: "& " + hook("copilot") }], "Copilot: deny PLC shell changes and configuration edits");
+    }
+    if (agent === "zed") {
+      const file = at(".zed/settings.json", ".config/zed/settings.json");
+      safety(file, ["agent", "tool_permissions", "tools", "terminal", "always_deny"], [{ pattern: "rung(?:\\.exe|\\.cmd|\\.cjs)?\\s+(download|live\\s+(modify|write|run|stop|force|unforce|acknowledge)|writes\\s+on|init.*--writes|setup\\s+openness|bridge)\\b", case_sensitive: false }], "Zed: deny PLC shell changes");
+      for (const tool of ["edit_file", "write_file"]) safety(file, ["agent", "tool_permissions", "tools", tool, "always_deny"], [{ pattern: "rung\\.toml$", case_sensitive: false }], "Zed: deny PLC configuration edits");
     }
   }
   for (const d of [...skillDirs].sort()) for (const s of skills) actions.push({ kind: "copy-skill", skill: s.name, from: s.dir, to: join(d, s.name) });
@@ -165,12 +202,26 @@ export async function applyAction(a: Action): Promise<string> {
     case "json": {
       const doc = await readJson(a.file);
       let node: Record<string, unknown> = doc;
-      for (const k of a.path.slice(0, -1)) node = (node[k] ??= {}) as Record<string, unknown>;
-      node[a.path[a.path.length - 1]!] = a.value;
+      for (const k of a.path.slice(0, -1)) {
+        if (a.path[0] === "permission" && ["bash", "edit"].includes(k) && typeof node[k] === "string") node[k] = { "*": node[k] };
+        const next = node[k] ??= {};
+        if (typeof next !== "object" || next === null || Array.isArray(next)) throw new Error(`${a.file}: ${k} must be an object`);
+        node = next as Record<string, unknown>;
+      }
+      const key = a.path[a.path.length - 1]!;
+      if (a.append) {
+        if (node[key] !== undefined && !Array.isArray(node[key])) throw new Error(`${a.file}: ${a.path.join(".")} must be an array`);
+        const values = [...((node[key] ?? []) as unknown[]), ...(a.value as unknown[])];
+        node[key] = values.filter((v, i) => values.findIndex(other => JSON.stringify(other) === JSON.stringify(v)) === i);
+      } else node[key] = a.value;
       await mkdir(dirname(a.file), { recursive: true });
       await writeFileAtomic(a.file, JSON.stringify(doc, null, 2) + "\n");
       return `${a.why} (${a.file})`;
     }
+    case "text":
+      await mkdir(dirname(a.file), { recursive: true });
+      await writeFileAtomic(a.file, a.content);
+      return `${a.why} (${a.file})`;
     case "toml-table": {
       const text = existsSync(a.file) ? await readFile(a.file, "utf8") : "";
       const header = `[${a.table}]`;
@@ -202,7 +253,9 @@ export function describeAction(a: Action): string {
     case "copy-skill":
       return `copy skill ${a.skill} to ${a.to}`;
     case "json":
-      return `set ${a.path.join(".")} in ${a.file}`;
+      return `set ${a.path.join(".")} in ${a.file} (${a.why})`;
+    case "text":
+      return `write ${a.file} (${a.why})`;
     case "toml-table":
       return `set [${a.table}] in ${a.file}`;
     case "run":

@@ -9,7 +9,7 @@ A PLC program is the machine's behaviour. The code you change runs every few mil
 
 ## Before writing a line
 
-1. **Find out what the machine does today.** Read the block you will change end to end, then its callers (`rung_find_usages`, `rung_graph` impact) and the data it touches. Follow signals from the physical input (tag table, `%I`) through the logic to the physical output (`%Q`, drive telegram). Do not guess from names.
+1. **Find out what the machine does today.** Read the block you will change end to end, then its callers (`rung_find_usages`, `rung_impact`) and the data it touches. Follow signals from the physical input (tag table, `%I`) through the logic to the physical output (`%Q`, drive telegram). Do not guess from names.
 2. **Name the operating states** involved: automatic, manual/jog, setup, stop, emergency stop, fault, power-up (first scan, OB100). Ask yourself what your change does in each of them.
 3. **Restate the requirement as observable behaviour**: "when the door opens in automatic, the conveyor stops within one scan and the fault lamp lights". If the task is ambiguous about a state, ask; the cost of a wrong assumption is a machine that moves when nobody expects it.
 

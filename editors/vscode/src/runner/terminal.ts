@@ -3,6 +3,7 @@
 // the extension gets the exit code and output (for download retries, compile problems, refreshes).
 import { spawn, type ChildProcess } from "node:child_process";
 import * as vscode from "vscode";
+import { humanConfirmedEnv } from "../core/agentEnv";
 import type { Invocation } from "../core/exec";
 
 export interface RunResult {
@@ -38,10 +39,10 @@ export function stopLive(child: ChildProcess, graceMs = 2000): void {
 }
 
 /** Starts a child process and collects its output. */
-export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void, env: Record<string, string> = {}, parentStdio = false): { child: ChildProcess; done: Promise<RunResult> } {
+export function startProcess(inv: Invocation, cwd: string | undefined, onData?: (text: string) => void, env: Record<string, string> = {}, parentStdio = false, base: NodeJS.ProcessEnv = process.env): { child: ChildProcess; done: Promise<RunResult> } {
   const child = spawn(inv.file, inv.args, {
     cwd,
-    env: { ...process.env, FORCE_COLOR: "0", ...env },
+    env: { ...base, FORCE_COLOR: "0", ...env },
     stdio: [parentStdio ? "pipe" : "ignore", "pipe", "pipe"],
     windowsHide: true,
     windowsVerbatimArguments: inv.shell,
@@ -70,6 +71,8 @@ export function startProcess(inv: Invocation, cwd: string | undefined, onData?: 
 export interface TerminalRunOptions {
   /** Ask before Ctrl+C kills the process (downloads). */
   guardInterrupt?: string;
+  /** The person confirmed this run in a modal: start it without agent markers (humanConfirmedEnv). */
+  humanConfirmed?: boolean;
 }
 
 /** A pseudoterminal that can run several rung commands one after another. */
@@ -130,7 +133,7 @@ export class RunTerminal implements vscode.Pseudoterminal {
     this.interruptArmed = false;
     this.write(`${DIM}> ${inv.display}${RESET}\r\n`);
     const started = Date.now();
-    const { child, done } = startProcess(inv, cwd, (t) => this.write(crlf(t)));
+    const { child, done } = startProcess(inv, cwd, (t) => this.write(crlf(t)), {}, false, opts.humanConfirmed ? humanConfirmedEnv() : process.env);
     this.child = child;
     const r = await done;
     this.child = undefined;

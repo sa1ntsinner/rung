@@ -99,6 +99,7 @@ export async function downloadCommand(ws: RungWorkspace, cli: RungCli, online: O
         terminal: `rung download ${device}`,
         icon: "desktop-download",
         guardInterrupt: "Stopping rung does not stop a download TIA Portal has already started. Press Ctrl+C again to stop rung anyway.",
+        humanConfirmed: true, // after the modal with the PLC name typed
       });
       void online.refresh(device);
       if (r.error) return;

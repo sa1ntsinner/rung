@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import type { LiveAccess } from "./liveAccess";
 import type { RungCli } from "./runner/cli";
+import { humanConfirmedEnv } from "./core/agentEnv";
 import { killTree } from "./runner/terminal";
 import type { RungWorkspace } from "./workspace";
 import { allowPlcWrite } from "./plcReadOnly";
@@ -27,7 +28,7 @@ export async function mutateLive(ws: RungWorkspace, cli: RungCli, access: LiveAc
   if (!allowPlcWrite(ws.config, connection.device)) return;
   const args = ["live", action, ...(action === "modify" ? [name!, draft!] : []), "--device", connection.device, "--confirm-stdin", "--json"];
   const inv = cli.invocation(args);
-  const child = spawn(inv.file, inv.args, { cwd: ws.root, env: { ...process.env, ...env }, stdio: "pipe", windowsHide: true, windowsVerbatimArguments: inv.shell });
+  const child = spawn(inv.file, inv.args, { cwd: ws.root, env: { ...humanConfirmedEnv(), ...env }, stdio: "pipe", windowsHide: true, windowsVerbatimArguments: inv.shell });
   let partial = "", output = "", errors = "", prepared = false, confirmed = false;
   const timer = setTimeout(() => killTree(child), 90_000);
   const changed = ws.onDidChange(() => { if (connection.workspace !== access.scope) killTree(child); });

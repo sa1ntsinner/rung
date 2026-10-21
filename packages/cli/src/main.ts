@@ -29,7 +29,8 @@ import { HINTS, bridgeEnv, bridgeFor, decodeArgs, defaultBridge, exists, findWor
 import { startLsp } from "./lsp.js";
 import { serveStdio } from "@rung/mcp";
 import { writeAgentsFile } from "./agents.js";
-import { cmdLive } from "./live.js";
+import { cmdLive, webApiFor } from "./live.js";
+import { cmdReview } from "./review.js";
 import {cmdTrace} from "./trace.js";
 import { cmdHardware } from "./hardware.js";
 import { cmdLibrary } from "./library.js";
@@ -58,10 +59,11 @@ import { cmdReport } from "./report.js";
 import { cmdCodesysBridge, codesysBridgeCommand } from "./codesys.js";
 import { cmdSetupWizard } from "./wizard.js";
 import { cmdWho } from "./who.js";
+import { agentMarker, assertHuman, cmdGuard, guardCommand, AGENT_REFUSAL } from "./guard.js";
 
 export type { Io } from "./common.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 
 export const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
@@ -79,6 +81,7 @@ Usage:
   rung why <file> <name> [--instance <DB>] [--json]  why a value is what the PLC has now: its writers, their branches and operands
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
+  rung review [base..head] [--base <rev>] [--head <rev>] [--json|--md]  offline change report for the person reviewing it; default: working tree against HEAD
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
   rung init [dir] [--project <file.ap20>] [--tia V20] [--device <name>]... [--rebind] [--writes]
   rung init [dir] --from-plc <ip> --project <dir>/<name>/<name>.ap20 [--use <PG/PC interface>] [--mode <mode>] [--number <n>] [--trust-certificate]
@@ -430,6 +433,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   why: { options: ["instance", "json"], positionals: 2 },
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
+  review: { options: ["base", "head", "json", "md"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
   init: { options: ["project", "tia", "device", "rebind", "from-plc", "use", "mode", "number", "host", "writes", "trust-certificate"], positionals: 1 },
   writes: { options: ["dir"], positionals: 1 },
@@ -491,6 +495,11 @@ function misuse(cmd: string, v: Record<string, unknown>, positionals: string[]):
 }
 
 export async function main(argv: string[], io: Io): Promise<number> {
+  if (argv[0] === "guard") return cmdGuard(argv.slice(1), io);
+  if (agentMarker(io.env) && !guardCommand("rung " + argv.join(" ")).allowed) {
+    io.stderr(`rung: AGENT_REFUSED: ${AGENT_REFUSAL}\n`);
+    return 1;
+  }
   // the Windows end of a workspace on Linux or macOS (rung over ssh): the bridge itself, its arguments untouched
   if (argv[0] === "bridge") {
     if (argv.includes("--help") || argv.includes("-h")) {
@@ -506,6 +515,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
       allowPositionals: true,
       options: {
         help: { type: "boolean", short: "h" },
+        base: { type: "string" },
+        head: { type: "string" },
+        md: { type: "boolean" },
         version: { type: "boolean", short: "v" },
         project: { type: "string" },
         tia: { type: "string" },
@@ -645,6 +657,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
+    if (cmd === "download" || cmd === "writes" && target === "on" || cmd === "init" && v.writes
+      || cmd === "setup" && target === "openness" || cmd === "live" && ["modify", "write", "run", "stop", "force", "unforce", "ack", "acknowledge", "reset"].includes(target ?? "")
+      || v["confirm-stdin"]) assertHuman(io.env);
     const mutating = ["download", "upload", "confirm-delete", "rename"].includes(cmd)
       || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
       || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply
@@ -658,6 +673,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
       assertPlcWritable(config, (v.plc as string | undefined) ?? (v.device as string[] | undefined)?.[0], io.env);
     }
     switch (cmd) {
+      case "review":
+        return await cmdReview(target, { base: v.base, head: v.head, json: !!v.json, md: !!v.md }, io);
       case "trace":
         if((v.device?.length??0)>1)throw new WorkspaceError("BAD_ARGUMENT","Trace requires one --device");
         return await cmdTrace(dir,target,positionals.slice(2),io,{device:v.device?.[0],out:v.out,duration:v.duration,interval:v.interval,json:!!v.json,parentStdio:!!v["parent-stdio"]});
@@ -828,7 +845,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         await serveStdio({
           root: ws ?? dir,
           env: io.env,
-          ...(ws ? { liveFactory: (options) => brokerReader(ws, io.env, options) } : {}),
+          ...(ws ? { liveFactory: (options) => brokerReader(ws, io.env, options), diagnosticFactory: async (options: { device?: string; limit: number }) => {
+            const reader = await webApiFor(ws, io.env, { device: options.device, transport: "webapi" });
+            try { return { provenance: "Web API diagnostic buffer", observedAt: new Date().toISOString(), entries: await reader.diagnosticBuffer(options.limit) }; }
+            finally { await reader.logout().catch(() => undefined); }
+          } } : {}),
           ...(config ? { bridgeFactory: () => bridgeFor(config, io, importFlags(config)) } : {}),
           bridgeWhitelisted: () => whitelistStatus(bridgeExecutable(io.env, tiaOf(config?.project.tiaVersion))),
         });

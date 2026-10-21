@@ -203,7 +203,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
         codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix, ...(monitor ? [CodeActionKind.Empty] : [])] },
         executeCommandProvider: { commands: ["rung.lsp.createFile", ...(monitor ? [MONITOR_COMMAND, STOP_MONITOR_COMMAND] : [])] },
       },
-      serverInfo: { name: "rung", version: "0.3.0" },
+      serverInfo: { name: "rung", version: "0.3.1" },
     };
   });
 

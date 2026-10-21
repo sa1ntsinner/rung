@@ -13,6 +13,7 @@ import type { LiveReader } from "./live.js";
 import { rungCommand } from "./paths.js";
 import { liveMutations } from "./liveMutation.js";
 import { runningSimulator } from "./simulate.js";
+import { assertHuman } from "./guard.js";
 
 // rung simulate takes any password; this one only fills the field
 const SIMULATOR_LOGIN = "simulator";
@@ -209,8 +210,8 @@ export async function brokerReader(root: string, env: Io["env"], options: Backen
       if (closed) { alarmListeners.delete(id); alarmLatest.delete(id); await release(id).catch(() => {}); throw new BridgeError("BRIDGE_EXITED", "Live reader is closed"); }
       return { close: async () => { alarmLatest.delete(id); if (!alarmListeners.delete(id) || closed) return; try { await release(id); } catch (error) { if ((error as { code?: string }).code !== "OWNER_GONE") throw error; } } };
     },
-    prepare: action => client.request("prepare", { key, action, credentials }),
-    commit: (operationId, preview, confirmed) => client.request("commit", { operationId, preview, confirmed }),
+    prepare: action => { assertHuman(env); return client.request("prepare", { key, action, credentials }); },
+    commit: (operationId, preview, confirmed) => { assertHuman(env); return client.request("commit", { operationId, preview, confirmed }); },
     cancel: operationId => client.request("cancel", { operationId }),
     readFrame, read: async (names) => (await readFrame(names)).items,
     subscribe: async (labels, cycleMs, cb) => {

@@ -47,7 +47,7 @@ beforeAll(async () => {
 describe("rung mcp", () => {
   it("lists a small, documented tool surface and the safety instructions", async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_impact", "rung_list", "rung_live_alarms", "rung_live_read", "rung_live_state", "rung_rename", "rung_resolve", "rung_rules", "rung_status", "rung_sync", "rung_test", "rung_why", "rung_xref"]);
+    expect(tools).toEqual(["rung_assignments", "rung_check", "rung_compare", "rung_compile", "rung_confirm_delete", "rung_diagnostics", "rung_diff", "rung_download_request", "rung_explain", "rung_find_usages", "rung_graph", "rung_impact", "rung_list", "rung_live_alarms", "rung_live_diag", "rung_live_read", "rung_live_state", "rung_rename", "rung_resolve", "rung_review", "rung_rules", "rung_status", "rung_sync", "rung_sync_preview", "rung_test", "rung_why", "rung_xref"]);
     expect(client.getInstructions()).toMatch(/Never download to a PLC/);
   });
 
@@ -66,9 +66,9 @@ describe("rung mcp", () => {
 
   it("finds usages and impact through the graph, accepting paths", async () => {
     const u = await call("rung_find_usages", { name: "plc/PLC_1/blocks/Fx_Global.db" });
-    expect((u.data as { by: string; how: string; members: string[] }[]).find((x) => x.by === "Main")).toMatchObject({ how: "writes", members: ["Counter"] });
+    expect((u.data as { items: { by: string; how: string; members: {items:string[]} }[] }).items.find((x) => x.by === "Main")).toMatchObject({ how: "writes", members: {items: ["Counter"]} });
     const impact = await call("rung_graph", { query: "impact", name: "Fx_Global" });
-    expect((impact.data as { name: string }[]).map((x) => x.name).sort()).toEqual(["Fx_Motor", "Main"]);
+    expect((impact.data as { items: { name: string }[] }).items.map((x) => x.name).sort()).toEqual(["Fx_Motor", "Main"]);
     expect((await call("rung_graph", { query: "callers", name: "Nope" })).isError).toBe(true);
   });
 
@@ -152,9 +152,9 @@ describe("rung mcp", () => {
   });
 
   it("serves the graph resource", async () => {
-    const r = await client.readResource({ uri: "rung://graph" });
-    const g = JSON.parse((r.contents[0] as { text: string }).text) as { nodes: { name: string }[] };
-    expect(g.nodes.map((n) => n.name)).toContain("Fx_Motor");
+    const r = await client.readResource({ uri: "rung://graph/Fx_Motor" });
+    const g = JSON.parse((r.contents[0] as { text: string }).text);
+    expect(g.node.name).toBe("Fx_Motor");
   });
 });
 
@@ -188,8 +188,8 @@ describe("rung mcp with two PLCs that have objects of the same name", () => {
     const bare = await ask("rung_graph", { query: "callers", name: "Motor" });
     expect(bare.isError).toBe(true);
     expect(bare.text).toContain("PLC_A/Motor or PLC_B/Motor");
-    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "PLC_A/Motor" })).text)).toEqual(["PLC_A/Main"]);
-    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "plc/PLC_B/blocks/Motor.scl" })).text)).toEqual([]);
+    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "PLC_A/Motor" })).text).items).toEqual(["PLC_A/Main"]);
+    expect(JSON.parse((await ask("rung_graph", { query: "callers", name: "plc/PLC_B/blocks/Motor.scl" })).text).items).toEqual([]);
     const explained = JSON.parse((await ask("rung_explain", { name: "plc/PLC_B/blocks/Motor_DB.db" })).text) as { path: string; usedBy: string[] };
     expect(explained.path).toBe("plc/PLC_B/blocks/Motor_DB.db");
   });

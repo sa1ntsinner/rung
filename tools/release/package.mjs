@@ -10,6 +10,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stageOnline, auditOnlineRelease } from "./online.mjs";
 import { installedTiaVersions, stageBridges } from "./bridges.mjs";
+import { stagePlugin } from "./plugin.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const out = join(root, "dist", "release");
@@ -40,8 +41,6 @@ cpSync(join(root, "bridge", "codesys", "rung_bridge_codesys.py"), join(stage, "b
 cpSync(join(root, "agents", "AGENTS.template.md"), join(stage, "AGENTS.template.md"));
 // rung setup openness uses it to register the bridge in the Openness whitelist
 cpSync(join(root, "tools", "openness", "Register-OpennessWhitelist.ps1"), join(stage, "tools", "Register-OpennessWhitelist.ps1"));
-cpSync(join(root, "agents", "claude-plugin"), join(stage, "agents", "claude-plugin"), { recursive: true });
-cpSync(join(root, "agents", ".claude-plugin"), join(stage, "agents", ".claude-plugin"), { recursive: true });
 cpSync(join(root, "LICENSE"), join(stage, "LICENSE.txt"));
 cpSync(join(root, "LICENSES"), join(stage, "LICENSES"), { recursive: true });
 cpSync(join(out, "THIRD_PARTY_NOTICES.txt"), join(stage, "THIRD_PARTY_NOTICES.txt"));
@@ -57,6 +56,7 @@ writeFileSync(join(stage, "THIRD_PARTY_NOTICES.txt"), readFileSync(join(stage, "
   "BouncyCastle.Cryptography 2.7.0: MIT, LICENSES/BouncyCastle-MIT.txt.\n" +
   "zlib.net-mutliplatform 1.1.0: BSD-3-Clause, Copyright 2006-2007 ComponentAce, 2022-2025 Sjofn LLC, LICENSES/zlib.net-BSD-3-Clause.txt.\n" +
   "Microsoft .NET 10 runtime and Microsoft.Extensions.*: MIT; runtime source https://github.com/dotnet/runtime; dependency source https://github.com/dotnet/dotnet.\n");
+stagePlugin(root, stage, version);
 writeFileSync(
   join(stage, "README.txt"),
   `rung ${version} — PLC projects of TIA Portal and CODESYS as plain text\n\n1. Put this folder somewhere permanent and add it to PATH.\n2. Run rung check: it lists what is installed and what is missing (for TIA Portal: your Windows user in the group "Siemens TIA Openness").\n3. In an empty folder: rung init --project <your project>, rung pull, rung watch.\n4. Editors and agents: rung setup (asks first; rung setup --dry-run shows what it would change).\n\nrung.cjs is the same CLI for any OS with Node.js 22 or newer (node rung.cjs test on a Linux CI runner).\n\nLicence: see LICENSE.txt (core BUSL-1.1, free for individuals and organizations of up to 3 users; editor, grammar and file format MIT).\n`,

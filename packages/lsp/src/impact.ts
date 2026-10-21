@@ -137,9 +137,9 @@ export async function workspaceTests(root: string): Promise<{ uri: string; text:
  * The impact of the interface in `index` at `uri` against `before` (the text TIA Portal has, the last synced
  * version). undefined when the file holds no FB, FC or data type.
  */
-export function interfaceImpact(index: WorkspaceIndex, uri: string, before: string, tests: { uri: string; text: string }[] = []): Impact | undefined {
+export function interfaceImpact(index: WorkspaceIndex, uri: string, before: string, tests: { uri: string; text: string }[] = [], blockName?: string): Impact | undefined {
   const doc = index.docs.get(uri);
-  const after = doc?.parsed?.blocks.find((b) => b.kind in OUTER);
+  const after = doc?.parsed?.blocks.find((b) => b.kind in OUTER && (!blockName || b.name === blockName));
   if (!doc || !after) return undefined;
   // the old text read as the index reads this kind of file
   const old = new WorkspaceIndex();

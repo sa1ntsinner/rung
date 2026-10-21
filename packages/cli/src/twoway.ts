@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertHuman } from "./guard.js";
 // Two-way commands: sync, watch (the workspace owner), status, resolve, confirm-delete, compile.
 import { join, relative, resolve, sep } from "node:path";
 import { StateStore, WorkspaceError, assertPlcWritable, plcReadOnly, grantWrites, loadConfig, parseAddress, readWrites, revokeWrites, shellPath, writesGranted, type RungConfig } from "@rung/core";
@@ -529,6 +530,7 @@ export async function cmdBackup(dir: string, io: Io): Promise<number> {
 
 /** `rung writes [on|off]`: whether this copy of the workspace may write into its project (core writes.ts). */
 export async function cmdWrites(dir: string, what: string | undefined, io: Io): Promise<number> {
+  if (what === "on") assertHuman(io.env);
   if (what !== undefined && what !== "on" && what !== "off") {
     io.stderr("rung: usage: rung writes [on|off] [--dir <workspace>]\n");
     return 1;

@@ -52,6 +52,23 @@ describe("rung mcp outside a workspace", () => {
 });
 
 describe("rung mcp tools", () => {
+  it("refuses the old sync preview argument before opening a bridge", async () => {
+    const { root } = await workspace();
+    let opened = false;
+    const call = await connect(root, { bridgeFactory: async () => { opened = true; throw new Error("must not start"); } });
+    expect((await call("rung_sync", { preview: true })).isError).toBe(true);
+    expect(opened).toBe(false);
+  });
+
+  it("reads a bounded diagnostic buffer through an injected read-only backend", async () => {
+    const { root } = await workspace();
+    const asked: unknown[] = [];
+    const call = await connect(root, { diagnosticFactory: async (opts) => { asked.push(opts); return { at: 1, entries: [{ rawId: 42, cpuTimestamp: "fixture" }] }; } });
+    expect(JSON.parse((await call("rung_live_diag", { device: "PLC_1" })).text).entries[0].rawId).toBe(42);
+    expect(asked).toEqual([{ device: "PLC_1", limit: 50 }]);
+    expect((await call("rung_live_diag", { limit: 101 })).isError).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
   it("compare and the download request name the PLC the workspace mirrors, and ask when there are several", async () => {
     const { root } = await workspace();
     const asked: string[] = [];
@@ -137,7 +154,7 @@ describe("rung mcp tools", () => {
     writeFileSync(join(root, "tests", "motor.test.yaml"), "block: Fx_Motor\ncases:\n  - steps:\n      - cycle: 1\n");
     const call = await connect(root);
     expect((await call("rung_list", { status: "conflict" })).isError).toBe(true);
-    expect(JSON.parse((await call("rung_list", { status: "synced" })).text)).toEqual([expect.objectContaining({ path: "plc/PLC_1/blocks/Fx_Motor.scl" })]);
+    expect(JSON.parse((await call("rung_list", { status: "synced" })).text).items).toEqual([expect.objectContaining({ path: "plc/PLC_1/blocks/Fx_Motor.scl" })]);
     expect(await call("rung_test", { filter: "valve" })).toEqual({ isError: false, text: 'No tests match "valve" (by file path, block name or case name); tests/**/*.test.yaml has 1 file.' });
   });
 

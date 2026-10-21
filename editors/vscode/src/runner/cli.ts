@@ -12,6 +12,8 @@ export interface RunOptions {
   terminal?: string;
   icon?: string;
   guardInterrupt?: string;
+  /** Only after the person confirmed it in a modal: see humanConfirmedEnv. */
+  humanConfirmed?: boolean;
 }
 
 export interface CaptureOptions {
@@ -60,7 +62,7 @@ export class RungCli implements vscode.Disposable {
     const t = opts.terminal ? this.terminals.dedicated(opts.terminal, new vscode.ThemeIcon(opts.icon ?? "terminal")) : this.terminals.get(readSettings().reuseTerminal);
     this.out.info(`$ ${inv.display}`);
     this.out.debug(`  spawn ${inv.file} ${JSON.stringify(inv.args)} in ${this.ws.root ?? "(no folder)"}`);
-    const result = await t.run(inv, this.ws.root, opts.guardInterrupt ? { guardInterrupt: opts.guardInterrupt } : {});
+    const result = await t.run(inv, this.ws.root, { ...(opts.guardInterrupt ? { guardInterrupt: opts.guardInterrupt } : {}), ...(opts.humanConfirmed ? { humanConfirmed: true } : {}) });
     this.report(inv, result);
     this.finished.fire({ args, result });
     return result;

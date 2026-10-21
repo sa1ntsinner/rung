@@ -2,6 +2,7 @@
 
 /** Workspace-side error codes (the bridge has its own set in @rung/bridge-client). */
 export type WorkspaceErrorCode =
+  | "AGENT_REFUSED"
   | "STATE_LOCKED"
   | "NOT_MIRRORED"
   | "NO_TARGET"

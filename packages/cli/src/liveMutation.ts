@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertHuman } from "./guard.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -42,6 +43,7 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
   }
   return {
     async prepare(clientId: string, options: BackendOptions, action: MutationAction, credentials: { user?: string; password?: string }) {
+      assertHuman(env);
       assertPlcWritable(await loadConfig(root), options.device, env);
       if (closed || pending.size + preparing >= 128) throw new BridgeError("RESOURCE_LIMIT", "Too many pending confirmations or broker is closed");
       const selected = await select(options);
@@ -61,7 +63,8 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
         const prepared = await host.request("online.prepare", { sessionId: session.sessionId, ...action }) as OnlinePreparedWrite & { context: { binding: MutationBinding } };
         const original = prepared.context.binding;
         const policy = new MutationPolicy(async () => {
-          assertPlcWritable(await loadConfig(root), selected.device, env);
+          assertHuman(env);
+      assertPlcWritable(await loadConfig(root), selected.device, env);
           const current = await select(options);
           if (JSON.stringify(current) !== JSON.stringify(selected) || await revision() !== configRevision) throw new BridgeError("STALE_PREPARATION", "PLC configuration changed; prepare again");
           const state = await activeHost.request("online.state", { sessionId: session.sessionId }) as OnlineStateResult;
@@ -79,6 +82,7 @@ export function liveMutations(root: string, env: Io["env"], select: (options: Ba
       finally { preparing--; }
     },
     async commit(clientId: string, id: string, preview: string, confirmed: boolean) {
+      assertHuman(env);
       assertPlcWritable(await loadConfig(root), undefined, env);
       const operation = pending.get(id);
       if (!operation || operation.clientId !== clientId) throw new BridgeError("STALE_PREPARATION", "Preparation belongs to another client or expired");

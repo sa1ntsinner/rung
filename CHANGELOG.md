@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — 2026-10-21
+
+- Agents cannot download, write PLC values, force, acknowledge alarms, switch RUN/STOP or enable writes through the CLI. `rung setup` installs shell deny rules alongside the existing skills and MCP registration. A refusal asks the person to run the command in their own terminal.
+- MCP tools describe whether they read or change the project, return structured results, and require a person for deletes and conflict resolution. `rung_sync_preview` previews a sync separately from sending it. Large lists, test results, previews and graph responses have limits and paging.
+- The Claude plugin runs the SCL language server after edits, blocks unsafe shell commands, and adds read-only reviewers and online diagnosticians. Its launcher uses the bundled CLI, and release packaging keeps its version with rung.
+- `rung review` reports changes against HEAD or a git range per block, including interfaces, SCL regions or LAD networks and affected callers, data blocks and tags. It produces Markdown or JSON and is available as a read-only MCP tool.
+- Download and live-change commands that a person confirms in VS Code still run when VS Code itself was started by an agent.
+- New rung mark on the extension icon and in the activity bar.
+
 ## 0.3.0 — 2026-10-21
 
 **Online with the PLC**

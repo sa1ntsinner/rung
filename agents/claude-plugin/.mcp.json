@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "rung": { "command": "rung", "args": ["mcp"] }
+    "rung": { "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/bin/rung.cjs", "mcp"] }
   }
 }
