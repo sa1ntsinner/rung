@@ -1,120 +1,112 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo-dark.png">
-    <img alt="rung" src="site/assets/logo-light.png" width="200">
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo-dark.png" />
+    <img src="site/assets/logo-light.png" alt="rung" width="240" />
   </picture>
 </p>
 
-<h3 align="center">PLC code in your editor, with TIA Portal in step.</h3>
-
 <p align="center">
-  <a href="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sa1ntsinner/rung/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="Status: pre-release" src="https://img.shields.io/badge/status-pre--release-e3b86a">
-  <a href="LICENSE"><img alt="License: BUSL-1.1 and MIT" src="https://img.shields.io/badge/license-BUSL--1.1%20%2B%20MIT-6cc08f"></a>
+  <a href="https://sa1ntsinner.github.io/rung/"><img src="https://img.shields.io/badge/website-rung-24292f?style=flat" alt="Website" /></a>
+  &nbsp;
+  <a href="https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rung-scl"><img src="https://img.shields.io/badge/vs%20code-install-1b7a45?style=flat" alt="Install for VS Code" /></a>
+  &nbsp;
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BUSL--1.1%20%2B%20MIT-24292f?style=flat" alt="License" /></a>
+  &nbsp;
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-0.3-24292f?style=flat" alt="Changelog" /></a>
 </p>
 
 <p align="center">
-  <a href="https://sa1ntsinner.github.io/rung/"><b>Website</b></a> ·
-  <a href="https://sa1ntsinner.github.io/rung/#play">Try a test in your browser</a> ·
-  <a href="docs/quickstart.md">Quickstart</a> ·
-  <a href="docs">Docs</a> ·
-  <a href="docs/capabilities.md">Capabilities and limits</a>
+  <img src="docs/media/sync.gif" width="100%" alt="A number changed in the file goes to TIA Portal and compiles; changed back in TIA Portal, it comes back to the file" />
 </p>
 
-<p align="center">
-  <img src="docs/media/sync.gif" width="920" alt="A number changed in the file goes to TIA Portal and compiles; changed back in TIA Portal, it comes back to the file">
-</p>
+**rung** puts a Siemens S7 project in your code editor. You write SCL and LAD as files in VS Code, Zed or Neovim, test them on your PC or in CI, and rung keeps the TIA Portal project in step both ways.
 
-rung keeps a Siemens TIA Portal project, or a CODESYS one, and a folder of text files in sync, both ways. Edit in your editor, review in git, test without a PLC.
+<table>
+  <tr>
+    <td width="50%"><img src="site/assets/img/decl-table.jpg" alt="A block's declarations as a table, in TIA Portal's sections" /></td>
+    <td width="50%"><img src="site/assets/img/values-code.jpg" alt="SCL code with the PLC's values beside each line" /></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="site/assets/img/test-table.jpg" alt="A unit test as a table: set, run, expect" /></td>
+    <td width="50%"><img src="docs/media/playground.gif" alt="A latch test passes, breaks and passes again in the browser playground" /></td>
+  </tr>
+</table>
 
-| | |
-|---|---|
-| **Two-way sync** | Save a file: rung imports it through Openness, compiles it and writes TIA's version back. Changes made in TIA Portal come back. Both sides changed: a three-way merge, SCL by line, LAD and FBD by network. |
-| **An editor for SCL** | A language server for VS Code, Zed and Neovim: completion, definitions through DBs, UDTs and instances, references, rename through TIA Portal, any block or tag by name, TIA's compile errors on their line, live values. |
-| **Tests without a PLC** | `rung test` runs YAML tests on an offline simulator: SCL, LAD, FBD, STL and structured text, with virtual time. Any CI runner, Linux too, no TIA Portal or PLCSIM. |
-| **TIA Portal in the background** | rung opens the project in a TIA Portal without window and keeps it open; **Open in TIA Portal** brings the window up on the object you are on. A `.zap` archive opens too. |
-| **Online** | Live values next to the code over S7CommPlus (TLS) or the Web API, TIA watch tables, trace, a reconstructed program status per SCL line, and a backup of a running PLC that is checked against it. A read-only lock for machines that must not be touched. |
-| **A debugger for PLC code** | Breakpoints, step back, Why? for any value, coverage, and the same tests run on another git revision to show what behaves differently. |
-| **Coding agents** | An MCP server and skills. Agents edit the files, rung carries the change into TIA Portal, a person starts every download. |
-| **Change review** <sub>Pro</sub> | Interfaces, attributes, logic per region and network, and what a change affects. A gate in your CI and a FAT/SAT record. |
+Try a test in your browser on the [playground](https://sa1ntsinner.github.io/rung/#play).
 
-## Try a test
+## Install
 
-<img src="docs/media/playground.gif" width="920" alt="The playground: a latch passes, Break it removes OR #Running and the test fails, Fix it restores it and the test passes again">
-
-The [playground](https://sa1ntsinner.github.io/rung/#play) runs rung's own simulator in your browser. The same tests run on your CI:
-
-```yaml
-- uses: sa1ntsinner/rung@v1        # a failing step shows on its line in the pull request
+```bash
+code --install-extension sa1ntsinner.rung-scl
 ```
 
-## Your project, as files
+The extension brings rung with it. Run **rung: Open TIA Project…** and pick your `.ap19`, `.ap20` or `.ap21`. Your Windows user has to be in the group "Siemens TIA Openness"; `rung check` tells you what is missing.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/workspace-dark.png">
-  <img src="docs/media/workspace-light.png" width="920" alt="A rung workspace: plc/PLC_1 with blocks, tags, types, hardware and watch tables, and a test folder">
-</picture>
-
-One file per object: `.scl` `.awl` `.db` `.udt` `.s7dcl` `.xml` `.tags.st` `network.yaml` `.test.yaml`. The [format](docs/format/README.md) is documented and MIT.
-
-## Measured against real TIA Portal
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/soak-dark.png">
-  <img src="docs/media/soak-light.png" width="920" alt="Twenty minutes of sync against TIA Portal V20: 247 actions, 78 syncs killed mid-run, 42 merges, 0 conflicts, 0 check failures">
-</picture>
-
-| Two 20-minute runs, two people, syncs killed at random | One production program | Tests |
-|---|---|---|
-| 0 conflicts, 0 check failures, every file equal to TIA Portal's export at the end ([evidence](docs/evidence.md)) | 42 of its 43 blocks run in `rung test`, 8 of them with stubs | 1800+ TypeScript and 370+ .NET tests, live suites against TIA Portal V19, V20 and V21, PLCSIM Advanced and a real S7-1500, Windows and Linux |
-
-## Quick start
+<details>
+<summary>Command line</summary>
 
 ```sh
-rung init --project D:\TIA\Line3.ap20   # link this folder to a TIA Portal project
-rung pull                               # blocks, types and tag tables as text
-rung writes on                          # when you want your edits to go to TIA Portal
-rung watch                              # keep both sides in sync
+npm i -g @rung-plc/cli                  # or a zip from the releases
+rung init --project D:\TIA\Line3.ap20   # link this folder to the project
+rung pull                               # blocks, types and tag tables as files
+rung writes on                          # let your edits go to TIA Portal
+rung watch                              # keep both sides in step
 ```
 
-Install the **rung** extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=sa1ntsinner.rung-scl) or [Open VSX](https://open-vsx.org/extension/sa1ntsinner/rung-scl) (it brings rung with it) and run **rung: Open TIA Project…**; or take rung from the [releases](https://github.com/sa1ntsinner/rung/releases) or npm (`npm i -g @rung-plc/cli`). The [quickstart](docs/quickstart.md) covers the setup, including the Openness group your Windows user has to be in. What rung does and where TIA Portal is still needed: [capabilities](docs/capabilities.md).
+</details>
 
-[Going online](docs/online.md): find the PLC, choose another address, supply a password and check a TLS certificate.
+<details>
+<summary>Zed, Neovim, Open VSX</summary>
 
-## Works with
+The Zed extension and `rung.nvim` use the same language server. The VS Code extension is also on [Open VSX](https://open-vsx.org/extension/sa1ntsinner/rung-scl) for VSCodium and Cursor.
 
-| | Sync | Editor | `rung test` |
-|---|:---:|:---:|:---:|
-| Siemens TIA Portal V19, V20, V21 | ✓ | ✓ | ✓ |
-| CODESYS V3.5 | ✓ | ✓ | ✓ |
-| TwinCAT 3 sources | files already | ✓ | ✓ |
+</details>
 
-**Editors** VS Code and Zed extensions, a Neovim plugin · **Agents** Claude Code, Codex, Cursor, Gemini CLI (`rung setup`) · **Runs on** Windows; Linux and macOS through a Windows PC [over ssh](docs/remote.md) · **TIA Portal** V19, V20 and V21.
+<details>
+<summary>Coding agents</summary>
 
-rung works through your own licensed TIA Portal and does not replace it or its licence. Without TIA Portal you still get the language server, the simulator and `rung test`.
+`rung setup` connects Claude Code, Codex, Cursor, Gemini CLI and others to rung's MCP server and skills. Agents read, edit and test the files; a person starts every download.
+
+</details>
+
+<details>
+<summary>CI</summary>
+
+```yaml
+- uses: sa1ntsinner/rung@v1   # runs rung test; a failing step shows on its line in the pull request
+```
+
+Tests run on rung's simulator, so the runner needs no TIA Portal and can be Linux.
+
+</details>
+
+## What you get
+
+1. Each block, data type and tag table is a file you can diff, review and keep in git.
+2. When you save, TIA Portal compiles the block, and its errors appear on the line they belong to.
+3. A change made in TIA Portal comes back to the file. If you both changed it, rung merges SCL by line and LAD by network.
+4. You test in YAML: set the inputs, run cycles, expect the outputs. A debugger steps through SCL and shows why a value is what it is.
+5. Online with an S7-1500, the editor shows live values beside the code and reads watch tables, alarms and the diagnostic buffer.
+
+Full list and limits: [capabilities](docs/capabilities.md). Setup: [quickstart](docs/quickstart.md). Everything else: [docs](docs).
 
 ## Careful by default
 
-- Only Siemens Openness talks to TIA Portal; rung never opens project files itself.
-- Failsafe, know-how protected, system and GRAPH blocks and library instances stay read-only. Deleting a file never deletes a block: `rung confirm-delete` does.
-- A person starts every [download](docs/downloads.md). Agents never do.
-- `RUNG_READ_ONLY=1` locks rung to reading for a machine that must not be changed: no download, write, force or RUN/STOP, refused before anything reaches the PLC.
+Only Siemens Openness talks to TIA Portal. Deleting a file never deletes a block. A person starts every [download](docs/downloads.md), and `RUNG_READ_ONLY=1` stops every change to the PLC and the project for a machine you must not touch.
+
+## Common questions
+
+**Do I still need TIA Portal?**  
+Yes, your own licensed TIA Portal V19, V20 or V21 for sync, hardware and download. The language server, the simulator and `rung test` work without it.
+
+**Does it run on Linux or macOS?**  
+The editor and the tests do. Sync needs Windows; rung can reach a Windows PC [over ssh](docs/remote.md).
+
+**CODESYS?**  
+CODESYS V3.5 projects sync too, and TwinCAT 3 sources work with the editor and the tests.
 
 ## License
 
-The core is under the Business Source License 1.1: free for individuals, education, non-commercial open source and organizations with up to three users, and each release becomes Apache 2.0 after three years. Larger teams take rung Pro, €49 per user and month: the commercial license, change review, a CI policy gate, FAT/SAT records and support (rungprojectplc@gmail.com). The protocol client, grammar, editor extensions and file format are MIT. Details in [LICENSE](LICENSE).
+The core is BUSL-1.1, free for individuals, education, non-commercial open source and organizations with up to three users, and each release becomes Apache 2.0 after three years. Larger teams take [rung Pro](docs/pricing.md), €49 per user and month. The extensions, grammar, protocol client and file format are MIT. Questions: [rungprojectplc@gmail.com](mailto:rungprojectplc@gmail.com).
 
-rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG.
-
-<details>
-<summary>Working on rung</summary>
-
-```sh
-pnpm install
-pnpm test                                         # TypeScript packages
-dotnet test bridge/tests/Rung.Bridge.Core.Tests   # bridge core, no TIA Portal needed
-```
-
-The live tests against TIA Portal run headless, without windows or prompts; the steps are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-</details>
+<sub>rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG. Working on rung: see [CONTRIBUTING.md](CONTRIBUTING.md).</sub>
