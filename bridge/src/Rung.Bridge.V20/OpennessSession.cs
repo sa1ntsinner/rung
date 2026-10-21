@@ -889,7 +889,8 @@ namespace Rung.Bridge.V20
             }
             catch (EngineeringException e)
             {
-                throw new RpcException(ErrorCodes.ExportFailed, e.Message);
+                // TIA Portal exports no block it has not compiled since its last change
+                throw new RpcException(ErrorCodes.ExportFailed, e.Message + (r.Entry.IsConsistent == false ? " Compile it (rung compile), then rung pull brings it in." : ""));
             }
         }
 

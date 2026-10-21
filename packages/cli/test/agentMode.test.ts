@@ -8,7 +8,7 @@ import { agentModesPath, defaultConfig, readAgentModes, saveConfig, workspaceAge
 import { createHash } from "node:crypto";
 import { liveMutations } from "../src/liveMutation.js";
 import * as trust from "../src/liveTrust.js";
-import { withAgentPermission, type DialogRunner } from "../src/agentMode.js";
+import { withAgentPermission, withAgentPreparation, type DialogRunner } from "../src/agentMode.js";
 import { assertHuman, commandAction, commandTokens, guardCommand, guardHook } from "../src/guard.js";
 import { main } from "../src/main.js";
 
@@ -74,6 +74,13 @@ describe("agent permission execution", () => {
     const lines = (await readFile(join(root, ".rung", "agent-actions.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
     expect(lines).toHaveLength(2);
     expect(lines.every(line => line.outcome === 1)).toBe(true);
+  });
+  it("records an action approved inside a prepared command once", async () => {
+    const { io, root } = await fixture("auto", ["write"]);
+    const audit = { delegated: false };
+    // the live broker approves with its own Io (another env object), as liveMutation.ts does
+    await withAgentPreparation(root, "write", "PLC_1", io, () => withAgentPermission(root, "write", "PLC_1", { ...io, env: { ...io.env } }, async () => 0), "rung live modify", audit);
+    expect(audit.delegated).toBe(true);
   });
   it("audits live commands rejected before a broker or dialog is started", async () => {
     const { io, root } = await fixture("auto");

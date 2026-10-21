@@ -84,6 +84,8 @@ export async function approveAgentAction(dir: string, action: AgentAction, plc: 
   const records = targets.map(policy => ({ time: new Date().toISOString(), agent: marker, plc: policy.plc, action, mode: policy.mode,
     allowedBy: policy.mode === "manual" ? "refused" : policy.mode === "bypass" || policy.mode === "auto" && policy.actions.includes(action) ? "mode" : "dialog", command }));
   const audit = async (outcome: number) => {
+    // the command around this approval (runAgentCommand) must not record the same action again
+    if (scope?.audit) scope.audit.delegated = true;
     await mkdir(join(root, ".rung"), { recursive: true });
     await appendFile(join(root, ".rung", "agent-actions.jsonl"), records.map(record => JSON.stringify({ ...record, outcome }) + "\n").join(""));
   };
