@@ -8,3 +8,4 @@ package-lock.json
 **/*.vsix
 test-e2e/**
 .vscode-test/**
+DEVELOPMENT.md

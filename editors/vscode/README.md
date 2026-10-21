@@ -6,7 +6,7 @@ SCL editing and TIA Portal sync for [rung](https://github.com/sa1ntsinner/rung).
 
 See the [capability map](https://github.com/sa1ntsinner/rung/blob/main/docs/capabilities.md) for supported workflows and limits, including HMI.
 
-The extension and CLI have independent version numbers. When reporting a problem, include the extension version from VS Code's Extensions view and `rung --version` from the terminal, together with the selected TIA version. A different CLI version number alone does not mean the extension is stale; check which CLI the extension selects in its settings and Output log.
+Something wrong? **rung: Report a Problem…** collects the versions and this PC's checks, without your project's code, names or addresses, for an issue.
 
 - **Language support** for `.scl`, `.db`, `.udt`, `.awl` (and TwinCAT / plain IEC ST files): highlighting, completion, hover, go to definition, references, rename of locals, outline, and diagnostics from the parser and from TIA Portal compiles.
 - **rung sidebar** (the ladder-rung icon in the activity bar):
@@ -16,7 +16,7 @@ The extension and CLI have independent version numbers. When reporting a problem
 - **CodeLens** above each block header: Compile · Test · Open in TIA Portal. Editor title buttons do the same.
 - **Testing view**: the YAML tests (`tests/**/*.test.yaml`) and their cases, run on rung's offline simulator. A failed expectation shows on its step's line, expected and actual side by side.
 - **Live Values** in the rung sidebar: the values you pin (PLC tags, DB members), read twice a second while the view is open, each with its age and a short history line, read-only; integers in decimal, hex or binary, and a flight recorder that keeps the last ten minutes with your bookmarks for a CSV or a unit test (pin an FB's inputs and outputs through its instance DB; the test sets the inputs as they changed on the machine and expects the outputs as they settled).
-- **Monitor Values** (the eye in the editor title): the values of the open block at the end of each line, read twice a second from the PLC's Web API or from `rung simulate`, read-only.
+- **Monitor Values** (the eye in the editor title): the values of the open block at the end of each line, read twice a second from the PLC (S7CommPlus, or its Web API) or from `rung simulate`, read-only.
 - **Problems** from `rung compile`, with file and line.
 - **Debug Test** in the Testing view: breakpoints in SCL, step back, the block's variables, and **Why?** on any value (the statement that wrote it, its operands then, the branch that ran). **Run with Coverage**, **Record Expectations**.
 - **Changes** and **Activity** views: what a sync would do before it runs, and what the watch did (sends, compiles, refusals), with conflicts in VS Code's merge editor.
@@ -71,7 +71,7 @@ The actions list also has **Release the Project**. It offers **Save and Release*
 
 ## Keys
 
-`Alt+Q`, then a letter (same letters as the Zed tasks):
+`Alt+Q`, then a letter:
 
 | key | action | key | action |
 | --- | --- | --- | --- |
@@ -102,15 +102,6 @@ All under `rung.*`: the command, auto-start of watch, terminal reuse, output ver
 
 ## Development
 
-```
-npm install
-npm run build        # type check + bundle to out/extension.js
-npm run package      # rung-scl.vsix
-npm run test:e2e     # integration tests in a real VS Code (see below)
-```
-
-Unit tests (no VS Code) run from the repository root: `pnpm vitest run editors/vscode`.
-
-`npm run test:e2e` starts VS Code as an Extension Development Host with a throwaway user data and extensions folder and other extensions turned off (the installed VS Code, else a downloaded one; `VSCODE_EXE` picks another). It runs three suites: *fresh* (a folder without `rung.toml`: initialize and pull), *fake* (a mirrored project on `packages/cli/test/fake-bridge.mjs`: views, status bar, CodeLens, every command, compile → Problems, watch, online and connection picking, download) and *tia* (the workspace `%TEMP%\rung-probe-ws`, bound to a TIA Portal V20 fixture project; skipped when TIA Portal does not answer). `RUNG_E2E_SUITES=fake` runs one suite, `RUNG_E2E_GREP=download` only matching tests. The CLI is `rung` from PATH, built with `pnpm -s tsc -b` at the repository root.
+Building and testing the extension: see [DEVELOPMENT.md](https://github.com/sa1ntsinner/rung/blob/main/editors/vscode/DEVELOPMENT.md).
 
 The extension is MIT licensed; the rung CLI it starts has its own license.

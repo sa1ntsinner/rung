@@ -12,6 +12,7 @@
   --soft: #8f8c86;            /* the second line of a headline */
   --accent: #1b7a45;          /* power flow in TIA Portal's monitoring: in sync, passed */
   --accent-ink: #ffffff;
+  --card: #ffffff;            /* a raised light surface: the light pill, the tab panel */
   --bad: #b03f28;
   --field: #121212;
   --field-2: #1d1d1d;
@@ -37,6 +38,7 @@
   --gap: clamp(120px, 14vw, 200px); /* between sections */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: clip; }
@@ -66,7 +68,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .pill { display: inline-flex; align-items: center; gap: 0.5em; min-height: 48px; padding: 0 24px; border-radius: 99px; font: 500 var(--step-body)/1 var(--sans); text-decoration: none; border: 0; cursor: pointer; transition: transform 0.2s var(--ease), background-color 0.2s; }
 .pill.dark { background: var(--ink); color: var(--bg); }
 .pill.dark:hover { background: #000; color: var(--bg); }
-.pill.light { background: #fff; color: var(--ink); }
+.pill.light { background: var(--card); color: var(--ink); }
 .pill.light:hover { background: var(--surface); color: var(--ink); }
 .pill:active { transform: scale(0.97); }
 .pill.small { min-height: 40px; padding: 0 18px; font-size: var(--step-small); }
@@ -76,7 +78,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 /* the bar */
 .top { display: flex; align-items: center; justify-content: space-between; padding: 20px var(--m); max-width: 1480px; margin-inline: auto; }
 .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.25rem; letter-spacing: -0.02em; text-decoration: none; }
-.mark { width: 28px; height: 28px; fill: currentColor; }
+.mark { width: 30px; height: 30px; }
 .top nav { display: flex; align-items: center; gap: clamp(14px, 2.4vw, 32px); font-size: var(--step-small); }
 .top nav a:not(.pill) { text-decoration: none; color: var(--muted); }
 .top nav a:not(.pill):hover { color: var(--ink); }
@@ -245,7 +247,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .tablist button:hover { background: var(--surface-2); }
 .tablist button:active { transform: scale(0.96); }
 .tablist button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
-.tabpanel { display: grid; grid-template-columns: 1fr 1fr; gap: 36px 40px; background: #fff; border-radius: var(--r); padding: clamp(24px, 3vw, 40px); }
+.tabpanel { display: grid; grid-template-columns: 1fr 1fr; gap: 36px 40px; background: var(--card); border-radius: var(--r); padding: clamp(24px, 3vw, 40px); }
 .tabpanel[hidden] { display: none; }
 .tabpanel .nm { margin-bottom: 6px; font-weight: 500; }
 .tabpanel p:not(.nm) { margin: 0; color: var(--muted); font-size: var(--step-small); }
@@ -257,6 +259,8 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .tile { background: var(--surface); border-radius: var(--r); padding: 24px; min-height: 190px; display: flex; flex-direction: column; }
 .tile .nm { font-size: var(--step-lead); font-weight: 600; letter-spacing: -0.03em; line-height: 1.05; margin-bottom: auto; padding-bottom: 20px; }
 .tile p:not(.nm) { margin: 0; color: var(--muted); font-size: var(--step-small); }
+.tile .brand { width: 44px; height: 44px; fill: currentColor; margin-bottom: auto; }
+.tile .nm.small { font-size: var(--step-body); font-weight: 600; letter-spacing: -0.01em; margin: 24px 0 4px; padding: 0; }
 .tile.head { grid-column: span 2; background: var(--accent); color: var(--accent-ink); }
 .tile.head h2 { font-size: clamp(2rem, 1.2rem + 2.6vw, 3.5rem); }
 .tile.head .soft { color: #bfe3cc; }
@@ -285,7 +289,8 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .foot .mail { justify-content: flex-end; }
 .foot .mail p { margin-bottom: 8px !important; }
 .foot .mail a { font-size: var(--step-body); font-weight: 500; overflow-wrap: anywhere; }
-.foot .word { grid-column: span 8; min-height: 320px; background: var(--ink); color: var(--bg); align-items: center; justify-content: center; font-size: clamp(5rem, 2rem + 12vw, 13rem); font-weight: 600; letter-spacing: -0.06em; line-height: 1; }
+.foot .word img { width: 0.78em; height: 0.78em; margin-right: 0.12em; border-radius: 0.17em; }
+.foot .word { grid-column: span 8; flex-direction: row; min-height: 320px; background: var(--ink); color: var(--bg); align-items: center; justify-content: center; font-size: clamp(5rem, 2rem + 12vw, 13rem); font-weight: 600; letter-spacing: -0.06em; line-height: 1; }
 .foot .go { grid-column: span 4; min-height: 320px; background: var(--accent); color: var(--accent-ink); text-decoration: none; font-size: var(--step-lead); font-weight: 500; letter-spacing: -0.02em; justify-content: space-between; transition: background-color 0.2s; }
 .foot .go:hover { background: #156338; color: var(--accent-ink); }
 .foot .go svg { width: 56px; height: 56px; align-self: flex-end; fill: none; stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.3s var(--ease); }
@@ -385,4 +390,26 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
   .foot .go { order: -1; min-height: 140px; grid-column: 1 / -1; }
   .foot .say { grid-column: 1 / -1; }
   .foot .tile { min-height: 150px; }
+}
+
+/* the same page at night: the device's theme decides */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e0e;
+    --surface: #1a1a1a;
+    --surface-2: #242424;
+    --card: #1f1f1f;
+    --ink: #edece8;
+    --muted: #a6a39d;
+    --soft: #6e6b66;
+    --accent: #23874d;
+    --bad: #f09a82;
+    --field: #191919;
+    --field-2: #262626;
+    --field-soft: #7a7772;
+    --code-bg: #101010;
+  }
+  .pill.dark:hover { background: #fff; }
+  .foot .go:hover { background: #1d7340; }
+  .tile.head .soft { color: #a9dcbc; }
 }

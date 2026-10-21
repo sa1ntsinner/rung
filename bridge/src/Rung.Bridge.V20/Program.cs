@@ -124,13 +124,14 @@ namespace Rung.Bridge.V20
             catch (RpcException e) { Console.Error.WriteLine(e.Message); return 2; }
 
             // Must be registered before any Siemens type is touched (Siemens-recommended pattern).
+            // RUNG_OPENNESS_DIR, else where the TIA Portal setup registered the API (any drive or folder), else the default path.
             var dir = Environment.GetEnvironmentVariable("RUNG_OPENNESS_DIR");
 #if TIA_V21
-            if (string.IsNullOrEmpty(dir)) dir = @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
+            if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("21.0", @"net48\Siemens.Engineering.Base") ?? @"C:\Program Files\Siemens\Automation\Portal V21\PublicAPI\V21\net48";
 #elif TIA_V19
-            if (string.IsNullOrEmpty(dir)) dir = @"C:\Program Files\Siemens\Automation\Portal V19\PublicAPI\V19";
+            if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("19.0", "Siemens.Engineering") ?? @"C:\Program Files\Siemens\Automation\Portal V19\PublicAPI\V19";
 #else
-            if (string.IsNullOrEmpty(dir)) dir = @"C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20";
+            if (string.IsNullOrEmpty(dir)) dir = OpennessDir.FromRegistry("20.0", "Siemens.Engineering") ?? @"C:\Program Files\Siemens\Automation\Portal V20\PublicAPI\V20";
 #endif
             AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
             {
