@@ -54,6 +54,7 @@ import { cmdWhy } from "./why.js";
 import { cmdProgramStatus } from "./program-status.js";
 import { cmdImpact } from "./impact.js";
 import { cmdLint } from "./lint.js";
+import { cmdNew } from "./new.js";
 import { cmdSplit } from "./split.js";
 import { cmdMergeDriver } from "./mergeDriver.js";
 import { cmdCheck } from "./check.js";
@@ -87,6 +88,8 @@ Usage:
   rung program-status <file> --capture <cycle.json> --instance <DB> [--why member] [--json]  reconstruct one captured SCL cycle and compare observed results
   rung impact <file> [--json]         what an interface change breaks: calls, instance DBs reinitialised, tests
   rung lint [dir] [--file <f>]... [--json] [--max-warnings <n>]  the language server's checks of the files, in the terminal or CI (no TIA Portal); exit 1 on errors or more than n warnings
+  rung new <fb|fc|ob|db|udt|tags> <name> [--plc <PLC>] [--folder <a/b>] [--returns <type>] [--of <FB>] [--dir <workspace>] [--json]
+                                       create an object file offline
   rung split [file]...                  a source with several objects (TIA's Generate source, a library) into one file per object, where rung keeps it
   rung review [base..head] [--base <rev>] [--head <rev>] [--json|--md]  offline change report for the person reviewing it; default: working tree against HEAD
   rung merge-driver %O %A %B %P       git's merge of SCL and tests: declarations and test cases both branches added stay
@@ -456,6 +459,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "program-status": { options: ["capture", "instance", "json", "why"], positionals: 1 },
   impact: { options: ["json"], positionals: 1 },
   lint: { options: ["file", "json", "max-warnings"], positionals: 1 },
+  new: { options: ["plc", "folder", "returns", "of", "dir", "json"], positionals: 2 },
   split: { options: [], positionals: Infinity },
   review: { options: ["base", "head", "json", "md"], positionals: 1 },
   "merge-driver": { options: [], positionals: 4 },
@@ -538,6 +542,9 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
       args: argv,
       allowPositionals: true,
       options: {
+        folder: { type: "string" },
+        returns: { type: "string" },
+        of: { type: "string" },
         help: { type: "boolean", short: "h" },
         base: { type: "string" },
         head: { type: "string" },
@@ -902,6 +909,8 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
         return await cmdMergeDriver(positionals.slice(1), io);
       case "impact":
         return await cmdImpact(target, !!v.json, io);
+      case "new":
+        return await cmdNew(positionals.slice(1), v, io);
       case "split":
         return await cmdSplit(positionals.slice(1), io);
       case "lint":

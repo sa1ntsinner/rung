@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { instanceDbText } from "./newObject.js";
 // Quick fixes like TIA Portal's: declare a local that is used but not declared, give a function block that is
 // called without an instance a single instance (a new instance DB) or a multi-instance, and define a PLC tag.
 import { escapeSegment } from "@rung/core";
@@ -105,10 +106,9 @@ function instanceFixes(index: WorkspaceIndex, text: string, uri: string, block: 
 /** A new instance DB file of `fb`, next to `uri`, with the FB's memory layout. */
 function instanceDb(index: WorkspaceIndex, uri: string, db: string, fb: string): { uri: string; text: string } {
   const fbDoc = index.docs.get(index.global(fb)!.uri)?.text ?? "";
-  const optimized = /S7_Optimized_Access\s*:=\s*'FALSE'/i.test(fbDoc) ? "FALSE" : "TRUE";
   return {
     uri: uri.slice(0, uri.lastIndexOf("/") + 1) + encodeURIComponent(escapeSegment(db)) + ".db",
-    text: `DATA_BLOCK "${db}"\n{ S7_Optimized_Access := '${optimized}' }\nVERSION : 0.1\nNON_RETAIN\n"${fb}"\n\nBEGIN\n\nEND_DATA_BLOCK\n`,
+    text: instanceDbText(db, fb, fbDoc),
   };
 }
 

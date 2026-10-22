@@ -40,8 +40,7 @@ import { codeActions, freeMemory } from "./actions.js";
 import { nestedTestKeyEdits, testFilesOf, testKeyEdits } from "./testkeys.js";
 import { baseText, interfaceImpact, workspaceTests } from "./impact.js";
 import { testSkeleton } from "./testSkeleton.js";
-import { newObject, type NewObjectRequest } from "./newObject.js";
-import { escapeSegment, unescapeSegment } from "@rung/core";
+import { workspaceNewObject, type NewObjectRequest } from "./newObject.js";
 import { testModel, type TestModel } from "./testModel.js";
 import { planTestEdit, type TestOp } from "./testEdit.js";
 import { keyProblem, keyProblems, testSymbols, valueProblem } from "./testSymbols.js";
@@ -386,33 +385,7 @@ export function startServer(reader?: MessageReader, writer?: MessageWriter, opti
   connection.onRequest("rung/newObject", async (p: NewObjectRequest) => {
     if (!root) return { reason: "No rung workspace is open." };
     if (!p || typeof p.name !== "string" || typeof p.plc !== "string" || !["FB", "FC", "DB", "UDT", "TAGS"].includes(p.kind)) return { reason: "Not a new object." };
-    // the PLC's folder as written on disk (PLC%2F1 for "PLC/1"), as the index knows it
-    let disk: string;
-    try {
-      disk = escapeSegment(p.plc);
-    } catch {
-      return { reason: `"${p.plc}" is not a PLC name.` };
-    }
-    const inPlc = index.allGlobals().filter((g) => deviceOfUri(g.uri)?.toLowerCase() === disk.toLowerCase());
-    const names = new Set(inPlc.filter((g) => g.kind === "FB" || g.kind === "FC" || g.kind === "DB" || g.kind === "OB").map((g) => g.name.toLowerCase()));
-    const types = new Set(inPlc.filter((g) => g.kind === "UDT").map((g) => g.name.toLowerCase()));
-    // tag table names are unique in the whole PLC, its software units included
-    const tables = new Set<string>();
-    for (const f of (await readdir(join(root, "plc", disk), { recursive: true }).catch(() => [] as string[])).map(String)) {
-      const m = /(?:^|[\\/])tags[\\/](?:.*[\\/])?([^\\/]+)\.tags\.(st|xml)$/i.exec(f);
-      if (!m) continue;
-      try {
-        tables.add(unescapeSegment(m[1]!).toLowerCase());
-      } catch {
-        tables.add(m[1]!.toLowerCase());
-      }
-    }
-    const draft = newObject(p, { names, types, tables, paths: [] });
-    if ("reason" in draft) return draft;
-    // the files already in its folder (a name that differs only in letter case is the same file on Windows)
-    const folder = draft.path.slice(0, draft.path.lastIndexOf("/"));
-    const siblings = (await readdir(join(root, folder)).catch(() => [] as string[])).map((f) => `${folder}/${f}`);
-    return newObject(p, { names, types, tables, paths: siblings });
+    return workspaceNewObject(index, root, p);
   });
   // a block's first test (Create test): its text and path, and the test files that already name the block
   connection.onRequest("rung/testSkeleton", async (p: { textDocument: { uri: string }; position?: { line: number; character: number } }) => {

@@ -9,6 +9,7 @@ This release comes from working on open-source PLC projects with rung (traffic l
 - `rung lint` runs the language server's checks in a terminal or CI without TIA Portal: exit 1 on errors, `--max-warnings <n>`, a summary line, `--json`.
 - `rung split` turns a source with several objects (TIA's *Generate source*, a library) into one file per object, named after it. The editor flags such a file, a file named after another object, and a block defined twice in one PLC.
 - A call through an instance DB that does not exist yet (`"Belt_DB"(Start := …)`) is a warning naming the FB whose parameters fit, with a quick fix that writes the DB. An FB called without an instance, a timer called without IN or PT, and a TIME compared with a number are flagged as TIA Portal would.
+- `rung new <fb|fc|ob|db|udt|tags> <name>` writes a new object in the layout TIA Portal exports, as the editor's wizard does; `rung new db Belt_DB --of Belt` writes an instance DB.
 - `rung upgrade` and an export of an uncompiled block say to compile first. `.ap15_1` and `.zap15_1` are read as V15.1.
 
 **Sync**
@@ -21,7 +22,7 @@ This release comes from working on open-source PLC projects with rung (traffic l
 - LAD counters on IEC_COUNTER data (`"Counter".CTU`), `#"quoted"` locals in SIMATIC SD, `#t.TON(...)` on a TON_TIME instance.
 - `x AT y` views share one memory in the standard S7 layout; the SHA-256 of a MySQL client now gives the FIPS digests. Typed instructions of older SCL (`CEIL_DINT`, `ROR_DWORD`, `LIMIT_INT` …), `HTA`, `Strg_TO_Chars`, `Chars_TO_Strg` and `#str[i]` run.
 - Program_Alarm needs no stub; a test can expect its signal. A stub's named parameters are the outputs of an STL `CALL` to a block nothing describes.
-- IEC sources (TwinCAT, CODESYS): name lists, FB start values, `STRING(n)`, namespaces, PERSISTENT, type aliases, interfaces and EXTENDS parse; an interface variable binds to the FB assigned to it.
+- IEC sources (TwinCAT, CODESYS): name lists, FB start values, `STRING(n)`, namespaces, PERSISTENT, type aliases, interfaces and EXTENDS parse; an interface variable binds to the FB assigned to it. The simulator runs FB inheritance: inherited variables and methods, `SUPER^()` and `SUPER^.Method()`.
 - Test keys in TIA's quoted form (`Pid."idb_PI-Control".x`), a hint when a local is written with quotes, and an `always:` step that says when it failed before any cycle ran. Renaming a member renames nested test keys; editing a test keeps its YAML comments.
 - `rung review` and `rung test --against` read the base revision with one git process, which matters on large workspaces.
 

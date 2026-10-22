@@ -623,11 +623,18 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
       }
     }
     if (iec && (isKw(peek(), "EXTENDS") || isKw(peek(), "IMPLEMENTS"))) {
-      let extending = false;
-      while (peek().kind !== "eof" && !(peek().kind === "ident" && (SECTIONS[peek().upper] || headers[peek().upper])) && peek().kind !== "pragma" && !/^(VAR|END_)/.test(peek().upper)) {
-        const x = next();
-        if (isKw(x, "EXTENDS", "IMPLEMENTS")) extending = x.upper === "EXTENDS";
-        else if (extending && x.kind === "ident") (block.extends ??= []).push(x.text);
+      while (isKw(peek(), "EXTENDS", "IMPLEMENTS")) {
+        const extending = next().upper === "EXTENDS";
+        do {
+          if (peek().text === ",") next();
+          if (peek().kind !== "ident") break;
+          let name = next().text;
+          while (peek().text === "." && peek(1).kind === "ident") {
+            next();
+            name += "." + next().text;
+          }
+          if (extending) (block.extends ??= []).push(name);
+        } while (peek().text === ",");
       }
     }
     while (peek().kind !== "eof" && !isKw(peek(), h.end) && !(iec && isHeaderAt(peek()))) {

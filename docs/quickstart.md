@@ -72,6 +72,8 @@ rung pull
 
 The syntax is `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order number> [--device <name>]`. The project must not exist. Writes start on for this new project. The bridge picks the newest installed firmware for that CPU order number and sets the lab security settings that TIA Portal's wizard would use. Review those settings in TIA Portal before commissioning.
 
+Create a file with `rung new <fb|fc|ob|db|udt|tags> <name> [--plc <PLC>] [--folder <a/b>] [--returns <type>] [--of <FB>] [--dir <workspace>] [--json]`. Choose `--plc` when there are several PLCs. `--returns` is for an FC (default: Void); `db --of <FB>` creates an instance DB. This writes only the file; `--json` prints its path and kind.
+
 Run `rung lint [dir] [--file f]... [--json]` for the language server's checks in the terminal or CI, without TIA Portal. It exits with code 1 on errors. Repeat `--file` to check selected files.
 
 Sources from elsewhere (a library from GitHub, TIA Portal's *Generate source from blocks*) often hold several objects in one file. Copy them under `plc/<PLC>/blocks/`, then run `rung split`: each type, data block and block gets a file of its own, named as the object (types go to `types/`), with the comments above it. `rung sync` then creates them in TIA Portal in the order they need each other.

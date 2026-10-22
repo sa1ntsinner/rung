@@ -278,6 +278,7 @@ function kindOfType(d: Decl | undefined): Kind {
 }
 
 export class Simulator {
+  private readonly instanceVarCache = new WeakMap<BlockModel, { decl: VarDecl; scope: BlockModel }[]>();
   /** Virtual time in milliseconds. */
   time = 0;
   /** The date and time the virtual clock starts at (RD_SYS_T, RD_LOC_T), in milliseconds since 1970. */
@@ -490,6 +491,9 @@ export class Simulator {
     if (!c) {
       c = {};
       byAccessor.set(accessor ?? "", c);
+      if (scope.kind === "FB")
+        for (const parent of this.ancestors(scope).slice(0, -1)) Object.assign(c, this.constants(parent));
+      else if (scope.owner) Object.assign(c, this.constants(this.index.global(scope.owner)?.block));
       for (const v of scope.vars)
         if (v.section === "Constant" && !v.isArray && !v.members?.length && (!v.accessor || v.accessor === accessor)) c[v.name.toUpperCase()] = this.defaultValue(v, scope, accessor);
     }
@@ -585,6 +589,40 @@ export class Simulator {
     return s;
   }
 
+  /** Oldest ancestor first. Invalid inheritance must fail before allocating any memory. */
+  private ancestors(b: BlockModel, seen = new Set<BlockModel>()): BlockModel[] {
+    if (seen.has(b)) throw new SimError(`inheritance cycle at ${b.name}`, b.name);
+    seen.add(b);
+    const parents = (b.extends ?? []).map((name) => {
+      const parent = this.index.global(name, this.uriOf(b))?.block;
+      if (parent?.kind !== "FB") throw new SimError(`${b.name} extends ${name}, which is not a function block in the workspace`, b.name);
+      return parent;
+    });
+    const chain = parents.flatMap((p) => this.ancestors(p, seen));
+    seen.delete(b);
+    return [...chain, b];
+  }
+
+  /** FB storage cannot redeclare inherited variables. Method locals and TEMP live in their own scope. */
+  private instanceVars(b: BlockModel): { decl: VarDecl; scope: BlockModel }[] {
+    // looked up on every variable access: the chain is walked once per block
+    const cached = this.instanceVarCache.get(b);
+    if (cached) return cached;
+    const vars = new Map<string, { decl: VarDecl; scope: BlockModel }>();
+    for (const scope of this.ancestors(b))
+      for (const decl of scope.vars) {
+        const key = decl.name.toUpperCase();
+        if (decl.section !== "Temp" && decl.section !== "Constant" && !vars.has(key)) vars.set(key, { decl, scope });
+      }
+    const list = [...vars.values()];
+    this.instanceVarCache.set(b, list);
+    return list;
+  }
+
+  private callVars(b: BlockModel): VarDecl[] {
+    return b.kind === "FB" && !b.owner ? this.instanceVars(b).map((v) => v.decl) : b.vars;
+  }
+
   newInstance(fbName: string): Instance {
     const std = STANDARD_BY_NAME.get(fbName.toUpperCase());
     const stub = this.stubOf(fbName);
@@ -597,9 +635,10 @@ export class Simulator {
     if (stub && !this.index.global(fbName)?.block) return { __fb: fbName, mem: copyValue(stub) as Struct, stub: true };
     const b = this.block(fbName);
     if (b.kind !== "FB" && b.kind !== "PRG") throw new SimError(`"${fbName}" is ${b.kind}, not a function block`);
-    const vars = b.vars.filter((v) => v.section !== "Temp" && v.section !== "Constant");
-    const mem = this.structOf(vars, b);
-    this.stubMembers(mem, vars);
+    const vars = this.instanceVars(b);
+    const mem: Struct = {};
+    for (const { decl, scope } of vars) mem[decl.name.toUpperCase()] = this.defaultValue(decl, scope);
+    this.stubMembers(mem, vars.map((v) => v.decl));
     return { __fb: b.name, mem: stub ? Object.assign(mem, copyValue(stub) as Struct) : mem };
   }
 
@@ -1016,17 +1055,17 @@ export class Simulator {
     let d: Decl | undefined;
     const name = ref.root.name.toUpperCase();
     let path = ref.path;
-    const fbVar = (n: string) => (frame?.inst ? this.index.global(frame.inst.__fb)?.block?.vars.find((x) => x.name.toUpperCase() === n) : undefined);
+    const fbVar = (n: string) => (frame?.inst ? this.instanceVars(this.block(frame.inst.__fb)).find((x) => x.decl.name.toUpperCase() === n)?.decl : undefined);
     const [p0, p1] = path;
     if (name === "THIS" && p0 && "deref" in p0 && p1 && "member" in p1) {
       d = fbVar(p1.member.toUpperCase());
       path = path.slice(2);
     } else if (ref.root.kind !== "global" && frame) {
       const b = frame.block;
-      d = b.vars.find((x) => x.name.toUpperCase() === name && (!x.accessor || x.accessor === frame.accessor));
+      d = (b.kind === "FB" && !b.owner ? [...b.vars.filter((v) => v.section === "Temp" || v.section === "Constant"), ...this.callVars(b)] : b.vars).find((x) => x.name.toUpperCase() === name && (!x.accessor || x.accessor === frame.accessor));
       if (!d && name === b.name.toUpperCase() && b.returnType) d = { type: b.returnType, typeRef: b.returnType, isArray: false };
       if (!d && b.kind === "DB" && b.dbOf) d = this.index.membersOfType(b.dbOf).find((m) => m.name.toUpperCase() === name);
-      if (!d && b.owner) d = fbVar(name); // a METHOD sees the variables of its FB
+      if (!d && (b.owner || b.kind === "FB")) d = fbVar(name); // a METHOD sees inherited storage too
     }
     if (!d && name !== "THIS") {
       const g = this.index.global(ref.root.name);
@@ -1043,7 +1082,8 @@ export class Simulator {
       }
       if ("member" in seg) {
         const u = seg.member.toUpperCase();
-        d = this.index.membersOf(d as Member).find((m) => m.name.toUpperCase() === u);
+        const type = this.index.global(d.typeRef ?? d.type)?.block;
+        d = type?.kind === "FB" ? this.instanceVars(type).find((v) => v.decl.name.toUpperCase() === u)?.decl : this.index.membersOf(d as Member).find((m) => m.name.toUpperCase() === u);
       } else if ("index" in seg) {
         const shape = d.isArray ? splitArrayType(d.type) : undefined;
         if (!shape) return undefined;
@@ -1223,6 +1263,22 @@ export class Simulator {
     // METHODs: fb.M(...), and inside the FB or one of its methods M(...) or THIS^.M(...)
     if (c.callee.root.kind === "ident") {
       const [p0, p1] = path;
+      if (upper === "SUPER" && p0 && "deref" in p0 && frame?.inst) {
+        // SUPER is relative to the body defining this call, even on a more derived instance.
+        const owner = frame.block.owner ? this.block(frame.block.owner) : frame.block;
+        const parentName = owner.extends?.[0];
+        if (!parentName) throw new SimError(`${owner.name} has no parent function block`, frame.block.name, c.callee.start);
+        const parent = this.block(parentName);
+        if (path.length === 1) {
+          this.runFbBody(frame.inst, parent, c.args, frame);
+          return undefined;
+        }
+        if (path.length === 2 && p1 && "member" in p1) {
+          const m = this.callableOf(parent.name, p1.member);
+          if (!m) throw new SimError(`${parent.name} has no METHOD ${p1.member}`, frame.block.name, c.callee.start);
+          return this.callMethod(frame.inst, m, c, frame);
+        }
+      }
       if (upper === "THIS" && p0 && "deref" in p0 && p1 && "member" in p1 && path.length === 2 && frame?.inst) {
         const m = this.callableOf(frame.inst.__fb, p1.member);
         if (!m) throw new SimError(`${frame.inst.__fb} has no METHOD ${p1.member}`, frame.block.name, c.callee.start);
@@ -1982,11 +2038,12 @@ export class Simulator {
   }
 
   private bindInputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
-    const params = b ? b.vars.filter((v) => v.section === "Input" || v.section === "InOut") : [];
+    const vars = b ? this.callVars(b) : [];
+    const params = vars.filter((v) => v.section === "Input" || v.section === "InOut");
     args.forEach((a, i) => {
       // a VARIANT or ARRAY[*] parameter, an output one too, is bound to the caller's variable before the call
       const byRef = (k: string | undefined) => {
-        const d = k ? b?.vars.find((v) => v.name.toUpperCase() === k) : undefined;
+        const d = k ? vars.find((v) => v.name.toUpperCase() === k) : undefined;
         return !!d && (/^variant$/i.test(d.type.trim()) || !!splitArrayType(d.type)?.dims.some((x) => x.trim() === "*"));
       };
       if (a.out) {
@@ -2002,7 +2059,7 @@ export class Simulator {
         return;
       }
       // an input gets a copy; an IN_OUT is the caller's variable itself (by reference)
-      const inOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
+      const inOut = vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       const value = this.eval(a.value, caller);
       const d = params.find((p) => p.name.toUpperCase() === key);
       mem[key] = inOut ? value : typeof value === "number" && d && !d.isArray && /^REAL$/i.test(d.typeRef ?? d.type) ? Math.fround(value) : copyValue(value);
@@ -2036,13 +2093,14 @@ export class Simulator {
   }
 
   private bindOutputs(mem: Struct, b: BlockModel | null, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
-    const params = b ? b.vars.filter((v) => v.section === "Input" || v.section === "InOut") : [];
+    const vars = b ? this.callVars(b) : [];
+    const params = vars.filter((v) => v.section === "Input" || v.section === "InOut");
     args.forEach((a, i) => {
       const key = (a.name ?? (a.out ? undefined : params[i]?.name))?.toUpperCase();
       if (!key) return;
       const bound = mem[key];
       if (isPointer(bound) && bound.variant) return; // a VARIANT or ARRAY[*] wrote into the caller's variable itself
-      const isInOut = b?.vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
+      const isInOut = vars.some((v) => v.section === "InOut" && v.name.toUpperCase() === key);
       if ((a.out || isInOut) && a.value.k === "ref") this.write(a.value.ref, mem[key], caller);
     });
   }
@@ -2059,7 +2117,10 @@ export class Simulator {
       this.bindOutputs(inst.mem, null, args, caller);
       return;
     }
-    const b = this.block(inst.__fb);
+    this.runFbBody(inst, this.block(inst.__fb), args, caller);
+  }
+
+  private runFbBody(inst: Instance, b: BlockModel, args: { name?: string; out?: boolean; value: Expr }[], caller: Frame | null) {
     this.enter(b, () => {
       this.bindInputs(inst.mem, b, args, caller);
       const temps = this.markUnset(this.structOf(b.vars.filter((v) => v.section === "Temp"), b));
@@ -2073,8 +2134,7 @@ export class Simulator {
   /** A METHOD of a user FB: its own inputs, outputs and locals for each call; the instance's variables shared. */
   private callMethod(inst: Instance, m: BlockModel, c: Extract<Expr, { k: "call" }>, caller: Frame | null): Value {
     return this.enter(m, () => {
-      const own = this.structOf(m.vars, m);
-      Object.assign(own, this.constants(m));
+      const own = { ...this.constants(m), ...this.structOf(m.vars, m) };
       this.bindInputs(own, m, c.args, caller);
       own[m.name.toUpperCase()] = m.returnType && !/^void$/i.test(m.returnType) ? this.defaultValue({ type: m.returnType, typeRef: m.returnType, isArray: false }, m) : undefined;
       this.runBody(m, { block: m, mem: inst.mem, temps: own, inst });
@@ -2125,8 +2185,7 @@ export class Simulator {
     if (!prop.property?.[accessor])
       throw new SimError(`${prop.owner}.${prop.name} has no ${accessor.toUpperCase()}: it ${accessor === "set" ? "is read-only" : "can only be written"}`, prop.name);
     return this.enter(prop, () => {
-      const own = this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop, accessor);
-      Object.assign(own, this.constants(prop, accessor));
+      const own = { ...this.constants(prop, accessor), ...this.structOf(prop.vars.filter((v) => !v.accessor || v.accessor === accessor), prop, accessor) };
       const key = prop.name.toUpperCase();
       const decl = { type: prop.returnType ?? "INT", typeRef: prop.returnType, isArray: false };
       own[key] = accessor === "set" ? (typeof value === "number" ? fitNumber(value, decl) : value) : this.defaultValue(decl, prop);
@@ -2153,7 +2212,15 @@ export class Simulator {
           if (g.block.property) this.hasProperties = true;
         }
     }
-    return this.methods.get(`${fb}.${name}`.toUpperCase());
+    const direct = this.methods.get(`${fb}.${name}`.toUpperCase());
+    if (direct) return direct;
+    const b = this.index.global(fb)?.block;
+    if (!b?.extends?.length) return undefined;
+    for (const parent of this.ancestors(b).reverse().slice(1)) {
+      const inherited = this.methods.get(`${parent.name}.${name}`.toUpperCase());
+      if (inherited) return inherited;
+    }
+    return undefined;
   }
 
   /** One step of a standard FB; `method` is the instruction called on IEC_TIMER/IEC_COUNTER data. */

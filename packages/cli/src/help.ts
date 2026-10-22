@@ -2,6 +2,7 @@
 // Command help uses the same usage lines and option list as argument validation.
 const EXAMPLES: Record<string, string> = {
   "agent-mode": "agent-mode auto --plc PLC_1 --for 8h",
+  new: "new fb Motor --folder Line",
   setup: "setup --dry-run", check: "check --json", init: "init --project Line.ap20",
   writes: "writes off", backup: "backup", pull: "pull", sync: "sync --preview", watch: "watch", status: "status",
   session: "session --release --save",
@@ -19,6 +20,7 @@ const EXAMPLES: Record<string, string> = {
   "program-status": "program-status plc/PLC_1/blocks/Counter.scl --capture cycle.json --instance Counter_DB --json",
 };
 const VALUES: Record<string, string> = {
+  folder: "a/b", returns: "type", of: "FB",
   actions: "a,b", for: "duration",
   project: "file", tia: "version", device: "name", dir: "workspace", junit: "file", coverage: "lcov file", filter: "text", case: "file#n", file: "file", plc: "name",
   allow: "answer", agents: "names", skills: "names", editors: "names", platforms: "names", scope: "project|global",
@@ -29,6 +31,7 @@ const VALUES: Record<string, string> = {
   why: "member",
 };
 const DETAIL: Record<string, string> = {
+  folder: "folders below blocks, types or tags", returns: "FC return type (default: Void)", of: "FB for an instance DB",
   actions: "auto mode actions allowed without a dialog (default: download,write,run-stop)",
   for: "expire this agent mode after a duration such as 8h; otherwise it lasts until changed",
   "hardware.apply": "apply allowlisted offline hardware changes under revision and transaction guards; no PLC download",

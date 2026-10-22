@@ -3,7 +3,10 @@
 // Portal V20 exports for a new object of that kind, so the first sync changes nothing back. Checked by import,
 // compile and export in TIA Portal V20: an FB or FC without declarations has no sections; a DB and a UDT need one
 // member (a structure without components does not compile).
-import { addressToPath, findCaseCollisions, type ObjectKind, type TextForm } from "@rung/core";
+import { readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { deviceOfUri, type WorkspaceIndex } from "./workspace.js";
+import { addressToPath, escapeSegment, findCaseCollisions, unescapeSegment, type ObjectKind, type TextForm } from "@rung/core";
 
 export type NewKind = "FB" | "FC" | "OB" | "DB" | "UDT" | "TAGS";
 
@@ -83,4 +86,41 @@ export function newObject(req: NewObjectRequest, existing: Existing): { path: st
   const clash = findCaseCollisions([...existing.paths, path]).find(([a, b]) => a === path || b === path);
   if (clash || existing.paths.includes(path)) return { reason: `${clash ? (clash[0] === path ? clash[1] : clash[0]) : path} is already there.` };
   return { path, text: template(req.kind, name, req.returnType) };
+}
+
+/** The wizard and CLI share the PLC names and on-disk collision checks. */
+export async function workspaceNewObject(index: WorkspaceIndex, root: string, req: NewObjectRequest) {
+  // the PLC's folder as written on disk (PLC%2F1 for "PLC/1"), as the index knows it
+  let disk: string;
+  try {
+    disk = escapeSegment(req.plc);
+  } catch {
+    return { reason: `"${req.plc}" is not a PLC name.` };
+  }
+  const inPlc = index.allGlobals().filter((g) => deviceOfUri(g.uri)?.toLowerCase() === disk.toLowerCase());
+  const names = new Set(inPlc.filter((g) => g.kind === "FB" || g.kind === "FC" || g.kind === "DB" || g.kind === "OB").map((g) => g.name.toLowerCase()));
+  const types = new Set(inPlc.filter((g) => g.kind === "UDT").map((g) => g.name.toLowerCase()));
+  // tag table names are unique in the whole PLC, its software units included
+  const tables = new Set<string>();
+  for (const f of (await readdir(join(root, "plc", disk), { recursive: true }).catch(() => [] as string[])).map(String)) {
+    const m = /(?:^|[\\/])tags[\\/](?:.*[\\/])?([^\\/]+)\.tags\.(st|xml)$/i.exec(f);
+    if (!m) continue;
+    try {
+      tables.add(unescapeSegment(m[1]!).toLowerCase());
+    } catch {
+      tables.add(m[1]!.toLowerCase());
+    }
+  }
+  const draft = newObject(req, { names, types, tables, paths: [] });
+  if ("reason" in draft) return draft;
+  // the files already in its folder (a name that differs only in letter case is the same file on Windows)
+  const folder = draft.path.slice(0, draft.path.lastIndexOf("/"));
+  const siblings = (await readdir(join(root, folder)).catch(() => [] as string[])).map((f) => `${folder}/${f}`);
+  return newObject(req, { names, types, tables, paths: siblings });
+}
+
+/** Instance DB text shared by the CLI and quick fixes. */
+export function instanceDbText(db: string, fb: string, source: string): string {
+  const optimized = /S7_Optimized_Access\s*:=\s*'FALSE'/i.test(source) ? "FALSE" : "TRUE";
+  return `DATA_BLOCK "${db}"\n{ S7_Optimized_Access := '${optimized}' }\nVERSION : 0.1\nNON_RETAIN\n"${fb}"\n\nBEGIN\n\nEND_DATA_BLOCK\n`;
 }
