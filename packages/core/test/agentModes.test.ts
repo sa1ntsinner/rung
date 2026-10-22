@@ -8,8 +8,8 @@ const config = defaultConfig("fixture.ap20", "V20", "", ["PLC_1", "PLC_2"]);
 const key = workspaceModeKey(root);
 
 describe("agent mode policy", () => {
-  it("defaults unknown and real PLCs to manual", () => {
-    expect(effectiveAgentMode({}, root, "PLC_1", config).mode).toBe("manual");
+  it("without a chosen mode an agent acts like the person", () => {
+    expect(effectiveAgentMode({}, root, "PLC_1", config)).toMatchObject({ mode: "bypass", source: "default" });
   });
   it.each(["manual", "ask", "auto", "bypass"] as const)("resolves workspace %s and a PLC override", mode => {
     const store: AgentModeStore = { workspaces: { [key]: { default: { mode }, plcs: { PLC_2: { mode: "ask" } } } } };
@@ -24,15 +24,15 @@ describe("agent mode policy", () => {
     store.workspaces![key]!.plcs!.PLC_1!.previous!.expires = "2020-01-01T00:00:00Z";
     expect(effectiveAgentMode(store, root, "PLC_1", config).mode).toBe("ask");
   });
-  it("defaults PLCSIM to auto, never an IP address or vague simulation name", () => {
+  it("marks PLCSIM as the simulator source, never an IP address or vague simulation name", () => {
     const c = defaultConfig("fixture.ap20", "V20");
     c.plc.PLC_1 = { mode: "PN/IE", pcInterface: "PLCSIM Virtual Ethernet Adapter", pcInterfaceNumber: 1 };
-    expect(effectiveAgentMode({}, root, "PLC_1", c)).toMatchObject({ mode: "auto", actions: ["download", "write", "run-stop"] });
+    expect(effectiveAgentMode({}, root, "PLC_1", c)).toMatchObject({ mode: "bypass", source: "simulator" });
     c.plc.PLC_1.pcInterface = "Ethernet"; c.plc.PLC_1.address = "127.0.0.1";
-    expect(effectiveAgentMode({}, root, "PLC_1", c).mode).toBe("manual");
-    expect(effectiveAgentMode({}, root, "PLC_1", c, { simulator: true }).mode).toBe("manual");
+    expect(effectiveAgentMode({}, root, "PLC_1", c).source).toBe("default");
+    expect(effectiveAgentMode({}, root, "PLC_1", c, { simulator: true }).source).toBe("default");
     delete c.plc.PLC_1;
-    expect(effectiveAgentMode({}, root, "PLC_1", c, { simulator: true }).mode).toBe("auto");
+    expect(effectiveAgentMode({}, root, "PLC_1", c, { simulator: true }).source).toBe("simulator");
   });
   it("normalizes absolute workspace roots case insensitively only on Windows", () => {
     expect(workspaceModeKey(root + "/.")).toBe(key);

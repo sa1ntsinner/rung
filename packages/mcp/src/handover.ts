@@ -52,7 +52,7 @@ export async function handover(i: HandoverInput): Promise<string> {
   const files = await changedFiles(i.root);
   const lines: string[] = [];
   lines.push(`# Download request: ${i.device}`, "");
-  lines.push("The MCP server never downloads. By default a person starts downloads and live changes; a person may set an agent mode that permits selected actions. RUNG_READ_ONLY and read-only locks always win. Review this, then run `rung download` (it asks for the PLC name and answers TIA's questions only as allowed).", "");
+  lines.push("The MCP server never downloads; `rung download` does. An agent may run it unless the person chose an agent mode that restricts it. RUNG_READ_ONLY and read-only locks always win. Review this, then run `rung download` (it asks for the PLC name and answers TIA's questions only as allowed).", "");
   if (i.summary) lines.push("## What changed and why", "", i.summary.trim(), "");
   // three different baselines: what TIA Portal has (the state store), what the PLC runs (rung keeps no record of
   // it), and git (what was committed, which says nothing about either)

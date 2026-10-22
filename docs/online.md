@@ -303,11 +303,10 @@ accepted the operation; subsequent logic can overwrite a modified value.
 certificate, the same preview and confirmation, and the value checked like a test's `set:` (a number in a BOOL, 40000
 in an INT are refused). It has no RUN/STOP.
 
-By default a person starts downloads and live changes. A person may set an
-[agent mode](agents/modes.md) that permits selected actions. Real PLCs default to
-`manual`; reliably identified simulators default to `auto`. Noninteractive CLI
-mutation is refused unless an agent mode or the paired frontend confirmation
-protocol permits it. `RUNG_READ_ONLY` and read-only locks always win. MCP exposes no live mutation tools. Target
+A person or an agent starts live changes; the person can restrict agents with an
+[agent mode](agents/modes.md) (`manual`, `ask` or `auto`). A noninteractive CLI
+mutation by a person is refused unless the paired frontend confirmation protocol
+permits it. `RUNG_READ_ONLY` and read-only locks always win. MCP exposes no live mutation tools. Target
 `192.168.1.1` is refused before connection, including read requests.
 
 ## Alarms and CPU diagnostics

@@ -687,7 +687,7 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
   }
   const dir = resolve(io.cwd, cmd === "live"||cmd==="trace" ? ((v.dir as string | undefined) ?? ".") : (target ?? "."));
   try {
-    if (commandAction(positionals, argv) || v["confirm-stdin"]) assertHuman(io.env, commandAction(positionals, argv));
+    if (commandAction(positionals, argv)) assertHuman(io.env, commandAction(positionals, argv));
     const mutating = ["download", "upload", "confirm-delete", "rename"].includes(cmd)
       || cmd === "writes" && target === "on" || cmd === "sync" && !v.preview
       || ["hardware", "library", "alarms", "technology"].includes(cmd) && !!v.apply

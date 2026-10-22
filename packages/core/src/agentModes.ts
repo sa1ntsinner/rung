@@ -64,7 +64,8 @@ export function effectiveAgentMode(store: AgentModeStore, root: string, plc: str
   // An address, even loopback, is not evidence that a PLC is a simulator.
   const connection = config.plc[plc];
   const simulator = options.simulator && !connection || !!connection && /\bPLCSIM\b/i.test(connection.pcInterface);
-  return { plc, mode: entry?.mode ?? (simulator ? "auto" : "manual"), source: local ? "plc" : entry ? "workspace" : simulator ? "simulator" : "default",
+  // Without a chosen mode an agent acts like the person; manual, ask and auto are restrictions the person picks.
+  return { plc, mode: entry?.mode ?? "bypass", source: local ? "plc" : entry ? "workspace" : simulator ? "simulator" : "default",
     actions: entry?.actions ?? [...DEFAULT_AGENT_ACTIONS], ...(entry?.expires ? { expires: entry.expires } : {}) };
 }
 

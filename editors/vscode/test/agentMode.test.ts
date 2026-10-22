@@ -18,16 +18,19 @@ function setup(plcs = [{ plc: "PLC_1", mode: "auto", source: "workspace", action
   const mode = new AgentMode(ws as never, cli as never);
   return { mode, item, cli, ws };
 }
-it("hides manual and shows permissive modes, warning for bypass", async () => {
+it("shows the mode the person chose and hides the default", async () => {
   for (const value of ["manual", "ask", "auto", "bypass"]) {
-    const s = setup([{ plc: "PLC_1", mode: value, source: "PLC", actions: [] }]);
+    const s = setup([{ plc: "PLC_1", mode: value, source: "plc", actions: [] }]);
     await s.mode.refresh();
     expect(s.cli.capture).toHaveBeenCalledWith(["agent-mode", "--json"], expect.anything());
-    if (value === "manual") expect(s.item.hide).toHaveBeenCalled();
-    else expect(s.item.text).toContain(value);
-    expect(s.item.backgroundColor).toEqual(value === "bypass" ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined);
+    expect(s.item.text).toContain(value);
+    expect(s.item.backgroundColor).toBeUndefined();
     s.mode.dispose();
   }
+  const s = setup([{ plc: "PLC_1", mode: "bypass", source: "default", actions: [] }]);
+  await s.mode.refresh();
+  expect(s.item.hide).toHaveBeenCalled();
+  s.mode.dispose();
 });
 it("runs mode changes in a real terminal with inherited markers and a typed-name prompt", async () => {
   const s = setup();
@@ -46,7 +49,7 @@ it("runs mode changes in a real terminal with inherited markers and a typed-name
 });
 
 it.each(["exit", "json", "throw"])("keeps a warning when mode reading fails: %s", async failure => {
-  const s = setup([{ plc: "PLC_1", mode: "bypass", source: "PLC", actions: [] }]);
+  const s = setup([{ plc: "PLC_1", mode: "bypass", source: "plc", actions: [] }]);
   await s.mode.refresh();
   s.item.hide.mockClear();
   if (failure === "throw") s.cli.capture.mockRejectedValueOnce(new Error("unreadable"));

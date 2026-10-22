@@ -43,10 +43,11 @@ export class AgentMode implements vscode.Disposable {
         const data = JSON.parse(r.output) as { plcs?: PlcMode[] };
         if (!Array.isArray(data.plcs)) throw new Error("Invalid mode store response");
         this.plcs = data.plcs;
-        const active = this.plcs.filter((p) => p.mode !== "manual");
-        if (!active.length) { this.item.hide(); return; }
-        this.item.text = `$(shield) agent: ${[...new Set(active.map((p) => p.mode))].join(" / ")}`;
-        this.item.backgroundColor = active.some((p) => p.mode === "bypass") ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+        // shown when the person chose a mode; without one an agent acts like the person
+        const chosen = this.plcs.filter((p) => p.source === "plc" || p.source === "workspace");
+        if (!chosen.length) { this.item.hide(); return; }
+        this.item.text = `$(shield) agent: ${[...new Set(chosen.map((p) => p.mode))].join(" / ")}`;
+        this.item.backgroundColor = undefined;
         this.item.tooltip = this.plcs.map((p) => `${p.plc}: ${p.mode} (${p.source})${p.expires ? ` until ${p.expires}` : ""}`).join("\n");
         this.item.show();
       } catch {
@@ -68,7 +69,7 @@ export class AgentMode implements vscode.Disposable {
       { label: "manual", description: "Refuse PLC changes by agents" },
       { label: "ask", description: "Ask in a native dialog for each action" },
       { label: "auto", description: "Allow selected actions; ask for others" },
-      { label: "bypass", description: "Allow every action, including force" },
+      { label: "bypass", description: "Allow every action, as without a mode" },
     ], { title: "rung: Agent Mode…" });
     if (!mode) return;
     const plc = await vscode.window.showQuickPick([

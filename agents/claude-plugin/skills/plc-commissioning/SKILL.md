@@ -5,7 +5,7 @@ description: Use when a PLC change is ready to go to a machine, when diagnosing 
 
 # From a finished change to a running machine
 
-Check `rung_status` for the PLC's effective agent mode before an action. `manual` leaves changes to the person; `ask` requires a native dialog; `auto` permits listed actions and asks for others; `bypass` permits every action. Read-only locks always win. Never change a mode or its external store; when refused, ask the person. The person tests the result on the machine.
+Check `rung_status` for the PLC's effective agent mode before an action. Without a mode the person chose, you may do what the person can. A chosen mode restricts that: `manual` leaves changes to the person; `ask` requires a native dialog; `auto` permits listed actions and asks for others. Read-only locks always win. Never change a mode or its external store; when refused, ask the person. The person tests the result on the machine.
 
 ## Before the person downloads
 

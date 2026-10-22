@@ -4,7 +4,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { randomUUID } from "node:crypto";
-import { AGENT_ACTIONS, AGENT_MODES, activeAgentEntry, agentModesPath, assertPlcWritable, formatAgentModes, loadConfig, readAgentModes, workspaceAgentModes, workspaceModeKey, WorkspaceError, writeFileAtomic,
+import { AGENT_ACTIONS, AGENT_MODES, activeAgentEntry, effectiveAgentMode, agentModesPath, assertPlcWritable, formatAgentModes, loadConfig, readAgentModes, workspaceAgentModes, workspaceModeKey, WorkspaceError, writeFileAtomic,
   type AgentAction, type AgentMode, type AgentModeEntry, type RungConfig } from "@rung/core";
 import { findWorkspace, type Io } from "./common.js";
 import { AGENT_REFUSAL, agentRefusal, agentMarker, agentPermission, commandAction, commandTokens, type AgentScope } from "./guard.js";
@@ -62,25 +62,29 @@ async function assertAgentWritable(config: RungConfig | undefined, dir: string, 
   }
 }
 
+async function targetModes(root: string, config: RungConfig, plc: string | undefined, io: Io) {
+  const policies = await workspaceAgentModes(root, config, io.env);
+  const targets = plc ? policies.filter(p => p.plc === plc) : policies;
+  // Unknown devices cannot inherit another PLC's override.
+  if (!targets.length) targets.push(effectiveAgentMode(await readAgentModes(io.env), root, plc ?? "", config));
+  return targets;
+}
+
 export async function approveAgentAction(dir: string, action: AgentAction, plc: string | undefined, io: Io, dialog: DialogRunner = nativeAgentDialog, command = `rung ${action}`): Promise<AgentApproval | undefined> {
   const marker = agentMarker(io.env);
   if (!marker) return undefined;
   const scope = agentPermission.getStore();
   await assertAgentWritable(undefined, dir, action, plc, io, command);
   const root = await findWorkspace(dir).catch(error => {
-    if (error instanceof WorkspaceError && error.code === "NOT_A_WORKSPACE") throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
+    if (error instanceof WorkspaceError && error.code === "NOT_A_WORKSPACE") return undefined;
     throw error;
   });
+  // no workspace holds no chosen mode: the agent acts like the person
+  if (!root) return { scope: { env: io.env, root: dir, plc, action, command }, finish: async () => {} };
   const config = await loadConfig(root, { raw: true });
   await assertAgentWritable(config, root, action, plc, io, command);
   if (scope?.env === io.env && scope.action === action && workspaceModeKey(scope.root) === workspaceModeKey(root) && (!plc || scope.plc === plc)) return undefined;
-  const policies = await workspaceAgentModes(root, config, io.env);
-  const targets = plc ? policies.filter(p => p.plc === plc) : policies;
-  // Unknown devices cannot inherit another PLC's override.
-  if (!targets.length) {
-    const { effectiveAgentMode } = await import("@rung/core");
-    targets.push(effectiveAgentMode(await readAgentModes(io.env), root, plc ?? "", config));
-  }
+  const targets = await targetModes(root, config, plc, io);
   if (action === "download" && targets.some(p => p.source === "simulator" && !config.plc[p.plc])) throw new WorkspaceError("NO_TARGET", "rung simulate does not support TIA downloads; configure an explicit PLC connection first");
   const records = targets.map(policy => ({ id: randomUUID(), time: new Date().toISOString(), agent: marker, plc: policy.plc, action, mode: policy.mode,
     allowedBy: policy.mode === "manual" ? "refused" : policy.mode === "bypass" || policy.mode === "auto" && policy.actions.includes(action) ? "mode" : "dialog", command }));
@@ -121,12 +125,13 @@ export async function withAgentPermission<T>(dir: string, action: AgentAction, p
 export async function withAgentPreparation<T>(dir: string, action: AgentAction, plc: string | undefined, io: Io, run: () => Promise<T>, command?: string, audit?: { delegated: boolean }): Promise<T> {
   if (!agentMarker(io.env)) return run();
   await assertAgentWritable(undefined, dir, action, plc, io, command);
-  const root = await findWorkspace(dir).catch(() => { throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action)); });
+  const parent = agentPermission.getStore();
+  const root = await findWorkspace(dir).catch(() => undefined);
+  if (!root) return agentPermission.run({ env: io.env, root: dir, plc, action, command: command ?? parent?.command, audit: audit ?? parent?.audit }, run);
   const config = await loadConfig(root, { raw: true });
   await assertAgentWritable(config, root, action, plc, io, command);
-  const modes = (await workspaceAgentModes(root, config, io.env)).filter(p => !plc || p.plc === plc);
-  if (!modes.length || modes.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
-  const parent = agentPermission.getStore();
+  const modes = await targetModes(root, config, plc, io);
+  if (modes.some(p => p.mode === "manual")) throw new WorkspaceError("AGENT_REFUSED", agentRefusal(action));
   return agentPermission.run({ env: io.env, root, plc: plc ?? (modes.length === 1 ? modes[0]!.plc : undefined), action, command: command ?? parent?.command, audit: audit ?? parent?.audit }, run);
 }
 
@@ -139,7 +144,7 @@ export async function runAgentCommand(argv: string[], io: Io, run: () => Promise
   if (!agentMarker(io.env) || argv[0] === "guard" || argv.includes("--help") || argv.includes("-h")) return run();
   const positionals = commandTokens(argv);
   const [cmd, sub] = positionals;
-  if (cmd === "agent-mode" && sub || argv.some(t => /^--confirm-stdin(?:=|$)/.test(t))) {
+  if (cmd === "agent-mode" && sub) {
     io.stderr(`rung: AGENT_REFUSED: ${agentRefusal(commandAction(positionals, argv))}\n`); return 1;
   }
   const action = commandAction(positionals, argv);
@@ -217,15 +222,18 @@ export async function cmdAgentMode(dir: string, mode: string | undefined, option
 /** Shell hooks let the CLI enforce native consent, but never grant a manual action. */
 export async function hookModePermits(io: Io): Promise<(action: AgentAction, tokens: string[]) => boolean> {
   const root = await findWorkspace(io.cwd).catch(() => undefined);
-  if (!root) return () => false;
+  if (!root) return () => { try { assertPlcWritable(undefined, undefined, io.env); return true; } catch { return false; } };
   const config = await loadConfig(root, { raw: true });
+  const store = await readAgentModes(io.env);
   const modes = await workspaceAgentModes(root, config, io.env);
   return (_action, tokens) => {
     const plc = option(tokens, "plc") ?? option(tokens, "device");
     const selected = modes.filter(p => !plc || p.plc === plc);
+    if (!selected.length) selected.push(effectiveAgentMode(store, root, plc ?? "", config));
     const dir = option(tokens, "dir");
-    if (dir && workspaceModeKey(resolve(io.cwd, dir)) !== workspaceModeKey(root)) return false;
+    // another workspace is judged by the CLI there, with its own modes
+    if (dir && workspaceModeKey(resolve(io.cwd, dir)) !== workspaceModeKey(root)) return true;
     try { assertPlcWritable(config, plc, io.env); } catch { return false; }
-    return selected.length > 0 && selected.every(p => p.mode !== "manual");
+    return selected.every(p => p.mode !== "manual");
   };
 }

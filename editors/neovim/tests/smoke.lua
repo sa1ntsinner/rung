@@ -174,9 +174,9 @@ vim.fn.writefile({ vim.json.encode({ objects = { a = { status = "conflicted" }, 
 vim.fn.writefile({ vim.json.encode({ items = { { severity = "error" }, { severity = "error" }, { severity = "warning" } } }) }, ws .. "/.rung/diagnostics.json")
 vim.fn.writefile({ vim.json.encode({ pid = vim.fn.getpid() }) }, ws .. "/.rung/owner.json")
 check("status", status.compute(ws) == "rung ● watch · 1 conflict · 2 errors", status.compute(ws))
-check("manual mode hidden", not status.compute(ws, { plcs = { { mode = "manual" } } }):find("agent", 1, true))
-for _, mode in ipairs({ "ask", "auto", "bypass" }) do
-  check("status agent " .. mode, status.compute(ws, { plcs = { { mode = mode }, { mode = mode } } }) == "rung ● watch · 1 conflict · 2 errors · agent " .. mode)
+check("default mode hidden", not status.compute(ws, { plcs = { { mode = "bypass", source = "default" } } }):find("agent", 1, true))
+for _, mode in ipairs({ "manual", "ask", "auto", "bypass" }) do
+  check("status agent " .. mode, status.compute(ws, { plcs = { { mode = mode, source = "workspace" }, { mode = mode, source = "plc" } } }) == "rung ● watch · 1 conflict · 2 errors · agent " .. mode)
 end
 vim.fn.delete(ws .. "/rung.toml")
 

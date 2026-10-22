@@ -97,7 +97,6 @@ export async function cmdLive(dir: string, sub: string | undefined, args: string
   if (sub === "modify" || sub === "run" || sub === "stop") {
     return withAgentPreparation(dir, commandAction(["live", sub], [])!, opts.device, io, async () => {
     assertPlcWritable(undefined, undefined, io.env);
-    if (opts.confirmStdin && agentMarker(io.env)) throw new WorkspaceError("AGENT_REFUSED", "--confirm-stdin is refused for agents");
     if (!agentMarker(io.env) && !opts.confirmStdin && !io.prompt && !process.stdin.isTTY) throw new WorkspaceError("BAD_ARGUMENT", "PLC mutation requires an interactive confirmation");
     if (sub === "modify" ? args.length !== 2 : args.length !== 0) throw new WorkspaceError("BAD_ARGUMENT", "Use live modify <name> <SCL-literal>, live run or live stop");
     const ws = await findWorkspace(dir);

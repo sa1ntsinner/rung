@@ -31,7 +31,8 @@ function M.compute(root, modes)
   if errors > 0 then table.insert(parts, errors .. (errors == 1 and " error" or " errors")) end
   local seen = {}
   for _, plc in ipairs(modes and modes.plcs or {}) do
-    if plc.mode ~= "manual" and not seen[plc.mode] then
+    -- the mode the person chose; without one an agent acts like the person
+    if (plc.source == "plc" or plc.source == "workspace") and not seen[plc.mode] then
       seen[plc.mode] = true
       table.insert(parts, "agent " .. plc.mode)
     end

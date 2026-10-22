@@ -278,7 +278,7 @@ describe("PLC commands", () => {
     expect(t.out.join("")).toMatch(/download: Success/);
   });
 
-  it("a simulator agent skips the typed name but TIA questions still need --allow", async () => {
+  it("an agent downloads like the person: no typed name, TIA questions still need --allow", async () => {
     const t = setup();
     await t.run(["init"]);
     appendFileSync(t.toml, TARGET);
@@ -292,7 +292,7 @@ describe("PLC commands", () => {
     expect(t.questions).toEqual([]);
     const audit = readFileSync(join(t.dir, ".rung", "agent-actions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line)).filter(line => line.outcome !== "started");
     expect(audit.map(line => line.outcome)).toEqual([3, 0]);
-    expect(audit.every(line => line.mode === "auto" && line.allowedBy === "mode")).toBe(true);
+    expect(audit.every(line => line.mode === "bypass" && line.allowedBy === "mode")).toBe(true);
   });
 
   it("what the download says about the PLC follows the phase: before the transfer, after it, or unknown", async () => {

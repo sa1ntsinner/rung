@@ -7,12 +7,12 @@ import type { AgentAction } from "@rung/core";
 export interface AgentScope { env: Io["env"]; root: string; plc?: string; action: AgentAction; command?: string; audit?: { delegated: boolean } }
 export const agentPermission = new AsyncLocalStorage<AgentScope>();
 
-export const AGENT_REFUSAL = "PLC changes and enabling writes belong to the person. Ask the person to run the command themselves in their own terminal, or confirm in VS Code started from their terminal. Use rung_download_request to prepare a download handover.";
+export const AGENT_REFUSAL = "The person set agent mode manual: PLC changes and enabling writes stay with them. Ask the person to run the command in their own terminal or to change the mode (rung agent-mode). Use rung_download_request to prepare a download handover.";
 
 export function agentRefusal(action?: AgentAction): string {
   const names: Record<AgentAction, string> = { download: "download", write: "live write", force: "live force/unforce", "run-stop": "run/stop", "alarm-ack": "alarm acknowledgement", "writes-on": "writes on", "openness-setup": "Openness whitelist registration", bridge: "bridge" };
   if (!action) return AGENT_REFUSAL;
-  const text = AGENT_REFUSAL.replace("PLC changes and enabling writes belong", `${names[action]} belongs`);
+  const text = AGENT_REFUSAL.replace("PLC changes and enabling writes stay", `${names[action]} stays`);
   // the handover is for a download only
   return action === "download" ? text : text.replace(/ Use rung_download_request.*$/, "");
 }
@@ -29,7 +29,8 @@ export function agentMarker(env: Io["env"]): string | undefined {
 
 export function assertHuman(env: Io["env"], action?: AgentAction): void {
   const marker = agentMarker(env);
-  if (marker && agentPermission.getStore()?.env !== env) throw new WorkspaceError("AGENT_REFUSED", `${agentRefusal(action)} (agent environment: ${marker})`);
+  // the command line, the MCP server and the live broker check the agent mode first; a caller that skipped them is refused
+  if (marker && agentPermission.getStore()?.env !== env) throw new WorkspaceError("AGENT_REFUSED", `${action ? `${action}: ` : ""}an agent's PLC change goes through rung's agent mode check, and this call skipped it (agent environment: ${marker})`);
 }
 
 /** Shared by the shell hooks and CLI: keep PLC-changing command recognition here. */
@@ -69,11 +70,11 @@ export function guardCommand(command: string, permits?: (action: AgentAction, to
     if (tokens.some(token => token === "--help" || token === "-h")) continue;
     const positionals = commandTokens(tokens);
     const action = commandAction(positionals, tokens);
-    if (positionals[0] === "agent-mode" && positionals.length > 1 || tokens.some(token => /^--confirm-stdin(?:=|$)/.test(token))
-      || action && !permits?.(action, tokens)) return { allowed: false, reason: agentRefusal(action) };
+    if (positionals[0] === "agent-mode" && positionals.length > 1 || action && !permits?.(action, tokens)) return { allowed: false, reason: agentRefusal(action) };
   }
   if (/(?:^|[\s/"'])rung\/agent-modes\.toml\b/i.test(text) && !/^\s*(?:cat|type|Get-Content)\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s;&|>]+)\s*$/i.test(text)) return { allowed: false, reason: AGENT_REFUSAL };
-  if (/rung\.toml/i.test(text) && /(?:allow_writes|download|read_only|\benabled\b|\b(?:Set-Content|Add-Content|Out-File|tee|sed|perl|python|node|cp|mv|copy|move)\b|[>])/i.test(text)) return { allowed: false, reason: AGENT_REFUSAL };
+  // the locks the person chose in rung.toml; other settings are ordinary project work
+  if (/rung\.toml/i.test(text) && /\b(?:allow_writes|read_only)\b/i.test(text)) return { allowed: false, reason: AGENT_REFUSAL };
   return { allowed: true };
 }
 
@@ -82,8 +83,8 @@ export function guardHook(event: Record<string, unknown>, protocol: "claude" | "
   const input = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, unknown>;
   const file = String(input.file_path ?? input.filePath ?? input.path ?? "");
   const editing = /write|edit|replace|patch|create|delete|move|remove/i.test(String(event.tool_name ?? event.toolName ?? ""));
-  const protectedEdit = editing && (/(?:^|[\\/])(?:rung\.toml|rung[\\/]agent-modes\.toml)$/i.test(file)
-    || /rung[\\/]+agent-modes\.toml/i.test(JSON.stringify(input)));
+  const protectedEdit = editing && (/(?:^|[\\/])rung[\\/]agent-modes\.toml$/i.test(file) || /rung[\\/]+agent-modes\.toml/i.test(JSON.stringify(input))
+    || /(?:^|[\\/])rung\.toml$/i.test(file) && /\b(?:allow_writes|read_only)\b/i.test(JSON.stringify(input)));
   const result = protectedEdit ? { allowed: false, reason: AGENT_REFUSAL } : guardCommand(String(input.command ?? event.command ?? ""), permits);
   if (protocol === "cursor") return { permission: result.allowed ? "allow" : "deny", ...(result.reason ? { user_message: result.reason, agent_message: result.reason } : {}) };
   if (result.allowed) return {};

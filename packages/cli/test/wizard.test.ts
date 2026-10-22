@@ -100,28 +100,14 @@ describe("rung setup", () => {
   });
 });
 
-describe("setup shell deny policies", () => {
-  it("plans a visible safety rule for every configured agent without writing", () => {
+describe("setup and agent restrictions", () => {
+  it("writes no deny rules: only hooks that follow the agent mode the person chose", () => {
     const root = tmp();
     const home = tmp();
     const plan = planSetup({ root, scope: "project", platforms: [], agents: ["claude", "cursor", "codex", "gemini", "opencode", "copilot", "zed"], skills: [], editors: [] }, {}, home);
-    for (const name of ["Claude", "Cursor", "Codex", "Gemini", "OpenCode", "Copilot", "Zed"]) expect(plan.some(a => "why" in a && a.why.includes(name) && /deny|guard/i.test(a.why))).toBe(true);
-    expect(summarizePlan(plan).join("\n")).toMatch(/guard|deny/);
+    for (const name of ["Claude", "Cursor", "Copilot"]) expect(plan.some(a => "why" in a && a.why.includes(name) && /agent mode/i.test(a.why))).toBe(true);
+    expect(plan.some(a => "why" in a && /\bdeny\b/i.test(a.why))).toBe(false);
     expect(readdirSync(root)).toEqual([]);
-  });
-  it("keeps OpenCode shorthand permissions and emits Zed regexes that match actual commands", async () => {
-    const root = tmp();
-    writeFileSync(join(root, "opencode.json"), JSON.stringify({ permission: { bash: "ask", edit: "allow" } }));
-    const actions = planSetup({ root, scope: "project", platforms: [], agents: ["opencode", "zed"], skills: [], editors: [] }, {}, root);
-    for (const a of actions) await applyAction(a);
-    const open = JSON.parse(readFileSync(join(root, "opencode.json"), "utf8"));
-    expect(open.permission.bash["*"]).toBe("ask");
-    expect(open.permission.bash["*rung download*"]).toBe("deny");
-    expect(open.permission.edit["*"]).toBe("allow");
-    const zed = JSON.parse(readFileSync(join(root, ".zed/settings.json"), "utf8"));
-    const pattern = zed.agent.tool_permissions.tools.terminal.always_deny[0].pattern;
-    expect(new RegExp(pattern).test("rung live stop")).toBe(true);
-    expect(new RegExp(pattern).test("rung live read X")).toBe(false);
   });
   it("keeps existing hooks and deny rules, and installing twice is idempotent", async () => {
     const root = tmp();
@@ -132,7 +118,6 @@ describe("setup shell deny policies", () => {
     const config = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8"));
     expect(config.hooks.PreToolUse).toHaveLength(2);
     expect(config.hooks.PreToolUse[0].matcher).toBe("Other");
-    expect(config.permissions.deny).toContain("Bash(other:*)");
-    expect(config.permissions.deny).toContain("Bash(rung download:*)");
+    expect(config.permissions.deny).toEqual(["Bash(other:*)"]);
   });
 });

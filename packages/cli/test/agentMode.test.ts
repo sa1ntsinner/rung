@@ -38,13 +38,13 @@ async function fixture(mode: AgentMode, actions?: string[]) {
 describe("agent permission execution", () => {
   it("keeps manual refusal text and never invokes a dialog", async () => {
     const { io, root } = await fixture("manual");
-    await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/download belongs to the person/);
+    await expect(withAgentPermission(root, "download", "PLC_1", io, async () => 0, async () => { throw new Error("dialog called"); })).rejects.toThrow(/download stays with them/);
     expect(await finalRecord(root)).toMatchObject({ mode: "manual", action: "download", outcome: 1, allowedBy: "refused" });
   });
   it.each(["auto", "bypass"] as const)("allows %s once within the execution scope and audits the exit code", async mode => {
     const { io, root } = await fixture(mode);
     expect(await withAgentPermission(root, "download", "PLC_1", io, async () => { assertHuman(io.env); return 7; }, async () => { throw new Error("dialog called"); })).toBe(7);
-    expect(() => assertHuman(io.env)).toThrow(/ask the person/i);
+    expect(() => assertHuman(io.env)).toThrow(/agent mode check/i);
     expect(await finalRecord(root)).toMatchObject({ agent: "RUNG_AGENT", plc: "PLC_1", action: "download", mode, allowedBy: "mode", outcome: 7 });
   });
   it("audits only actions on a PLC, not the commands that read (status, pull)", async () => {
