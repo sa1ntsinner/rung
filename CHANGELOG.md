@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.3 (not published yet)
+
+This release comes from working on open-source PLC projects with rung (traffic lights, an oven PID library, a MySQL client, OSCAT and a building services library for TwinCAT, a collection of SCL sources, a Factory IO line in LAD, STEP 7 Classic STL functions) and from two projects started from nothing through rung. What got in the way there is fixed here.
+
+**Starting and checking a project**
+- `rung init --new --project <dir>/<name>/<name>.ap20 --cpu <order number>` makes a new project with one CPU, the newest firmware TIA Portal has for it; writes are on, since nothing in it is anyone's yet.
+- `rung lint` runs the language server's checks in a terminal or CI without TIA Portal: exit 1 on errors, `--max-warnings <n>`, a summary line, `--json`.
+- `rung split` turns a source with several objects (TIA's *Generate source*, a library) into one file per object, named after it. The editor flags such a file, a file named after another object, and a block defined twice in one PLC.
+- A call through an instance DB that does not exist yet (`"Belt_DB"(Start := …)`) is a warning naming the FB whose parameters fit, with a quick fix that writes the DB. An FB called without an instance, a timer called without IN or PT, and a TIME compared with a number are flagged as TIA Portal would.
+- `rung upgrade` and an export of an uncompiled block say to compile first. `.ap15_1` and `.zap15_1` are read as V15.1.
+
+**Sync**
+- Data types named without quotes (`buf : BufferUDT;`) order the sync like quoted ones, so a type reaches TIA Portal before the blocks that use it.
+- After creating a block, sync says once that TIA Portal wrote it back in its own layout and that `rung format` lays out a new file that way.
+- A file in another language than TIA Portal's object (Main.scl for a LAD Main) says how to switch: `rung confirm-delete` the old one, then sync creates it from the new file.
+
+**Tests and simulator**
+- STL: `SAVE` and the BR bit, an FC's ENO, local data bits (`L 0.0`), `TAK`, and references of STL operands for the editor and the stub check. A test can expect an FC's `ENO`, also from `ENO := FALSE;` in SCL.
+- LAD counters on IEC_COUNTER data (`"Counter".CTU`), `#"quoted"` locals in SIMATIC SD, `#t.TON(...)` on a TON_TIME instance.
+- `x AT y` views share one memory in the standard S7 layout; the SHA-256 of a MySQL client now gives the FIPS digests. Typed instructions of older SCL (`CEIL_DINT`, `ROR_DWORD`, `LIMIT_INT` …), `HTA`, `Strg_TO_Chars`, `Chars_TO_Strg` and `#str[i]` run.
+- Program_Alarm needs no stub; a test can expect its signal. A stub's named parameters are the outputs of an STL `CALL` to a block nothing describes.
+- IEC sources (TwinCAT, CODESYS): name lists, FB start values, `STRING(n)`, namespaces, PERSISTENT, type aliases, interfaces and EXTENDS parse; an interface variable binds to the FB assigned to it.
+- Test keys in TIA's quoted form (`Pid."idb_PI-Control".x`), a hint when a local is written with quotes, and an `always:` step that says when it failed before any cycle ran. Renaming a member renames nested test keys; editing a test keeps its YAML comments.
+- `rung review` and `rung test --against` read the base revision with one git process, which matters on large workspaces.
+
+**Online and agents**
+- `rung live modify` works on `rung simulate`, without a certificate or the per-PLC opt-in a real PLC needs.
+- An agent's action is recorded when it starts and again when it ends; the Activity view shows one that did not finish. A refusal names the action and offers the download handover only for a download.
+
 ## 0.3.2 — 2026-10-21
 
 - TIA Portal V18: init, pull, sync, compile, cross-reference and views through a V18 bridge, with `.ap18` and `.zap18` opened as they are instead of upgraded. What V18's Openness lacks (Unified HMI, PLC users, the scan for reachable devices, library documents, SIMATIC SD) is refused with a message that names V18.
