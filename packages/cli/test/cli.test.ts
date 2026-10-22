@@ -184,6 +184,15 @@ describe("upload from a PLC (TIA Portal's Upload device as new station)", () => 
     expect(await setup().run("init", "--from-plc", "192.168.0.9")).toBe(1);
   });
 
+  it("rung init --new makes a project with one CPU, writes on, and says how Main becomes SCL", async () => {
+    const t = setup();
+    const code = await t.run("init", "--new", "--project", PROJECT, "--cpu", "6ES7 511-1AK02-0AB0");
+    expect([code, t.err.join("")]).toEqual([0, ""]);
+    const db = JSON.parse(readFileSync(t.objects, "utf8"));
+    expect(JSON.stringify(db.startArgs)).toContain('"--new-cpu","6ES7 511-1AK02-0AB0"');
+    expect(t.out.join("")).toMatch(/Writes to TIA Portal are on[\s\S]*Next: rung pull\nMain comes in LAD \(blocks\/Main\.xml\)\. For Main in SCL: .*rung confirm-delete it, then rung sync\n/);
+  });
+
   it("a station TIA Portal could not save is not a success: init --from-plc binds nothing", async () => {
     const t = setup({ FAKE_SAVE_ERROR: "There is not enough space on the disk." });
     expect(await t.run("init", "--from-plc", "192.168.0.9", "--project", PROJECT)).toBe(3);

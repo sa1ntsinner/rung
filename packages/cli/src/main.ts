@@ -334,6 +334,8 @@ async function cmdInit(dir: string, v: Record<string, unknown>, io: Io): Promise
     else if (config.sync.import === "auto")
       io.stdout("Writes to TIA Portal are off: rung pull and rung watch bring the project into files, your edits stay in the files. When you want rung to send them: rung writes on\n");
     io.stdout("Next: rung pull\n");
+    // TIA Portal makes Main in LAD; in a project of SCL it is replaced, not converted
+    if (fresh) io.stdout("Main comes in LAD (blocks/Main.xml). For Main in SCL: write blocks/Main.scl, delete Main.xml, rung confirm-delete it, then rung sync\n");
     return 0;
   } finally {
     await client.close();
