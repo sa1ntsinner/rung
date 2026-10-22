@@ -25,6 +25,9 @@ describe("temporal expectations: within, always, never", () => {
     expect(r1.cases[0]!.failures).toEqual([{ step: 4, name: "Fault", expected: true, actual: false, note: "within 1s: not reached", line: 9 }]);
     const r2 = await run("      - { always: 3s, expect: { Motor: true } }\n");
     expect(r2.cases[0]!.failures[0]).toMatchObject({ name: "Motor", expected: true, actual: false, note: "always for 3s: broken after 2.01 s" });
+    // checked before the first cycle too: right after a set: the outputs have not followed it yet, and it says so
+    const r0 = await run("      - set: { Stop: false }\n      - { always: 1s, expect: { Motor: false } }\n");
+    expect(r0.cases[0]!.failures[0]!.note).toBe("always for 1s: broken after 0 ms; it is checked before the first cycle too, and no cycle has run since the last set: (add cycle: 1 before it)");
     const r3 = await run("      - { never: 3s, expect: { Fault: true } }\n");
     expect(r3.cases[0]!.failures[0]).toMatchObject({ name: "Fault", expected: "not true", actual: true, note: "never for 3s: it was, after 2.01 s" });
   });

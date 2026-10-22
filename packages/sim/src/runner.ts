@@ -421,7 +421,14 @@ function stubProblem(seen: WorkspaceIndex, tested: string, stubs: NonNullable<Te
 const RECORD_INTERFACE = new Map<string, [string, string][]>([
   ["RDREC", [["REQ", "Bool"], ["ID", "DWord"], ["INDEX", "Int"], ["MLEN", "UInt"], ["RECORD", "Variant"], ["VALID", "Bool"], ["BUSY", "Bool"], ["ERROR", "Bool"], ["STATUS", "DWord"], ["LEN", "UInt"]]],
   ["WRREC", [["REQ", "Bool"], ["ID", "DWord"], ["INDEX", "Int"], ["LEN", "UInt"], ["RECORD", "Variant"], ["DONE", "Bool"], ["BUSY", "Bool"], ["ERROR", "Bool"], ["STATUS", "DWord"]]],
+  ["PROGRAM_ALARM", [["SIG", "Bool"], ["TIMESTAMP", "LDT"], ...Array.from({ length: 10 }, (_, i): [string, string] => [`SD_${i + 1}`, "Variant"]), ["ERROR", "Bool"], ["STATUS", "Word"]]],
 ]);
+
+/**
+ * Instructions that change nothing the program reads back, stubbed without being asked: a Program_Alarm call keeps
+ * its arguments in the instance (alarm.SIG), Error and Status stay FALSE and 0. A test's own stub replaces it.
+ */
+const IMPLICIT_STUBS: Record<string, Record<string, unknown>> = { PROGRAM_ALARM: { ERROR: false, STATUS: 0 } };
 
 /** Follow declarations, including each array dimension, rather than guessing from the stored value. */
 function declaration(seen: WorkspaceIndex, g: GlobalSymbol, name: string): Member | undefined {
@@ -546,10 +553,11 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
   const seen = scopedTo(index, g.uri);
   const stubProblemText = spec.stubs ? stubProblem(seen, g.block.name, spec.stubs) : undefined;
   if (stubProblemText) return { file, block: blockName, cases: [], error: stubProblemText };
-  const required = requiredStubs(seen, g, Object.keys(spec.stubs ?? {}));
+  const required = requiredStubs(seen, g, [...Object.keys(spec.stubs ?? {}), ...Object.keys(IMPLICIT_STUBS)]);
   if (required.length) return { file, block: blockName, cases: [], error: `stubs needed (${required.map((s) => `${s.name} ${s.reason}`).join("; ")}): write stubs: { ${required.map((s) => `${s.key}: ${s.value}`).join(", ")} }` };
   // by upper-case name, without quotes; T#... values are durations; hardware identifiers are numbers
-  const entries = Object.entries(spec.stubs ?? {}).map(([n, values]) => [n.replace(/^"|"$/g, "").toUpperCase(), values] as const);
+  const given = Object.entries(spec.stubs ?? {}).map(([n, values]) => [n.replace(/^"|"$/g, "").toUpperCase(), values] as const);
+  const entries = [...Object.entries(IMPLICIT_STUBS).filter(([n]) => !given.some(([k]) => k === n)), ...given];
   const stubs = new Map<string, Struct>(
     entries.filter(([n]) => !n.includes("~")).map(([n, values]) => [n, Object.fromEntries(Object.entries(values ?? {}).map(([k, v]) => [k.toUpperCase(), normalizeExpected(v, stubInterface(seen, n)?.get(k.toUpperCase())?.type) as Value]))]),
   );
@@ -637,7 +645,10 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       }
       return walk(getMem(), root, path);
     };
+    // a set: since the last cycle: the block has not seen those values yet
+    let setSinceCycle = false;
     const runCycle = () => {
+      setSinceCycle = false;
       sim.time += cycleMs;
       if (isFb) sim.callBlock(inst!);
       else {
@@ -741,6 +752,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
           if ((op === "set" || op === "expect") && !plain(arg)) throw new SimError(`${op}: write names and values, e.g. { Raw: 1 }`);
           switch (op) {
             case "set":
+              setSinceCycle = true;
               for (const [k, v] of Object.entries(arg as Record<string, unknown>)) {
                 let target: ReturnType<typeof resolve>;
                 try {
@@ -798,7 +810,8 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
                 const after = elapsed(i * cycleMs);
                 if (op === "within" && !now.length) done = true;
                 else if (op === "always" && now.length) {
-                  failures.push(...now.map((f) => ({ ...f, note: `always for ${span}: broken after ${after}` })));
+                  const unseen = i === 0 && setSinceCycle ? "; it is checked before the first cycle too, and no cycle has run since the last set: (add cycle: 1 before it)" : "";
+                  failures.push(...now.map((f) => ({ ...f, note: `always for ${span}: broken after ${after}${unseen}` })));
                   done = true;
                 } else if (op === "never" && !now.length) {
                   // what it should never be, it was

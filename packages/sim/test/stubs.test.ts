@@ -80,6 +80,13 @@ describe("rung test stubs", () => {
     ]);
   });
 
+  it("a Program_Alarm needs no stub: its arguments stay in the instance, Error and Status FALSE and 0", async () => {
+    const idx = workspace();
+    idx.set("file:///w/plc/P/blocks/Fx_Alarm.scl", fb("Fx_Alarm", "VAR_INPUT\n  hot : Bool;\nEND_VAR\nVAR_OUTPUT\n  err : Bool;\nEND_VAR\nVAR\n  al : Program_Alarm;\nEND_VAR", "  #al(SIG := #hot);\n  #err := #al.Error;"), 0);
+    const r = await runTestFile(idx, "t.yaml", "block: Fx_Alarm\ncases:\n  - name: one\n    steps:\n      - set: { hot: true }\n      - cycle: 1\n      - expect: { al.SIG: true, err: false }\n");
+    expect([r.error, r.cases.map((c) => [c.passed, c.error, c.failures])]).toEqual([undefined, [[true, undefined, []]]]);
+  });
+
   it("stubs a technology object: its members are readable and settable, and a call can pass it on", async () => {
     const r = await runTestFile(workspace(), "t.yaml", test("Fx_Drive", "  '\"Fx_Axis\"': { StatusWord: 33 }\n  MC_POWER: { Status: true }", "      - cycle: 1\n      - expect: { ready: true, status: 33, pw.Enable: true }\n      - set: { '\"Fx_Axis\".StatusWord': 1 }\n      - cycle: 1\n      - expect: { status: 1 }\n"));
     expect(r.cases.map((c) => [c.passed, c.error, c.failures])).toEqual([[true, undefined, []]]);

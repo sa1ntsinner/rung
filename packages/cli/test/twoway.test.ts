@@ -144,7 +144,7 @@ describe("two-way CLI", () => {
     const out: string[] = [];
     printReport({ cwd: t.dir, env: {}, stdout: (s) => out.push(s), stderr: () => {} }, { exported: 1000, imported: 0, created: 0, merged: 0, conflicts: 0, pendingDeletes: 0, removed: 0, unchanged: 0, warnings: [], diagnostics: [], changes: Array.from({ length: 1000 }, (_, i) => ({ path: `plc/PLC_1/blocks/F${i}.scl`, action: "export" as const })) });
     expect(out.join("").match(/← TIA/g)).toHaveLength(8);
-    expect(out.join("")).toContain("992 more files (1000 moved");
+    expect(out.join("")).toContain("992 more files (1000 in all");
     // a clean compile of hundreds of new blocks names a few, not all of them on one line
     const compiled: string[] = [];
     printReport({ cwd: t.dir, env: {}, stdout: (s) => compiled.push(s), stderr: () => {} }, { exported: 0, imported: 0, created: 600, merged: 0, conflicts: 0, pendingDeletes: 0, removed: 0, unchanged: 0, warnings: [], diagnostics: [], compiled: Array.from({ length: 600 }, (_, i) => `plc:PLC_1/blocks/FB_${i}`) });

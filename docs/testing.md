@@ -56,7 +56,7 @@ In VS Code's Live Values, pin an FB's inputs and outputs through its instance DB
 
 ## Over time: within, always, never
 
-A machine's promises are about time: the motor runs no later than 2 s after start, the alarm holds for 5 s, the valve never opens while stopped. A step with `within`, `always` or `never` checks its `expect:` after every cycle for that long:
+A machine's promises are about time: the motor runs no later than 2 s after start, the alarm holds for 5 s, the valve never opens while stopped. A step with `within`, `always` or `never` checks its `expect:` as things are when the step starts, then after every cycle for that long (after a `set:`, run a `cycle: 1` first when the outputs must already follow it):
 
 ```yaml
       - { within: 2s, expect: { Motor: true } }      # true at some cycle within 2 s (then the next step)
@@ -112,6 +112,7 @@ cases:
 - **An FC or instruction** named there returns `RET_VAL` from the stub, or else 0 (for a workspace FC: its type's default). It writes the outputs the stub names; an output it does not name keeps the caller's value.
 - **A technology object**, named with its quotes, has the members the stub names. They are readable and settable (`'"Axis_1".StatusWord'`), and the object can be called like an instance.
 - **A data block the workspace does not have** (often a library or system FB's instance DB that was not exported, such as a PID's), named with its quotes, has the members the stub names, readable and settable (`'"Pid_Steer".ER'`). Without a stub the error says how to give one.
+- **Program_Alarm** needs no stub: a call keeps its arguments in the instance, so a test can expect the alarm's signal (`faultAlarm.SIG: true`); Error and Status stay FALSE and 0. A stub of its own replaces that.
 - **A hardware identifier** (`"Rack~Gateway"`, a system constant) has no value offline. The test gives it one, a number, where the code passes it on (to a stubbed RDREC, for example).
 - **Only what is named is stubbed.**
   - `rung test` prints once per file what the stubs stood in for (`stubbed: RDREC ×2, MB_CLIENT`), and marks a stub of code the simulator could run itself ("replaces code the simulator runs"). This is allowed, to test one unit alone.
