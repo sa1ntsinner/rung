@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.3 (not published yet)
+## 0.3.3 — 2026-10-22
 
 This release comes from working on open-source PLC projects with rung (traffic lights, an oven PID library, a MySQL client, OSCAT and a building services library for TwinCAT, a collection of SCL sources, a Factory IO line in LAD, STEP 7 Classic STL functions) and from two projects started from nothing through rung. What got in the way there is fixed here.
 

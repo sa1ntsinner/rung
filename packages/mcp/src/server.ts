@@ -176,7 +176,7 @@ const sourceHash = async (root: string, index: WorkspaceIndex) => {
 };
 
 export function createMcpServer(ctx: McpContext): McpServer {
-  const server = new McpServer({ name: "rung", version: "0.3.2" }, { instructions: SAFETY_RULES });
+  const server = new McpServer({ name: "rung", version: "0.3.3" }, { instructions: SAFETY_RULES });
   let lastSync: SyncReport | undefined;
   const syncResult = (report: SyncReport) => {
     lastSync = report;

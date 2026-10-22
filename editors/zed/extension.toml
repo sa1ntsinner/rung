@@ -1,6 +1,6 @@
 id = "rung"
 name = "rung"
-version = "0.3.2"
+version = "0.3.3"
 schema_version = 1
 authors = ["Elmir Mirzayev"]
 description = "Siemens SCL and TIA Portal projects in Zed with rung: completion, definitions, references, rename, TIA compile errors on their line, run buttons for compile, test and download, and snippets. Uses rung from PATH, or installs it from npm (@rung-plc/cli)."

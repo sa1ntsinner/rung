@@ -67,7 +67,7 @@ import { cmdAgentMode, runAgentCommand } from "./agentMode.js";
 
 export type { Io } from "./common.js";
 
-export const VERSION = "0.3.2";
+export const VERSION = "0.3.3";
 
 export const HELP = `rung ${VERSION} — PLC-as-code for Siemens TIA Portal
 
