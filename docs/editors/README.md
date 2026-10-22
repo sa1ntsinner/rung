@@ -48,7 +48,7 @@ Keys: `alt+q` and then a letter, the same letters as in Zed below: `s` sync, `w`
 
 ## Zed
 
-Zed → Extensions → install **Siemens SCL**. Until it is listed there: *Install Dev Extension* → choose `editors/zed` (needs Rust via rustup on PATH). The extension gives you:
+Zed → Extensions → install **rung**. Until it is listed there: *Install Dev Extension* → choose `editors/zed` (needs Rust via rustup on PATH). The extension gives you:
 
 - SCL highlighting, outline and the rung language server for `.scl`, `.db`, `.udt` and `.s7dcl`.
 - The debugger for test cases (`rung debug`): breakpoints in SCL, stepping, step back, variables. Add a scenario to `.zed/debug.json` (`examples/conveyor/.zed/debug.json` is one: `"adapter": "rung", "test": "$ZED_FILE", "case": 0`) and start it from a test file with the debugger panel.

@@ -4,7 +4,7 @@ rung turns a Siemens TIA Portal project into a folder of text files that stays i
 
 **In five minutes, in VS Code:** install the **rung** extension (it brings rung with it) → the rung view's **Environment** section checks this
 PC; do what it says once (the Openness group, `rung setup openness`) → **rung: Open TIA Project…** →
-choose your `.ap20` (or `.ap19`, `.ap21`, a `.zap` archive) and an empty folder. rung opens the project in a TIA Portal
+choose your `.ap20` (or `.ap18`, `.ap19`, `.ap21`, a `.zap` archive) and an empty folder. rung opens the project in a TIA Portal
 without window, mirrors it into the folder and starts watching. Look around; when you want your edits to go to TIA
 Portal, turn on *Writes to TIA Portal* in the PLC view. The rest of this page is the same, step by step and from the
 command line.
@@ -41,7 +41,7 @@ It installs the VS Code extension, adds rung's MCP server to the agents it finds
 
 ## 3. Mirror a project
 
-In VS Code, run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap19`, `.ap20` or `.ap21` file, or an archive (`.zap20` and so on): rung retrieves an archive into a folder next to it first (`Line3.zap20` → `Line3\Line3.ap20`; an archive older than V19 with upgrade, by V20). rung checks TIA Portal and Openness, initializes the mirror folder, pulls the files and starts watch. It uses the open folder, or asks you to choose one.
+In VS Code, run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap18`, `.ap19`, `.ap20` or `.ap21` file, or an archive (`.zap20` and so on): rung retrieves an archive into a folder next to it first (`Line3.zap20` → `Line3\Line3.ap20`; an archive older than V19 with upgrade, by V20). rung checks TIA Portal and Openness, initializes the mirror folder, pulls the files and starts watch. It uses the open folder, or asks you to choose one.
 
 For another Windows PC, choose **TIA Portal on another PC (ssh)…**. Enter the SSH destination (for example `engineer@tia-pc`) and the Windows project path on that PC. It needs key-based SSH login, rung on PATH and `rung setup openness` run there once ([setup](remote.md)). The files stay in your local mirror folder.
 

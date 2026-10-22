@@ -1,6 +1,16 @@
 # rung for VS Code
 
-SCL editing and TIA Portal sync for [rung](https://github.com/sa1ntsinner/rung). The extension is a front end for the `rung` CLI: every button runs a `rung` command, so what you do here is what you would type in a terminal.
+**Write Siemens SCL in VS Code and keep your TIA Portal project in step.**
+
+rung brings your blocks, data types and tag tables into a folder of text files. Edit them with completion, go to definition, find usages and rename; save, and TIA Portal compiles the change and its errors show on the line. Changes made in TIA Portal come back to the files. Put a unit test next to a block and run it on your PC, without a PLC.
+
+**Try it without TIA Portal**: run a test in your browser on the [playground](https://sa1ntsinner.github.io/rung/#play), or open the [conveyor example](https://github.com/sa1ntsinner/rung/tree/main/examples/conveyor) and run its tests from the Testing view. Editing and tests work on Windows, Linux and macOS.
+
+**Use your TIA project**: Windows, your own licensed TIA Portal V18–V21 with Openness. Run **rung: Open TIA Project…**; the Environment view checks what is missing. The extension brings rung with it, nothing else to install.
+
+Questions or something not working: [Discussions](https://github.com/sa1ntsinner/rung/discussions), **rung: Report a Problem…** (you see the report before you share it), or rungprojectplc@gmail.com.
+
+The extension is MIT licensed; the rung core it brings is BUSL-1.1, free for individual use and the other cases in [pricing](https://github.com/sa1ntsinner/rung/blob/main/docs/pricing.md).
 
 ## What you get
 
@@ -49,7 +59,7 @@ A `rung` you installed yourself wins when it is on PATH. To use another one, poi
 "rung.command": ["node", "C:/path/to/rung/packages/cli/dist/index.js"]
 ```
 
-No `rung.toml` yet? Run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap19`, `.ap20` or `.ap21` file. rung checks TIA Portal and Openness, runs `rung init --project <file>`, pulls the files and starts watch. It uses the open folder, or asks you to choose a mirror folder.
+No `rung.toml` yet? Run **rung: Open TIA Project…** from the command palette or the Project view. Choose **TIA Portal on this PC** and a `.ap18`, `.ap19`, `.ap20` or `.ap21` file. rung checks TIA Portal and Openness, runs `rung init --project <file>`, pulls the files and starts watch. It uses the open folder, or asks you to choose a mirror folder.
 
 For a remote Windows PC, choose **TIA Portal on another PC (ssh)…** and enter the SSH destination and the Windows project path there. The PC needs key-based SSH login, rung on PATH and `rung setup openness` run there once. The mirror stays local. The last host is remembered; `rung.remote.host` supplies a default. See [remote setup](../../docs/remote.md).
 

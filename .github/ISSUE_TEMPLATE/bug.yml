@@ -1,0 +1,28 @@
+name: Something behaved wrong
+description: A sync, compile, test, download or editor feature did something you did not expect.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: The command or button, the output, and the file it was about.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest case you can share. A made-up FB with the same shape is enough; please do not post code you may not share.
+  - type: textarea
+    id: report
+    attributes:
+      label: rung report (optional)
+      description: Output of `rung report` (versions and checks, no project code).
+      render: text

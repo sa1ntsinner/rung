@@ -152,7 +152,7 @@ export function planSetup(c: Choices, env: Record<string, string | undefined>, h
       const vsix = [installRoot(env) && join(installRoot(env)!, "editors", "rung-scl.vsix"), devPath("../../../editors/vscode/rung-scl.vsix")].find((f): f is string => !!f && existsSync(f));
       actions.push(vsix ? { kind: "run", command: "code", args: ["--install-extension", vsix, "--force"], why: "VS Code: install the rung extension" } : { kind: "note", text: "VS Code: rung-scl.vsix not found in this installation; see the editors guide." });
     }
-    if (e === "zed") actions.push({ kind: "note", text: "Zed: Extensions → install Siemens SCL (until it is listed: Install Dev Extension → the rung editors/zed folder, needs Rust via rustup). Guide: " + LINKS.rungEditors });
+    if (e === "zed") actions.push({ kind: "note", text: "Zed: Extensions → install rung (until it is listed: Install Dev Extension → the rung editors/zed folder, needs Rust via rustup). Guide: " + LINKS.rungEditors });
     if (e === "neovim") actions.push({ kind: "note", text: "Neovim: copy the lspconfig snippet from the editors guide: " + LINKS.rungEditors });
   }
   return actions;

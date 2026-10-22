@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/sa1ntsinner/rung/discussions
+    about: How do I…, does rung fit my project, what should it do next.
+  - name: Email
+    url: mailto:rungprojectplc@gmail.com
+    about: For anything you would rather not post in public.

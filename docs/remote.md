@@ -36,6 +36,6 @@ When nothing answers, rung says so and what to check: that `ssh <host>` logs in 
 
 ## From VS Code
 
-Run **rung: Open TIA Project…**, choose **TIA Portal on another PC (ssh)…**, then enter the SSH destination and the Windows project path (`.ap19`, `.ap20` or `.ap21`). The last destination is remembered; `rung.remote.host` supplies a default. rung checks TIA Portal and Openness on that PC before opening the project. Register Openness with `rung setup openness` on the Windows PC if prompted.
+Run **rung: Open TIA Project…**, choose **TIA Portal on another PC (ssh)…**, then enter the SSH destination and the Windows project path (`.ap18`, `.ap19`, `.ap20` or `.ap21`). The last destination is remembered; `rung.remote.host` supplies a default. rung checks TIA Portal and Openness on that PC before opening the project. Register Openness with `rung setup openness` on the Windows PC if prompted.
 
 The mirror uses your open local folder, or asks you to choose one. rung initializes it, pulls the project files and starts Watch as for a local project. Project writes stay off. **Open in TIA Portal** still needs an interactive desktop on the Windows PC; SSH does not provide one.

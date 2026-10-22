@@ -1,14 +1,14 @@
 # How rung compares
 
-A snapshot of public information as of September 2026: product pages, documentation and published code. Check the vendors' sites for current details.
+A snapshot of public information as of October 2026: product pages, documentation and published code. Check the vendors' sites for current details.
 
 | | rung | T-IA Connect | Siemens (VCI, SIMATIC SD, Eigen, AX) | Copia | Octoplant | TIA MCP servers (TiaCommander and open ones) | CODESYS's own tools |
 |---|---|---|---|---|---|---|---|
-| PLC platforms | TIA Portal V20, CODESYS V3.5; TwinCAT sources for the language server and tests | TIA Portal V17–V21 | TIA Portal; AX for new projects | Many vendors | Many vendors | TIA Portal | CODESYS |
+| PLC platforms | TIA Portal V18–V21, CODESYS V3.5; TwinCAT sources for the language server and tests | TIA Portal V17–V21 | TIA Portal; AX for new projects | Many vendors | Many vendors | TIA Portal | CODESYS |
 | Project as text | A continuous two-way mirror: three-way merge (by line, and by network for LAD/FBD), conflicts, crash recovery | Import on save, export back; a concurrent change asks overwrite or cancel | VCI export and import; SD text for LAD, DB, UDT | Exported into Git by a desktop app | Backups and versions | On demand, per tool call | Git for the project (Professional Developer Edition) |
 | Editor | Any editor with LSP: VS Code, Zed, Neovim | VS Code, Cursor, Windsurf | TIA Portal; VS Code for AX | Web viewer | — | — | CODESYS |
 | Tests without a PLC | Offline simulator (SCL, LAD, FBD, STL), on any CI runner including Linux; JUnit, failures on their line in the pull request | PLCSIM Advanced | TIA Test Suite, PLCSIM | — | — | Rare | Test Manager |
-| Change review | rung Pro: interface, attributes, logic per region and per LAD network, callers affected, policy gate in your own CI | Git UI | — | Graphical diff, review comments, block-level merge | Compare, approvals, audit trail | — | Git merge |
+| Change review | `rung review` (free): interface and declarations, logic per SCL region and per LAD network, callers, data blocks, tags; rung Pro adds team review and a policy gate in your own CI | Git UI | — | Graphical diff, review comments, block-level merge | Compare, approvals, audit trail | — | Git merge |
 | AI agents | MCP for any agent; agents edit the files | MCP | Eigen Engineering Agent inside TIA Portal | — | — | MCP | MCP server |
 | Where it runs | Windows; Linux and macOS through a Windows PC over ssh | A server on Windows | Windows | Desktop app and cloud or self-hosted | Server | Windows | Windows |
 | Licence | Clients and file format MIT; core free for up to 3 users per organization; Pro commercial | Subscription | TIA Portal and separate licences | Commercial | Commercial | Proprietary free beta (TiaCommander); MIT or AGPL | Commercial editions |
@@ -20,4 +20,4 @@ Where rung is different:
 - Tests run without the engineering software or a PLC licence, in seconds, so every pull request can run them: SCL, LAD, FBD, STL and structured text, with a list of what the simulator does not model instead of a guess.
 - It does not pick your editor, your agent or your Git host. The workspace is plain files in an open format.
 
-What rung is not: a replacement for TIA Portal or CODESYS, or a way around their licences. By default a person starts downloads and live changes. A person may set an [agent mode](agents/modes.md) that permits selected actions. `RUNG_READ_ONLY` and read-only locks always win.
+What rung is not: a replacement for TIA Portal or CODESYS, or a way around their licences. Downloads and live changes are started by you or your agent; an [agent mode](agents/modes.md) restricts agents where you want that. `RUNG_READ_ONLY` and read-only locks always win.

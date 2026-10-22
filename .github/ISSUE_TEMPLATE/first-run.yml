@@ -1,0 +1,29 @@
+name: Installation or first sync
+description: rung did not install, did not find TIA Portal, or the first project did not come into the files.
+labels: ["first run"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do?
+      placeholder: Open my V20 project in VS Code and change one SCL block.
+    validations:
+      required: true
+  - type: textarea
+    id: stuck
+    attributes:
+      label: How far did you get, and what happened instead?
+      description: The step where it stopped and the message you saw. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: rung report (optional)
+      description: Run `rung report` or **rung: Report a Problem…** in VS Code. It holds versions and this PC's checks, not your project's code, names or addresses; look at it before you paste it.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: TIA Portal version, Windows version, editor
+      placeholder: TIA Portal V20 Update 2, Windows 11, VS Code 1.105

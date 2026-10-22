@@ -176,16 +176,16 @@ export async function runChecks(p: Probes): Promise<CheckItem[]> {
     ...(code ? (vsExt?.some((e) => /\.rung-scl$/i.test(e)) ? {} : { fix: "rung setup (installs the extension), or: code --install-extension rung-scl.vsix" }) : { link: LINKS.vscode }),
   });
   const zedCmd = p.which("zed") ?? (p.exists(join(p.home, "AppData", "Local", "Programs", "Zed", "Zed.exe")) ? "Zed.exe" : null);
-  // the Siemens SCL extension (rung-scl before it was in Zed's registry)
+  // the rung extension (siemens-scl was its earlier id)
   const zedHas = p.zedExtensions()?.some((e) => /^siemens-scl$|rung/i.test(e)) ?? false;
   out.push({
     id: "zed",
     group: "editor",
     name: "Zed",
     status: zedCmd ? (zedHas ? "ok" : "warn") : "missing",
-    ...(zedCmd ? { detail: zedHas ? "Siemens SCL extension installed" : "Siemens SCL extension not installed" } : {}),
+    ...(zedCmd ? { detail: zedHas ? "rung extension installed" : "rung extension not installed" } : {}),
     enables: "SCL language server, run buttons and tasks for compile, test, online, download",
-    ...(zedCmd ? (zedHas ? {} : { fix: "Zed → Extensions → install Siemens SCL (until it is listed: Install Dev Extension → editors/zed, see the editors guide)", link: LINKS.rungEditors }) : { link: LINKS.zed }),
+    ...(zedCmd ? (zedHas ? {} : { fix: "Zed → Extensions → install rung (until it is listed: Install Dev Extension → editors/zed, see the editors guide)", link: LINKS.rungEditors }) : { link: LINKS.zed }),
   });
   const nvim = p.which("nvim");
   out.push({ id: "neovim", group: "editor", name: "Neovim", status: nvim ? "ok" : "missing", enables: "SCL language server via its built-in LSP client", link: nvim ? LINKS.rungEditors : LINKS.neovim });

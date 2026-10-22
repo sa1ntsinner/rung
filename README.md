@@ -32,7 +32,14 @@
   </tr>
 </table>
 
-Try a test in your browser on the [playground](https://sa1ntsinner.github.io/rung/#play).
+TIA Portal stays the compiler and the source of truth; rung gives you the editor around it: go to definition, find usages, rename, TIA's compile errors on the line, a diff of the logic before you sync, and unit tests that run without a PLC.
+
+**Two ways to start**
+
+- **Without TIA Portal**, on Windows, Linux or macOS: try a test in your browser on the [playground](https://sa1ntsinner.github.io/rung/#play), or open the [conveyor example](examples/conveyor) and run `npx -y @rung-plc/cli test` in it (Node.js 22 or later).
+- **With your TIA project**: Windows, your own TIA Portal V18–V21 licence and Openness. Install the extension below and run **rung: Open TIA Project…**. Setting up Openness the first time means adding your Windows user to a group and signing in again; after that the first sync of a project takes a few minutes.
+
+Stuck somewhere, or something does not work as you expected? Ask in [Discussions](https://github.com/sa1ntsinner/rung/discussions), open an [issue](https://github.com/sa1ntsinner/rung/issues/new/choose), or write to rungprojectplc@gmail.com.
 
 ## Install
 
@@ -40,7 +47,7 @@ Try a test in your browser on the [playground](https://sa1ntsinner.github.io/run
 code --install-extension sa1ntsinner.rung-scl
 ```
 
-The extension brings rung with it. Run **rung: Open TIA Project…** and pick your `.ap19`, `.ap20` or `.ap21`. Your Windows user has to be in the group "Siemens TIA Openness"; `rung check` tells you what is missing.
+The extension brings rung with it. Run **rung: Open TIA Project…** and pick your `.ap18`, `.ap19`, `.ap20` or `.ap21`. Your Windows user has to be in the group "Siemens TIA Openness"; `rung check` tells you what is missing.
 
 <details>
 <summary>Command line</summary>

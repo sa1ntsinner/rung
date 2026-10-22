@@ -1,7 +1,7 @@
 {
   "name": "rung-scl",
   "displayName": "rung: SCL and TIA Portal sync",
-  "description": "Siemens SCL language support and two-way TIA Portal sync, compile, online and download through the rung CLI.",
+  "description": "Write Siemens SCL in VS Code: two-way TIA Portal sync, TIA compile errors on the line, unit tests without a PLC, online values and download.",
   "version": "0.3.2",
   "publisher": "sa1ntsinner",
   "license": "MIT",
