@@ -17,6 +17,8 @@ export function testSymbols(model: DeclModel): TestSymbol[] {
   const out: TestSymbol[] = [];
   const ret = model.block?.returnType;
   if (model.block?.kind === "FC" && ret && !/^void$/i.test(ret)) out.push({ name: model.block.name, type: ret, section: "Return" });
+  // an FC's enable output (ENO := FALSE in SCL, SAVE in STL), which its test can expect
+  if (model.block?.kind === "FC") out.push({ name: "ENO", type: "Bool", section: "Return" });
   const walk = (rows: DeclRow[], prefix: string, section: string) => {
     for (const r of rows) {
       const name = prefix + r.name;

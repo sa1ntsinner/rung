@@ -33,9 +33,9 @@ describe("testSymbols", () => {
   it("lists inputs, outputs and statics with struct members, never temporaries", () => {
     expect(testSymbols(model).map((s) => `${s.section}:${s.name}:${s.type}`)).toEqual(["Input:Start:Bool", "Output:Running:Bool", "Static:Cfg.Speed:Real", "Static:Timer:TON_TIME"]);
   });
-  it("an FC's return value is a symbol under the block's name", () => {
+  it("an FC's return value is a symbol under the block's name, its ENO one of its own", () => {
     const fc = 'FUNCTION "Calc" : Int\n   VAR_INPUT\n      a : Int;\n   END_VAR\nBEGIN\nEND_FUNCTION\n';
-    expect(testSymbols(declarationModel("u", 1, fc, parse(fc))).map((s) => s.name)).toEqual(["Calc", "a"]);
+    expect(testSymbols(declarationModel("u", 1, fc, parse(fc))).map((s) => s.name)).toEqual(["Calc", "ENO", "a"]);
   });
 });
 
