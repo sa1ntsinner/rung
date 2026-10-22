@@ -6,7 +6,7 @@ import { lex } from "./lexer.js";
 import type { BlockModel, Ref } from "./parser.js";
 import { deviceOfUri, scopedTo, tagTableFor, type WorkspaceIndex } from "./workspace.js";
 import { TYPE_BITS, assignmentList } from "./assignments.js";
-import { calledWithoutInstance, scopeDecl, unknownMember } from "./features.js";
+import { calledWithoutInstance, instanceCandidates, scopeDecl, unknownMember } from "./features.js";
 import { nearest } from "./nearest.js";
 import { callSites, defaultArgument, missingParams, unknownArgs } from "./calls.js";
 
@@ -20,7 +20,7 @@ export interface EditAt {
 export interface QuickFix {
   title: string;
   /** Diagnostic code the fix answers. */
-  code: "UNDECLARED" | "NO_INSTANCE" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER" | "UNKNOWN_GLOBAL" | "UNKNOWN_MEMBER";
+  code: "UNDECLARED" | "NO_INSTANCE" | "NO_INSTANCE_DB" | "UNKNOWN_PARAMETER" | "MISSING_PARAMETER" | "UNKNOWN_GLOBAL" | "UNKNOWN_MEMBER";
   edits: EditAt[];
   /** A new file (an instance DB); rung sync creates it in TIA Portal. */
   create?: { uri: string; text: string };
@@ -40,6 +40,8 @@ export function codeActions(index: WorkspaceIndex, uri: string, start: number, e
       if (ref.end < start || ref.start > end) continue;
       if (ref.kind === "local" && !scopeDecl(index, uri, block, ref.name, ref.start) && ref.name.toUpperCase() !== block.name.toUpperCase()) out.push(...declareFixes(index, doc.text, uri, block, ref));
       if (calledWithoutInstance(index, ref)) out.push(...instanceFixes(index, doc.text, uri, block, ref));
+      for (const fb of instanceCandidates(index, doc.text, ref))
+        out.push({ title: `Create "${ref.name}" as an instance DB of "${fb}"`, code: "NO_INSTANCE_DB", edits: [], create: instanceDb(index, uri, ref.name, fb), preferred: true });
       if (canBeATag(index, ref)) out.push(...tagFixes(index, doc.text, uri, block, ref));
     }
   }
@@ -81,16 +83,11 @@ function instanceFixes(index: WorkspaceIndex, text: string, uri: string, block: 
   const fixes: QuickFix[] = [];
   let db = `${fb}_DB`;
   for (let i = 1; index.global(db); i++) db = `${fb}_DB_${i}`;
-  const fbDoc = index.docs.get(index.global(fb)!.uri)?.text ?? "";
-  const optimized = /S7_Optimized_Access\s*:=\s*'FALSE'/i.test(fbDoc) ? "FALSE" : "TRUE";
   fixes.push({
     title: `Create the instance DB "${db}" and call "${fb}" through it`,
     code: "NO_INSTANCE",
     preferred: true,
-    create: {
-      uri: uri.slice(0, uri.lastIndexOf("/") + 1) + encodeURIComponent(escapeSegment(db)) + ".db",
-      text: `DATA_BLOCK "${db}"\n{ S7_Optimized_Access := '${optimized}' }\nVERSION : 0.1\nNON_RETAIN\n"${fb}"\n\nBEGIN\n\nEND_DATA_BLOCK\n`,
-    },
+    create: instanceDb(index, uri, db, fb),
     edits: [{ uri, start: ref.start, end: ref.end, newText: `"${db}"` }],
   });
   if (block.kind === "FB") {
@@ -103,6 +100,16 @@ function instanceFixes(index: WorkspaceIndex, text: string, uri: string, block: 
     });
   }
   return fixes;
+}
+
+/** A new instance DB file of `fb`, next to `uri`, with the FB's memory layout. */
+function instanceDb(index: WorkspaceIndex, uri: string, db: string, fb: string): { uri: string; text: string } {
+  const fbDoc = index.docs.get(index.global(fb)!.uri)?.text ?? "";
+  const optimized = /S7_Optimized_Access\s*:=\s*'FALSE'/i.test(fbDoc) ? "FALSE" : "TRUE";
+  return {
+    uri: uri.slice(0, uri.lastIndexOf("/") + 1) + encodeURIComponent(escapeSegment(db)) + ".db",
+    text: `DATA_BLOCK "${db}"\n{ S7_Optimized_Access := '${optimized}' }\nVERSION : 0.1\nNON_RETAIN\n"${fb}"\n\nBEGIN\n\nEND_DATA_BLOCK\n`,
+  };
 }
 
 /** A "name" the workspace does not know, used as a value: TIA Portal's "Define tag" makes it a PLC tag. */

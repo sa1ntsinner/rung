@@ -67,6 +67,31 @@ export function calledWithoutInstance(index: WorkspaceIndex, ref: Ref): boolean 
   return ref.kind === "global" && ref.access === "call" && !ref.members.length && index.global(ref.name)?.block?.kind === "FB";
 }
 
+/**
+ * `"Belt_DB"(Start := ...)` where nothing is named Belt_DB: the FBs whose interface has every parameter the call
+ * names, the types its missing instance DB could have.
+ */
+export function instanceCandidates(index: WorkspaceIndex, text: string, ref: Ref): string[] {
+  if (ref.kind !== "global" || ref.access !== "call" || ref.members.length || index.global(ref.name)) return [];
+  const open = /^"?\s*\(/.exec(text.slice(ref.end));
+  if (!open) return [];
+  let depth = 0;
+  let i = ref.end + open[0].length - 1;
+  for (; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) break;
+  }
+  // the arguments of this call, without those of calls inside it
+  let args = text.slice(ref.end + open[0].length, i);
+  for (let before = ""; before !== args; ) [before, args] = [args, args.replace(/\([^()]*\)/g, "")];
+  const names = [...args.matchAll(/(?:^|,)\s*("[^"]+"|[A-Za-z_]\w*)\s*(?::=|=>)/g)].map((m) => m[1]!.replace(/"/g, "").toUpperCase());
+  if (!names.length) return [];
+  return index
+    .allGlobals()
+    .filter((g) => g.kind === "FB" && g.block && names.every((n) => g.block!.vars.some((v) => ["Input", "Output", "InOut"].includes(v.section) && v.name.toUpperCase() === n)))
+    .map((g) => g.name);
+}
+
 export function scopeDecl(index: WorkspaceIndex, uri: string, block: BlockModel, name: string, at?: number): Member | undefined {
   index = scopedTo(index, uri); // names mean the objects of this file's PLC
   const own = localDecl(block, name, at);
@@ -289,6 +314,11 @@ export function diagnostics(index: WorkspaceIndex, uri: string): FeatureDiagnost
         continue;
       }
       // "Device~Module" names are hardware identifiers (system constants): exports never contain them
+      const fbs = /\.scl$/i.test(uri) ? instanceCandidates(index, doc.text, ref) : [];
+      if (fbs.length) {
+        out.push({ start: ref.start, end: ref.end, severity: "warning", message: `"${ref.name}" is not in the workspace: TIA Portal stops the compile. As an instance DB of ${fbs.map((f) => `"${f}"`).join(" or ")} (quick fix) it is created with the next sync`, code: "NO_INSTANCE_DB" });
+        continue;
+      }
       if (ref.kind === "global" && !index.global(ref.name) && !ref.name.includes("~") && !index.enumTypesWith(ref.name).length && !scopeDecl(index, uri, block, ref.name, ref.start)) {
         const definable = ref.access !== "call" && !ref.members.length && /\.scl$/i.test(uri) && tagTableFor(index, uri);
         out.push({ start: ref.start, end: ref.end, severity: "information", message: `"${ref.name}" is not in the workspace (system object or not mirrored${definable ? "; quick fix: create it as a PLC tag" : ""})`, code: "UNKNOWN_GLOBAL" });

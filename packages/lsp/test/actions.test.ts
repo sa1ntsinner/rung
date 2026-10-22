@@ -146,6 +146,18 @@ describe("quick fixes", () => {
     expect(diagnostics(idx, FB).map((d) => d.code)).not.toContain("NO_INSTANCE");
   });
 
+  it("a call through an instance DB that does not exist yet: the FB whose parameters fit, and a quick fix that creates it", () => {
+    const text = 'FUNCTION_BLOCK "Fx_Line"\n   VAR_INPUT \n      Go : Bool;\n   END_VAR\n\nBEGIN\n\t"Motor1_DB"(Start := #Go);\n\t"Other_DB"(Speed := LIMIT(MN := 0, IN := 5, MX := 9));\nEND_FUNCTION_BLOCK\n';
+    const idx = workspace(text);
+    expect(diagnostics(idx, FB).filter((d) => d.code === "NO_INSTANCE_DB").map((d) => d.message)).toEqual([
+      '"Motor1_DB" is not in the workspace: TIA Portal stops the compile. As an instance DB of "Fx_Motor" (quick fix) it is created with the next sync',
+    ]);
+    // a parameter Fx_Motor does not have: no guess (and the names of the call inside are not its parameters)
+    expect(diagnostics(idx, FB).find((d) => text.slice(d.start, d.end) === "Other_DB")?.code).not.toBe("NO_INSTANCE_DB");
+    const fix = codeActions(idx, FB, at(idx, '"Motor1_DB"'), at(idx, '"Motor1_DB"')).find((f) => f.code === "NO_INSTANCE_DB")!;
+    expect([fix.title, fix.create?.uri, fix.create?.text.includes('\n"Fx_Motor"\n')]).toEqual(['Create "Motor1_DB" as an instance DB of "Fx_Motor"', "file:///w/plc/P/blocks/Motor1_DB.db", true]);
+  });
+
   it("does not reuse a DB name that exists", () => {
     const idx = workspace(LINE);
     idx.set("file:///w/plc/P/blocks/Fx_Motor_DB.db", 'DATA_BLOCK "Fx_Motor_DB"\n"Fx_Motor"\nBEGIN\nEND_DATA_BLOCK\n', 0);
