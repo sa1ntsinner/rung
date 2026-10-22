@@ -122,7 +122,7 @@ rung compare                # the project against the PLC, read-only; exit 2 if 
 rung download               # you type the PLC name to confirm; TIA's risky questions need --allow
 ```
 
-`rung download` never picks a PLC by itself: run `rung connect` once (or `rung connect --pick` to choose among what answers). The MCP server never downloads. By default a person starts downloads and live changes. A person may set an [agent mode](agents/modes.md) that permits selected actions. `RUNG_READ_ONLY` and read-only locks always win. Everything about TIA's questions (stop the CPU, reinitialise data blocks, …) is in [downloads](downloads.md).
+`rung download` never picks a PLC by itself: run `rung connect` once (or `rung connect --pick` to choose among what answers). The MCP server never downloads. You or your agent start downloads and live changes; an [agent mode](agents/modes.md) restricts agents where you want that. `RUNG_READ_ONLY` and read-only locks always win. Everything about TIA's questions (stop the CPU, reinitialise data blocks, …) is in [downloads](downloads.md).
 
 In VS Code, the PLC picker puts the last PLC you chose first the next time; it still lists every PLC. See [Going online](online.md) for other addresses, passwords and certificates.
 
