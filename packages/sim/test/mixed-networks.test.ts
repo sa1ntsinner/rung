@@ -94,13 +94,13 @@ describe("SCL and STL networks in SimaticML blocks", () => {
 
   it("refuses unsupported STL and an open string before a non-STL network", async () => {
     const members = '<Section Name="Output"><Member Name="q" Datatype="Bool" /><Member Name="x" Datatype="Bool" /></Section>';
-    const refused = fb("Fx_Old", members, [unit(1, "STL", stl("A", local("q")) + stl("TAK") + stl("Assign", local("x")))]);
+    const refused = fb("Fx_Old", members, [unit(1, "STL", stl("A", local("q")) + stl("PUSH") + stl("Assign", local("x")))]);
     const open = fb("Fx_Open", members, [unit(1, "STL", stl("A", local("q"))), unit(2, "SCL", sclSet("x", "TRUE"))]);
     const ladOpen = fb("Fx_LadOpen", members, [unit(1, "STL", stl("A", local("q"))), ladSet(2, "x")]);
     const last = fb("Fx_Last", members, [unit(1, "STL", stl("A", local("q")))]);
     const yaml = (b: string) => `block: ${b}\ncases:\n  - name: case 4\n    steps:\n      - cycle: 1\n`;
     const idx = workspace({ "Fx_Old.xml": refused, "Fx_Open.xml": open, "Fx_LadOpen.xml": ladOpen, "Fx_Last.xml": last });
-    expect((await runTestFile(idx, "t.test.yaml", yaml("Fx_Old"))).cases[0]!.error).toBe('"Fx_Old" uses STL instructions the simulator does not run yet (network 1): TAK (in Fx_Old)');
+    expect((await runTestFile(idx, "t.test.yaml", yaml("Fx_Old"))).cases[0]!.error).toBe('"Fx_Old" uses STL instructions the simulator does not run yet (network 1): PUSH (in Fx_Old)');
     for (const name of ["Fx_Open", "Fx_LadOpen"]) expect((await runTestFile(idx, "t.test.yaml", yaml(name))).cases[0]!.error).toMatch(/^STL network 1: the logic string is still open at the end of the network and cannot continue in STL: not simulated/);
     // at the end of the block the string ends with it, as in an .awl block
     expect((await runTestFile(idx, "t.test.yaml", yaml("Fx_Last"))).cases[0]).toMatchObject({ passed: true });

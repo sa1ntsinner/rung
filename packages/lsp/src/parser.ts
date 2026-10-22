@@ -718,9 +718,38 @@ export function parse(src: string, opts: ParseOptions = {}): ParsedDocument {
         next();
         block.bodyStart = x.end;
         if (opts.dialect === "stl" || isKw(peek(), "NETWORK")) {
-          // STL body: skip it (the interface above is what editors and other blocks need)
+          // STL body: not parsed as code; its operands are references (T #x writes, CALL "FC" calls) for the editor
+          // and the simulator's stubs
           block.stl = true;
-          while (peek().kind !== "eof" && !isKw(peek(), h.end)) next();
+          let op = "";
+          let first = true;
+          while (peek().kind !== "eof" && !isKw(peek(), h.end)) {
+            const t = next();
+            if (t.text === ";" || isKw(t, "NETWORK")) {
+              op = "";
+              continue;
+            }
+            if (isKw(t, "TITLE")) {
+              // TITLE = free text, to the end of its line
+              const eol = src.indexOf("\n", t.end);
+              while (peek().kind !== "eof" && (eol < 0 || peek().start < eol)) next();
+              continue;
+            }
+            if (!op) {
+              if (t.kind === "ident" && peek().text === ":") next(); // a label
+              else {
+                op = t.upper || t.text;
+                first = true;
+              }
+              continue;
+            }
+            if (t.kind !== "local" && t.kind !== "global") continue;
+            const n = block.refs.length;
+            collectRef(t, block);
+            const r = block.refs[n];
+            if (r && first) r.access = op === "CALL" ? "call" : /^(=|S|R|T|FP|FN)$/.test(op) ? "write" : r.access;
+            first = false;
+          }
           continue;
         }
         parseBody(block, h.end);

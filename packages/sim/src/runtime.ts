@@ -4,7 +4,7 @@
 // (integers wrap around like on an S7-1500; of the system instructions only those in system.ts).
 import { STANDARD_BY_NAME, SYSTEM_TYPES, parseAbsolute, type BlockModel, type Member, type VarDecl, type WorkspaceIndex } from "@rung/lsp";
 import { parseStl, runStl, stlState, type S5Timer, type StlCall, type StlHost, type StlProgram, type StlState } from "./stl.js";
-import { parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
+import { ENO_LOCAL, parseBody, SclSyntaxError, type Arg, type Expr, type LRef, type Stmt } from "./ast.js";
 import { decode, encode, LayoutUnsupported } from "./layout.js";
 import { CLOCK_START, Unsupported, deleteChars, dtlOf, insertChars, msOfDtl, replaceChars, swapBytes, timeDiff, timeKindOfType, timeShift, typeTag, valStrg, type TimeKind } from "./system.js";
 
@@ -759,6 +759,7 @@ export class Simulator {
       if (root in frame.temps) obj = frame.temps;
       else if (root in frame.mem) obj = frame.mem;
       else if (root === frame.block.name.toUpperCase() && frame.block.kind === "FC") obj = frame.temps; // FC return value
+      else if (root.startsWith(ENO_LOCAL)) obj = frame.temps; // ENO := ..., SAVE: the block's enable output; STL local data bits
       else if (ref.root.kind === "ident" && frame.block.kind === "DB") obj = frame.mem;
       else if (ref.root.kind === "ident" && this.isIecGlobal(ref.root.name)) ({ obj, key } = this.global(ref.root.name));
       else throw new SimError(`#${ref.root.name} is not declared in ${frame.block.name}`, frame.block.name, ref.start);
@@ -1851,7 +1852,10 @@ export class Simulator {
   private runStlBody(b: BlockModel, frame: Frame) {
     const p = this.stlProgram(b, "", () => parseStl(this.index.docs.get(this.uriOf(b))!.text, b.bodyStart ?? b.start, b.end));
     if (p.missing.length) throw new SimError(`"${b.name}" uses STL instructions the simulator does not run yet: ${p.missing.join(", ")}`, b.name);
-    runStl(p, this.stlHost(b, frame, (message, offset) => new SimError(message, b.name, offset)));
+    const state = stlState();
+    runStl(p, this.stlHost(b, frame, (message, offset) => new SimError(message, b.name, offset)), { state });
+    // ENO is the BR bit at the end of the block (SAVE puts the RLO there)
+    frame.temps[ENO_LOCAL] = state.br;
   }
 
   /** STL network `n` of a SimaticML block (its translation calls __RUNG_STL(n)), in the block's own frame. */
@@ -1906,10 +1910,14 @@ export class Simulator {
     const type = (sc.block ?? d?.typeRef ?? d?.type)?.replace(/^"|"$/g, "");
     const b = type ? this.index.global(type)?.block : undefined;
     const std = type ? STANDARD_BY_NAME.get(type.toUpperCase()) : undefined;
+    // a block nothing describes (a library FC the workspace does not have): what its stub names is an output
+    const stub = !b && !std && type ? this.stubOf(type) : undefined;
     const output = (n: string) => {
       const u = n.toUpperCase();
       const v = b?.vars.find((x) => x.name.toUpperCase() === u);
-      return v ? v.section === "Output" : std?.params.find((q) => q.name.toUpperCase() === u)?.dir === "out";
+      if (v) return v.section === "Output";
+      if (std) return std.params.find((q) => q.name.toUpperCase() === u)?.dir === "out";
+      return !!stub && typeof stub === "object" && Object.keys(stub).some((k) => k.toUpperCase() === u);
     };
     const args: Arg[] = [];
     let ret: LRef | undefined;
@@ -1937,6 +1945,12 @@ export class Simulator {
         const g = a ? this.index.allGlobals().find((s) => s.tag?.address && parseAbsolute(s.tag.address)?.address === a) : undefined;
         return g ? { root: { kind: "global", name: g.name }, path: [], start: 0 } : undefined;
       },
+      localBit: (address) => {
+        if (b.vars.some((v) => v.section === "Temp")) return undefined;
+        const name = `${ENO_LOCAL}L${address.slice(2)}`; // a local no source can name, one per bit
+        if (!(name.toUpperCase() in frame.temps)) frame.temps[name.toUpperCase()] = false;
+        return { root: { kind: "local", name }, path: [], start: 0 };
+      },
       now: () => this.time,
       timer: (ref) => {
         let t = this.s5timers.get(at(ref));
@@ -1962,7 +1976,7 @@ export class Simulator {
       temps[b.name.toUpperCase()] = b.returnType && !/^void$/i.test(b.returnType) ? this.defaultValue({ type: b.returnType, typeRef: b.returnType, isArray: false }, b) : undefined;
       this.runBody(b, frame);
       this.bindOutputs(mem, b, c.args, caller);
-      if (capture) Object.assign(capture, mem);
+      if (capture) Object.assign(capture, mem, { [ENO_LOCAL]: temps[ENO_LOCAL] ?? true });
       return temps[b.name.toUpperCase()];
     });
   }

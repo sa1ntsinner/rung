@@ -3,6 +3,9 @@
 import { lex, type Token } from "@rung/lsp";
 import { ELEMENTARY_TYPE, typeTag } from "./system.js";
 
+
+/** Where a block's ENO is kept: a local no source can name. */
+export const ENO_LOCAL = "__ENO";
 export type Expr =
   | { k: "lit"; value: boolean | number | string; type: "bool" | "int" | "real" | "time" | "string"; typeName?: string }
   | { k: "ref"; ref: LRef }
@@ -447,11 +450,11 @@ export function parseBody(src: string, from = 0, to = src.length, opts: BodyOpti
         return { k: "if", branches: [{ cond, body: [{ k: "assign", target, value: { k: "lit", value: set, type: "bool" }, at }] }], at };
       }
       expectOp(":=");
-      // ENO := TRUE;: the block's enable output, for the EN/ENO chain of a LAD/FBD caller, which the simulator does not run
+      // ENO := FALSE;: the block's enable output, kept in a local of its own (an FC's ENO is what its test expects)
       if (!opts.iec && t.kind === "ident" && t.upper === "ENO" && !target.path.length) {
-        expr();
+        const value = expr();
         semicolon();
-        return { k: "empty", at };
+        return { k: "assign", target: { root: { kind: "local", name: ENO_LOCAL }, path: [], start: target.start }, value, at };
       }
       // multiple assignment, a := b := 0;: the value goes to the last target first, then leftwards
       const targets = [target];

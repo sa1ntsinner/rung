@@ -14,7 +14,7 @@ function roundHalfEven(x: number): number {
   return d > 0.5 ? f + 1 : d < 0.5 ? f : f % 2 === 0 ? f : f + 1;
 }
 
-type Kind = "bit" | "or" | "not" | "nest" | "close" | "assign" | "edge" | "set" | "load" | "transfer" | "accu" | "add" | "compare" | "jump" | "nop" | "timer" | "call" | "end";
+type Kind = "bit" | "or" | "not" | "nest" | "close" | "assign" | "edge" | "set" | "save" | "load" | "transfer" | "accu" | "add" | "compare" | "jump" | "nop" | "timer" | "call" | "end";
 
 /** What each instruction the simulator runs does with its operand. */
 const SUBSET: Record<string, Kind> = {
@@ -22,13 +22,13 @@ const SUBSET: Record<string, Kind> = {
   "A(": "nest", "AN(": "nest", "O(": "nest", "ON(": "nest", "X(": "nest", "XN(": "nest", ")": "close",
   "=": "assign", S: "assign", R: "assign",
   FP: "edge", FN: "edge",
-  SET: "set", CLR: "set",
+  SET: "set", CLR: "set", SAVE: "save",
   L: "load", T: "transfer",
   "+I": "accu", "-I": "accu", "*I": "accu", "/I": "accu",
   "+D": "accu", "-D": "accu", "*D": "accu", "/D": "accu",
   "+R": "accu", "-R": "accu", "*R": "accu", "/R": "accu",
   "+": "add",
-  ITD: "accu", DTR: "accu", RND: "accu", TRUNC: "accu", CAW: "accu", CAD: "accu",
+  ITD: "accu", DTR: "accu", RND: "accu", TRUNC: "accu", CAW: "accu", CAD: "accu", TAK: "accu",
   "==I": "compare", "<>I": "compare", ">I": "compare", "<I": "compare", ">=I": "compare", "<=I": "compare",
   "==D": "compare", "<>D": "compare", ">D": "compare", "<D": "compare", ">=D": "compare", "<=D": "compare",
   "==R": "compare", "<>R": "compare", ">R": "compare", "<R": "compare", ">=R": "compare", "<=R": "compare",
@@ -232,7 +232,7 @@ export function parseStl(src: string, from: number, to: number): StlProgram {
       else operand = { kind: "const", ...v };
     } else if (kind === "nop") {
       if (!/^[01]$/.test(arg)) wants(arg);
-    } else if (["close", "set", "accu", "compare", "nest", "end", "not"].includes(kind)) {
+    } else if (["close", "set", "save", "accu", "compare", "nest", "end", "not"].includes(kind)) {
       if (arg) wants(arg);
     } else if (op === "O" && !arg) {
       // O without an operand: AND before OR (§1.8)
@@ -242,7 +242,8 @@ export function parseStl(src: string, from: number, to: number): StlProgram {
     else if (/^(STW|AR1|AR2|DBNO|DINO|DBLG|DILG)$/i.test(arg)) missing.add(`${op} ${arg.toUpperCase()}`);
     else if (/^(OV|OS|BR|UO|==0|<>0|>0|<0|>=0|<=0)$/i.test(arg)) missing.add("status bits as operands (OV, OS, BR, ==0 ...)");
     else if (/^%?D[BI][XBWD]\s*\d/i.test(arg) || /^%?DB\d+\.DB/i.test(arg)) missing.add("absolute DB addresses (DBX, DBW, %DB1.DBX0.0 ...)");
-    else if (/^%?[IQMETACZ][XBWD]?\s*\d+(\.\d)?$/i.test(arg)) {
+    else if (/^%?L[BWD]\s*\d+$/i.test(arg)) missing.add("local data bytes and words (LB, LW, LD)");
+    else if (/^%?[IQMLETACZ][XBWD]?\s*\d+(\.\d)?$/i.test(arg)) {
       // %I0.0 / I 0.0: the PLC tag at that address
       const a = arg.replace(/\s+/g, "").replace(/^%?/, "%").toUpperCase();
       operand = { kind: "absolute", address: a };
@@ -305,6 +306,8 @@ export interface StlHost {
   typeOf(ref: LRef): string | undefined;
   /** The PLC tag at an absolute address. */
   tagAt(address: string): LRef | undefined;
+  /** A local data bit (%L0.0) as a BOOL of the call; undefined where declared temporaries share the local data. */
+  localBit(address: string): LRef | undefined;
   now(): number;
   timer(ref: LRef): S5Timer;
   /** A CALL through the simulator's own call path (stubs included). */
@@ -328,10 +331,12 @@ export interface StlState extends LogicState {
   accu2: number;
   accu1Known: boolean;
   accu2Known: boolean;
+  /** The BR bit: SAVE puts the RLO there; at the end of a block it is the block's ENO. */
+  br: boolean;
 }
 
 export function stlState(known = true): StlState {
-  return { fc: false, orb: false, grp: false, fresh: false, rlo: false, rloKnown: known, stack: [], accu1: 0, accu2: 0, accu1Known: known, accu2Known: known };
+  return { fc: false, orb: false, grp: false, fresh: false, rlo: false, rloKnown: known, stack: [], accu1: 0, accu2: 0, accu1Known: known, accu2Known: known, br: true };
 }
 
 /**
@@ -348,10 +353,10 @@ export function stlState(known = true): StlState {
  */
 export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; state?: StlState } = {}): boolean {
   const state = opts.state ?? stlState();
-  let { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known } = state;
+  let { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known, br } = state;
   const stack = state.stack;
   let at = 0;
-  const save = () => Object.assign(state, { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known });
+  const save = () => Object.assign(state, { fc, orb, grp, fresh, rlo, rloKnown, accu1, accu2, accu1Known, accu2Known, br });
   const RLO = () => {
     if (!fc && !rloKnown) host.fail("RLO is undefined after a non-STL network: start a logic string or use SET/CLR first", at);
     return fc ? orb || grp : rlo;
@@ -386,6 +391,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; s
   const location = (c: StlInstr): LRef => {
     const o = c.operand;
     if (o.kind === "var") return o.ref;
+    if (o.kind === "absolute" && o.address.startsWith("%L")) return host.localBit(o.address) ?? host.fail(`${o.address}: a local data bit in a block with declared temporary variables (they share its local data) is not simulated`, c.at);
     if (o.kind === "absolute") return host.tagAt(o.address) ?? host.fail(`${o.address} has no PLC tag: an address without a tag is not simulated`, c.at);
     return host.fail(`${c.op} needs a variable`, c.at);
   };
@@ -483,7 +489,7 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; s
   };
   const arith = (c: StlInstr) => {
     const op = c.op;
-    needAccu(/^[+*/-][IDR]$/.test(op));
+    needAccu(/^([+*/-][IDR]|TAK)$/.test(op));
     if (op.endsWith("I") && op.length === 2) {
       const a = s16(accu2);
       const b = s16(accu1);
@@ -529,6 +535,10 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; s
         accu1 = r >>> 0;
         return;
       }
+      case "TAK":
+        // exchanges ACCU1 and ACCU2
+        [accu1, accu2] = [accu2, accu1];
+        return;
       case "CAW":
         accu1 = lo16(accu1, ((accu1 & 0xff) << 8) | ((accu1 >> 8) & 0xff));
         return;
@@ -613,6 +623,10 @@ export function runStl(p: StlProgram, host: StlHost, opts: { endOpen?: string; s
         fc = false;
         orb = false;
         fresh = false;
+        break;
+      case "save":
+        // SAVE: the RLO into BR; the logic string and the RLO stay
+        br = RLO();
         break;
       case "load":
         accu2 = accu1;

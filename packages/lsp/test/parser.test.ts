@@ -123,13 +123,15 @@ describe("parse structure", () => {
     expect(r.blocks[0]!.vars[0]!.members!.map((m) => m.name)).toEqual(["MaxCurrent"]);
   });
 
-  it("indexes the interface of STL sources but ignores the STL body", () => {
+  it("indexes the interface of STL sources; the operands of the STL body are references", () => {
     const src = 'FUNCTION "S" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = with brackets\n      A(;\n      A "Db".x;\n      O #a;\n      );\n      L s5t#10ms;\n      = "Db".y;\n      JC m001;\nm001: NOP 0;\nEND_FUNCTION\n';
     for (const r of [parse(src, { dialect: "stl" }), parse(src)]) {
       expect(r.diagnostics).toEqual([]);
       expect(r.blocks[0]!.vars.map((v) => v.name)).toEqual(["a"]);
-      expect(r.blocks[0]!.refs).toEqual([]);
+      expect(r.blocks[0]!.refs.map((x) => `${x.kind}:${x.name}${x.members.map((m) => `.${m.name}`).join("")}:${x.access}`)).toEqual(["global:Db.x:read", "local:a:read", "global:Db.y:write"]);
     }
+    const call = parse('FUNCTION "C" : Void\nVAR_OUTPUT\n  r : Real;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = T #nothing here\n      CALL "Lib_Pow" (\n           x := 1.0,\n           y := #r);\n      T #r;\nEND_FUNCTION\n', { dialect: "stl" });
+    expect(call.blocks[0]!.refs.map((x) => `${x.kind}:${x.name}:${x.access}`)).toEqual(["global:Lib_Pow:call", "local:r:read", "local:r:write"]);
   });
 
   it("accepts REF_TO, POINTER TO and REFERENCE TO declarations", () => {

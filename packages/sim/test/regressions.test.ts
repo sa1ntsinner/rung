@@ -101,12 +101,12 @@ describe("Simulator QA regressions", () => {
 
   it("fails calls of STL blocks the simulator does not run and of technology objects with a clear message", () => {
     const s = sim({
-      "file:///w/plc/P/blocks/Stl.awl": 'FUNCTION "Stl" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = x\n      A #a;\n      = #a;\n      TAK;\nEND_FUNCTION\n',
+      "file:///w/plc/P/blocks/Stl.awl": 'FUNCTION "Stl" : Void\nVAR_INPUT\n  a : Bool;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = x\n      A #a;\n      = #a;\n      PUSH;\nEND_FUNCTION\n',
       "file:///w/plc/P/technology/Axis_1.xml": "<to/>",
       U: fb("U", "VAR\n  p : MC_POWER;\n  mode : Int;\nEND_VAR", '  CASE #mode OF\n    1: "Stl"(a := TRUE);\n    2: #p(Axis := "Axis_1", Enable := TRUE);\n    3: #mode := "Axis_1".StatusWord;\n  END_CASE;'),
     });
     const i = s.newInstance("U");
-    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"Stl" uses STL instructions the simulator does not run yet: TAK/);
+    expect(errorOf(() => s.callBlock(i, { mode: 1 }))).toMatch(/"Stl" uses STL instructions the simulator does not run yet: PUSH/);
     expect(errorOf(() => s.callBlock(i, { mode: 2 }))).toMatch(/MC_POWER.*not simulated/);
     expect(errorOf(() => s.callBlock(i, { mode: 3 }))).toMatch(/"Axis_1" is a technology object.*not simulated/);
   });

@@ -6,6 +6,7 @@ import { LineCounter, isMap, isSeq, parseDocument } from "yaml";
 import { KEYWORDS, STANDARD, STANDARD_BY_NAME, SYSTEM_TYPES, deviceOfUri, nearest as nearestSpelling, scopedTo, unscoped, type GlobalSymbol, type Member, type WorkspaceIndex } from "@rung/lsp";
 import { SYSTEM_FUNCTIONS, Simulator, SimError, realText, splitArrayType, toMs, typedInstruction, type ArrayValue, type Instance, type Struct, type Value } from "./runtime.js";
 import { ELEMENTARY_TYPE } from "./system.js";
+import { ENO_LOCAL } from "./ast.js";
 
 /*
  * tests/motor.test.yaml
@@ -624,10 +625,12 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
       if (!isFb) {
         const key = root.toUpperCase();
         const returning = key === g.block!.name.toUpperCase();
-        if (!own && !returning) throw new SimError(`${name} does not exist`);
+        if (!own && !returning && !(key === "ENO" && op === "expect")) throw new SimError(`${name} does not exist`);
         if (op === "set" && (returning || !["Input", "InOut"].includes(own?.section ?? ""))) throw new SimError(`${name} is not an input of ${g.block!.name}: set an input or IN_OUT`);
         if (op === "expect" && !fcRan && (returning || !(key in fcInputs))) throw new SimError(`${g.block!.name} has not run yet: run a cycle before expecting ${name}`);
         if (returning) return { decl, get: () => fcReturn, set: () => {} };
+        // the FC's enable output: ENO := FALSE in SCL, SAVE in STL
+        if (key === "ENO" && !own && op === "expect") return { decl: { type: "Bool" } as typeof decl, get: () => fcOutputs[ENO_LOCAL], set: () => {} };
         const base = op === "set" || (["Input", "InOut"].includes(own?.section ?? "") && key in fcInputs) ? fcInputs : key in fcOutputs ? fcOutputs : fcInputs;
         if (!(key in base) && op === "set") base[key] = sim.defaultValue(own!, g.block);
         return walk(base, root, path);

@@ -181,6 +181,31 @@ describe("STL accumulators", () => {
     expect(s.globals.FX_LAMP).toBe(true);
     expect(errorOf(() => s.callBlock("Fx_NoTag"))).toBe("%I7.7 has no PLC tag: an address without a tag is not simulated");
   });
+
+  it("TAK exchanges ACCU1 and ACCU2", () => {
+    const s = sim({ Fx_Tak: awl("FUNCTION", "Fx_Tak", "   VAR_OUTPUT\n      x : Int;\n   END_VAR", ["L 1;\nL 2;\nTAK;\nT #x;"]) });
+    expect(s.callBlock("Fx_Tak").outputs.X).toBe(1);
+  });
+});
+
+describe("STL BR and local data", () => {
+  const decl = "   VAR_INPUT\n      a : Bool;\n   END_VAR";
+  it("SAVE puts the RLO into BR, which is the FC's ENO at its end (TRUE without SAVE)", () => {
+    const s = sim({ Fx_Eno: awl("FUNCTION", "Fx_Eno", decl, ["A #a;\nSAVE;\nCLR;"]), Fx_Plain: awl("FUNCTION", "Fx_Plain", decl, ["CLR;"]) });
+    expect([false, true].map((a) => s.callBlock("Fx_Eno", { a }).outputs.__ENO)).toEqual([false, true]);
+    expect(s.callBlock("Fx_Plain", { a: false }).outputs.__ENO).toBe(true);
+  });
+
+  it("a local data bit (L 0.0) is a BOOL of the call where no temporaries are declared", () => {
+    const s = sim({
+      Fx_LBit: awl("FUNCTION", "Fx_LBit", `${decl}\n   VAR_OUTPUT\n      q : Bool;\n   END_VAR`, ["A #a;\n= L 0.0;\nA L 0.0;\n= #q;"]),
+      Fx_LTemp: awl("FUNCTION", "Fx_LTemp", `${decl}\n   VAR_TEMP\n      t : Int;\n   END_VAR`, ["A #a;\n= L 0.0;"]),
+      Fx_LByte: awl("FUNCTION", "Fx_LByte", decl, ["L LB 0;\nT LB 1;"]),
+    });
+    expect([false, true].map((a) => s.callBlock("Fx_LBit", { a }).outputs.Q)).toEqual([false, true]);
+    expect(errorOf(() => s.callBlock("Fx_LTemp", { a: true }))).toMatch(/%L0\.0: a local data bit in a block with declared temporary variables/);
+    expect(errorOf(() => s.callBlock("Fx_LByte", { a: true }))).toMatch(/local data bytes and words \(LB, LW, LD\)/);
+  });
 });
 
 describe("STL S5 timers", () => {
@@ -266,7 +291,7 @@ describe("STL outside the subset", () => {
   it("is refused before the block runs, with the list of what is missing", () => {
     const s = sim({ Fx_Old: awl("FUNCTION", "Fx_Old", BITS, ['A #a;\n= "Fx_Lamp";', "L 1;\nL 2;\nTAK;\nOPN DB 1;\nA [AR1,P#0.0];\nL P#1.0;\nJZ x;\nA OV;\nx: NOP 0;"]) });
     expect(errorOf(() => s.callBlock("Fx_Old", { a: true }))).toBe(
-      '"Fx_Old" uses STL instructions the simulator does not run yet: JZ, OPN, TAK, indirect addressing ([...]), pointer constants (P#), status bits as operands (OV, OS, BR, ==0 ...)',
+      '"Fx_Old" uses STL instructions the simulator does not run yet: JZ, OPN, indirect addressing ([...]), pointer constants (P#), status bits as operands (OV, OS, BR, ==0 ...)',
     );
     expect(s.globals.FX_LAMP).toBeUndefined(); // not even its first network ran
   });

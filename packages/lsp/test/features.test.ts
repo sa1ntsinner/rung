@@ -222,7 +222,7 @@ END_FUNCTION_BLOCK
       ["Q_Fb.scl", "MaxCurrent"],
     ]);
     const plug = references(q, u("Q_Start.db"), START.indexOf("Mode :=") + 1, false);
-    expect(plug.map((r) => r.uri.split("/").pop())).toEqual(["Q_Fb.scl", "Q_Start.db"]);
+    expect(plug.map((r) => r.uri.split("/").pop())).toEqual(["Q_Fb.scl", "Q_Start.db", "Q_Stl.awl"]);
     const year = references(q, "file:///q/plc/P/types/Q_Stat.udt", UDT.indexOf("lastSync") + 1, false);
     expect(year.map((r) => q.docs.get(r.uri)!.text.slice(r.start, r.end))).toEqual(["lastSync", "lastSync", "lastSync"]);
   });

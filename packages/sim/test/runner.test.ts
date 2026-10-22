@@ -77,6 +77,16 @@ describe("rung test runner", () => {
     expect(g.cases[0]!.passed).toBe(true);
   });
 
+  it("expects an FC's ENO (ENO := in SCL, SAVE in STL); a stub's named parameter is an output of an STL CALL", async () => {
+    const idx = index();
+    idx.set("file:///w/plc/P/blocks/Fx_Div.scl", 'FUNCTION "Fx_Div" : Int\nVAR_INPUT\n  a : Int;\n  b : Int;\nEND_VAR\nBEGIN\n  IF #b = 0 THEN\n    ENO := FALSE;\n  ELSE\n    #Fx_Div := #a / #b;\n  END_IF;\nEND_FUNCTION\n', 0);
+    idx.set("file:///w/plc/P/blocks/Fx_Pow.awl", 'FUNCTION "Fx_Pow" : Void\nVAR_OUTPUT\n  r : Real;\nEND_VAR\nBEGIN\nNETWORK\nTITLE = power\n      CALL "Lib_Pow" (\n           x := 1.000000e+001,\n           y := #r);\n      CLR;\n      SAVE;\nEND_FUNCTION\n', 0);
+    const div = await runTestFile(idx, "d.yaml", "block: Fx_Div\ncases:\n  - name: by zero\n    steps:\n      - set: { a: 4, b: 0 }\n      - cycle: 1\n      - expect: { ENO: false }\n      - set: { b: 2 }\n      - cycle: 1\n      - expect: { ENO: true, Fx_Div: 2 }\n");
+    expect(div.cases[0]).toMatchObject({ passed: true });
+    const pow = await runTestFile(idx, "p.yaml", "block: Fx_Pow\nstubs:\n  Lib_Pow: { y: 100.0 }\ncases:\n  - name: stub output\n    steps:\n      - cycle: 1\n      - expect: { r: 100.0, ENO: false }\n");
+    expect(pow.cases[0]).toMatchObject({ passed: true });
+  });
+
   it("reports unknown blocks, bad YAML and unknown steps clearly", async () => {
     expect((await runTestFile(index(), "a.yaml", "block: Nope\ncases: []\n")).error).toMatch(/not found/);
     expect((await runTestFile(index(), "b.yaml", "block: [unclosed")).error).toMatch(/invalid YAML/);
