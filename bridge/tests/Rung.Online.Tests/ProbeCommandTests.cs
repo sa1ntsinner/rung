@@ -30,28 +30,14 @@ public sealed class ProbeCommandTests
     [InlineData("probe --address 192.168.250.1 --address 192.168.250.2")]
     [InlineData("probe --address 192.168.250.1 --password-stdin --password-stdin")]
     [InlineData("probe --address 192.168.250.1 --show-certificate --show-certificate")]
+    [InlineData("probe --address 192.168.001.001")]
+    [InlineData("probe --address ::ffff:192.168.1.1")]
     public void RejectsMalformedArguments(string command) =>
         Assert.Throws<ArgumentException>(() => ProbeOptions.Parse(command.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
 
-    [Theory]
-    [InlineData("probe --address 192.168.1.1")]
-    [InlineData("probe --address 192.168.250.1 --address 192.168.1.1")]
-    [InlineData("--help --address=192.168.1.1")]
-    [InlineData("bad 192.168.1.1 --password-stdin")]
-    [InlineData("probe --address 192.168.001.001")]
-    [InlineData("probe --address ::ffff:192.168.1.1")]
-    [InlineData("probe --show-certificate --address 192.168.1.1")]
-    public async Task RefusesProtectedAddressBeforeInputTrustOrTransport(string command)
-    {
-        using var error = new StringWriter();
-        var calls = 0;
-        var result = await ProbeCommand.RunAsync(command.Split(' '), new UnreadableInput(), TextWriter.Null, error,
-            () => throw new Exception("Trust must not be consulted"),
-            (_, _, _, _) => { calls++; return Task.CompletedTask; });
-        Assert.Equal(3, result);
-        Assert.Contains("TARGET_REFUSED", error.ToString());
-        Assert.Equal(0, calls);
-    }
+    [Fact]
+    public void AcceptsAnyCanonicalAddress() =>
+        Assert.Equal("192.168.1.1", ProbeOptions.Parse(["probe", "--address", "192.168.1.1"]).Address);
 
     [Theory]
     [InlineData(null)]

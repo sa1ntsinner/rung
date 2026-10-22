@@ -40,8 +40,6 @@ export class S7CommPlusClient {
 export function validateLiveAddress(address: string, opts: { readOnly?: boolean; mutation?: boolean } = {}): void {
   const locked = opts.readOnly || !!plcReadOnly();
   if (opts.mutation && locked) throw new WorkspaceError("PLC_READ_ONLY", "PLC changes refused by the read-only lock (RUNG_READ_ONLY=1 or PLC read_only = true)");
-  // Reject alternate textual forms before canonical validation; none can reach the host.
-  if (/^(?:::ffff:)?192\.168\.(?:0*1)\.(?:0*1)$/i.test(address) && !(address === "192.168.1.1" && locked && !opts.mutation)) throw new BridgeError("TARGET_REFUSED", "192.168.1.1 is refused before connection");
   if (!isIPv4(address)) throw new WorkspaceError("CONFIG_INVALID", "Live address must be a canonical IPv4 literal");
 }
 

@@ -66,8 +66,8 @@ public sealed class WriteOperationTests
         var current = Context(); var calls = 0;
         var engine = new WriteOperationEngine((_, _) => Task.FromResult(current), (_, _) => { calls++; return Task.FromResult(new WriteResult("acknowledged")); });
         await Assert.ThrowsAsync<RpcException>(() => engine.PrepareAsync(new("modify", "DB.X", "32768")));
-        current = current with { Binding = current.Binding with { Address = "192.168.1.1" } };
-        Assert.Equal(ErrorCodes.TargetRefused, (await Assert.ThrowsAsync<RpcException>(() => engine.PrepareAsync(new("run")))).Code);
+        current = current with { Binding = current.Binding with { Address = "192.168.001.001" } };
+        Assert.Equal(ErrorCodes.BadRequest, (await Assert.ThrowsAsync<RpcException>(() => engine.PrepareAsync(new("run")))).Code);
         current = Context() with { Datatype = 19, MaxLength = 8 };
         var op = await engine.PrepareAsync(new("modify", "DB.Text", "'hello'"));
         current = current with { MaxLength = 3 };

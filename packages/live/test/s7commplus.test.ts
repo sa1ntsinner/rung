@@ -35,7 +35,7 @@ describe("native online client", () => {
     expect(() => selectLiveTarget(config)).toThrow(/device/);
     expect(selectLiveTarget(config, { file: "plc/B/blocks/DB.scl" }).device).toBe("B");
     expect(() => selectLiveTarget(config, { device: "A", file: "plc/B/blocks/DB.scl" })).toThrow(/scope/);
-    config.live.plc!.B!.address = "192.168.1.1";
-    expect(() => selectLiveTarget(config, { device: "B" })).toThrow(/refused/);
+    config.live.plc!.B!.address = "192.168.001.001";
+    expect(() => selectLiveTarget(config, { device: "B" })).toThrow(/canonical/);
   });
 });

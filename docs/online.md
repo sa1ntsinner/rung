@@ -11,8 +11,7 @@ Refused changes report `PLC_READ_ONLY` and exit with code 2.
 
 The lock blocks downloads, value modification, CPU control and TIA imports and
 apply operations. Pull and export remain available; watch runs export-only and
-does not start automatically in VS Code. `192.168.1.1` is admitted for locked
-read paths only. Use a pinned certificate for native reads and verified HTTPS
+does not start automatically in VS Code. Use a pinned certificate for native reads and verified HTTPS
 for Web API reads; insecure TLS and the non-loopback HTTP override are refused.
 FB monitors do not automatically capture native program status while locked;
 `rung live watch --native-capture` requests it explicitly.
@@ -306,8 +305,7 @@ in an INT are refused). It has no RUN/STOP.
 A person or an agent starts live changes; the person can restrict agents with an
 [agent mode](agents/modes.md) (`manual`, `ask` or `auto`). A noninteractive CLI
 mutation by a person is refused unless the paired frontend confirmation protocol
-permits it. `RUNG_READ_ONLY` and read-only locks always win. MCP exposes no live mutation tools. Target
-`192.168.1.1` is refused before connection, including read requests.
+permits it. `RUNG_READ_ONLY` and read-only locks always win. MCP exposes no live mutation tools.
 
 ## Alarms and CPU diagnostics
 

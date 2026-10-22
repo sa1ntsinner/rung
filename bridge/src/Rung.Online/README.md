@@ -5,7 +5,7 @@ no arguments or `--stdio`. It advertises only `online.connect`, `online.browse`,
 `online.read`, `online.state`, `online.subscribe`, `online.unsubscribe`,
 `online.disconnect`, and certificate inspection.
 It does not start an engineering session. Unknown methods, including mutations,
-are refused. `192.168.1.1` is refused before any connection is created.
+are refused.
 
 Configure the live target separately from engineering/download connections:
 
@@ -87,8 +87,8 @@ Read-only TLS 1.3 feasibility probe, targeting .NET 10. No TIA installation is r
 The probe connects, prints the CPU order code/type, firmware and operating state,
 lists up to five accessible scalar symbols, reads one, disconnects and exits.
 It never writes, changes CPU mode or falls back to challenge authentication.
-Every invocation containing the protected endpoint `192.168.1.1` is refused before
-password input, certificate lookup or transport creation, including duplicate options.
+Addresses must be canonical IPv4 literals; anything else is refused before password
+input, certificate lookup or transport creation, including duplicate options.
 
 Inspect the PLC's presented certificate without creating a PLC session, sending a
 password, browsing or reading:

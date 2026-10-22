@@ -14,8 +14,9 @@ it("the shared mutation policy refuses preparation and commitment under the envi
   await expect(policy.commit(prepared.operationId, prepared.preview, true)).rejects.toMatchObject({ code: "PLC_READ_ONLY" });
   expect(current).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
 });
-it("admits the protected address for locked reads, while refusing mutations", async () => {
-  expect(() => validateLiveAddress("192.168.1.1")).toThrow(/refused/);
+it("admits any canonical address for reads, and the lock refuses mutations", async () => {
+  expect(() => validateLiveAddress("192.168.1.1")).not.toThrow();
+  expect(() => validateLiveAddress("192.168.1.1", { mutation: true })).not.toThrow();
   vi.stubEnv("RUNG_READ_ONLY", "1");
   expect(() => validateLiveAddress("192.168.1.1")).not.toThrow();
   expect(() => validateLiveAddress("192.168.1.1", { mutation: true })).toThrowError(expect.objectContaining({ code: "PLC_READ_ONLY" }));
@@ -23,7 +24,7 @@ it("admits the protected address for locked reads, while refusing mutations", as
   await new S7CommPlusClient({ request }).connect({ device: "P", address: "192.168.1.1", certificateSha256: "A".repeat(64) });
   expect(request).toHaveBeenCalledOnce();
 });
-it.each(["192.168.01.001", "::ffff:192.168.1.1", "192.168.001.1"])("refuses alternate address %s even while locked", address => {
+it.each(["192.168.01.001", "::ffff:192.168.1.1", "192.168.001.1"])("refuses the non-canonical address %s", address => {
   vi.stubEnv("RUNG_READ_ONLY", "1");
   expect(() => validateLiveAddress(address)).toThrow();
 });

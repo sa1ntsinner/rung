@@ -46,9 +46,8 @@ public class OnlineTests
     }
 
     [Theory]
-    [InlineData("192.168.1.1", "TARGET_REFUSED")]
-    [InlineData("::ffff:192.168.1.1", "TARGET_REFUSED")]
-    [InlineData("192.168.001.001", "TARGET_REFUSED")]
+    [InlineData("::ffff:192.168.1.1", "BAD_REQUEST")]
+    [InlineData("192.168.001.001", "BAD_REQUEST")]
     [InlineData("plc.local", "BAD_REQUEST")]
     [InlineData("0192.168.250.1", "BAD_REQUEST")]
     public async Task RefusesTargetsBeforeDriverCreation(string address, string code)

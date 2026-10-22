@@ -18,10 +18,7 @@ public sealed class OnlineDispatcher(Func<ConnectRequest, IOnlineDriver>? factor
     long epoch;
 
     public static void ValidateTarget(string? address) {
-        if (IPAddress.TryParse(address, out var target) && (target.IsIPv4MappedToIPv6 ? target.MapToIPv4() : target).Equals(IPAddress.Parse("192.168.1.1"))
-            && !(ReadOnlyPolicy.Locked && address == "192.168.1.1"))
-            throw new RpcException(ErrorCodes.TargetRefused, "192.168.1.1 is refused before connection.");
-        if (target == null || target.AddressFamily != AddressFamily.InterNetwork || target.ToString() != address)
+        if (!IPAddress.TryParse(address, out var target) || target == null || target.AddressFamily != AddressFamily.InterNetwork || target.ToString() != address)
             throw new RpcException(ErrorCodes.BadRequest, "Address must be a canonical IPv4 literal.");
     }
 

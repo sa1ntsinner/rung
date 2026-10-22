@@ -11,9 +11,9 @@ it.each([false, undefined])("refuses absent/false opt-in before mutation", async
   await expect(policy.prepare({ action: "run" })).rejects.toMatchObject({ code: "WRITES_DISABLED" });
   expect(send).not.toHaveBeenCalled();
 });
-it("refuses the protected address before preparing", async () => {
-  const policy = new MutationPolicy(async () => ({ ...binding, address: "192.168.1.1" }), vi.fn());
-  await expect(policy.prepare({ action: "run" })).rejects.toMatchObject({ code: "TARGET_REFUSED" });
+it("refuses a non-canonical address before preparing", async () => {
+  const policy = new MutationPolicy(async () => ({ ...binding, address: "192.168.001.001" }), vi.fn());
+  await expect(policy.prepare({ action: "run" })).rejects.toMatchObject({ code: "CONFIG_INVALID" });
 });
 it.each(["device", "address", "certificateSha256", "serial", "plcName", "epoch", "programRevision", "configRevision", "workspace"] as const)("invalidates a changed %s binding before sending", async key => {
   let current = { ...binding }; const send = vi.fn(); const policy = new MutationPolicy(async () => current, send);

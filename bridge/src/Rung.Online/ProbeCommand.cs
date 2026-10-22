@@ -10,14 +10,6 @@ public sealed record ProbeOptions(string Address, bool PasswordStdin, bool ShowC
 {
     public static ProbeOptions Parse(string[] args)
     {
-        // Scan the entire invocation before parsing; duplicate options and help cannot bypass the refusal.
-        foreach (var argument in args)
-        {
-            var value = argument[(argument.LastIndexOf('=') + 1)..];
-            if (IPAddress.TryParse(value, out var ip) &&
-                (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).Equals(IPAddress.Parse("192.168.1.1")))
-                throw new ProtectedAddressException();
-        }
         if (args.Length == 0 || args[0] != "probe") throw new ArgumentException("Expected probe command.");
         string? address = null;
         var password = false;
@@ -46,14 +38,11 @@ public sealed record ProbeOptions(string Address, bool PasswordStdin, bool ShowC
     }
 }
 
-public sealed class ProtectedAddressException : Exception;
-
 public readonly record struct ProbeError(int ExitCode, string Code, string Message)
 {
     public static ProbeError From(Exception error) => error switch
     {
         CertificateDiagnosticException diagnostic => diagnostic.Error,
-        ProtectedAddressException => new(3, "TARGET_REFUSED", "192.168.1.1 is refused before connection."),
         AuthenticationException => new(4, "CERTIFICATE_UNTRUSTED", "Set RUNG_ONLINE_CERTIFICATE_SHA256 to the independently verified PLC leaf certificate fingerprint."),
         S7CommPlusException { ErrorCode: S7Consts.errS7CommPlusCertificate } => new(4, "CERTIFICATE_UNTRUSTED", "PLC certificate does not match the verified SHA-256 pin. Compare the presented certificate with the TIA Portal project before setting RUNG_ONLINE_CERTIFICATE_SHA256."),
         S7CommPlusLegitimationException => new(5, "AUTHENTICATION_FAILED", "PLC rejected legitimation. Check its password and access settings."),

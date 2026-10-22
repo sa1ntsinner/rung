@@ -18,15 +18,15 @@ async function fixture(url = "https://192.168.1.1", readOnly = false) {
   await saveConfig(root, config);
   return { root, config };
 }
-it("validates the legacy Web API target, admitting protected reads only while locked", async () => {
+it("validates the legacy Web API target, locked or not", async () => {
   const { root, config } = await fixture();
-  await expect(broker.liveSelection(root, {})).rejects.toMatchObject({ code: "TARGET_REFUSED" });
+  expect((await broker.liveSelection(root, {})).target).toMatchObject({ address: "192.168.1.1" });
   config.plc.P!.readOnly = true; await saveConfig(root, config);
   expect((await broker.liveSelection(root, {})).target).toMatchObject({ address: "192.168.1.1", readOnly: true });
 });
 it("checks legacy diagnostic targets before creating the Web API client", async () => {
-  const { root } = await fixture();
-  await expect(webApiFor(root, { RUNG_WEBAPI_PASSWORD: "fixture" })).rejects.toMatchObject({ code: "TARGET_REFUSED" });
+  const { root } = await fixture("https://192.168.001.001");
+  await expect(webApiFor(root, { RUNG_WEBAPI_PASSWORD: "fixture" })).rejects.toMatchObject({ code: "CONFIG_INVALID" });
 });
 it.each(["192.168.001.001", "3232235777", "0xc0a80101"])("refuses legacy URL normalization of %s even under the lock", async address => {
   const { root } = await fixture(`https://${address}`, true);
