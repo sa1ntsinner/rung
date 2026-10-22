@@ -332,13 +332,20 @@ function interfaceOf(form: string, text: string | undefined): string | undefined
 }
 
 /**
- * Quoted identifiers a source refers to (its own name excluded). In SCL, DB and tag sources a name in a comment or
+ * Quoted identifiers a source refers to (its own name excluded), and the data types it names unquoted
+ * (`x : ARRAY [1..9] OF BufferUDT;`, which TIA Portal takes too). In SCL, DB and tag sources a name in a comment or
  * a '…' string refers to nothing: a header comment naming the instance DB must not make the FB wait for it.
  */
 export function referencedNames(texts: string[], self: string): string[] {
   const names = new Set<string>();
   const code = (t: string) => (t.trimStart().startsWith("<") ? t : t.replace(/"[^"\r\n]*"|\/\/[^\n]*|\(\*[\s\S]*?\*\)|\/\*[\s\S]*?\*\/|'(?:\$.|[^'$])*'/g, (m) => (m.startsWith('"') ? m : " ")));
-  for (const t of texts) for (const m of code(t).matchAll(/"([^"\r\n]+)"/g)) if (m[1] !== self) names.add(m[1]!);
+  for (const t of texts) {
+    const c = code(t);
+    for (const m of c.matchAll(/"([^"\r\n]+)"/g)) if (m[1] !== self) names.add(m[1]!);
+    if (c.trimStart().startsWith("<")) continue;
+    // a name no object of the sync has (Int, Bool) waits for nothing
+    for (const m of c.matchAll(/(?:(?<![:=<>]):(?!=)|\bOF\b)\s*([A-Za-z_]\w*)\s*(?=[;:\[]|$)/gim)) if (m[1] !== self) names.add(m[1]!);
+  }
   return [...names];
 }
 

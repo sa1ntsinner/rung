@@ -1731,4 +1731,10 @@ describe("what a source refers to", () => {
     expect(referencedNames([fb], "FB_Carrefour").sort()).toEqual(["Global", "Motor's DB"]);
     expect(referencedNames(['<Member Name="x" Datatype="&quot;Udt&quot;" />'], "Self")).toContain("x");
   });
+  it("takes a data type named without quotes, as TIA Portal accepts it, but not a start value or a CASE label", () => {
+    const udt = 'TYPE "BufferStructUDT"\n   STRUCT\n      n : Int := 5;\n      Buffer : ARRAY [1..100] OF BufferUDT;  // places\n      Cfg : CfgUDT;\n   END_STRUCT;\nEND_TYPE\n';
+    expect(referencedNames([udt], "BufferStructUDT")).toEqual(expect.arrayContaining(["BufferUDT", "CfgUDT", "Int"]));
+    const fc = 'FUNCTION "F" : Void\nBEGIN\n  CASE #s OF\n    Idle: #x := Busy;\n  END_CASE;\nEND_FUNCTION\n';
+    expect(referencedNames([fc], "F")).not.toContain("Busy");
+  });
 });
