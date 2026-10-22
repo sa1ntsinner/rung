@@ -24,7 +24,7 @@ async function simulatorCall(url: string, method: string, params: Record<string,
     if (reply.error) throw new BridgeError("REJECTED", reply.error.message);
     return reply.result;
   };
-  const login = await rpc({ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any", password: "simulator" } }) as { token: string };
+  const login = await rpc({ jsonrpc: "2.0", id: 1, method: "Api.Login", params: { user: "any" } }) as { token: string };
   return await rpc({ jsonrpc: "2.0", id: 2, method, params }, login.token) as Record<string, unknown>;
 }
 
