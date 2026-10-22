@@ -19,7 +19,9 @@ namespace Rung.Bridge.V20
     {
         public static void Add(TiaPortal portal, Project project, BridgeArgs args)
         {
-            if (string.IsNullOrEmpty(args.NewCpu)) return;
+            // PLCSIM refuses blocks compiled without it ("cannot be simulated"); a new project is for trying things out
+            EnableSimulation(project);
+            if (string.IsNullOrEmpty(args.NewCpu)) { project.Save(); return; }
             var order = args.NewCpu.Trim();
             var entries = portal.HardwareCatalog.Find(order).Where(e => e.TypeIdentifier.StartsWith("OrderNumber:" + order + "/", StringComparison.OrdinalIgnoreCase)).ToList();
             if (entries.Count == 0) throw new RpcException(ErrorCodes.BadRequest, "CPU " + order + " is not in the hardware catalog of this TIA Portal (an order number such as 6ES7 516-3AN02-0AB0)");
@@ -41,6 +43,20 @@ namespace Rung.Bridge.V20
             // TIA Portal exports no block it has not compiled yet: the new Main [OB1] would stay out of the files
             (cpu.GetService<SoftwareContainer>().Software as PlcSoftware).GetService<ICompilable>()?.Compile();
             project.Save();
+        }
+
+        /// <summary>Turns on "Support simulation during block compilation"; true when it was off.</summary>
+        public static bool EnableSimulation(Project project)
+        {
+#if TIA_V21
+            var settings = project.GetService<PlcSimulationSettingsProvider>();
+            if (settings == null || settings.IsSimulationDuringBlockCompilationEnabled) return false;
+            settings.IsSimulationDuringBlockCompilationEnabled = true;
+#else
+            if (project.IsSimulationDuringBlockCompilationEnabled) return false;
+            project.IsSimulationDuringBlockCompilationEnabled = true;
+#endif
+            return true;
         }
 
         static Version Firmware(string typeId)

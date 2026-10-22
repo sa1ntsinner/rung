@@ -40,7 +40,9 @@ A password-protected CPU gets its password from `RUNG_PLC_PASSWORD`; passwords n
 
 ## Where to connect
 
-`rung connect` finds the PLC like TIA's "Go online": it scans the PG/PC interfaces for the IP address configured in the project and saves what it found under `[plc.<device>]` in `rung.toml`. `rung online` and `rung compare` do the same by themselves when nothing is saved, because they only read. `rung download` never does: factory addresses such as 192.168.0.1 repeat on every network, so the machine that answers at the project's address can be another one. It downloads only over a connection a person saved or chose. `rung connect --pick` chooses again, `rung interfaces --scan` shows everything TIA can reach.
+`rung connect` finds the PLC like TIA's "Go online": it scans the PG/PC interfaces for the IP address configured in the project and saves what it found under `[plc.<device>]` in `rung.toml`. `rung online` and `rung compare` do the same by themselves when nothing is saved, because they only read. `rung download` never does: factory addresses such as 192.168.0.1 repeat on every network, so the machine that answers at the project's address can be another one. It downloads only over a connection saved with `rung connect`. `rung connect --pick` chooses again, `rung interfaces --scan` shows everything TIA can reach.
+
+To S7-PLCSIM or PLCSIM Advanced, the first download of a new instance needs `--hw`: without its hardware configuration the CPU does not start. PLCSIM runs only blocks compiled with "Support simulation during block compilation"; `rung download` to a PLCSIM interface turns it on and compiles when it is off, and `rung init --new` turns it on in a new project. Two instances at the same address (192.168.0.1 by default) answer the same connection: keep one running per address.
 
 While `rung watch` runs, these commands go through its bridge, so a download never races a sync.
 

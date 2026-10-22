@@ -427,6 +427,8 @@ async function download(dir: string, v: Record<string, unknown>, io: Io): Promis
     return 3;
   }
   io.stdout(`\ndownload: ${r.state} (errors ${r.errors}, warnings ${r.warnings})\n`);
+  // a new PLCSIM instance (or a new CPU) has no hardware configuration yet: its software cannot run without one
+  if (!hardware && r.messages.some((m) => /Failed to start CPU/i.test(m))) io.stdout(`${device} did not start. A new PLCSIM instance or CPU needs its hardware configuration first: rung download --hw\n`);
   if (r.state === "Error" && afterTransfer) io.stdout(`The transfer had started: ${device} may hold part of the download. rung compare shows what it runs now.\n`);
   return r.state === "Error" ? 2 : 0;
 }

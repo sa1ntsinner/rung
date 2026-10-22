@@ -28,6 +28,7 @@ This release comes from working on open-source PLC projects with rung (traffic l
 
 **Online and agents**
 - An agent may now do on a PLC what you can: download, live writes, RUN/STOP, `rung writes on`, on PLCSIM and on real PLCs alike. Restrictions are yours to choose: `rung agent-mode manual`, `ask` or `auto`, and `read_only` / `RUNG_READ_ONLY` as before. `rung setup` no longer writes deny rules into agent configurations; its hooks apply the mode you chose, and they let an agent edit `rung.toml` except the `read_only` and `allow_writes` lines.
+- Downloads to PLCSIM work on a project that was not made for simulation: rung turns on "Support simulation during block compilation" and compiles; `rung init --new` turns it on from the start. A CPU that does not start after a software-only download points to `--hw`.
 - `rung live modify` works on `rung simulate`, without a certificate or the per-PLC opt-in a real PLC needs.
 - An agent's action is recorded when it starts and again when it ends; the Activity view shows one that did not finish. A refusal names the action and offers the download handover only for a download.
 

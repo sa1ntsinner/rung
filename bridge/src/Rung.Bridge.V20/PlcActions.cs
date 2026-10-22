@@ -17,6 +17,7 @@ using Siemens.Engineering.Download.Configurations;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.Online;
+using Siemens.Engineering.SW;
 using Siemens.Engineering.Upload;
 using Siemens.Engineering.Upload.Configurations;
 
@@ -371,6 +372,12 @@ namespace Rung.Bridge.V20
             if (options == DownloadOptions.None) throw new RpcException(ErrorCodes.BadRequest, "Nothing to download: choose hardware and/or software");
 
             var outcome = new DownloadOutcome { Device = request.Device };
+            // PLCSIM refuses blocks compiled without simulation support ("cannot be simulated"): turn it on and compile
+            if ((request.Target.PcInterface ?? "").IndexOf("PLCSIM", StringComparison.OrdinalIgnoreCase) >= 0 && NewStation.EnableSimulation(_project))
+            {
+                (item.GetService<SoftwareContainer>()?.Software as PlcSoftware)?.GetService<ICompilable>()?.Compile();
+                outcome.Messages.Add("Info: turned on \"Support simulation during block compilation\" for PLCSIM and compiled the program");
+            }
             DownloadConfigurationDelegate pre = c => Answer(c, "pre", request, outcome);
             DownloadConfigurationDelegate post = c => Answer(c, "post", request, outcome);
             using (OfflineFor(request.Device))

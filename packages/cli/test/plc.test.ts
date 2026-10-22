@@ -320,6 +320,15 @@ describe("PLC commands", () => {
     expect(t.err.join("")).toMatch(/cannot tell how far the download to PLC_1 got/);
   });
 
+  it("a CPU that does not start after a software download points to --hw", async () => {
+    const t = setup();
+    await t.run(["init"]);
+    appendFileSync(t.toml, TARGET);
+    t.patch({ downloadOutcome: { state: "Warning", warnings: 1, decisions: [], messages: ["Warning: Failed to start CPUcommon!"] } });
+    expect(await t.run(["download", "--yes", "--no-hw"])).toBe(0);
+    expect(t.out.join("")).toMatch(/needs its hardware configuration first: rung download --hw/);
+  });
+
   it("download settings in rung.toml apply and can switch downloads off", async () => {
     const t = setup();
     await t.run(["init"]);
