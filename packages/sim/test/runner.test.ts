@@ -119,6 +119,8 @@ describe("rung test runner", () => {
     expect((await one("      - set: { '\"Fx_Globl\".Count': 1 }\n")).cases[0]!.error).toMatch(/ \(did you mean "Fx_Global"\.Count\?\)$/);
     expect((await one("      - set: { drive.sped: 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("drive.sped does not exist (did you mean drive.speed?)");
     expect((await one("      - set: { 'axes[2].Mdoe': 1 }\n", "Fx_Drive")).cases[0]!.error).toBe("axes[2].Mdoe does not exist (did you mean axes[2].Mode?)");
+    // the block's own variable written with quotes, as a global
+    expect((await one("      - set: { '\"drive\".speed': 1 }\n", "Fx_Drive")).cases[0]!.error).toMatch(/\(did you mean drive\.speed\?\)$/);
     // an FC: inputs for set, outputs for expect
     expect((await one("      - set: { Enabel: true }\n      - cycle: 1\n", "Fx_Valve")).cases[0]!.error).toBe("Enabel does not exist (did you mean Enable?)");
     expect((await one("      - cycle: 1\n      - expect: { Opn: true }\n", "Fx_Valve")).cases[0]!.error).toBe("Opn does not exist (did you mean Open?)");

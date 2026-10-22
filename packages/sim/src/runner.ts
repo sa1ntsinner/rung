@@ -296,11 +296,15 @@ function closestName(index: WorkspaceIndex, g: GlobalSymbol, typed: string, op: 
   const { global, root, path } = splitName(typed);
   const b = g.block!;
   const seen = scopedTo(index, g.uri);
-  const show = (r: string, p: Seg[]) => (global ? `"${r}"` : r) + p.map((s) => (typeof s === "string" ? `.${memberName(s)}` : `[${s.join(",")}]`)).join("");
+  const p2s = (p: Seg[]) => p.map((s) => (typeof s === "string" ? `.${memberName(s)}` : `[${s.join(",")}]`)).join("");
+  const show = (r: string, p: Seg[]) => (global ? `"${r}"` : r) + p2s(p);
   let members: Member[];
   if (global) {
     const target = seen.global(root);
     if (!target) {
+      // "Pusher 1 Jam" for the block's own Pusher 1 Jam: a local is named without the inner quotes
+      const own = b.vars.find((v) => v.name.toUpperCase() === root.toUpperCase());
+      if (own) return own.name + p2s(path);
       const near = nearest(root, seen.allGlobals().filter((s) => s.kind === "DB" || s.kind === "TAG").map((s) => s.name));
       return near ? show(near, path) : undefined;
     }

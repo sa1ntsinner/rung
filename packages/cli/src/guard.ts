@@ -11,7 +11,10 @@ export const AGENT_REFUSAL = "PLC changes and enabling writes belong to the pers
 
 export function agentRefusal(action?: AgentAction): string {
   const names: Record<AgentAction, string> = { download: "download", write: "live write", force: "live force/unforce", "run-stop": "run/stop", "alarm-ack": "alarm acknowledgement", "writes-on": "writes on", "openness-setup": "Openness whitelist registration", bridge: "bridge" };
-  return action ? AGENT_REFUSAL.replace("PLC changes and enabling writes belong", `${names[action]} belongs`) : AGENT_REFUSAL;
+  if (!action) return AGENT_REFUSAL;
+  const text = AGENT_REFUSAL.replace("PLC changes and enabling writes belong", `${names[action]} belongs`);
+  // the handover is for a download only
+  return action === "download" ? text : text.replace(/ Use rung_download_request.*$/, "");
 }
 
 /** Environment only: workspace files cannot switch this protection off. */

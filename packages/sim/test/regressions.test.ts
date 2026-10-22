@@ -149,6 +149,19 @@ describe("Simulator QA regressions", () => {
     expect([t.mem.Q, t.mem.ET, c.mem.CV, c.mem.QU, i.mem.N, i.mem.Q]).toEqual([true, 20, 2, true, 2, true]);
   });
 
+  it("reads Q of a ladder CTU / CTD box on IEC_COUNTER data as QU / QD", () => {
+    const s = sim({
+      L: fb(
+        "L",
+        "VAR_INPUT\n  go : Bool;\nEND_VAR\nVAR\n  up : IEC_COUNTER;\n  down : IEC_COUNTER;\n  qu : Bool;\n  qd : Bool;\nEND_VAR",
+        "  #up.CTU(CU := #go, PV := 1);\n  #qu := #up.Q;\n  #down.CTD(CD := #go, LD := FALSE, PV := 0);\n  #qd := #down.Q;",
+      ),
+    });
+    const i = s.newInstance("L");
+    s.callBlock(i, { go: true });
+    expect([i.mem.QU, i.mem.QD]).toEqual([true, true]);
+  });
+
   it("sizes arrays with constant bounds", () => {
     const s = sim({
       A: fb("A", "VAR\n  items : Array[0..#N_LOC] of Int;\n  more : Array[1..N_LOC * 2] of Int;\nEND_VAR\nVAR CONSTANT\n  N_LOC : Int := 3;\nEND_VAR", "  #items[3] := 7;\n  #more[6] := 1;"),

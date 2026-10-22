@@ -124,7 +124,7 @@ export async function cmdUpgrade(target: string | undefined, v: Record<string, u
   await rm(plan.staging, { recursive: true, force: true }).catch(() => {});
   const upgraded = join(plan.target, basename(r.path));
   if (v.json) io.stdout(JSON.stringify({ upgraded, from: `V${plan.from}`, to: plan.to, original: join(plan.folder, basename(plan.file)) }) + "\n");
-  else io.stdout(`upgraded: ${upgraded} (TIA Portal's log of the upgrade is in its Logs folder)\nnext: rung init --project "${upgraded}"\n`);
+  else io.stdout(`upgraded: ${upgraded} (TIA Portal's log of the upgrade is in its Logs folder)\nnext: rung init --project "${upgraded}", then rung compile (TIA Portal leaves an upgraded program uncompiled, and uncompiled blocks cannot be exported) and rung pull\n`);
   return 0;
 }
 

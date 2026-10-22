@@ -67,15 +67,17 @@ function blankForParser(text: string, region: { start: number; end: number } | u
 /** `#local.member`, `"Global".member` operands of the networks, with write access for coils and `=>` outputs. */
 function operandRefs(text: string, from: number, to: number): Ref[] {
   const refs: Ref[] = [];
-  const re = /(#[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+")((?:\.(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+"))*)/g;
+  const re = /(#[A-Za-z_][A-Za-z0-9_]*|#?"(?:[^"]|"")+")((?:\.(?:[A-Za-z_][A-Za-z0-9_]*|"(?:[^"]|"")+"))*)/g;
   re.lastIndex = from;
   for (let m = re.exec(text); m && m.index < to; m = re.exec(text)) {
     const head = m[1]!;
     const start = m.index;
     // wire#w1 names a wire; { S7_Language := "LAD" } pragmas and { … } templates hold no operands
     if (text.slice(start - 4, start) === "wire" || text.lastIndexOf("{", start) > text.lastIndexOf("}", start)) continue;
-    const nameStart = head.startsWith("#") ? start + 1 : start + 1;
-    const name = head.startsWith("#") ? head.slice(1) : head.slice(1, -1);
+    // #Count, #"Pusher 1 Timer", "Tag"
+    const quotedName = head.endsWith('"');
+    const nameStart = start + (head.startsWith('#"') ? 2 : 1);
+    const name = head.replace(/^#/, "").slice(quotedName ? 1 : 0, quotedName ? -1 : undefined);
     const members: Ref["members"] = [];
     let at = start + head.length;
     for (const part of (m[2] ?? "").split(".").slice(1)) {

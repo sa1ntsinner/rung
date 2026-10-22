@@ -35,6 +35,14 @@ describe("LAD in SIMATIC SD text", () => {
     expect(pump.slice(start.start, start.end)).toBe("Start");
   });
 
+  it("takes #\"quoted\" operands for locals", () => {
+    const src = pump.replace(/StartDelay/g, '"Start delay"').replace(/#Ready/g, '#"Is ready"').replace(/Ready :/, '"Is ready" :');
+    const refs = parseSd(src).blocks[0]!.refs;
+    const delay = refs.find((r) => r.name === "Start delay")!;
+    expect([delay.kind, delay.access, src.slice(delay.start, delay.end)]).toEqual(["local", "call", "Start delay"]);
+    expect(refs.find((r) => r.name === "Is ready")).toMatchObject({ kind: "local", access: "write" });
+  });
+
   it("does not take wire names or the language pragma for operands", () => {
     const names = parseSd(pump).blocks[0]!.refs.map((r) => r.name);
     expect(names).not.toContain("powerrail");

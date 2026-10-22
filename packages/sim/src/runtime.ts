@@ -31,7 +31,7 @@ export interface Instance {
   __fb: string;
   mem: Struct;
   /** Native state for standard FBs (TON, CTU, ...). */
-  std?: Record<string, number | boolean>;
+  std?: Record<string, number | boolean | string>;
   /** A stubbed type nobody describes (rung test stubs:): members come from the stub, the call arguments and the test. */
   stub?: true;
 }
@@ -774,11 +774,14 @@ export class Simulator {
         continue;
       }
       const stubbed = isInstance(cur) && cur.stub ? cur.__fb : undefined;
+      // Q of CTU / CTD called on IEC_COUNTER data, as a ladder box reads it, is QU / QD
+      const counterQ = isInstance(cur) ? cur.std?.q : undefined;
       if (isInstance(cur)) cur = cur.mem;
       if ("member" in seg) {
         if (typeof cur !== "object" || cur === null || isArray(cur)) throw new SimError(`${seg.member}: not a structure`, frame?.block.name, ref.start);
         obj = cur as Struct;
         key = seg.member.toUpperCase();
+        if (key === "Q" && !(key in obj) && typeof counterQ === "string") key = counterQ;
         if (!(key in obj))
           throw new SimError(stubbed ? `${seg.member} is not a member of the stub of ${stubbed}: give it a start value in the test (stubs: { ${stubbed}: { ${seg.member}: … } })` : `${seg.member} is not a member`, frame?.block.name, ref.start);
       } else if ("index" in seg) {
@@ -2146,7 +2149,7 @@ export class Simulator {
     const s = inst.std!;
     const now = this.time;
     // CTU and CTD on IEC_COUNTER data report through QU / QD instead of Q
-    const setQ = (fallback: "QU" | "QD", v: boolean) => void ("Q" in m ? (m.Q = v) : (m[fallback] = v));
+    const setQ = (fallback: "QU" | "QD", v: boolean) => void ("Q" in m ? (m.Q = v) : ((m[fallback] = v), (s.q = fallback)));
     const kind = (method ?? inst.__fb)
       .toUpperCase()
       .replace(/_(L?TIME)$/, "")

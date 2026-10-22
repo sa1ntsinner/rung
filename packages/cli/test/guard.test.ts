@@ -19,6 +19,8 @@ describe("agent shell guard", () => {
     expect(await main(args, { cwd: "/does-not-exist", env: { RUNG_AGENT: "1" }, stdout: () => {}, stderr: text => err.push(text) })).toBe(1);
     expect(err.join("")).toContain(`${action} belongs to the person`);
     expect(err.join("")).toContain("Ask the person to run the command themselves");
+    // the download handover is offered for a download only
+    expect(err.join("").includes("rung_download_request")).toBe(action === "download");
   });
   it("blocks oversized or malformed hook input with exit code 2", async () => {
     for (const payload of ["{bad json", "x".repeat(1_048_577)]) {
