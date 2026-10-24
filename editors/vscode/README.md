@@ -25,6 +25,7 @@ Something wrong? **rung: Report a Problem…** collects the versions and this PC
 - **Status bar**: watching / idle / conflicts, and online PLCs. Click it for all rung actions.
 - **CodeLens** above each block header: Compile · Test · Open in TIA Portal. Editor title buttons do the same.
 - **Testing view**: the YAML tests (`tests/**/*.test.yaml`) and their cases, run on rung's offline simulator. A failed expectation shows on its step's line, expected and actual side by side.
+- **Find a Behavioural Change**: after you edit a block, rung searches input sequences on which the old and the new version answer differently and shows the shortest one: as a sentence, as a timeline and with the line that wrote each value. Save it as a test with one click. See [discovery](https://github.com/sa1ntsinner/rung/blob/main/docs/discovery.md).
 - **Live Values** in the rung sidebar: the values you pin (PLC tags, DB members), read twice a second while the view is open, each with its age and a short history line, read-only; integers in decimal, hex or binary, and a flight recorder that keeps the last ten minutes with your bookmarks for a CSV or a unit test (pin an FB's inputs and outputs through its instance DB; the test sets the inputs as they changed on the machine and expects the outputs as they settled).
 - **Monitor Values** (the eye in the editor title): the values of the open block at the end of each line, read twice a second from the PLC (S7CommPlus, or its Web API) or from `rung simulate`, read-only.
 - **Problems** from `rung compile`, with file and line.

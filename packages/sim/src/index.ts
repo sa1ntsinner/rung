@@ -7,3 +7,4 @@ export * from "./coverage.js";
 export * from "./explain.js";
 export * from "./reconstruct.js";
 export * from "./native-source.js";
+export * from "./discover.js";

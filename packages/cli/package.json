@@ -30,6 +30,7 @@
     "@rung/lsp": "workspace:*",
     "@rung/mcp": "workspace:*",
     "@rung/sim": "workspace:*",
-    "@rung/sync": "workspace:*"
+    "@rung/sync": "workspace:*",
+    "yaml": "^2.8.1"
   }
 }

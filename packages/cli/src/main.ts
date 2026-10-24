@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { cmdDiscover } from "./discover.js";
 import { cmdRetrieve, cmdUpgrade, olderProjectHint, retrieveArchive } from "./upgrade.js";
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
@@ -116,6 +117,7 @@ Usage:
   rung confirm-delete <file|address>... [--force] [--dir <workspace>]   delete in TIA Portal what you deleted here; --force when other blocks still use it
   rung rename <file|name> <new-name> [--dir <workspace>]  rename in TIA Portal; the files that use it follow
   rung test [dir] [--junit <file>] [--filter <text> | --case <file#n>] [--strict] [--json [--observe]] [--coverage <lcov file>] [--against <git rev>]  run tests/**/*.test.yaml on the offline simulator (SCL, LAD, FBD, STL)
+  rung discover [config.yaml | --file <block>] [--against <rev>] [--fresh] [--out <new directory>] [--json]  find the input sequences on which your change behaves differently (default: every FB/FC changed since HEAD)
   rung live read <var>... [--dir <ws>] [--device <PLC>] [--transport s7commplus|webapi] [--json]
                                      read values from the selected PLC backend (read-only)
   rung live watch --file <block> [--instance <DB>] [--interval 500] [--reconnect-timeout 60] [--json]
@@ -475,6 +477,7 @@ export const COMMANDS: Record<string, { options: string[]; positionals: number }
   "confirm-delete": { options: ["dir", "force"], positionals: Infinity },
   rename: { options: ["dir"], positionals: 2 },
   test: { options: ["junit", "filter", "case", "json", "coverage", "observe", "against", "strict"], positionals: 1 },
+  discover: { options: ["against", "out", "json", "file", "fresh"], positionals: 1 },
   live: { options: ["dir", "device", "transport", "file", "table", "instance", "json", "interval", "confirm-stdin", "parent-stdio", "lcid", "stream", "native-capture", "expect-sha256", "reconnect-timeout"], positionals: Infinity },
   "live-server": { options: [], positionals: 1 },
   trace:{options:["device","out","duration","interval","dir","json","parent-stdio"],positionals:Infinity},
@@ -739,6 +742,18 @@ async function mainCommand(argv: string[], io: Io): Promise<number> {
       }
       case "session":
         return await cmdSession(dir, v, io);
+      case "discover": {
+        try {
+          if ((v.file?.length ?? 0) > 1) throw new Error("Discovery takes one source file");
+          return await cmdDiscover(target, { against: v.against as string | undefined, out: v.out as string | undefined, json: !!v.json, file: v.file?.[0], fresh: !!v.fresh }, io);
+        }
+        catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          if (v.json) io.stdout(JSON.stringify({ status: "unavailable", reason }) + "\n");
+          else io.stderr(`rung discover: ${reason}\n`);
+          return 1;
+        }
+      }
       case "test": {
         // TwinCAT / plain IEC ST folders have no rung.toml: the given folder is the workspace.
         const ws = await findWorkspace(dir).catch(() => dir);

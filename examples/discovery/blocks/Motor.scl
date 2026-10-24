@@ -1,0 +1,12 @@
+FUNCTION_BLOCK "Motor"
+VAR_INPUT
+    Start : Bool;
+    Stop : Bool;
+    Permit : Bool;
+END_VAR
+VAR_OUTPUT
+    Running : Bool;
+END_VAR
+BEGIN
+    #Running := (#Running OR #Start) AND NOT #Stop AND #Permit;
+END_FUNCTION_BLOCK

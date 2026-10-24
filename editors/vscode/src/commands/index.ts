@@ -25,6 +25,7 @@ import { recordExpectations } from "./record";
 import { crossReference } from "./xref";
 import { interfaceImpact } from "./impact";
 import { compareBehaviour } from "./behaviour";
+import { discoverBehaviour } from "./discover";
 import { newObjectCommand } from "./newObject";
 import type { UsagesView } from "../views/usagesView";
 import type { ChangesView } from "../views/changesView";
@@ -156,6 +157,7 @@ export function registerCommands(context: vscode.ExtensionContext, s: Services):
   // text editor's overtype mode
   reg("rung.tableKey", () => undefined);
   reg("rung.compareBehaviour", (rev?: unknown) => compareBehaviour(s.ws, s.cli, typeof rev === "string" ? rev : undefined));
+  reg("rung.discoverBehaviour", inWs(() => discoverBehaviour(context, s.ws, s.cli)));
   reg("rung.xref", (arg?: unknown) => crossReference(s.ws, s.cli, arg));
   reg("rung.impact", (arg?: unknown) => interfaceImpact(s.lsp, arg));
   reg("rung.test.record", (uri?: unknown, caseIndex?: unknown, stepIndex?: unknown) => recordExpectations(s.ws, s.cli, s.lsp, uri instanceof vscode.Uri ? uri : undefined, typeof caseIndex === "number" ? caseIndex : undefined, typeof stepIndex === "number" ? stepIndex : undefined));

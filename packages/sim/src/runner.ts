@@ -95,7 +95,7 @@ const elapsed = (ms: number) => (ms < 1000 ? `${ms} ms` : `${Number((ms / 1000).
 /** The cycles one step may run: a typo like advance: 1000d (or .inf) is refused instead of running for hours. */
 const MAX_STEP_CYCLES = 10_000_000;
 
-const approx = (a: unknown, b: unknown) =>
+export const testValuesEqual = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)) : a === b;
 
 /** Short PLC names often differ by two swapped letters or an expanded abbreviation (LENGTH/LEN). */
@@ -690,7 +690,7 @@ export async function runTestFile(index: WorkspaceIndex, file: string, text: str
         const actual = target.get();
         if (actual === undefined) throw new SimError(`${k} has no value: give it a start value in stubs`);
         const expected = normalizeExpected(v, target.decl?.type);
-        if (!approx(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : (isDate(target.decl?.type) || isTod(target.decl?.type)) && typeof expected === "number" ? dateText(expected, target.decl?.type) : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
+        if (!testValuesEqual(actual, expected)) out.push({ step: si + 1, name: k, expected: isTime(target.decl?.type) && typeof expected === "number" ? `T#${expected}ms` : (isDate(target.decl?.type) || isTod(target.decl?.type)) && typeof expected === "number" ? dateText(expected, target.decl?.type) : expected, actual: isTime(target.decl?.type) && typeof actual === "number" ? `T#${actual}ms` : isReal(target.decl?.type) && typeof actual === "number" ? Number(realText(actual)) : plainValue(actual) });
       }
       return out;
     };

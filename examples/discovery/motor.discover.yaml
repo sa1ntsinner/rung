@@ -1,0 +1,14 @@
+block: Motor
+cycle: 10ms
+inputs:
+  Start: [false, true]
+  Stop: [false, true]
+  Permit: [false, true]
+outputs: [Running]
+search:
+  seed: 1
+  maxCycles: 32
+  maxEvents: 12
+  maxRuns: 1000
+  holds: [1, 2, 5, 10, 20]
+  timeoutMs: 15000

@@ -120,6 +120,10 @@ async function main(): Promise<void> {
       const fake = createFakeWorkspace(repo, base);
       ok = (await runSuite("fake", fake.dir, base, { ...fake.env, RUNG_E2E_OBJECTS: fake.objects })) && ok;
     }
+    if (suites.includes("discovery")) {
+      const fixture = createFakeWorkspace(repo, join(base, "discovery-fixture"));
+      ok = (await runSuite("discovery", fixture.dir, base, fixture.env)) && ok;
+    }
     if (suites.includes("online")) {
       const pin = process.env.RUNG_TEST_CERT_SHA256;
       if (process.platform !== "win32" || !/^[a-fA-F0-9]{64}$/.test(pin ?? "")) throw new Error("online suite requires Windows and an explicitly approved RungProve pin");

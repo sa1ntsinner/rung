@@ -737,6 +737,12 @@
         "icon": "$(git-compare)"
       },
       {
+        "command": "rung.discoverBehaviour",
+        "title": "Find a Behavioural Change",
+        "category": "rung",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "rung.live.modify",
         "title": "Modify Current PLC Value…",
         "category": "rung",
@@ -1387,6 +1393,13 @@
           "group": "live@1"
         }
       ],
+      "scm/title": [
+        {
+          "command": "rung.discoverBehaviour",
+          "when": "rung.workspace && scmProvider == git",
+          "group": "navigation@9"
+        }
+      ],
       "editor/title": [
         {
           "command": "rung.declarations.open",
@@ -1440,6 +1453,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "rung.discoverBehaviour",
+          "when": "rung.workspace && resourceExtname =~ /^\\.(scl|s7dcl|xml)$/",
+          "group": "rung@5"
+        },
         {
           "command": "rung.resolveOurs",
           "when": "rung.workspace && resourceExtname =~ /^\\.(conflict|tia)$/",

@@ -1,0 +1,8 @@
+format = 1
+
+[project]
+path = "offline-only.ap20"
+tiaVersion = "V20"
+
+[tia]
+start = "headless"
