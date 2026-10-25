@@ -116,7 +116,7 @@ describe("Claude plugin", () => {
 
   it("keeps package, extension and plugin versions together", () => {
     const version = json("packages/cli/package.json").version;
-    expect(version).toBe("0.3.3");
+    expect(version).toBe("0.3.4");
     for (const name of ["bridge-client", "core", "graph", "live", "lsp", "mcp", "sim", "sync"]) {
       expect(json(`packages/${name}/package.json`).version).toBe(version);
     }

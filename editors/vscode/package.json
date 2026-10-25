@@ -2,7 +2,7 @@
   "name": "rung-scl",
   "displayName": "rung: SCL and TIA Portal sync",
   "description": "Write Siemens SCL in VS Code: two-way TIA Portal sync, TIA compile errors on the line, unit tests without a PLC, online values and download.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "publisher": "sa1ntsinner",
   "license": "MIT",
   "icon": "media/icon.png",

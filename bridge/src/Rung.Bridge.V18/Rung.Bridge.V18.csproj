@@ -12,7 +12,7 @@
     <AssemblyName>rung-bridge-v18</AssemblyName>
     <RootNamespace>Rung.Bridge.V20</RootNamespace>
     <DefineConstants>$(DefineConstants);TIA_V19;TIA_V18</DefineConstants>
-    <Version>0.3.3</Version>
+    <Version>0.3.4</Version>
     <RungOpennessDir Condition="'$(RungOpennessDir)' == ''">C:\Program Files\Siemens\Automation\Portal V18\PublicAPI\V18</RungOpennessDir>
   </PropertyGroup>
   <ItemGroup>

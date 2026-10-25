@@ -1,6 +1,6 @@
 {
   "name": "@rung/live",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "BUSL-1.1",
   "type": "module",
   "main": "./dist/index.js",

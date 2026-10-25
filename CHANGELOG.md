@@ -1,7 +1,15 @@
 # Changelog
 
-## 0.3.4 (not published yet)
+## 0.3.4 — 2026-10-25
 
+**Find what your change changed**
+- `rung discover` runs a block before and after your change on the offline simulator and searches input sequences on which the two answer differently. You write no test and no scenario first. Without arguments it searches every FB and FC changed since the last commit; `--file` takes one block, `--against` any revision.
+- Inputs are chosen from the interface: Booleans both ways, numbers around what the code compares them with (start values of types and constants count), the members of a structure or UDT one by one, in/out members the block only reads. Timers set the scan time, so a 30 s step runs out within the search.
+- The search walks sequencers step by step from the states it reached, and the next run starts from them (`--fresh` to start over). Up to three differences per block, each shortened.
+- The report tells the sequence as a sentence and shows, for each version, the line that wrote the value, what it read and the IF or CASE it ran in. Other changed files the block depends on are named. **Save as test…** writes an ordinary `rung test` file that passes on the old version and fails on yours.
+- In VS Code: **rung: Find a Behavioural Change**, from the editor or the Source Control title bar. See [docs/discovery.md](docs/discovery.md).
+
+**Live access**
 - Live access no longer refuses 192.168.1.1, the factory address of many CPUs' second interface. To keep a PLC out of reach, set `read_only = true` for it or `RUNG_READ_ONLY=1`.
 
 ## 0.3.3 — 2026-10-22
