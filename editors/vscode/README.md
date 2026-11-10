@@ -10,7 +10,7 @@ rung brings your blocks, data types and tag tables into a folder of text files. 
 
 Questions or something not working: [Discussions](https://github.com/sa1ntsinner/rung/discussions), **rung: Report a Problem…** (you see the report before you share it), or rungprojectplc@gmail.com.
 
-The extension is MIT licensed; the rung core it brings is BUSL-1.1, free for individual use and the other cases in [pricing](https://github.com/sa1ntsinner/rung/blob/main/docs/pricing.md).
+The extension is MIT licensed; the rung core it brings is BUSL-1.1, free for individuals, education, non-commercial open source and teams of up to three; see [Licence and terms](https://github.com/sa1ntsinner/rung/blob/main/docs/pricing.md).
 
 ## What you get
 

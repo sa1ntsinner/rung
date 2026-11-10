@@ -114,6 +114,6 @@ CODESYS V3.5 projects sync too, and TwinCAT 3 sources work with the editor and t
 
 ## License
 
-The core is BUSL-1.1, free for individuals, education, non-commercial open source and organizations with up to three users, and each release becomes Apache 2.0 after three years. Larger teams take [rung Pro](docs/pricing.md), €49 per user and month. The extensions, grammar, protocol client and file format are MIT. Questions: [rungprojectplc@gmail.com](mailto:rungprojectplc@gmail.com).
+rung is free for individuals, education, non-commercial open source and organizations with up to three people using it. The source is open: the core is BUSL-1.1 and each release becomes Apache 2.0 after three years; the extensions, grammar, protocol client and file format are MIT. A larger company writes to [rungprojectplc@gmail.com](mailto:rungprojectplc@gmail.com) and we agree terms. More in [Licence and terms](docs/pricing.md).
 
 <sub>rung is not affiliated with Siemens AG. TIA Portal and SIMATIC are trademarks of Siemens AG. Working on rung: see [CONTRIBUTING.md](CONTRIBUTING.md).</sub>

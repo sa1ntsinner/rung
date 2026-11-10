@@ -292,14 +292,12 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 .tile.head h2 { font-size: clamp(2rem, 1.2rem + 2.6vw, 3.5rem); }
 .tile.head .soft { color: #bfe3cc; }
 
-/* pricing */
+/* licence */
 .pricing { align-items: center; min-height: 80svh; }
 .pricing-text { grid-column: 1 / span 5; align-self: start; padding-top: 40px; }
 .pricing-text h2 { margin-bottom: 28px; }
 .price { grid-column: 7 / -1; position: relative; }
 .fig { position: relative; z-index: 1; margin: 0; font-size: clamp(8rem, 4rem + 13vw, 15rem); font-weight: 600; letter-spacing: -0.06em; line-height: 0.85; font-variant-numeric: tabular-nums; }
-.fig .cur { font-size: 0.5em; vertical-align: 0.62em; margin-right: 0.04em; }
-.fig .per { font-size: var(--step-body); letter-spacing: 0; font-weight: 500; margin-left: 0.6em; color: var(--muted); }
 .incl { list-style: none; margin: 40px 0 32px; padding: 0; line-height: 1.9; }
 
 /* footer: the last rows of tiles */
@@ -388,7 +386,7 @@ section.dark { margin-top: clamp(96px, 10vw, 150px); }
 
 /* phone: its own composition */
 @media (max-width: 720px) {
-  .top nav a:not(.pill):not([href="#pricing"]) { display: none; }
+  .top nav a:not(.pill):not([href="#licence"]) { display: none; }
   .hero { min-height: 0; margin-top: 24px; }
   .hero h1 { font-size: clamp(2.5rem, 11vw, 3.5rem); }
   .lead { margin-top: 24px; }

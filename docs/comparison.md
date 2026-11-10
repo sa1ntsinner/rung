@@ -11,7 +11,7 @@ A snapshot of public information as of October 2026: product pages, documentatio
 | Change review | `rung review` (free): interface and declarations, logic per SCL region and per LAD network, callers, data blocks, tags; rung Pro adds team review and a policy gate in your own CI | Git UI | — | Graphical diff, review comments, block-level merge | Compare, approvals, audit trail | — | Git merge |
 | AI agents | MCP for any agent; agents edit the files | MCP | Eigen Engineering Agent inside TIA Portal | — | — | MCP | MCP server |
 | Where it runs | Windows; Linux and macOS through a Windows PC over ssh | A server on Windows | Windows | Desktop app and cloud or self-hosted | Server | Windows | Windows |
-| Licence | Clients and file format MIT; core free for up to 3 users per organization; Pro commercial | Subscription | TIA Portal and separate licences | Commercial | Commercial | Proprietary free beta (TiaCommander); MIT or AGPL | Commercial editions |
+| Licence | Clients and file format MIT; core free for individuals, education, open source and up to 3 users per organization; larger companies by agreement | Subscription | TIA Portal and separate licences | Commercial | Commercial | Proprietary free beta (TiaCommander); MIT or AGPL | Commercial editions |
 
 Where rung is different:
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 — 2026-11-10
+
+**Free to use**
+- rung has no price list any more. It is free for individuals, education, non-commercial open source and organizations with up to three people using it, as the licence already said. A larger company writes to rungprojectplc@gmail.com and we agree terms.
+- The site, README, FAQ and [docs/pricing.md](docs/pricing.md) say so. The licences are unchanged: BUSL-1.1 for the core, MIT for the editors and clients.
+
 ## 0.3.4 — 2026-10-25
 
 **Find what your change changed**
