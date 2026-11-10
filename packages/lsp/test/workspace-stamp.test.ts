@@ -13,6 +13,8 @@ it("changes the source stamp when content changes at the same size and mtime", a
   await utimes(file, 1700000000, 1700000000);
   const before = await stat(file);
   const stamp = await sourceStamp(root);
+  // ctime is what tells the two apart; Windows' clock can stay on one tick for ~16 ms
+  await new Promise((r) => setTimeout(r, 50));
   await writeFile(file, "new\n");
   await utimes(file, before.atime, before.mtime);
   const after = await stat(file);
